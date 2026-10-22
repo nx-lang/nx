@@ -1922,6 +1922,7 @@ impl<'a> TreeBuilder<'a> {
     /// visualizer that types a property of a listed declaration.
     fn attach_visualizers(&mut self, visualizers: &ProgramVisualizers) {
         let workspace = Arc::clone(&self.scope.workspace);
+        self.list_property_types(&workspace);
         let mut index = 0;
         while index < self.table.len() {
             let Some(origin) = self
@@ -1984,6 +1985,60 @@ impl<'a> TreeBuilder<'a> {
             self.table[index].visualizer = visualizer;
             index += 1;
         }
+    }
+
+    /// Lists the declaration that types each property of every element declaration listed so far,
+    /// and the declaration each listed alias names, through its chain, so a reader can edit a
+    /// property an element does not write: a union's cases, an alias's end. A record listed this
+    /// way does not list its own properties' types, so the table stays bounded.
+    fn list_property_types(&mut self, workspace: &WorkspaceDeclarations) {
+        let listed: Vec<DeclarationOrigin> = (0..self.table.len())
+            .filter_map(|index| self.origin_of(index))
+            .collect();
+        for origin in &listed {
+            let element = match item_at(workspace, origin) {
+                Some(Item::Record(_) | Item::Component(_)) => true,
+                Some(Item::Function(function)) => function.form == FunctionForm::Element,
+                _ => false,
+            };
+            if !element {
+                continue;
+            }
+            let chain = base_chain(workspace, origin);
+            for (_, _, typed, _) in property_types(workspace, origin, &chain) {
+                if let Some(typed) = typed {
+                    self.entry(&typed);
+                }
+            }
+        }
+        let mut index = 0;
+        while index < self.table.len() {
+            if self.table[index].kind == SourceDeclarationKind::Alias {
+                let target = self.origin_of(index).and_then(|origin| {
+                    let Some(Item::TypeAlias(alias)) = item_at(workspace, &origin) else {
+                        return None;
+                    };
+                    let name = written_type_name(&alias.ty)?;
+                    workspace
+                        .type_namespaces
+                        .get(origin.0.as_str())?
+                        .get(name.as_str())
+                        .cloned()
+                });
+                if let Some(target) = target {
+                    self.entry(&target);
+                }
+            }
+            index += 1;
+        }
+    }
+
+    /// The origin of the table's entry at `index`.
+    fn origin_of(&self, index: usize) -> Option<DeclarationOrigin> {
+        self.table_index
+            .iter()
+            .find(|(_, entry)| **entry as usize == index)
+            .map(|(origin, _)| origin.clone())
     }
 
     /// The visualizer of a record, an action, a component or an element function: its title, id

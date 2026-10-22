@@ -214,6 +214,8 @@ export const styles = `
 .source { container-type: inline-size; }
 @container (width < 64ch) {
   .source .sheet-row > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
+  /* An unwritten property with nothing to show takes no line of its own; a click on its name edits it. */
+  .source .dimmed-row > .sheet-value:has(> .more-value:empty:only-child) { display: none; }
 }
 
 /* A group's name is a step bolder than its rows, and a bracket runs down the group from under its
@@ -356,6 +358,8 @@ export const styles = `
   overflow-wrap: break-word;
 }
 .card[hidden] { display: none; }
+/* A named value's card opens beside its popover, over it. */
+.card.over-popover { z-index: 6; }
 .card-signature {
   font-family: var(--nx-viewer-source-font-family, var(--mono));
   font-variation-settings: var(--nx-viewer-source-font-variation, normal);
@@ -510,4 +514,130 @@ export const styles = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A number's unit, read after it and quieter; never part of the value. */
+.source .unit { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); }
+/* A placeholder reads, quieter, in an empty field, and is never written. */
+.source .field:empty::before {
+  content: attr(data-placeholder);
+  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  pointer-events: none;
+}
+/* What a selected element does not write: a quiet row that opens a dimmed row to each property. */
+.source .more { font-weight: 400; }
+.source .more-toggle { cursor: pointer; user-select: none; outline: none; }
+.source .more-toggle > .more-label {
+  grid-column: 1 / -1;
+  color: var(--nx-viewer-more-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.92em;
+}
+.source .more-toggle:hover > .more-label, .source .more-toggle:focus-visible > .more-label { color: var(--nx-viewer-foreground, CanvasText); }
+.source .more-toggle:focus-visible > .more-label { text-decoration: underline; }
+.source .dimmed-row { opacity: var(--nx-viewer-dimmed-opacity, 0.55); outline: none; }
+.source .dimmed-row:focus-visible, .source .added-row:focus-visible { opacity: 1; background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); border-radius: 3px; outline: none; }
+.source .dimmed-row[hidden], .source .added-row[hidden] { display: none; }
+.source .more-default {
+  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+}
+/* An optional property with no default still takes a click where its value would be. */
+.source .more-value:empty { display: inline-block; min-width: 4ch; min-height: 1em; vertical-align: text-bottom; }
+.source .more-filter-row > .more-filter {
+  grid-column: 1 / -1;
+  width: min(24ch, 100%);
+  margin: 1px 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  background: light-dark(#0000000a, #ffffff0f);
+}
+.source .more-filter-row > .more-filter:focus-visible { box-shadow: 0 0 0 1px var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
+/* Under a line, the list sets out as a group's rows do, from where the line's indentation ends. */
+.source .more-block {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 2ch;
+  justify-content: start;
+  padding-left: calc(var(--more-indent, 0) * 1ch);
+  white-space: pre;
+}
+/* A written row's menu: a quiet mark just past the row's end, under the pointer and when selected,
+   so it moves nothing. */
+.source .sheet-row[data-key] { position: relative; }
+.source .row-menu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 0.5ch;
+  padding: 0 0.4ch;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  font-weight: 400;
+}
+.source .sheet-row[data-key]:hover > .row-menu, .source .sheet-row.selected > .row-menu { opacity: 1; }
+.source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
+/* A row's menu opens over the reading, as a popover does. */
+.menu {
+  position: absolute;
+  z-index: 5;
+  min-width: 10rem;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.menu[hidden] { display: none; }
+.menu-item { padding: 2px 8px; border-radius: 4px; cursor: pointer; outline: none; }
+.menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* A slider: its track, with its stops as ticks under it, then the number's field and its unit. */
+.popover.slider { min-width: 16rem; }
+.popover .slider-row { display: flex; align-items: center; gap: 8px; }
+.popover .slider-track { position: relative; flex: 1; min-width: 8rem; padding-bottom: 4px; }
+.popover .popover-slider { display: block; width: 100%; margin: 0; accent-color: var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
+.popover .slider-ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 4px; pointer-events: none; }
+.popover .slider-tick { position: absolute; width: 1px; height: 4px; background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a)); }
+.popover input.popover-number { width: 7ch; flex: none; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
+.popover input.popover-number.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
+.popover .popover-unit { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); }
+/* Segmented, a few cases read as one row of buttons; the filter takes the keys out of sight. */
+.popover.segmented { min-width: 0; }
+.popover.segmented > .popover-filter { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; }
+.popover.segmented .options { display: flex; flex-wrap: nowrap; gap: 2px; margin-top: 0; max-height: none; overflow: visible; }
+.popover.segmented .option {
+  padding: 2px 10px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  white-space: nowrap;
+}
+.popover.segmented .option.current { background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78)); }
+.popover.segmented .option.current::before, .popover.segmented .option-doc { display: none; }
+/* Named values listed with an editor: above a color's or a slider's field, or under a field. */
+.popover.with-named { flex-wrap: wrap; }
+.popover.colors.with-named > .popover-hex { flex: 1 1 auto; width: auto; min-width: 0; }
+.popover .named-list { flex: 1 0 100%; margin: 0 0 4px; }
+.popover .named-list[hidden] { display: none; }
+.popover.named .named-list { margin: 0; }
+.popover .option-type { color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a)); font-size: 12px; }
+.popover .option .swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
+.popover .option.named + .option:not(.named) { border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f)); }
 `;

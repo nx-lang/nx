@@ -146,7 +146,7 @@ visualizer Choice = <ElementVisualizer icon={prefix} />   // error: a visualizer
 ## What a reading shows
 
 The source tree a viewer reads carries each declaration's resolved visualizer: the properties bound
-to `title` and `id`, where the id reads, its icon, and each property's format. A visualizer
+to `title` and `id`, where the id reads, its icon, and each property's format and editor hints. A visualizer
 declaration changes how source reads, never what it means. The playground's Visual view uses it this
 way:
 
@@ -160,8 +160,11 @@ way:
 - **Formats.** A string bound to a property with the format `id` reads as a quiet token, and one with
   the format `color` reads with a small square of its color before it. A format changes how a value
   looks, never what it is, and does nothing to a value that is not a string literal.
+- **Editor hints.** A number hinted with a range edits with a slider that snaps to its `stops` and
+  reads its `unit` after it; a union hinted `segmented` edits as a row of buttons; a string hinted
+  `multiline` takes line breaks. See [editor hints](/reference/libraries/visualizer#editor-hints).
 
-A property's format comes from its `PropertyVisualizer` when that sets one, and otherwise from the
+A property's format, and each of its editor hints, comes from its `PropertyVisualizer` when that sets one, and otherwise from the
 `ValueVisualizer` of the alias its type names, read as written, through `?`, `+` and `*`. In the survey
 library every property typed `Color` reads with a swatch, and
 `<PropertyVisualizer property=value format=id />` would read a choice's `value` as an id wherever it

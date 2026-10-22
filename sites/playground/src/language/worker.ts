@@ -1,5 +1,6 @@
 /**
- * Hover, completions, diagnostics, document symbols and the source tree, answered in the app's
+ * Hover, completions, diagnostics, document symbols, the source tree, source edits and named values,
+ * answered in the app's
  * compiler worker.
  *
  * <para>The same host that evaluates answers these, so a hover range and a diagnostic land on the
@@ -16,6 +17,8 @@ import type {
   Hover,
   HoverRequest,
   LanguageQueryName,
+  NamedValue,
+  NamedValuesRequest,
   NxLanguageService,
   SourceTree,
   SourceEditAnswer,
@@ -42,6 +45,8 @@ export function createWorkerLanguageService(): NxLanguageService {
     sourceTree: (request: SourceTreeRequest, signal?: AbortSignal) =>
       ask<SourceTree>("sourceTree", request, signal),
     sourceEdit: (request: SourceEditRequest, signal?: AbortSignal) =>
-      ask<SourceEditAnswer>("sourceEdit", request, signal)
+      ask<SourceEditAnswer>("sourceEdit", request, signal),
+    namedValues: (request: NamedValuesRequest, signal?: AbortSignal) =>
+      ask<NamedValue[]>("namedValues", request, signal)
   };
 }

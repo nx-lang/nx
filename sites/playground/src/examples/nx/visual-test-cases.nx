@@ -3,8 +3,9 @@ import "@nx/visualizer"
 // Test cases for Visual, one or two of each. Hover a name, or select it and press i, for its card.
 // Click a value, or press Enter or F2 on the selected row, to edit it; Tab and Shift+Tab move between
 // values and Escape cancels. Delete (Cmd+Backspace on a Mac) leaves out a property that has a default
-// or is optional. Ctrl or Cmd+Z and Shift+Z, or the title bar's buttons, undo and redo. After each
-// edit, check Source.
+// or is optional, and so does Reset to default or Remove in a row's menu (the ⋯ at its end, or Shift+F10).
+// Select an element to see "+ N more", the properties it does not write: open it and set one. Ctrl or
+// Cmd+Z and Shift+Z, or the title bar's buttons, undo and redo. After each edit, check Source.
 
 type uitext = string
 type Color = string
@@ -48,6 +49,25 @@ type Pastry extends Item = {
 }
 
 type Water extends Item = { sparkling:boolean = false }
+
+/// Space between things, in pixels.
+type Spacing = int
+type Align = start | center | end
+
+/// A brand's colors.
+type Theme = { accent:Color muted:Color radius:Spacing = 6 }
+
+type Banner = {
+  title:uitext
+  intro?:uitext
+  /// Room inside the banner's edge.
+  padding:Spacing = 8
+  gap:int = 4
+  align:Align = start
+  body?:uitext
+  tint?:Color
+  cup?:Cup
+}
 type Note = { content text:uitext }
 type Menu = { title:uitext content items:Item+ }
 
@@ -57,6 +77,36 @@ visualizer Item = <ElementVisualizer title=name id=code icon="coffee" />
 visualizer Pastry = <ElementVisualizer idPosition=end icon="croissant" />
 visualizer Water = <ElementVisualizer icon="no-such-icon" />
 visualizer Cup = <ElementVisualizer><PropertyVisualizer property=sleeve format=color /></ElementVisualizer>
+visualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={ 0 4 8 16 24 32 48 64 } unit="px" />
+visualizer Banner = <ElementVisualizer icon="panel-top">
+  <PropertyVisualizer property=gap min=0 max=24 />
+  <PropertyVisualizer property=align editor=segmented />
+  <PropertyVisualizer property=body multiline=true placeholder="A line or two for the banner" />
+</ElementVisualizer>
+
+// Named values: a color's editor lists accent, theme.accent and theme.muted with swatches, and a
+// Spacing's lists gutter and theme.radius. Choosing one writes a reference to it.
+/// The brand's warm accent.
+let accent:Color = "#c8a27a"
+let gutter:Spacing = 16
+let theme = <Theme accent="#7a4b2a" muted="#d9cfc4" />
+
+// Hints: padding opens a slider that snaps to its stops (hold Alt to go between them), reads "px",
+// and refuses 80 with "At most 64"; gap has a range and no editor, so it slides too; align is a row of
+// buttons; tint is a reference to a named value: open it to see accent marked, or type a hex to
+// replace it. intro was written over two lines and edits with Shift+Enter for a line break. Select
+// the banner and open "+ 2 more": body is multi-line with a placeholder (Enter breaks a line, Ctrl or
+// Cmd+Enter commits), and cup has no editor, so it opens Source.
+let banner =
+  <Banner
+    title="Fresh today"
+    intro="Pastries from the bakery next door.
+Ask what came in this morning."
+    padding=8
+    gap=4
+    align=start
+    tint={accent}
+  />
 
 // Values: an untyped int and float; a string with escapes, which opens without them; and one with \n,
 // which Enter or a double-click opens in Source

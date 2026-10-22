@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { after, describe, it, type TestContext } from "node:test";
 
 import { fixture, nxHost, type Fixture } from "./fixtures.js";
-import { editTargets, isRemovable } from "../src/edit.js";
+import { editTargets, isRemovable, unwrittenProperties } from "../src/edit.js";
 import { offsetAtPoint } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
@@ -783,5 +783,359 @@ describe("editing in place", () => {
         assert.equal(node.textContent, text, `${node.dataset["key"]} reads as it did`);
       }
     }
+  });
+});
+
+/** The rows listing the selected element's unwritten properties, as drawn. */
+function moreRows(element: NxViewerElement): HTMLElement[] {
+  return Array.from(root(element).querySelectorAll<HTMLElement>(".dimmed-row, .added-row"));
+}
+
+function moreToggle(element: NxViewerElement): HTMLElement | null {
+  return root(element).querySelector<HTMLElement>(".more-toggle");
+}
+
+/** What a row reads, its spaces run together. */
+function reads(row: Element): string {
+  return Array.from(row.children)
+    .map((cell) => cell.textContent ?? "")
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function popover(element: NxViewerElement): HTMLElement {
+  return root(element).querySelector<HTMLElement>(".popover")!;
+}
+
+describe("what an element does not write", () => {
+  it("lists the unwritten properties in the visualizer's order, else declaration order, with their editors", async () => {
+    const { tree, text } = await fixture("adding");
+    const index = indexTree(tree, text);
+    const listed = (key: string) =>
+      unwrittenProperties(index, index.byKey.get(key)!).map((entry) => `${entry.property.name}:${entry.editor?.kind ?? "-"}`);
+    assert.deepEqual(listed("latte.value"), ["note:text", "iced:boolean", "shots:number", "color:color"]);
+    assert.deepEqual(listed("bare.value"), ["gap:number", "count:number", "mode:case", "body:text", "padding:number", "theme:-"]);
+    assert.deepEqual(listed("latte.value.code"), [], "an attribute is no element");
+  });
+
+  it("ends the selected element with + N more, and only the selected one, only when editable", async () => {
+    const element = show(await fixture("adding"));
+    assert.equal(moreToggle(element), null, "nothing is selected");
+    element.selection = "latte.value";
+    assert.equal(moreToggle(element)?.textContent, "+ 4 more");
+    assert.equal(root(element).querySelectorAll(".more-toggle").length, 1);
+    element.selection = "latte.value.code";
+    assert.equal(moreToggle(element), null, "a row is not an element");
+    element.selection = "wide.value";
+    assert.equal(moreToggle(element)?.textContent, "+ 14 more");
+    const reading = show(await fixture("adding"), false);
+    reading.selection = "latte.value";
+    assert.equal(moreToggle(reading), null, "not when the reading only reads");
+  });
+
+  it("opens to dimmed rows reading each default, and closes on Escape or another selection", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    assert.deepEqual(moreRows(element).map(reads), ["note", "iced ✗ default", "shots 1 default", "color"]);
+    assert.equal(element.selection, "latte.value", "the element stays selected");
+    press(moreRows(element)[0]!, "Escape");
+    assert.deepEqual(moreRows(element), [], "Escape closes the list");
+    assert.ok(moreToggle(element), "and keeps the row");
+    moreToggle(element)!.click();
+    element.selection = "mocha.value";
+    assert.deepEqual(moreRows(element), [], "another selection closes it");
+  });
+
+  it("opens with Enter on the row, and keeps open across a newer tree", async () => {
+    const fixed = await fixture("adding");
+    const element = show(fixed);
+    element.selection = "latte.value";
+    press(moreToggle(element)!, "Enter");
+    assert.equal(moreRows(element).length, 4);
+    element.tree = fixed.tree;
+    assert.equal(moreRows(element).length, 4, "still open on the same element");
+  });
+
+  it("adds a property from its dimmed row, which then reads as written", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    rendered(element, "latte.value.iced.value").click();
+    assert.deepEqual(edits, [
+      { key: "latte.value", edit: { kind: "addProperty", name: "iced", value: { kind: "boolean", value: true } } }
+    ]);
+    const row = moreRows(element)[1]!;
+    assert.ok(row.classList.contains("added-row"), "no longer dimmed");
+    assert.equal(reads(row), "iced ✓", "without its default note");
+    assert.equal(element.selection, "latte.value", "the selection is kept");
+  });
+
+  it("opens a dimmed number on its default and adds what is typed", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    rendered(element, "latte.value.shots.value").click();
+    const open = field(element)!;
+    assert.equal(open.textContent, "1", "its default");
+    open.textContent = "3";
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "latte.value", edit: { kind: "addProperty", name: "shots", value: { kind: "number", text: "3" } } }]);
+  });
+
+  it("opens Source for a property no editor takes", async () => {
+    const element = show(await fixture("adding"));
+    const { edits, opens } = events(element);
+    element.selection = "bare.value";
+    moreToggle(element)!.click();
+    const theme = moreRows(element).find((row) => row.dataset["name"] === "theme")!;
+    press(theme, "Enter");
+    assert.deepEqual(edits, []);
+    assert.deepEqual(opens.map((open) => open.key), ["bare.value"]);
+    theme.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.equal(opens.length, 2);
+  });
+
+  it("filters past twelve", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "wide.value";
+    moreToggle(element)!.click();
+    const filter = root(element).querySelector<HTMLInputElement>(".more-filter");
+    assert.ok(filter, "a filter leads the rows");
+    filter.value = "c";
+    filter.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(moreRows(element).filter((row) => !row.hidden).map((row) => row.dataset["name"]), ["c"]);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    assert.equal(root(element).querySelector(".more-filter"), null, "four rows need no filter");
+  });
+
+  it("shows a dimmed name's property card", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    const name = moreRows(element)[0]!.querySelector<HTMLElement>(".sheet-name")!;
+    assert.equal(name.dataset["hover"], "latte.value.note");
+  });
+});
+
+describe("a row's menu", () => {
+  it("resets a property with a default, removes an optional one, and shows any row in Source", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits, opens } = events(element);
+    const menuOf = (key: string): string[] => {
+      rendered(element, key).querySelector<HTMLElement>(":scope > .row-menu")!.click();
+      return Array.from(root(element).querySelectorAll(".menu-item")).map((item) => item.textContent ?? "");
+    };
+    assert.ok(rendered(element, "latte.value.size").matches(".sheet-row"), "the drink reads as a group");
+    assert.deepEqual(menuOf("latte.value.size"), ["Reset to default", "Show in Source"]);
+    assert.equal(element.selection, "latte.value.size", "opening the menu selects its row");
+    root(element).querySelector<HTMLElement>(".menu-item")!.click();
+    assert.deepEqual(edits, [{ key: "latte.value.size", edit: { kind: "remove" } }]);
+    assert.ok(root(element).querySelector<HTMLElement>(".menu")!.hidden, "a choice closes it");
+    assert.deepEqual(menuOf("mocha.value.color"), ["Remove", "Show in Source"]);
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    assert.ok(root(element).querySelector<HTMLElement>(".menu")!.hidden, "Escape closes it");
+    assert.equal(edits.length, 1);
+    assert.deepEqual(menuOf("latte.value.name"), ["Show in Source"], "a required property is not left out");
+    root(element).querySelector<HTMLElement>(".menu-item")!.click();
+    assert.deepEqual(opens.map((open) => open.key), ["latte.value.name.value"]);
+  });
+
+  it("opens from the keyboard on the selected row", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value.size";
+    press(body(element), "F10", { shiftKey: true });
+    const items = Array.from(root(element).querySelectorAll<HTMLElement>(".menu-item"));
+    assert.equal(items.length, 2);
+    assert.equal(root(element).activeElement, items[0], "its first item takes focus");
+    press(items[0]!, "ArrowDown");
+    assert.equal(root(element).activeElement, items[1]);
+  });
+});
+
+describe("editor hints", () => {
+  it("reads a number's unit after it", async () => {
+    const element = show(await fixture("adding"));
+    const value = rendered(element, "card.value.padding.value");
+    assert.equal(value.nextElementSibling?.className, "unit");
+    assert.equal(reads(value.parentElement!).includes("8 px"), true);
+  });
+
+  it("slides a spacing to the nearest stop and commits once on release", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.padding.value").click();
+    const slider = root(element).querySelector<HTMLInputElement>(".popover-slider");
+    assert.ok(slider, "a slider opens");
+    assert.equal(root(element).querySelectorAll(".slider-tick").length, 5, "its stops as ticks");
+    slider.value = "15";
+    slider.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.equal(rendered(element, "card.value.padding.value").textContent, "16", "the value reads the stop while dragged");
+    assert.deepEqual(edits, []);
+    slider.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
+  });
+
+  it("takes a typed number with its unit, and keeps one out of range with a note", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.padding.value").click();
+    const input = root(element).querySelector<HTMLInputElement>(".popover-number")!;
+    input.value = "80";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(input, "Enter");
+    assert.deepEqual(edits, []);
+    assert.equal(root(element).querySelector(".edit-problem")?.textContent, "At most 64 px");
+    input.value = "12px";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(input, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
+  });
+
+  it("gives a range a slider unless the editor is a field, which steps within the range", async () => {
+    const element = show(await fixture("adding"));
+    rendered(element, "card.value.gap.value").click();
+    assert.ok(root(element).querySelector(".popover-slider"), "a range with no editor slides");
+    press(root(element).querySelector(".popover-number")!, "Escape");
+    rendered(element, "card.value.count.value").click();
+    assert.equal(root(element).querySelector(".popover-slider"), null);
+    const open = field(element)!;
+    open.textContent = "9";
+    press(open, "ArrowUp", { shiftKey: true });
+    assert.equal(open.textContent, "10", "kept at the most");
+  });
+
+  it("shows a segmented union as a row of buttons", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.mode.value").click();
+    assert.ok(popover(element).classList.contains("segmented"));
+    const filter = root(element).querySelector(".popover-filter")!;
+    press(filter, "ArrowRight");
+    press(filter, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.mode.value", edit: { kind: "setValue", value: { kind: "case", name: "dark" } } }]);
+  });
+
+  it("breaks a string's line with Shift+Enter, and with Enter where it takes several lines", async (t) => {
+    fakeSelection(t);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "mocha.value.note.value").click();
+    let open = field(element)!;
+    open.textContent = "Ask for oat milk";
+    const caret = document.createRange();
+    caret.setStart(open.firstChild!, 3);
+    caret.collapse(true);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(caret);
+    press(open, "Enter", { shiftKey: true });
+    assert.equal(open.textContent, "Ask\n for oat milk");
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "mocha.value.note.value", edit: { kind: "setValue", value: { kind: "string", value: "Ask\n for oat milk" } } }]);
+    rendered(element, "card.value.body.value").click();
+    open = field(element)!;
+    assert.equal(open.dataset["placeholder"], "Say more", "an empty field shows its placeholder");
+    open.textContent = "One";
+    const end = document.createRange();
+    end.setStart(open.firstChild!, 3);
+    end.collapse(true);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(end);
+    press(open, "Enter");
+    assert.equal(edits.length, 1, "Enter breaks the line where the hint says several lines");
+    assert.equal(open.textContent, "One\n");
+    press(open, "Enter", { ctrlKey: true });
+    assert.equal(edits.length, 2, "Ctrl+Enter commits");
+  });
+});
+
+describe("named values", () => {
+  const named = [
+    { path: "accent", type: "string", doc: "The brand's accent.", value: '"#c8a27a"' },
+    { path: "theme.accent", type: "Swatch", value: '"#111111"' }
+  ];
+
+  it("lists the host's named values in a color popover, and writes the chosen one as a reference", async () => {
+    const element = show(await fixture("adding"));
+    const asked: string[] = [];
+    element.namedValues = async (key, property) => {
+      asked.push(`${key} ${property}`);
+      return named;
+    };
+    const { edits } = events(element);
+    rendered(element, "mocha.value.color.value").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(asked, ["mocha.value color"]);
+    const options = Array.from(popover(element).querySelectorAll<HTMLElement>(".option.named"));
+    assert.deepEqual(options.map((option) => option.dataset["reference"]), ["accent", "theme.accent"]);
+    assert.ok(options[0]!.querySelector(".swatch"), "a color shows its swatch");
+    options[0]!.click();
+    assert.deepEqual(edits, [{ key: "mocha.value.color.value", edit: { kind: "setValue", value: { kind: "reference", path: "accent" } } }]);
+    assert.equal(rendered(element, "mocha.value.color.value").textContent, "accent");
+  });
+
+  it("opens a reference with its type's editor, the reference marked, and a typed color replaces it", async () => {
+    const element = show(await fixture("adding"));
+    element.namedValues = async () => named;
+    const { edits } = events(element);
+    rendered(element, "tinted.value.color.value").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(popover(element).classList.contains("colors"), "a color's popover");
+    const current = popover(element).querySelector<HTMLElement>(".option.named.current");
+    assert.equal(current?.dataset["reference"], "accent");
+    const hex = root(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    hex.value = "#ffffff";
+    hex.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(hex, "Enter");
+    assert.deepEqual(edits, [{ key: "tinted.value.color.value", edit: { kind: "setValue", value: { kind: "string", value: "#ffffff" } } }]);
+  });
+
+  it("filters a field's named values as the reader types, and adds one from a dimmed row", async () => {
+    const element = show(await fixture("adding"));
+    element.namedValues = async () => [{ path: "spacing", type: "int", value: "8" }, { path: "gutter", type: "int", value: "16" }];
+    const { edits } = events(element);
+    element.selection = "bare.value";
+    moreToggle(element)!.click();
+    rendered(element, "bare.value.count.value").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const options = () => Array.from(popover(element).querySelectorAll<HTMLElement>(".option.named")).filter((option) => !option.hidden);
+    assert.equal(options().length, 2);
+    const open = field(element)!;
+    open.textContent = "gu";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(options().map((option) => option.dataset["reference"]), ["gutter"]);
+    press(open, "ArrowDown", { altKey: true });
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "bare.value", edit: { kind: "addProperty", name: "count", value: { kind: "reference", path: "gutter" } } }]);
+  });
+
+  it("shows a named value's doc in a card beside the popover", async (t) => {
+    const element = show(await fixture("adding"));
+    element.namedValues = async () => named;
+    rendered(element, "mocha.value.color.value").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const option = popover(element).querySelector<HTMLElement>(".option.named")!;
+    option.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    t.mock.timers.tick(500);
+    const card = root(element).querySelector<HTMLElement>(".card")!;
+    assert.equal(card.hidden, false);
+    assert.equal(card.querySelector(".card-signature")?.textContent, "accent: string");
+    assert.equal(card.querySelector(".card-doc")?.textContent?.trim(), "The brand's accent.");
+    press(root(element).querySelector(".popover-hex")!, "Escape");
+    assert.equal(card.hidden, true, "it closes with the popover");
+  });
+
+  it("reads as before with no host function", async () => {
+    const element = show(await fixture("adding"));
+    rendered(element, "mocha.value.color.value").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(popover(element).querySelector(".named"), null);
   });
 });

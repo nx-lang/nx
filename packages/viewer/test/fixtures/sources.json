@@ -11,7 +11,7 @@
     "source": "/// A person the survey is about.\ntype User = {\n  id:string\n  /// What to call them.\n  name:string?\n}\n"
   },
   "emoji": {
-    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"😀 hello\" title=\"after\" />\n"
+    "source": "type Label = { text:string title:string }\n\nlet wave = <Label text=\"\ud83d\ude00 hello\" title=\"after\" />\n"
   },
   "tasks": {
     "source": "type Task = {\n  title:string\n  priority:int = 2\n  notes?:string\n}\n\nlet root(): Task+ = {\n  <Task title=\"Ship the site\" priority=1 />\n  <Task title=\"Plan the next release, and then write down every step of it for the whole team\" notes=\"After the site ships\" />\n}\n"
@@ -111,5 +111,9 @@
   },
   "editingEdges": {
     "source": "type Text = { content text:string }\ntype Box = { title:string note:string depth:int items:int* }\n\nlet box = <Box title=\"a\\nb\" note=\"say \\\"hi\\\" \\\\ ok\" depth={3} items={ 1 2 } />\n\nlet mixed = <Text>Hello {1} world</Text>\n\nlet total = 3\n\nlet said = { \"say \\\"hi\\\"\" \"ok\" }\n"
+  },
+  "adding": {
+    "source": "import \"@nx/visualizer\"\n\ntype Size = small | medium | large\ntype Swatch = string\ntype Spacing = int\ntype Mode = light | dark\n\ntype Theme = { accent:Swatch }\n\n/// A drink on the menu.\ntype Drink = {\n  code:string\n  name:string\n  /// What the barista should know.\n  note?:string\n  size:Size = medium\n  iced:bool = false\n  shots:int = 1\n  color?:Swatch\n}\n\ntype Card = {\n  title:string\n  padding:Spacing = 8\n  gap:int = 4\n  count:int = 0\n  mode:Mode = light\n  body?:string\n  theme?:Theme\n}\n\ntype Wide = { a?:int b?:int c?:int d?:int e?:int f?:int g?:int h?:int i?:int j?:int k?:int l?:int m?:int n?:int }\n\nvisualizer Swatch = <ValueVisualizer format=color />\nvisualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={ 0 4 8 16 24 } unit=\"px\" />\nvisualizer Card = <ElementVisualizer>\n  <PropertyVisualizer property=gap min=0 max=16 />\n  <PropertyVisualizer property=count editor=field min=0 max=10 />\n  <PropertyVisualizer property=mode editor=segmented />\n  <PropertyVisualizer property=body multiline=true placeholder=\"Say more\" />\n</ElementVisualizer>\n\nlet accent = \"#c8a27a\"\n\nlet latte = <Drink code=\"LAT\" name=\"Latte\" size=small />\n\nlet mocha = <Drink code=\"MOC\" name=\"Mocha\" note=\"Ask for oat milk\" color=\"#5a3a22\" />\n\nlet tinted = <Drink code=\"TIN\" name=\"Tinted\" color={accent} />\n\nlet card = <Card title=\"Hi\" padding=8 gap=4 count=2 mode=light body=\"\" />\n\nlet bare = <Card title=\"Bare\" />\n\nlet wide = <Wide />\n",
+    "visualizers": []
   }
 }

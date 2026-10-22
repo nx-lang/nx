@@ -63,7 +63,7 @@ A union cannot have a visualizer yet.
 | --- | --- | --- |
 | `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, content `properties?: PropertyVisualizer+` | `title` and `id` each name a property of the target. |
 | `IdPosition` | `start`, `end` | Where the element's id reads. |
-| `PropertyVisualizer` | `property`, `format?: ValueFormat` | `property` names the property it describes. |
+| `PropertyVisualizer` | `property`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
 
 - `title` is the property whose value is the element's title. The playground's Visual view shows its
   value alone on the element's line, without the property's name or quotes, and after the header of
@@ -77,8 +77,10 @@ A union cannot have a visualizer yet.
   [Lucide](https://lucide.dev/icons) set, such as `"list-checks"`. Visual shows it before an element
   that starts a line of its own; an element with none takes one for its kind of declaration. A kind
   that extends another inherits it.
-- `properties` says how individual properties read: a `PropertyVisualizer`'s `format` says how the
-  property's string value is shown, in place of the format its type gives it.
+- `properties` says how individual properties read and edit: a `PropertyVisualizer`'s `format` says
+  how the property's string value is shown, in place of the format its type gives it, and its
+  [editor hints](#editor-hints) how the value is edited. The order of the `PropertyVisualizer`s is the
+  order in which Visual lists the properties an element does not write.
 
 ```nx
 import "@nx/visualizer"
@@ -92,8 +94,9 @@ visualizer Question = <ElementVisualizer title=label id=id icon="circle-help" />
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ValueVisualizer` | `format: ValueFormat` | How a string value of the alias is shown. |
+| `ValueVisualizer` | `format?: ValueFormat`, the [editor hints](#editor-hints) | How a value of the alias is shown and edited. |
 | `ValueFormat` | `id`, `color` | A format changes how the value looks, never what it is. |
+| `ValueEditor` | `field`, `slider`, `dropdown`, `segmented` | The editor a viewer offers for a value. |
 
 | Format | Shows a string value |
 | --- | --- |
@@ -115,6 +118,45 @@ visualizer Theme =
     <PropertyVisualizer property=code format=id />
   </ElementVisualizer>
 ```
+
+## Editor hints
+
+A `PropertyVisualizer` and a `ValueVisualizer` can also say how a value is edited. Each hint changes
+how a viewer edits a value, never what the value is: `min` and `max` are not constraints, and a
+document may still write a number outside them.
+
+| Hint | Applies to | Says |
+| --- | --- | --- |
+| `editor: ValueEditor` | A number: `field`, `slider`. A union of cases with no properties: `dropdown`, `segmented` | Which editor to offer. |
+| `min`, `max: float64` | A number | The range the editor offers. A number with both and no `editor` gets a slider. |
+| `step: float64` | A number | How far one step moves the number, as an arrow key or a slider's notch does. |
+| `stops: float64+` | A number | The numbers a slider snaps to, in order. |
+| `unit: string` | A number | The unit shown after the number, such as `"px"`; never written. |
+| `multiline: boolean` | A string, on a `PropertyVisualizer` only | The field takes line breaks: Enter starts a new line. |
+| `placeholder: string` | A string, on a `PropertyVisualizer` only | Text shown in the empty field; never written. |
+
+A property's hints come from its `PropertyVisualizer`, hint by hint, and otherwise from the
+`ValueVisualizer` of the alias its type names, so a design system can say once how its spacing edits:
+
+```nx
+import "@nx/visualizer"
+
+export type Spacing = int
+export type Align = start | center | end
+export type Card = { title:string padding:Spacing = 8 gap:Spacing = 4 align:Align = start body?:string }
+
+visualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={ 0 4 8 16 24 32 48 64 } unit="px" />
+visualizer Card =
+  <ElementVisualizer title=title>
+    <PropertyVisualizer property=gap max=16 />
+    <PropertyVisualizer property=align editor=segmented />
+    <PropertyVisualizer property=body multiline=true placeholder="A line or two" />
+  </ElementVisualizer>
+```
+
+A hint that does not fit its property's type, such as `slider` on a string, is reported as the
+warning `editor-hint-mismatch` and ignored, and a `min` above its `max` as `editor-hint-range`.
+Warnings, because a hint never changes what a program means.
 
 ## The library source
 
@@ -164,6 +206,23 @@ export type PropertyVisualizer = {
   property: Target.Property
   /// How the property's string value is shown.
   format?: ValueFormat
+  /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
+  editor?: ValueEditor
+  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  min?: float64
+  /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  max?: float64
+  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  step?: float64
+  /// The numbers a slider snaps to, in order.
+  stops?: float64+
+  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
+  unit?: string
+  /// Whether the property's string field takes line breaks: Enter starts a new line, and the
+  /// value is written over several lines.
+  multiline: boolean = false
+  /// Text shown in the property's empty field, quieter than a value, and never written.
+  placeholder?: string
 }
 
 /// How a viewer presents values of a scalar type.
@@ -171,7 +230,19 @@ export type ValueVisualizer = {
   // The type this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// How a string value of the type is shown.
-  format: ValueFormat
+  format?: ValueFormat
+  /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
+  editor?: ValueEditor
+  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  min?: float64
+  /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  max?: float64
+  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  step?: float64
+  /// The numbers a slider snaps to, in order.
+  stops?: float64+
+  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
+  unit?: string
 }
 
 /// How a string value is shown. A format changes how the value looks, never what it is.
@@ -180,6 +251,17 @@ export type ValueFormat =
   | id
   /// With a small square of the color it names.
   | color
+
+/// The editor a viewer offers for a value. A hint changes how a value is edited, never what it is.
+export type ValueEditor =
+  /// A number field, with arrow-key steps, even when the number has a range.
+  | field
+  /// A slider with a number field beside it, for a number with `min` and `max`.
+  | slider
+  /// A list of a union's cases.
+  | dropdown
+  /// A union's cases as one row of buttons.
+  | segmented
 ```
 
 ## See also

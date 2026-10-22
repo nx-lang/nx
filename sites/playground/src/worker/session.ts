@@ -142,6 +142,8 @@ function answerLanguage(
       return service.sourceTree(request as Parameters<SnapshotLanguageService["sourceTree"]>[0]);
     case "sourceEdit":
       return service.sourceEdit(request as Parameters<SnapshotLanguageService["sourceEdit"]>[0]);
+    case "namedValues":
+      return service.namedValues(request as Parameters<SnapshotLanguageService["namedValues"]>[0]);
     default:
       return Promise.reject(new Error(`Unknown language query '${String(query)}'.`));
   }

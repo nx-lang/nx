@@ -2,7 +2,7 @@
  * What a hover card says about a node of the source tree, from the tree alone, in the shapes the
  * editor's hover uses: a signature in NX, then the doc comment, as Markdown.
  */
-import type { SourceDeclaration, SourceNode } from "@nx-lang/language-protocol";
+import type { SourceDeclaration, SourceNode, SourceProperty } from "@nx-lang/language-protocol";
 
 import type { TreeIndex } from "./tree.js";
 
@@ -134,9 +134,11 @@ function propertyCard(index: TreeIndex, node: SourceNode): Card | undefined {
   const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
   const declaration = owner?.declaration === undefined ? undefined : tree.declarations[owner.declaration];
   const property = declaration?.properties?.find((candidate) => candidate.name === node.name);
-  if (property === undefined) {
-    return undefined;
-  }
+  return property === undefined ? undefined : propertyCardOf(property);
+}
+
+/** A property's card, `(property) name?: Type = default` and its doc, as for one an element does not write. */
+export function propertyCardOf(property: SourceProperty): Card {
   const fallback = property.default === undefined ? "" : ` = ${property.default}`;
   return withDoc(`(property) ${property.name}${optional(property.flags)}: ${property.type}${fallback}`, property.doc);
 }

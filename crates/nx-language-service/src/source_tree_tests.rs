@@ -1958,3 +1958,45 @@ fn hints_round_trip_through_json() {
     let back: SourceTree = serde_json::from_str(&json).expect("back");
     assert_eq!(back, tree);
 }
+
+#[test]
+fn the_types_of_unwritten_properties_are_listed() {
+    let tree = cards_tree();
+    let declaration = |name: &str| {
+        tree.declarations
+            .iter()
+            .find(|candidate| candidate.name == name)
+            .unwrap_or_else(|| panic!("{name} is listed"))
+    };
+    // The card writes only `title`, and a reader can still edit `size` with its cases.
+    let size = declaration("Size");
+    assert_eq!(
+        size.cases
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["small", "medium", "large"]
+    );
+    assert_eq!(declaration("Spacing").ty.as_deref(), Some("int"));
+}
+
+#[test]
+fn an_aliass_chain_is_listed_to_its_end() {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![DocumentInput::new(
+            URI,
+            "type Mode = light | dark\ntype Theme = Mode\ntype Panel = { theme:Theme = light }\n\nlet panel = <Panel />\n",
+        )
+        .with_version(1)],
+    )
+    .expect("snapshot");
+    let tree = with_visualizers(&snapshot, &[]);
+    let names: Vec<&str> = tree
+        .declarations
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(names.contains(&"Theme"), "{names:?}");
+    assert!(names.contains(&"Mode"), "{names:?}");
+}

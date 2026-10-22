@@ -8,11 +8,39 @@
  * reads as written, in the colors the host's editor gives it. Every piece carries its node's key.
  * It has no framework dependency and keeps its markup and styles in a shadow root.</para>
  */
-import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
+import type { EditorRange, NamedValue, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
-import { cardOf } from "./card.js";
-import { editOf, editTargets, isHexColor, isNumericLiteral, isRemovable, isWholeValue, runProblem, type EditTarget } from "./edit.js";
-import { caseOptions, offsetAtPoint, pickerColor, showValue, stepNumber, valueHost } from "./editors.js";
+import { cardOf, propertyCardOf, type Card } from "./card.js";
+import {
+  editOf,
+  editTargets,
+  isHexColor,
+  isNumericLiteral,
+  isRemovable,
+  isWholeValue,
+  referenceEditOf,
+  removalOf,
+  runProblem,
+  unwrittenProperties,
+  type EditTarget,
+  type UnwrittenProperty
+} from "./edit.js";
+import {
+  caseOptions,
+  defaultShown,
+  defaultValue,
+  isSlider,
+  namedOptions,
+  numberEntry,
+  offsetAtPoint,
+  pickerColor,
+  rangeProblem,
+  showReference,
+  showValue,
+  slidValue,
+  stepNumber,
+  valueHost
+} from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
@@ -91,8 +119,17 @@ export interface NxSelectDetail {
 /** Renders a doc comment's Markdown as the host wants it read. */
 export type NxViewerMarkdown = (markdown: string) => Node;
 
+/**
+ * Answers the named values the property `property` of the element with the key `element` can take,
+ * as the language service's `namedValues` query answers them.
+ */
+export type NxViewerNamedValues = (element: string, property: string) => Promise<readonly NamedValue[]>;
+
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable", "namedValues"] as const;
+
+/** How many unwritten properties a selected element lists before a filter field leads them. */
+const MORE_FILTER_PAST = 12;
 
 /** How far the pointer moves sideways, in pixels, for a number's name dragged to step it once. */
 const SCRUB_STEP = 2;
@@ -129,10 +166,10 @@ const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement
  * its tags that starts a line, or a block written as it is, as an `if` or a `for`. A group's header
  * stands for its group.
  */
-const UNITS = ".sheet-head, .sheet-row, .line-element, .tag-line, .block-line";
+const UNITS = ".sheet-head, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /** The units as they are drawn selected: a group stands for itself, not through its header. */
-const DRAWN_UNITS = ".sheet, .sheet-row, .line-element, .tag-line, .block-line";
+const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /**
  * What `element` reads as, word by word: its text, with an icon read by its label, for telling a
@@ -175,6 +212,13 @@ interface EditSession {
   /** A case popover's options, and the one Enter chooses. */
   readonly options?: readonly HTMLElement[];
   active?: HTMLElement | undefined;
+  /** A slider's track, beside its number field. */
+  readonly slider?: HTMLInputElement;
+  /** The named values listed with a field, a color or a slider, and the one Enter chooses. */
+  named?: HTMLElement[];
+  namedActive?: HTMLElement | undefined;
+  /** Whether the reader has typed in the editor, after which the named values filter by it. */
+  typed?: boolean;
   closed: boolean;
 }
 
@@ -272,6 +316,29 @@ export class NxViewerElement extends ElementBase {
   #ignoreClick = false;
   /** The value whose popover a press on it closed, which the click that follows leaves closed. */
   #closedOnPress: string | undefined;
+  /** Each value set to a named value since the host last set a tree, by key: its reference path. */
+  #pendingReferences = new Map<string, string>();
+  /** Answers the named values a property can take, as the host gives it. */
+  #namedValues: NxViewerNamedValues | undefined;
+  /** The named values asked for since the host last set a tree, by element and property. */
+  #namedAnswers = new Map<string, Promise<readonly NamedValue[]>>();
+  /** The key of the element whose unwritten properties are listed. */
+  #moreOpen: string | undefined;
+  /** What the filter of the unwritten properties holds. */
+  #moreFilter = "";
+  /** What the list of unwritten properties was drawn for: the element's key and whether it was open. */
+  #moreFor: string | undefined;
+  /** The rows of unwritten properties drawn, and the block that holds them under a line. */
+  #moreDrawn: HTMLElement[] = [];
+  #moreBlock: HTMLElement | undefined;
+  /** The keys of the unwritten properties' values, which the reading edits as written ones. */
+  #moreKeys: string[] = [];
+  /** The cards of the unwritten properties' names, by the key their attribute would have. */
+  #moreCards = new Map<string, Card>();
+  /** The menu of a row's actions, when open: the row's key. */
+  #menuKey: string | undefined;
+  /** The cards of the named values listed, by their options. */
+  #namedCards = new WeakMap<Element, Card>();
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -284,6 +351,8 @@ export class NxViewerElement extends ElementBase {
   readonly #card: HTMLDivElement;
   /** The popover a case or a color is chosen in. */
   readonly #popover: HTMLDivElement;
+  /** The menu of a row's actions. */
+  readonly #menu: HTMLDivElement;
   /** Whether the open editor holds an entry that differs from its value, as `nx-draft` last said. */
   #draftChanged = false;
   /** Why the open editor cannot take its entry, under it while it cannot. */
@@ -300,6 +369,9 @@ export class NxViewerElement extends ElementBase {
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
     this.#closedOnPress = undefined;
+    if (this.#menuKey !== undefined && !event.composedPath().includes(this.#menu)) {
+      this.#closeMenu(false);
+    }
     if (session !== undefined && session.field === undefined && !event.composedPath().includes(this.#popover)) {
       this.#cancel(session, false);
       // A press on the value whose popover was open closes it, as a dropdown's does; the click
@@ -374,10 +446,22 @@ export class NxViewerElement extends ElementBase {
     this.#popover.addEventListener("click", (event) => {
       const option = (event.target as Element).closest?.(".option") as HTMLElement | null;
       const session = this.#session;
-      if (option !== null && session !== undefined && session.options !== undefined) {
+      if (option === null || session === undefined) {
+        return;
+      }
+      const reference = option.dataset["reference"];
+      if (reference !== undefined) {
+        this.#chooseReference(session, reference);
+      } else if (session.options !== undefined) {
         this.#choose(session, option.dataset["name"]!);
       }
     });
+    // A named value's doc opens in a card beside the popover, once the pointer rests on it.
+    this.#popover.addEventListener("pointerover", (event) => {
+      const option = (event.target as Element).closest?.(".option.named") as HTMLElement | null;
+      this.#pointNamed(option ?? undefined);
+    });
+    this.#popover.addEventListener("pointerleave", () => this.#pointNamed(undefined));
     this.#popover.addEventListener("focusout", (event) => {
       const next = event.relatedTarget as Node | null;
       const session = this.#session;
@@ -390,7 +474,20 @@ export class NxViewerElement extends ElementBase {
     this.#problem.className = "edit-problem";
     this.#problem.id = "edit-problem";
     this.#problem.hidden = true;
-    frame.append(toolbar, this.#body, this.#announcer, this.#card, this.#popover, this.#problem);
+
+    this.#menu = document.createElement("div");
+    this.#menu.className = "menu";
+    this.#menu.setAttribute("role", "menu");
+    this.#menu.hidden = true;
+    this.#menu.addEventListener("keydown", (event) => this.#onMenuKey(event));
+    this.#menu.addEventListener("pointerdown", (event) => event.preventDefault());
+    this.#menu.addEventListener("click", (event) => {
+      const item = (event.target as Element).closest?.(".menu-item") as HTMLElement | null;
+      if (item !== null) {
+        this.#chooseMenuItem(item);
+      }
+    });
+    frame.append(toolbar, this.#body, this.#announcer, this.#card, this.#popover, this.#problem, this.#menu);
     shadow.append(style, frame);
 
     this.#body.addEventListener("click", (event) => this.#onClick(event));
@@ -466,7 +563,9 @@ export class NxViewerElement extends ElementBase {
     this.#tree = tree;
     // A new tree says what each edit made of the source, or that it made nothing.
     this.#pending.clear();
+    this.#pendingReferences.clear();
     this.#removed.clear();
+    this.#namedAnswers.clear();
     this.#render();
   }
 
@@ -561,6 +660,21 @@ export class NxViewerElement extends ElementBase {
     this.#setFolded(new Set());
   }
 
+  /**
+   * Answers the named values a property can take: given an element's key and a property's name, a
+   * promise of the values in the document's scope its type accepts, as the language service's
+   * `namedValues` query answers them. Editors list them, and choosing one writes a reference to it.
+   * Without it, editors list none.
+   */
+  get namedValues(): NxViewerNamedValues | undefined {
+    return this.#namedValues;
+  }
+
+  set namedValues(namedValues: NxViewerNamedValues | undefined) {
+    this.#namedValues = typeof namedValues === "function" ? namedValues : undefined;
+    this.#namedAnswers.clear();
+  }
+
   /** Whether the tree is out of date: the reading is muted and badged, and still works. */
   get stale(): boolean {
     return this.hasAttribute("stale");
@@ -611,7 +725,8 @@ export class NxViewerElement extends ElementBase {
   keyAtTop(): { key: string; top: number } | undefined {
     const port = this.#scrollPort();
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
-      if (element.getClientRects().length === 0) {
+      // An unwritten property's value is not in the tree.
+      if (element.getClientRects().length === 0 || element.closest(".more") !== null) {
         continue;
       }
       const top = element.getBoundingClientRect().top - port.top;
@@ -703,6 +818,11 @@ export class NxViewerElement extends ElementBase {
     this.#body.classList.toggle("editable", this.#editable);
     this.#index = undefined;
     this.#targets = new Map();
+    this.#moreDrawn = [];
+    this.#moreBlock = undefined;
+    this.#moreKeys = [];
+    this.#moreFor = undefined;
+    this.#closeMenu(false);
     if (tree === undefined) {
       // A host that gives the next tree soon, at once or once it has it, keeps the height; one that
       // leaves the reading empty lets it go.
@@ -750,8 +870,10 @@ export class NxViewerElement extends ElementBase {
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
+    const targets = editTargets(index);
+    this.#markUnits(targets);
     if (this.#editable) {
-      this.#targets = editTargets(index);
+      this.#targets = targets;
       this.#markEditable();
       if (scrub !== undefined) {
         this.#resumeScrub(scrub);
@@ -841,6 +963,11 @@ export class NxViewerElement extends ElementBase {
 
   /** The unit `target` is in, or the group it falls in between rows, or nothing. */
   #unitOf(target: Element | null | undefined): HTMLElement | undefined {
+    // The rows of an element's unwritten properties are the element's, wherever they are drawn.
+    const more = target?.closest?.(".more") as HTMLElement | null | undefined;
+    if (more !== null && more !== undefined && this.#body.contains(more)) {
+      return this.#rendered.get(more.dataset["moreOf"] ?? "");
+    }
     const found = target?.closest?.(UNITS) as HTMLElement | null | undefined;
     if (found !== null && found !== undefined && this.#body.contains(found)) {
       return found.classList.contains("sheet-head") ? (found.parentElement as HTMLElement) : found;
@@ -1008,6 +1135,10 @@ export class NxViewerElement extends ElementBase {
       } else {
         draw(unit, unit.getBoundingClientRect(), "selected");
       }
+      // A line's unwritten properties, listed under it, are part of what is selected.
+      if (this.#moreBlock !== undefined && this.#body.contains(this.#moreBlock)) {
+        draw(unit, this.#moreBlock.getBoundingClientRect(), "selected-body");
+      }
     }
     const hovered = this.#hoveredUnit;
     if (hovered !== undefined && this.#body.contains(hovered)) {
@@ -1078,6 +1209,19 @@ export class NxViewerElement extends ElementBase {
    * again, the folds stay as they are.
    */
   #select(key: string | undefined, fire: boolean, reveal = true): void {
+    // Selecting another unit closes the list of an element's unwritten properties.
+    if (key !== this.#moreOpen) {
+      this.#moreOpen = undefined;
+      this.#moreFilter = "";
+    }
+    if (this.#menuKey !== undefined && this.#menuKey !== key) {
+      this.#closeMenu(false);
+    }
+    this.#selectNode(key, fire, reveal);
+    this.#drawMore();
+  }
+
+  #selectNode(key: string | undefined, fire: boolean, reveal: boolean): void {
     // A card asked for from the keyboard is the selected unit's.
     if (this.#cardByKeyboard) {
       this.#closeCard();
@@ -1154,9 +1298,46 @@ export class NxViewerElement extends ElementBase {
         showValue(span, target, this.#writtenOf(target), value);
       }
     }
+    for (const [key, path] of this.#pendingReferences) {
+      const span = this.#rendered.get(key);
+      if (span !== undefined) {
+        showReference(span, path);
+      }
+    }
     for (const key of this.#removed) {
       this.#rendered.get(key)?.classList.add("pending");
     }
+    // Each written row has a menu of what can be done with it, opened from a quiet mark at its end.
+    for (const row of this.#body.querySelectorAll<HTMLElement>(".sheet-row[data-key]")) {
+      const mark = this.ownerDocument.createElement("span");
+      mark.className = "row-menu";
+      mark.textContent = "\u22EF";
+      mark.setAttribute("role", "button");
+      mark.setAttribute("aria-haspopup", "menu");
+      mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
+      row.append(mark);
+    }
+  }
+
+  /**
+   * Reads each number's unit after it, quieter, where its property's hints give one: never part of
+   * the value, so it is drawn beside it.
+   */
+  #markUnits(targets: ReadonlyMap<string, EditTarget>): void {
+    for (const target of targets.values()) {
+      const span = this.#rendered.get(target.key);
+      if (target.kind === "number" && target.reference === undefined && target.hints?.unit !== undefined && span !== undefined) {
+        span.after(this.#unitMark(target.hints.unit));
+      }
+    }
+  }
+
+  #unitMark(unit: string): HTMLElement {
+    const mark = this.ownerDocument.createElement("span");
+    mark.className = "unit";
+    mark.textContent = ` ${unit}`;
+    mark.setAttribute("aria-hidden", "true");
+    return mark;
   }
 
   /** The selected unit, as it is drawn, when the selection is one. */
@@ -1169,21 +1350,30 @@ export class NxViewerElement extends ElementBase {
   #unitValues(unit: HTMLElement): HTMLElement[] {
     const found: HTMLElement[] = [];
     for (const value of unit.querySelectorAll<HTMLElement>(".editable-value")) {
-      if (this.#unitOf(value) === unit && !found.some((other) => keyOf(other) === keyOf(value))) {
+      // An unwritten property's value is the list's, not the unit's own.
+      if (this.#unitOf(value) === unit && value.closest(".more") === null && !found.some((other) => keyOf(other) === keyOf(value))) {
         found.push(value);
       }
     }
     return found;
   }
 
-  /** The text of the value `target` names as the tree writes it. */
+  /** The text of the value `target` names as the tree writes it; nothing for a property not written. */
   #writtenOf(target: EditTarget): string {
-    return this.#index?.tree.nodes[target.at]?.value ?? "";
+    return target.adding === true ? "" : (this.#index?.tree.nodes[target.at]?.value ?? "");
   }
 
   /** The value `target` reads as now: as the reader left it, or as the tree gives it. */
   #currentOf(target: EditTarget): string {
-    return this.#pending.get(target.key) ?? target.value;
+    return this.#pendingReferences.get(target.key) ?? this.#pending.get(target.key) ?? target.value;
+  }
+
+  /** The reference path `target` reads as now, when it is a named value. */
+  #referenceOf(target: EditTarget): string | undefined {
+    if (this.#pendingReferences.has(target.key)) {
+      return this.#pendingReferences.get(target.key);
+    }
+    return this.#pending.has(target.key) ? undefined : target.reference;
   }
 
   #fire(name: string, detail: NxEditDetail | NxOpenDetail): void {
@@ -1204,19 +1394,33 @@ export class NxViewerElement extends ElementBase {
       this.#cancel(this.#session, false);
     }
     this.#closeCard();
+    this.#closeMenu(false);
     const current = this.#currentOf(target);
+    const reference = this.#referenceOf(target);
     switch (target.kind) {
       case "boolean":
         this.#commitValue(target, current === "true" ? "false" : "true");
         return;
       case "case":
         this.#openCases(target, span, draft ?? "", caret);
-        return;
+        break;
       case "color":
-        this.#openColor(target, span, draft ?? current, caret);
-        return;
+        // A named value's path is no hex: the field starts empty, the path its placeholder.
+        this.#openColor(target, span, draft ?? (reference === undefined ? current : ""), caret);
+        break;
+      case "number":
+        if (isSlider(target)) {
+          this.#openSlider(target, span, draft ?? current, caret);
+        } else {
+          this.#openField(target, span, draft ?? current, caret);
+        }
+        break;
       default:
         this.#openField(target, span, draft ?? current, caret);
+    }
+    const session = this.#session;
+    if (session !== undefined && session.target === target) {
+      this.#askNamedValues(session);
     }
   }
 
@@ -1297,12 +1501,26 @@ export class NxViewerElement extends ElementBase {
     field.setAttribute("aria-label", this.#labelOf(target));
     field.spellcheck = target.kind === "run";
     field.textContent = text;
+    // A placeholder reads, quieter, while the field is empty, and is never written.
+    const placeholder = target.kind === "text" ? target.hints?.placeholder : undefined;
+    if (placeholder !== undefined) {
+      field.dataset["placeholder"] = placeholder;
+      field.setAttribute("aria-placeholder", placeholder);
+    }
+    if (target.kind === "text" && target.hints?.multiline === true) {
+      field.classList.add("field-multiline");
+      field.setAttribute("aria-multiline", "true");
+    }
     host.replaceChildren(...keep, ...(lead === undefined ? [] : [lead]), field, ...(trail === undefined ? [] : [trail]));
     span.classList.add("editing");
     const session: EditSession = { target, span, host, restore, field, closed: false };
     this.#session = session;
     field.addEventListener("keydown", (event) => this.#onFieldKey(event, session));
-    field.addEventListener("input", () => this.#validate(session));
+    field.addEventListener("input", () => {
+      session.typed = true;
+      this.#validate(session);
+      this.#filterNamed(session, field.textContent ?? "");
+    });
     field.addEventListener("blur", () => {
       if (!session.closed) {
         this.#finishField(session, "blur");
@@ -1331,6 +1549,9 @@ export class NxViewerElement extends ElementBase {
 
   /** What the value is called for a reader who cannot see it: its property's name, or its kind. */
   #labelOf(target: EditTarget): string {
+    if (target.property !== undefined) {
+      return target.property.name;
+    }
     const index = this.#index!;
     const owner = index.tree.nodes[target.at]!.parent;
     const name = owner === undefined ? undefined : index.tree.nodes[owner]!.name;
@@ -1339,12 +1560,21 @@ export class NxViewerElement extends ElementBase {
 
   /** Why the field's entry cannot be taken, or nothing when it can. */
   #problemOf(target: EditTarget, value: string): string | undefined {
+    // A named value left as it is, as its path, is no entry to check.
+    if (this.#referenceOf(target) !== undefined && value.trim() === this.#currentOf(target)) {
+      return undefined;
+    }
     switch (target.kind) {
-      case "number":
-        if (!isNumericLiteral(value.trim())) {
+      case "number": {
+        const entry = numberEntry(value, target.hints);
+        if (!isNumericLiteral(entry)) {
           return "Not a number";
         }
-        return target.signed === false && value.trim().startsWith("-") ? "Cannot be negative here" : undefined;
+        if (target.signed === false && entry.startsWith("-")) {
+          return "Cannot be negative here";
+        }
+        return rangeProblem(entry, target.hints);
+      }
       case "run":
         return runProblem(value);
       case "color":
@@ -1362,6 +1592,13 @@ export class NxViewerElement extends ElementBase {
   #validate(session: EditSession, now = false): void {
     const input = session.field ?? session.input;
     if (input === undefined || session.target.kind === "case") {
+      return;
+    }
+    // A named value's color popover starts empty, which leaves the value as it is.
+    if (session.input !== undefined && session.input.value === "" && session.target.kind === "color" && this.#referenceOf(session.target) !== undefined) {
+      this.#reportDraft(false);
+      input.classList.remove("invalid");
+      this.#hideProblem();
       return;
     }
     this.#reportDraft(this.#draftOf(session) !== this.#currentOf(session.target));
@@ -1423,9 +1660,27 @@ export class NxViewerElement extends ElementBase {
     // A field's keys are its own, Ctrl+Z and Ctrl+Y included, not the reading's or the host's.
     event.stopPropagation();
     const field = session.field!;
+    const target = session.target;
+    // The named values listed with the field: the arrows walk them, in a number's field with Alt,
+    // since there they step the number.
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.named?.length ?? 0) > 0 && (target.kind !== "number" || event.altKey)) {
+      event.preventDefault();
+      this.#stepNamed(session, event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
     switch (event.key) {
       case "Enter":
         event.preventDefault();
+        if (session.namedActive !== undefined) {
+          this.#chooseReference(session, session.namedActive.dataset["reference"]!);
+          return;
+        }
+        // Shift+Enter breaks a string's line; in a field hinted for several lines, Enter does, and
+        // Ctrl or Cmd+Enter commits.
+        if (target.kind === "text" && (event.shiftKey || (target.hints?.multiline === true && !event.ctrlKey && !event.metaKey))) {
+          this.#insertLineBreak(session);
+          return;
+        }
         this.#finishField(session, "key");
         return;
       case "Escape":
@@ -1445,7 +1700,7 @@ export class NxViewerElement extends ElementBase {
         }
         event.preventDefault();
         const steps = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
-        const stepped = stepNumber(field.textContent ?? "", steps, session.target.signed !== false);
+        const stepped = stepNumber(numberEntry(field.textContent ?? "", target.hints), steps, target.signed !== false, target.hints);
         if (stepped !== undefined) {
           field.textContent = stepped;
           this.#validate(session);
@@ -1464,7 +1719,12 @@ export class NxViewerElement extends ElementBase {
     const target = session.target;
     let value = session.field!.textContent ?? "";
     if (target.kind === "number") {
-      value = value.trim();
+      value = numberEntry(value, target.hints);
+    }
+    if (value === this.#currentOf(target)) {
+      this.#endSession(session, how === "key");
+      session.host!.replaceChildren(...session.restore!);
+      return true;
     }
     if (this.#problemOf(target, value) !== undefined) {
       if (how === "blur") {
@@ -1487,6 +1747,11 @@ export class NxViewerElement extends ElementBase {
   #cancel(session: EditSession, refocus: boolean): void {
     this.#endSession(session, refocus);
     session.host?.replaceChildren(...session.restore!);
+    // A slider shows where it was dragged; back, it shows what was last committed.
+    const pending = this.#pending.get(session.target.key);
+    if (session.slider !== undefined && pending !== undefined) {
+      showValue(session.span, session.target, this.#writtenOf(session.target), pending);
+    }
   }
 
   /** Closes `session`: its popover goes, and with `refocus`, the reading takes the keys again. */
@@ -1498,9 +1763,8 @@ export class NxViewerElement extends ElementBase {
     session.span.classList.remove("editing");
     this.#hideProblem();
     this.#reportDraft(false);
-    if (session.field === undefined) {
-      this.#closePopover();
-    }
+    // A field's popover lists its named values; a popover editor is the popover itself.
+    this.#closePopover();
     if (refocus) {
       this.#body.focus({ preventScroll: true });
     }
@@ -1521,6 +1785,9 @@ export class NxViewerElement extends ElementBase {
 
   /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
   #closePopover(): void {
+    if (this.#card.classList.contains("over-popover")) {
+      this.#closeCard();
+    }
     this.#popover.hidden = true;
     this.#popover.className = "popover";
     this.#popover.replaceChildren();
@@ -1528,15 +1795,47 @@ export class NxViewerElement extends ElementBase {
 
   /** Sets `target` to `value`: fires `nx-edit` and shows the value, muted, until the host's tree. */
   #commitValue(target: EditTarget, value: string): void {
-    if (value === this.#currentOf(target)) {
+    if (value === this.#currentOf(target) && this.#referenceOf(target) === undefined) {
       return;
     }
     this.#pending.set(target.key, value);
+    this.#pendingReferences.delete(target.key);
     const span = this.#rendered.get(target.key);
     if (span !== undefined) {
       showValue(span, target, this.#writtenOf(target), value);
+      this.#markAdded(target, span);
     }
-    this.#fire(NX_EDIT_EVENT, { key: target.key, edit: editOf(target, value) });
+    this.#fire(NX_EDIT_EVENT, { key: this.#editKeyOf(target), edit: editOf(target, value) });
+  }
+
+  /** Sets `target` to the named value at `path`, written as a reference to it. */
+  #commitReference(target: EditTarget, path: string): void {
+    if (this.#referenceOf(target) === path) {
+      return;
+    }
+    this.#pendingReferences.set(target.key, path);
+    this.#pending.delete(target.key);
+    const span = this.#rendered.get(target.key);
+    if (span !== undefined) {
+      showReference(span, path);
+      this.#markAdded(target, span);
+    }
+    this.#fire(NX_EDIT_EVENT, { key: this.#editKeyOf(target), edit: referenceEditOf(target, path) });
+  }
+
+  /** The key an edit of `target` is aimed at: its node's, or, for a property it adds, its element's. */
+  #editKeyOf(target: EditTarget): string {
+    return target.adding === true && target.property !== undefined ? target.property.element : target.key;
+  }
+
+  /** An unwritten property just set reads as written, where it stands, until the host's tree. */
+  #markAdded(target: EditTarget, span: HTMLElement): void {
+    if (target.adding !== true) {
+      return;
+    }
+    const row = span.closest(".dimmed-row");
+    row?.classList.replace("dimmed-row", "added-row");
+    row?.querySelector(".more-default")?.remove();
   }
 
   /**
@@ -1566,12 +1865,13 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Opens the selected unit's first editable value; or, with `open`, fires `nx-open` for a selected
-   * value the reading cannot edit, as a row's expression. Answers whether either happened.
+   * value the reading cannot edit, as a row's expression, and with `source` for any row's value, as
+   * its menu's Show in Source does. Answers whether either happened.
    */
-  #openSelected(open: boolean): boolean {
+  #openSelected(open: boolean, source = false): boolean {
     const unit = this.#selectedUnit();
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const first = unit !== undefined ? this.#unitValues(unit)[0] : selected?.matches(".editable-value") === true ? selected : undefined;
+    const first = source ? undefined : unit !== undefined ? this.#unitValues(unit)[0] : selected?.matches(".editable-value") === true ? selected : undefined;
     if (first !== undefined) {
       this.#openEditor(keyOf(first)!);
       return true;
@@ -1630,6 +1930,16 @@ export class NxViewerElement extends ElementBase {
     const target = event.target as Element;
     if (this.#session?.field?.contains(target) === true || target.closest?.(".fold") != null) {
       return;
+    }
+    const opens = target.closest?.(".dimmed-row[data-opens]") as HTMLElement | null | undefined;
+    if (opens !== null && opens !== undefined && this.#body.contains(opens)) {
+      this.#openMoreInSource(opens);
+      return;
+    }
+    if (target.closest?.(".more") != null) {
+      if (target.closest?.(".editable-value") == null) {
+        return;
+      }
     }
     const value = target.closest?.(".editable-value") as HTMLElement | null | undefined;
     if (value !== null && value !== undefined && this.#body.contains(value)) {
@@ -1694,13 +2004,24 @@ export class NxViewerElement extends ElementBase {
     list.className = "options";
     list.id = "nx-viewer-options";
     list.setAttribute("role", "listbox");
-    const current = this.#currentOf(target);
+    const current = this.#referenceOf(target) === undefined ? this.#currentOf(target) : "";
     const options = caseOptions(document, target.cases ?? [], current);
     options.forEach((option, position) => (option.id = `nx-viewer-option-${position}`));
     list.append(...options);
-    this.#popover.className = "popover cases";
+    // Segmented, a few short cases read as one row of buttons; more than five, or a row too wide
+    // for the reading, read as the list.
+    const segmented = target.hints?.kind === "segmented" && options.length <= 5;
+    this.#popover.className = segmented ? "popover cases segmented" : "popover cases";
     this.#popover.replaceChildren(input, list);
     this.#popover.hidden = false;
+    if (segmented) {
+      list.setAttribute("aria-orientation", "horizontal");
+      const room = this.#body.clientWidth;
+      if (room > 0 && list.scrollWidth > room) {
+        this.#popover.className = "popover cases";
+        list.removeAttribute("aria-orientation");
+      }
+    }
     span.classList.add("editing");
     const session: EditSession = { target, span, input, options, active: undefined, closed: false };
     this.#session = session;
@@ -1761,13 +2082,21 @@ export class NxViewerElement extends ElementBase {
     picker.className = "popover-picker";
     picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
     picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
+    const reference = this.#referenceOf(target);
+    if (reference !== undefined) {
+      input.placeholder = reference;
+    }
     this.#popover.className = "popover colors";
     this.#popover.replaceChildren(input, picker);
     this.#popover.hidden = false;
     span.classList.add("editing");
     const session: EditSession = { target, span, input, closed: false };
     this.#session = session;
-    input.addEventListener("input", () => this.#validate(session));
+    input.addEventListener("input", () => {
+      session.typed = true;
+      this.#validate(session);
+      this.#filterNamed(session, input.value);
+    });
     picker.addEventListener("input", () => {
       input.value = picker.value;
       this.#validate(session);
@@ -1798,13 +2127,19 @@ export class NxViewerElement extends ElementBase {
     if (session.options !== undefined) {
       const shown = session.options.filter((option) => !option.hidden);
       const at = session.active === undefined ? -1 : shown.indexOf(session.active);
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      // A row of buttons steps sideways too.
+      const steps: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, ArrowRight: 1, ArrowLeft: -1 };
+      const sideways = event.key === "ArrowRight" || event.key === "ArrowLeft";
+      if (steps[event.key] !== undefined && (!sideways || this.#popover.classList.contains("segmented"))) {
         event.preventDefault();
-        const next = shown[Math.max(0, Math.min(shown.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))];
+        const next = shown[Math.max(0, Math.min(shown.length - 1, at + steps[event.key]!))];
         this.#setActive(session, next);
       } else if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        if (session.active !== undefined) {
+        const reference = session.active?.dataset["reference"];
+        if (reference !== undefined) {
+          this.#chooseReference(session, reference);
+        } else if (session.active !== undefined) {
           this.#choose(session, session.active.dataset["name"]!);
         }
         if (event.key === "Tab") {
@@ -1813,16 +2148,40 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
+    const target = session.target;
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.named?.length ?? 0) > 0 && (session.slider === undefined || event.altKey)) {
+      event.preventDefault();
+      this.#stepNamed(session, event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if (session.slider !== undefined && (event.key === "ArrowDown" || event.key === "ArrowUp") && event.target === session.input) {
+      event.preventDefault();
+      const steps = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
+      const stepped = stepNumber(numberEntry(session.input.value, target.hints), steps, target.signed !== false, target.hints);
+      if (stepped !== undefined) {
+        this.#slideTo(session, stepped);
+      }
+      return;
+    }
     if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      const value = (session.input?.value ?? "").trim();
-      if (!isHexColor(value)) {
-        this.#validate(session, true);
+      if (session.namedActive !== undefined) {
+        this.#chooseReference(session, session.namedActive.dataset["reference"]!);
         return;
       }
-      this.#choose(session, value);
+      const raw = session.input?.value ?? "";
+      const value = target.kind === "number" ? numberEntry(raw, target.hints) : raw.trim();
+      // A named value's popover left empty, or as it was, leaves the value as it is.
+      if ((value === "" && this.#referenceOf(target) !== undefined) || value === this.#currentOf(target)) {
+        this.#cancel(session, true);
+      } else if (this.#problemOf(target, value) !== undefined) {
+        this.#validate(session, true);
+        return;
+      } else {
+        this.#choose(session, value);
+      }
       if (event.key === "Tab") {
-        this.#openNext(session.target.key, event.shiftKey ? -1 : 1);
+        this.#openNext(target.key, event.shiftKey ? -1 : 1);
       }
     }
   }
@@ -1831,6 +2190,640 @@ export class NxViewerElement extends ElementBase {
   #choose(session: EditSession, value: string): void {
     this.#endSession(session, true);
     this.#commitValue(session.target, value);
+  }
+
+  /** Closes a popover with the named value at `path` chosen. */
+  #chooseReference(session: EditSession, path: string): void {
+    this.#endSession(session, true);
+    session.host?.replaceChildren(...session.restore!);
+    this.#commitReference(session.target, path);
+  }
+
+  // ---- Sliders ------------------------------------------------------------------------------
+
+  /**
+   * A slider for a number its hints give a range: a track under the value, with its stops as ticks,
+   * and the number's field beside it, its unit after.
+   */
+  #openSlider(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
+    const document = this.ownerDocument;
+    const hints = target.hints ?? {};
+    const start = Number(numberEntry(text, hints));
+    const min = hints.min ?? Math.min(0, Number.isFinite(start) ? start : 0);
+    const max = hints.max ?? Math.max(min + 100, Number.isFinite(start) ? start : 0);
+    const { host } = valueHost(span, this.#writtenOf(target));
+    const restore = [...host.childNodes];
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = "popover-slider";
+    slider.min = String(min);
+    slider.max = String(max);
+    // With stops the thumb snaps to them itself; otherwise it moves by the hinted step, or by one.
+    slider.step = (hints.stops?.length ?? 0) > 0 ? "any" : String(hints.step ?? (/\./.test(text) ? "any" : 1));
+    slider.value = String(Number.isFinite(start) ? Math.min(max, Math.max(min, start)) : min);
+    slider.setAttribute("aria-label", this.#labelOf(target));
+    const track = document.createElement("div");
+    track.className = "slider-track";
+    track.append(slider);
+    if ((hints.stops?.length ?? 0) > 0 && max > min) {
+      const ticks = document.createElement("div");
+      ticks.className = "slider-ticks";
+      ticks.setAttribute("aria-hidden", "true");
+      for (const stop of hints.stops!) {
+        if (stop < min || stop > max) {
+          continue;
+        }
+        const tick = document.createElement("span");
+        tick.className = "slider-tick";
+        tick.style.left = `${((stop - min) / (max - min)) * 100}%`;
+        ticks.append(tick);
+      }
+      track.append(ticks);
+    }
+    const input = document.createElement("input");
+    input.className = "popover-number";
+    input.value = text;
+    input.spellcheck = false;
+    input.setAttribute("aria-label", `${this.#labelOf(target)}: number`);
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    row.append(track, input);
+    if (hints.unit !== undefined) {
+      const unit = document.createElement("span");
+      unit.className = "popover-unit";
+      unit.textContent = hints.unit;
+      row.append(unit);
+    }
+    this.#popover.className = "popover slider";
+    this.#popover.replaceChildren(row);
+    this.#popover.hidden = false;
+    span.classList.add("editing");
+    const session: EditSession = { target, span, host, restore, input, slider, closed: false };
+    this.#session = session;
+    // Alt held while dragging lets the thumb go between the stops.
+    let free = false;
+    const note = (event: PointerEvent | KeyboardEvent): void => {
+      free = event.altKey;
+    };
+    slider.addEventListener("pointerdown", note);
+    slider.addEventListener("pointermove", note);
+    slider.addEventListener("keydown", note);
+    slider.addEventListener("input", () => {
+      const value = slidValue(Number(slider.value), hints, text, free);
+      input.value = value;
+      showValue(span, target, this.#writtenOf(target), value);
+      this.#validate(session);
+    });
+    // Let go, the number is committed once; the slider stays open on it.
+    slider.addEventListener("change", () => {
+      const value = slidValue(Number(slider.value), hints, text, free);
+      input.value = value;
+      if (this.#problemOf(target, value) === undefined) {
+        this.#commitValue(target, value);
+      }
+      this.#validate(session);
+    });
+    input.addEventListener("input", () => {
+      session.typed = true;
+      this.#validate(session);
+      const entry = Number(numberEntry(input.value, hints));
+      if (Number.isFinite(entry)) {
+        slider.value = String(entry);
+      }
+      this.#filterNamed(session, input.value);
+    });
+    this.#validate(session);
+    this.#placeCard(span, this.#popover);
+    input.focus({ preventScroll: true });
+    if (caret === undefined) {
+      input.select();
+    } else {
+      input.setSelectionRange(caret.start, caret.end);
+    }
+  }
+
+  /** Puts a slider's field and track at `value`, as the arrows in its field do. */
+  #slideTo(session: EditSession, value: string): void {
+    session.input!.value = value;
+    session.slider!.value = value;
+    session.input!.select();
+    this.#validate(session);
+  }
+
+  // ---- Named values -------------------------------------------------------------------------
+
+  /** Asks the host for the named values `session`'s property can take, and lists them when they come. */
+  #askNamedValues(session: EditSession): void {
+    const ask = this.#namedValues;
+    const property = session.target.property;
+    if (ask === undefined || property === undefined || session.target.kind === "run") {
+      return;
+    }
+    const key = `${property.element}\u0000${property.name}`;
+    let answer = this.#namedAnswers.get(key);
+    if (answer === undefined) {
+      try {
+        answer = Promise.resolve(ask(property.element, property.name));
+      } catch (error) {
+        answer = Promise.reject(error);
+      }
+      // A failed answer is asked again next time.
+      answer.catch(() => this.#namedAnswers.delete(key));
+      this.#namedAnswers.set(key, answer);
+    }
+    answer.then(
+      (values) => {
+        if (!session.closed && this.#session === session && Array.isArray(values) && values.length > 0) {
+          this.#showNamed(session, values);
+        }
+      },
+      () => undefined
+    );
+  }
+
+  /**
+   * Lists `values` with `session`'s editor: above a case's own choices, above a color's or a
+   * slider's field, or in a popover under a field. The value's own reference is marked.
+   */
+  #showNamed(session: EditSession, values: readonly NamedValue[]): void {
+    const document = this.ownerDocument;
+    const options = namedOptions(document, values, this.#referenceOf(session.target));
+    options.forEach((option, position) => {
+      option.id = `nx-viewer-named-${position}`;
+      const named = values[position]!;
+      this.#namedCards.set(option, named.doc === undefined ? { signature: `${named.path}: ${named.type}` } : { signature: `${named.path}: ${named.type}`, doc: named.doc });
+    });
+    const current = options.find((option) => option.classList.contains("current"));
+    if (session.options !== undefined) {
+      // A case's popover: one list, the named values first.
+      const list = this.#popover.querySelector(".options")!;
+      list.prepend(...options);
+      (session as { options: readonly HTMLElement[] }).options = [...options, ...session.options];
+      this.#popover.classList.remove("segmented");
+      this.#filterCases(session, current ?? session.active);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "options named-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Named values");
+    list.append(...options);
+    session.named = options;
+    if (session.field !== undefined) {
+      this.#popover.className = "popover named";
+      this.#popover.replaceChildren(list);
+      this.#popover.hidden = false;
+      this.#placeCard(session.span, this.#popover);
+    } else {
+      this.#popover.prepend(list);
+      this.#popover.classList.add("with-named");
+      this.#placeCard(session.span, this.#popover);
+    }
+    if (session.typed === true) {
+      this.#filterNamed(session, this.#draftOf(session) ?? "");
+    }
+  }
+
+  /** Shows the named values whose paths hold what the reader typed, once they have typed. */
+  #filterNamed(session: EditSession, typed: string): void {
+    const named = session.named;
+    if (named === undefined || session.typed !== true) {
+      return;
+    }
+    const query = typed.trim().toLowerCase();
+    for (const option of named) {
+      option.hidden = query !== "" && !option.dataset["reference"]!.toLowerCase().includes(query);
+    }
+    if (session.namedActive?.hidden === true) {
+      this.#setNamedActive(session, undefined);
+    }
+    const none = named.every((option) => option.hidden);
+    if (session.field !== undefined) {
+      this.#popover.hidden = none;
+    } else {
+      this.#popover.querySelector<HTMLElement>(".named-list")?.toggleAttribute("hidden", none);
+    }
+  }
+
+  /** Moves the active named value one up or down among those shown. */
+  #stepNamed(session: EditSession, direction: 1 | -1): void {
+    const shown = (session.named ?? []).filter((option) => !option.hidden);
+    if (shown.length === 0) {
+      return;
+    }
+    const at = session.namedActive === undefined ? -1 : shown.indexOf(session.namedActive);
+    const next = at < 0 ? (direction === 1 ? 0 : shown.length - 1) : at + direction;
+    this.#setNamedActive(session, next < 0 || next >= shown.length ? undefined : shown[next]);
+  }
+
+  #setNamedActive(session: EditSession, option: HTMLElement | undefined): void {
+    session.namedActive = option;
+    for (const candidate of session.named ?? []) {
+      candidate.classList.toggle("active", candidate === option);
+    }
+    const input = session.field ?? session.input;
+    if (option === undefined) {
+      input?.removeAttribute("aria-activedescendant");
+    } else {
+      input?.setAttribute("aria-activedescendant", option.id);
+    }
+  }
+
+  // ---- Line breaks --------------------------------------------------------------------------
+
+  /** Breaks the line where the caret is in `session`'s field, replacing what is selected. */
+  #insertLineBreak(session: EditSession): void {
+    const field = session.field!;
+    const before = field.textContent ?? "";
+    // The browser's own insertion keeps its undo; where it inserts nothing, the text is spliced.
+    let inserted = false;
+    try {
+      inserted = this.ownerDocument.execCommand?.("insertText", false, "\n") === true && field.textContent !== before;
+    } catch {
+      inserted = false;
+    }
+    if (!inserted) {
+      const caret = this.#caretOf(session) ?? { start: before.length, end: before.length };
+      field.textContent = `${before.slice(0, caret.start)}\n${before.slice(caret.end)}`;
+      this.#placeCaret(field, { start: caret.start + 1, end: caret.start + 1 });
+    }
+    session.typed = true;
+    this.#validate(session);
+  }
+
+  // ---- Properties an element does not write -------------------------------------------------
+
+  /**
+   * Draws, on the selected element, the quiet row that lists the properties it does not write, and
+   * under it, when open, a dimmed row to each. Drawn again only when the element or its state
+   * changed, or with `force`.
+   */
+  #drawMore(force = false): void {
+    const key = this.#selection;
+    const open = key !== undefined && this.#moreOpen === key;
+    const state = key === undefined ? undefined : `${key}\u0000${open}`;
+    if (!force && state === this.#moreFor && (state === undefined || this.#moreDrawn.some((drawn) => this.#body.contains(drawn)))) {
+      return;
+    }
+    const focused = this.shadowRoot?.activeElement;
+    const refocus = focused instanceof HTMLElement && this.#moreDrawn.some((drawn) => drawn.contains(focused)) ? focused.dataset["moreFocus"] : undefined;
+    for (const drawn of this.#moreDrawn) {
+      drawn.remove();
+    }
+    for (const stale of this.#moreKeys) {
+      this.#targets.delete(stale);
+      this.#rendered.delete(stale);
+    }
+    this.#moreDrawn = [];
+    this.#moreBlock = undefined;
+    this.#moreKeys = [];
+    this.#moreCards.clear();
+    this.#moreFor = state;
+    const index = this.#index;
+    const at = key === undefined ? undefined : index?.byKey.get(key);
+    const element = key === undefined ? undefined : this.#rendered.get(key);
+    if (!this.#editable || index === undefined || at === undefined || element === undefined || !element.matches(".sheet:not(.folded), .line-element, .tag-line")) {
+      return;
+    }
+    const unwritten = unwrittenProperties(index, at);
+    if (unwritten.length === 0) {
+      return;
+    }
+    const document = this.ownerDocument;
+    const rows: HTMLElement[] = [];
+    const toggle = document.createElement("span");
+    toggle.className = open ? "sheet-row more more-toggle open" : "sheet-row more more-toggle";
+    toggle.tabIndex = 0;
+    toggle.dataset["moreFocus"] = "toggle";
+    toggle.setAttribute("role", "button");
+    toggle.setAttribute("aria-expanded", String(open));
+    const label = document.createElement("span");
+    label.className = "more-label";
+    label.textContent = `+ ${unwritten.length} more`;
+    toggle.setAttribute("aria-label", `${unwritten.length} more ${unwritten.length === 1 ? "property" : "properties"}`);
+    toggle.append(label);
+    rows.push(toggle);
+    if (open) {
+      if (unwritten.length > MORE_FILTER_PAST) {
+        const holder = document.createElement("span");
+        holder.className = "sheet-row more more-filter-row";
+        const filter = document.createElement("input");
+        filter.className = "more-filter";
+        filter.placeholder = "Filter properties";
+        filter.spellcheck = false;
+        filter.value = this.#moreFilter;
+        filter.dataset["moreFocus"] = "filter";
+        filter.setAttribute("aria-label", "Filter properties");
+        filter.addEventListener("input", () => {
+          this.#moreFilter = filter.value;
+          this.#filterMore();
+        });
+        holder.append(filter);
+        rows.push(holder);
+      }
+      for (const entry of unwritten) {
+        rows.push(this.#dimmedRow(index, at, key!, entry));
+      }
+    }
+    for (const row of rows) {
+      row.dataset["moreOf"] = key;
+    }
+    if (element.matches(".sheet")) {
+      const written = [...element.children].filter((child) => child.matches(".sheet-row:not(.more), .sheet-head"));
+      written[written.length - 1]!.after(...rows);
+      this.#moreDrawn = rows;
+    } else {
+      // A line lists them under it, as a group would.
+      const block = document.createElement("span");
+      block.className = "more-block";
+      block.dataset["moreOf"] = key;
+      const inGroup = element.parentElement?.closest(".sheet") !== null;
+      const line = this.#text.split("\n")[index.tree.nodes[at]!.range.start.line] ?? "";
+      block.style.setProperty("--more-indent", String(inGroup ? 0 : line.length - line.trimStart().length));
+      block.append(...rows);
+      // After the line's end, so the block takes no blank line of its own.
+      const next = element.nextSibling;
+      if (next !== null && next.nodeType === 3 && (next.textContent ?? "").startsWith("\n")) {
+        (next as Text).splitText(1);
+        next.after(block);
+      } else {
+        element.after(block);
+      }
+      this.#moreDrawn = [block];
+      this.#moreBlock = block;
+    }
+    for (const value of this.#moreKeys) {
+      const span = this.#rendered.get(value);
+      const pending = this.#pending.get(value);
+      const reference = this.#pendingReferences.get(value);
+      if (span !== undefined && (pending !== undefined || reference !== undefined)) {
+        if (reference !== undefined) {
+          showReference(span, reference);
+        } else {
+          showValue(span, this.#targets.get(value)!, "", pending!);
+        }
+        this.#markAdded(this.#targets.get(value)!, span);
+      }
+    }
+    this.#filterMore();
+    if (refocus !== undefined) {
+      [...this.#moreDrawn.flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])]
+        .find((candidate) => candidate.dataset["moreFocus"] === refocus)
+        ?.focus({ preventScroll: true });
+    }
+    queueMicrotask(() => this.#paintHighlights());
+  }
+
+  /** A dimmed row for a property the element at `at`, with `key`, does not write. */
+  #dimmedRow(index: TreeIndex, at: number, key: string, entry: UnwrittenProperty): HTMLElement {
+    const document = this.ownerDocument;
+    const { property, editor, hints } = entry;
+    const attributeKey = `${key}.${property.name}`;
+    const valueKey = `${attributeKey}.value`;
+    const row = document.createElement("span");
+    row.className = "sheet-row more dimmed-row";
+    row.tabIndex = -1;
+    row.dataset["moreFocus"] = `row:${property.name}`;
+    row.dataset["name"] = property.name;
+    const name = document.createElement("span");
+    name.className = "sheet-name";
+    name.textContent = property.name;
+    name.dataset["hover"] = attributeKey;
+    this.#moreCards.set(attributeKey, propertyCardOf(property));
+    const cell = document.createElement("span");
+    cell.className = "sheet-value";
+    const value = document.createElement("span");
+    value.className = "more-value";
+    const start = defaultValue(property.default, editor);
+    value.append(...defaultShown(document, property.default, editor, entry.format));
+    cell.append(value);
+    if (editor !== undefined) {
+      const target: EditTarget = {
+        at,
+        key: valueKey,
+        kind: editor.kind,
+        value: start,
+        ...(editor.cases === undefined ? {} : { cases: editor.cases }),
+        signed: true,
+        ...(hints === undefined ? {} : { hints }),
+        property: { element: key, name: property.name },
+        adding: true
+      };
+      value.dataset["key"] = valueKey;
+      value.classList.add("editable-value", `edit-${editor.kind}`);
+      this.#targets.set(valueKey, target);
+      this.#rendered.set(valueKey, value);
+      this.#moreKeys.push(valueKey);
+      if (editor.kind === "number") {
+        name.classList.add("scrub");
+        name.dataset["scrubKey"] = valueKey;
+        if (hints?.unit !== undefined && property.default !== undefined) {
+          cell.append(this.#unitMark(hints.unit));
+        }
+      }
+    } else {
+      // No editor takes its type, as a record's: Enter or a double-click opens the element in Source.
+      row.dataset["opens"] = "true";
+    }
+    if (property.default !== undefined) {
+      const quiet = document.createElement("span");
+      quiet.className = "more-default";
+      quiet.textContent = "default";
+      cell.append(" ", quiet);
+    }
+    row.append(name, cell);
+    row.setAttribute("aria-label", `${property.name}, not written${property.default === undefined ? "" : `, default ${property.default}`}`);
+    return row;
+  }
+
+  /** Hides the dimmed rows whose names do not hold what the filter holds. */
+  #filterMore(): void {
+    const query = this.#moreFilter.trim().toLowerCase();
+    for (const drawn of this.#moreDrawn) {
+      const rows = drawn.matches(".dimmed-row, .added-row") ? [drawn] : [...drawn.querySelectorAll<HTMLElement>(".dimmed-row, .added-row")];
+      for (const row of rows) {
+        row.hidden = query !== "" && !row.dataset["name"]!.toLowerCase().includes(query);
+      }
+    }
+  }
+
+  /** Opens or closes the selected element's list of unwritten properties. */
+  #toggleMore(): void {
+    const key = this.#selection;
+    if (key === undefined) {
+      return;
+    }
+    this.#moreOpen = this.#moreOpen === key ? undefined : key;
+    this.#moreFilter = "";
+    this.#drawMore();
+    const focus = this.#moreDrawn
+      .flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])
+      .find((candidate) => candidate.dataset["moreFocus"] === (this.#moreOpen === undefined ? "toggle" : "filter"));
+    if (this.#moreOpen !== undefined && focus !== undefined) {
+      focus.focus({ preventScroll: true });
+    } else if (this.shadowRoot?.activeElement === null || this.shadowRoot?.activeElement === undefined) {
+      this.#body.focus({ preventScroll: true });
+    }
+  }
+
+  /** Closes the list of unwritten properties, and the reading takes the keys again. */
+  #closeMore(): void {
+    this.#moreOpen = undefined;
+    this.#moreFilter = "";
+    this.#drawMore();
+    this.#body.focus({ preventScroll: true });
+  }
+
+  /** The keys of the list of unwritten properties, where focus is in it. */
+  #onMoreKey(event: KeyboardEvent, target: HTMLElement): void {
+    const focusables = this.#moreDrawn
+      .flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])
+      .filter((candidate) => candidate.dataset["moreFocus"] !== undefined && !candidate.hidden && candidate.closest("[hidden]") === null);
+    const holder = target.closest<HTMLElement>("[data-more-focus]");
+    const at = holder === null ? -1 : focusables.indexOf(holder);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.#closeMore();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = at + (event.key === "ArrowDown" ? 1 : -1);
+      if (next < 0) {
+        this.#body.focus({ preventScroll: true });
+      } else {
+        focusables[Math.min(next, focusables.length - 1)]?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if (holder?.classList.contains("more-toggle") === true && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      this.#toggleMore();
+      return;
+    }
+    if (holder?.classList.contains("dimmed-row") !== true && holder?.classList.contains("added-row") !== true) {
+      return;
+    }
+    const value = holder.querySelector<HTMLElement>(".editable-value");
+    if (event.key === "Enter" || event.key === "F2" || (event.key === " " && value !== null && this.#targets.get(keyOf(value)!)?.kind === "boolean")) {
+      event.preventDefault();
+      if (value !== null) {
+        this.#openEditor(keyOf(value)!);
+      } else if (event.key === "Enter") {
+        this.#openMoreInSource(holder);
+      }
+    }
+  }
+
+  /** Fires `nx-open` for the element a dimmed row with no editor is on, to set it in Source. */
+  #openMoreInSource(row: HTMLElement): void {
+    const at = this.#index?.byKey.get(row.dataset["moreOf"] ?? "");
+    if (at !== undefined) {
+      this.#fireOpen(at);
+    }
+  }
+
+  // ---- A row's menu -------------------------------------------------------------------------
+
+  /** Opens the menu of the written row with `key`, against `anchor`, selecting the row. */
+  #openMenu(key: string, anchor: HTMLElement): void {
+    const index = this.#index;
+    const at = index?.byKey.get(key);
+    if (!this.#editable || index === undefined || at === undefined) {
+      return;
+    }
+    if (this.#session !== undefined) {
+      this.#cancel(this.#session, false);
+    }
+    this.#closeCard();
+    if (this.#selection !== key) {
+      this.#select(key, true, false);
+    }
+    const document = this.ownerDocument;
+    const items: HTMLElement[] = [];
+    const item = (action: string, words: string): void => {
+      const button = document.createElement("div");
+      button.className = "menu-item";
+      button.tabIndex = -1;
+      button.dataset["action"] = action;
+      button.setAttribute("role", "menuitem");
+      button.textContent = words;
+      items.push(button);
+    };
+    const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
+    if (removal === "reset") {
+      item("remove", "Reset to default");
+    } else if (removal === "remove") {
+      item("remove", "Remove");
+    }
+    item("source", "Show in Source");
+    this.#menu.replaceChildren(...items);
+    this.#menu.setAttribute("aria-label", `Actions for ${index.tree.nodes[at]!.name ?? "the row"}`);
+    this.#menu.hidden = false;
+    this.#menuKey = key;
+    this.#placeCard(anchor, this.#menu);
+    items[0]!.focus({ preventScroll: true });
+  }
+
+  /** Closes the row's menu; with `refocus`, the reading takes the keys again. */
+  #closeMenu(refocus: boolean): void {
+    if (this.#menuKey === undefined) {
+      return;
+    }
+    this.#menuKey = undefined;
+    this.#menu.hidden = true;
+    this.#menu.replaceChildren();
+    if (refocus) {
+      this.#body.focus({ preventScroll: true });
+    }
+  }
+
+  #onMenuKey(event: KeyboardEvent): void {
+    event.stopPropagation();
+    const items = [...this.#menu.querySelectorAll<HTMLElement>(".menu-item")];
+    const at = items.indexOf(event.target as HTMLElement);
+    switch (event.key) {
+      case "Escape":
+      case "Tab":
+        event.preventDefault();
+        this.#closeMenu(true);
+        return;
+      case "ArrowDown":
+      case "ArrowUp": {
+        event.preventDefault();
+        const next = (at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus({ preventScroll: true });
+        return;
+      }
+      case "Home":
+      case "End":
+        event.preventDefault();
+        items[event.key === "Home" ? 0 : items.length - 1]?.focus({ preventScroll: true });
+        return;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        if (at >= 0) {
+          this.#chooseMenuItem(items[at]!);
+        }
+    }
+  }
+
+  /** Does what the menu's `item` says to its row, and closes the menu. */
+  #chooseMenuItem(item: HTMLElement): void {
+    const key = this.#menuKey;
+    this.#closeMenu(true);
+    if (key === undefined) {
+      return;
+    }
+    if (this.#selection !== key) {
+      this.#select(key, true, false);
+    }
+    if (item.dataset["action"] === "remove") {
+      this.#removeSelected();
+    } else {
+      this.#openSelected(true, true);
+    }
   }
 
   // ---- Dragging a number's name -----------------------------------------------------------
@@ -1868,7 +2861,7 @@ export class NxViewerElement extends ElementBase {
     }
     event.preventDefault();
     const steps = Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
-    const value = stepNumber(scrub.from, steps, scrub.target.signed !== false) ?? scrub.from;
+    const value = stepNumber(scrub.from, steps, scrub.target.signed !== false, scrub.target.hints) ?? scrub.from;
     scrub.value = value;
     const span = this.#rendered.get(scrub.target.key);
     if (span !== undefined) {
@@ -1951,6 +2944,39 @@ export class NxViewerElement extends ElementBase {
     if (this.#session?.field?.contains(target) === true) {
       return;
     }
+    // A row's menu opens from the mark at its end.
+    const mark = target.closest?.(".row-menu") as HTMLElement | null | undefined;
+    if (mark !== null && mark !== undefined && this.#body.contains(mark)) {
+      const row = mark.closest<HTMLElement>(".sheet-row[data-key]")!;
+      if (this.#menuKey === row.dataset["key"]) {
+        this.#closeMenu(true);
+      } else {
+        this.#openMenu(row.dataset["key"]!, mark);
+      }
+      return;
+    }
+    // The quiet row on a selected element opens and closes its list of unwritten properties, and the
+    // rest of that list, but its values, is no choice of node.
+    const more = target.closest?.(".more") as HTMLElement | null | undefined;
+    if (more !== null && more !== undefined && this.#body.contains(more)) {
+      if (more.classList.contains("more-toggle")) {
+        this.#toggleMore();
+        return;
+      }
+      if (target.closest?.(".editable-value") == null) {
+        // A click anywhere on a dimmed row edits its value, which may be empty, as an optional one is.
+        const row = target.closest?.(".dimmed-row, .added-row") as HTMLElement | null | undefined;
+        const value = row?.querySelector<HTMLElement>(".editable-value");
+        if (value !== null && value !== undefined && target.closest?.(".scrub") == null) {
+          if (this.#session?.target.key !== keyOf(value)) {
+            this.#openEditor(keyOf(value)!);
+          }
+        } else if (!target.matches?.("input")) {
+          (more.closest<HTMLElement>("[data-more-focus]") ?? more).focus({ preventScroll: true });
+        }
+        return;
+      }
+    }
     // A drag that selected text is a text selection, not a choice of node.
     // Chromium reports a selection inside a shadow root only through the root itself.
     const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
@@ -1995,6 +3021,21 @@ export class NxViewerElement extends ElementBase {
     if (!this.#body.contains(target)) {
       return;
     }
+    const more = target.closest?.(".more, .more-block") as HTMLElement | null | undefined;
+    if (more !== null && more !== undefined) {
+      this.#onMoreKey(event, target as HTMLElement);
+      return;
+    }
+    // The context menu key, or Shift+F10, opens the selected row's menu.
+    if (this.#editable && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))) {
+      const row = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+      const mark = row?.matches(".sheet-row") === true ? row.querySelector<HTMLElement>(":scope > .row-menu") : null;
+      if (mark !== null && mark !== undefined) {
+        event.preventDefault();
+        this.#openMenu(this.#selection!, mark);
+      }
+      return;
+    }
     // The units read as a tree: up and down walk its rows, left goes to the unit that holds this one,
     // and right into the first one it holds.
     const moves = { ArrowDown: "next", ArrowUp: "previous", ArrowLeft: "out", ArrowRight: "in" } as const;
@@ -2006,6 +3047,9 @@ export class NxViewerElement extends ElementBase {
     }
     if (event.key === "Escape") {
       this.#closeCard();
+      if (this.#moreOpen !== undefined) {
+        this.#closeMore();
+      }
       return;
     }
     // Cmd+Backspace leaves out the selected row's property, as Delete does: a Mac laptop's delete
@@ -2022,6 +3066,10 @@ export class NxViewerElement extends ElementBase {
       if (event.key === "Enter" || event.key === "F2") {
         if (this.#openSelected(event.key === "Enter")) {
           event.preventDefault();
+        } else if (event.key === "Enter" && this.#moreDrawn.length > 0) {
+          // An element with no value of its own to open opens its list of unwritten properties.
+          event.preventDefault();
+          this.#toggleMore();
         }
         return;
       }
@@ -2097,22 +3145,12 @@ export class NxViewerElement extends ElementBase {
   #openCard(key: string, anchor: HTMLElement, byKeyboard: boolean): string | undefined {
     const index = this.#index;
     const at = index?.byKey.get(key);
-    const card = index === undefined || at === undefined ? undefined : cardOf(index, at);
+    const card = index === undefined || at === undefined ? this.#moreCards.get(key) : cardOf(index, at);
     if (card === undefined || !this.#body.contains(anchor)) {
       return undefined;
     }
     clearTimeout(this.#cardCloseTimer);
-    const document = this.ownerDocument;
-    const signature = document.createElement("div");
-    signature.className = "card-signature";
-    signature.textContent = card.signature;
-    this.#card.replaceChildren(signature);
-    if (card.doc !== undefined) {
-      const doc = document.createElement("div");
-      doc.className = "card-doc";
-      doc.append(this.#renderDoc(card.doc));
-      this.#card.append(doc);
-    }
+    this.#fillCard(card);
     this.#cardKey = key;
     this.#cardByKeyboard = byKeyboard;
     this.#card.hidden = false;
@@ -2126,6 +3164,56 @@ export class NxViewerElement extends ElementBase {
     }
     const doc = (this.#card.querySelector(".card-doc")?.textContent ?? "").trim();
     return `${card.signature}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
+  }
+
+  /** Puts `card`'s signature and doc in the hover card. */
+  #fillCard(card: Card): void {
+    const document = this.ownerDocument;
+    const signature = document.createElement("div");
+    signature.className = "card-signature";
+    signature.textContent = card.signature;
+    this.#card.replaceChildren(signature);
+    this.#card.classList.remove("over-popover");
+    if (card.doc !== undefined) {
+      const doc = document.createElement("div");
+      doc.className = "card-doc";
+      doc.append(this.#renderDoc(card.doc));
+      this.#card.append(doc);
+    }
+  }
+
+  /**
+   * Opens the card of the named value `option` lists, once the pointer rests on it: beside the
+   * popover, over the reading, so it hides none of the list.
+   */
+  #pointNamed(option: HTMLElement | undefined): void {
+    clearTimeout(this.#cardOpenTimer);
+    const card = option === undefined ? undefined : this.#namedCards.get(option);
+    if (card === undefined) {
+      if (this.#card.classList.contains("over-popover")) {
+        this.#hideCard();
+      }
+      return;
+    }
+    this.#cardOpenTimer = setTimeout(() => {
+      if (this.#popover.hidden || !this.#popover.contains(option!)) {
+        return;
+      }
+      this.#fillCard(card);
+      this.#card.classList.add("over-popover");
+      this.#card.hidden = false;
+      const frame = this.#frame.getBoundingClientRect();
+      const box = this.getBoundingClientRect();
+      const list = this.#popover.getBoundingClientRect();
+      const row = option!.getBoundingClientRect();
+      this.#card.style.left = "0px";
+      this.#card.style.top = "0px";
+      const size = this.#card.getBoundingClientRect();
+      const right = list.right + CARD_GAP;
+      const x = right + size.width <= box.right ? right : Math.max(box.left, list.left - CARD_GAP - size.width);
+      this.#card.style.left = `${x - frame.left}px`;
+      this.#card.style.top = `${row.top - frame.top}px`;
+    }, CARD_DELAY);
   }
 
   /** A doc's Markdown as the host renders it, or as the built-in renderer does. */
@@ -2193,6 +3281,7 @@ export class NxViewerElement extends ElementBase {
     if (this.#card !== undefined && !this.#card.hidden) {
       this.#card.hidden = true;
       this.#card.replaceChildren();
+      this.#card.classList.remove("over-popover");
     }
   }
 }

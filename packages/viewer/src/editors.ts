@@ -2,9 +2,9 @@
  * The pieces of the reading's editors: where in a value's rendering its text sits, the value shown
  * once an edit is made and before the host answers, a number's steps, and the popovers' content.
  */
-import type { SourceCase } from "@nx-lang/language-protocol";
+import type { NamedValue, SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
 
-import { isNumericLiteral, type EditTarget } from "./edit.js";
+import { isNumericLiteral, type EditTarget, type TypeEditor } from "./edit.js";
 import { decodeString } from "./source.js";
 
 /** A boolean's mark, as the reading draws it. */
@@ -93,18 +93,209 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
 }
 
 /**
- * `text`, a numeric literal, moved by `steps`: an integer stays one, and a real keeps as many
- * decimals as it has; unless `signed`, it stops at zero. Nothing when `text` is not a decimal number.
+ * `text`, a numeric literal, moved by `steps` of `hints.step`, or of one: an integer stays one, and a
+ * real keeps as many decimals as it or the step has; it stays within `hints.min` and `hints.max`,
+ * and unless `signed`, it stops at zero. Nothing when `text` is not a decimal number.
  */
-export function stepNumber(text: string, steps: number, signed = true): string | undefined {
+export function stepNumber(text: string, steps: number, signed = true, hints?: SourceEditorHints): string | undefined {
   const trimmed = text.trim();
   if (!isNumericLiteral(trimmed) || /[xXeE]/.test(trimmed)) {
     return undefined;
   }
-  const decimals = trimmed.includes(".") ? trimmed.length - trimmed.indexOf(".") - 1 : 0;
+  const step = hints?.step !== undefined && hints.step > 0 ? hints.step : 1;
+  const decimals = Math.max(decimalsOf(trimmed), decimalsOf(String(step)));
+  let next = Number(trimmed) + steps * step;
   // Where a number cannot be negative, it stops at zero.
-  const next = signed ? Number(trimmed) + steps : Math.max(0, Number(trimmed) + steps);
+  if (!signed) {
+    next = Math.max(0, next);
+  }
+  next = clamp(next, hints);
   return decimals === 0 ? String(Math.round(next)) : next.toFixed(decimals);
+}
+
+/** How many decimals a number is written with. */
+function decimalsOf(text: string): number {
+  return text.includes(".") ? text.length - text.indexOf(".") - 1 : 0;
+}
+
+/** `value` kept within the range `hints` gives, if any. */
+function clamp(value: number, hints: SourceEditorHints | undefined): number {
+  const low = hints?.min ?? -Infinity;
+  const high = hints?.max ?? Infinity;
+  return low > high ? value : Math.min(high, Math.max(low, value));
+}
+
+/**
+ * What a number's field holds, as the number to write: trimmed, and without the unit its hints
+ * give, which a reader may type after it, as `16px`.
+ */
+export function numberEntry(text: string, hints: SourceEditorHints | undefined): string {
+  const trimmed = text.trim();
+  const unit = hints?.unit?.trim();
+  return unit !== undefined && unit !== "" && trimmed.endsWith(unit) ? trimmed.slice(0, -unit.length).trim() : trimmed;
+}
+
+/** Why the number `entry` is outside the range its hints give, as `At most 64`, or nothing. */
+export function rangeProblem(entry: string, hints: SourceEditorHints | undefined): string | undefined {
+  const value = Number(entry);
+  if (hints === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const unit = hints.unit === undefined ? "" : ` ${hints.unit}`;
+  if (hints.min !== undefined && value < hints.min) {
+    return `At least ${hints.min}${unit}`;
+  }
+  if (hints.max !== undefined && value > hints.max) {
+    return `At most ${hints.max}${unit}`;
+  }
+  return undefined;
+}
+
+/** Whether a number edits with a slider: its hints ask for one, or give a range and ask for nothing. */
+export function isSlider(target: EditTarget): boolean {
+  const hints = target.hints;
+  if (target.kind !== "number" || hints === undefined) {
+    return false;
+  }
+  return hints.kind === "slider" || (hints.kind === undefined && hints.min !== undefined && hints.max !== undefined);
+}
+
+/**
+ * The number a slider at `position` stands for, written as the number it started from is: snapped
+ * to the nearest of its hints' stops unless `free`, and to its step.
+ */
+export function slidValue(position: number, hints: SourceEditorHints, from: string, free: boolean): string {
+  let value = position;
+  const stops = hints.stops ?? [];
+  if (!free && stops.length > 0) {
+    value = stops.reduce((best, stop) => (Math.abs(stop - position) < Math.abs(best - position) ? stop : best), stops[0]!);
+  } else if (hints.step !== undefined && hints.step > 0) {
+    const base = hints.min ?? 0;
+    value = base + Math.round((position - base) / hints.step) * hints.step;
+  }
+  value = clamp(value, hints);
+  const decimals = Math.max(decimalsOf(from.trim()), hints.step === undefined ? 0 : decimalsOf(String(hints.step)));
+  // Between stops, with no step, a real keeps two decimals at most and an integer stays one.
+  if (free && stops.length > 0 && hints.step === undefined && decimals === 0) {
+    return String(Math.round(value));
+  }
+  return decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
+}
+
+/** Shows the named value `path` in place of what `span` draws, muted as waiting for the host. */
+export function showReference(span: HTMLElement, path: string): void {
+  span.classList.add("pending");
+  span.replaceChildren(path);
+}
+
+/**
+ * The options listing named values: each one's path, its color as a swatch when its value is a
+ * color literal, its type and its doc's first paragraph, whose whole doc a card shows; `current`,
+ * the value's own reference, marked.
+ */
+export function namedOptions(document: Document, values: readonly NamedValue[], current: string | undefined): HTMLElement[] {
+  return values.map((named) => {
+    const row = document.createElement("div");
+    row.className = named.path === current ? "option named current" : "option named";
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(named.path === current));
+    row.dataset["reference"] = named.path;
+    row.dataset["name"] = named.path;
+    const name = document.createElement("span");
+    name.className = "option-name";
+    const color = colorOf(document, named.value);
+    if (color !== undefined) {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.backgroundColor = color;
+      swatch.setAttribute("aria-hidden", "true");
+      name.append(swatch);
+    }
+    name.append(named.path);
+    const type = document.createElement("span");
+    type.className = "option-type";
+    type.textContent = named.type;
+    name.append(" ", type);
+    row.append(name);
+    const words = firstParagraph(named.doc);
+    if (words !== "") {
+      const doc = document.createElement("span");
+      doc.className = "option-doc";
+      doc.textContent = words;
+      row.append(doc);
+    }
+    return row;
+  });
+}
+
+/** The color a literal names, as `"#c8a27a"` does, or nothing when it names none. */
+function colorOf(document: Document, literal: string | undefined): string | undefined {
+  if (literal === undefined || !literal.startsWith('"') || !literal.endsWith('"') || literal.length < 2) {
+    return undefined;
+  }
+  const probe = document.createElement("span");
+  probe.style.backgroundColor = literal.slice(1, -1).trim();
+  return probe.style.backgroundColor === "" ? undefined : probe.style.backgroundColor;
+}
+
+/**
+ * What an unwritten property's editor opens on: its default, when it is a literal its editor takes,
+ * as a string's content or a case's name; otherwise nothing.
+ */
+export function defaultValue(written: string | undefined, editor: TypeEditor | undefined): string {
+  const text = written?.trim();
+  if (text === undefined || editor === undefined) {
+    return "";
+  }
+  switch (editor.kind) {
+    case "number":
+      return isNumericLiteral(text) ? text : "";
+    case "boolean":
+      return text === "true" || text === "false" ? text : "";
+    case "case": {
+      const name = text.slice(text.lastIndexOf(".") + 1);
+      return editor.cases?.some((candidate) => candidate.name === name) === true ? name : "";
+    }
+    default:
+      return text.startsWith('"') && text.endsWith('"') && text.length >= 2 ? (decodeString(text) ?? "") : "";
+  }
+}
+
+/**
+ * An unwritten property's default as the reading reads values: a string without its quotes, with
+ * its swatch when it is a color, a boolean as its mark, and anything else as written. Nothing for a
+ * property with no default.
+ */
+export function defaultShown(
+  document: Document,
+  written: string | undefined,
+  editor: TypeEditor | undefined,
+  format: SourceValueFormat | undefined
+): Node[] {
+  const text = written?.trim();
+  if (text === undefined) {
+    return [];
+  }
+  if (text === "true" || text === "false") {
+    const mark = document.createElement("span");
+    mark.className = `sheet-boolean ${text}`;
+    mark.textContent = BOOLEAN_MARKS[text];
+    mark.title = text;
+    mark.setAttribute("aria-label", text);
+    return [mark];
+  }
+  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
+    const words = decodeString(text) ?? text.slice(1, -1);
+    if (editor?.kind === "color" || format === "color") {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.backgroundColor = words.trim();
+      swatch.setAttribute("aria-hidden", "true");
+      return swatch.style.backgroundColor === "" ? [document.createTextNode(words)] : [swatch, document.createTextNode(words)];
+    }
+    return [document.createTextNode(words)];
+  }
+  return [document.createTextNode(text)];
 }
 
 /** A doc comment's first paragraph as plain text, for one line under a case's name. */

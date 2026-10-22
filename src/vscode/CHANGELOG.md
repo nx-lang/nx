@@ -19,7 +19,26 @@ All notable changes to this project will be documented in this file.
   source; a value the reading cannot edit, such as an expression, fires `nx-open`.
 - The playground's Visual edits this way, through the editor, so undo and redo work in both views,
   and the NX title bar has Undo and Redo buttons.
-- `@nx-lang/sdk-wasm`'s module ABI version is now 9; the loader refuses a module of another version.
+- `sourceEdit` also adds a property an element does not write (`addProperty`, aimed at the element,
+  written in the element's layout), and sets a value to a named value (`{ kind: "reference", path }`,
+  braced at an attribute).
+- New language query, `namedValues`: the parameterless `let`s of a document and its imports, and one
+  level of their records' members, that a property's type accepts, each with its reference path,
+  type, doc and literal value. The language service, the Node and wasm SDKs and the protocol packages
+  answer it.
+- `@nx/visualizer` has editor hints: `editor` (`field`, `slider`, `dropdown`, `segmented`), `min`,
+  `max`, `step`, `stops` and `unit` on `PropertyVisualizer` and `ValueVisualizer`, and `multiline` and
+  `placeholder` on `PropertyVisualizer`; `ValueVisualizer.format` is optional. A hint that does not fit
+  its property's type warns `editor-hint-mismatch`, and a `min` above its `max` warns
+  `editor-hint-range`. With `visualizers`, the source tree carries each property's resolved hints, and
+  lists the types of the properties an element does not write.
+- `<nx-viewer>`: a selected element lists the properties it does not write under `+ N more`, and sets
+  one where it reads; a written row has a menu (Reset to default or Remove, and Show in Source);
+  numbers edit with sliders, ranges and units, unions as segmented buttons and strings over several
+  lines as their hints say; Shift+Enter breaks a string's line; and with the new `namedValues`
+  property, editors list the named values a property can take and write a reference to the one
+  chosen. The playground passes its worker's `namedValues`.
+- `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
 
 ## 0.8.0
 

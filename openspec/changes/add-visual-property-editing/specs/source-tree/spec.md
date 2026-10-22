@@ -21,3 +21,16 @@ value as one with a format does. The values SHALL round-trip through JSON withou
 #### Scenario: A mismatched hint is left out
 - **WHEN** `Card.title` is a `string` hinted `editor=slider placeholder="Title"`
 - **THEN** the entry for `title` SHALL carry an `editor` value with the placeholder `Title` and no kind
+
+### Requirement: The types of unwritten properties are listed
+When a `sourceTree` request asks for `visualizers`, the declaration table SHALL also list the
+declaration that types each property of every record, component or element function the document's
+nodes refer to, written or not, and the declaration each listed alias names, through its chain, so a
+reader can edit a property an element does not write with its type's editor. A declaration listed only
+this way SHALL NOT bring the types of its own properties.
+
+#### Scenario: A union no element writes
+- **WHEN** a client asks with `visualizers` for the source tree of a document that constructs
+  `<Card title="Hi" />`, where `Card.size` is typed `Size`, a union `small | medium | large` that no
+  node of the document refers to
+- **THEN** the declaration table SHALL list `Size` with its three cases

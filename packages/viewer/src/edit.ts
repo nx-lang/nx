@@ -5,7 +5,14 @@
  * or a parameterless `let`'s value), or a run of plain text written on one line, and an editor fits
  * its type. The service checks again, so this decides only what the reading offers.
  */
-import type { SourceCase, SourceEdit, SourceValueFormat } from "@nx-lang/language-protocol";
+import type {
+  SourceCase,
+  SourceEdit,
+  SourceEditorHints,
+  SourceEditValue,
+  SourceProperty,
+  SourceValueFormat
+} from "@nx-lang/language-protocol";
 
 import { decodeString, formattedNodes } from "./source.js";
 import type { TreeIndex } from "./tree.js";
@@ -34,6 +41,20 @@ export interface EditTarget {
    * since in a sequence or inside braces `-` reads as an operator.
    */
   readonly signed?: boolean;
+  /** How its property's visualizers say it edits: a slider, a range, a unit, several lines. */
+  readonly hints?: SourceEditorHints;
+  /**
+   * The element and the property the value is set on, for a whole value of an attribute or of a
+   * property the element does not write: what the host's named values are asked for.
+   */
+  readonly property?: { readonly element: string; readonly name: string };
+  /**
+   * Set for a property the element does not write, which an edit adds: its value is the
+   * property's default, or nothing, and its node is the element's.
+   */
+  readonly adding?: boolean;
+  /** The reference path the value is written as, as `theme.accent`, when it is a named value. */
+  readonly reference?: string;
 }
 
 /** The types a number field edits, and their aliases' ends. */
@@ -83,19 +104,39 @@ export function isHexColor(text: string): boolean {
 
 /** The edit that sets `target` to `value`, as its editor holds it. */
 export function editOf(target: EditTarget, value: string): SourceEdit {
-  switch (target.kind) {
-    case "text":
-    case "color":
-      return { kind: "setValue", value: { kind: "string", value } };
-    case "number":
-      return { kind: "setValue", value: { kind: "number", text: value } };
-    case "boolean":
-      return { kind: "setValue", value: { kind: "boolean", value: value === "true" } };
-    case "case":
-      return { kind: "setValue", value: { kind: "case", name: value } };
-    case "run":
-      return { kind: "setText", text: value };
+  if (target.kind === "run") {
+    return { kind: "setText", text: value };
   }
+  return valueEdit(target, valueOf(target, value));
+}
+
+/** The edit that sets `target` to the named value at `path`, written as a reference to it. */
+export function referenceEditOf(target: EditTarget, path: string): SourceEdit {
+  return valueEdit(target, { kind: "reference", path });
+}
+
+function valueEdit(target: EditTarget, value: SourceEditValue): SourceEdit {
+  return target.adding === true && target.property !== undefined
+    ? { kind: "addProperty", name: target.property.name, value }
+    : { kind: "setValue", value };
+}
+
+function valueOf(target: EditTarget, value: string): SourceEditValue {
+  switch (target.kind) {
+    case "number":
+      return { kind: "number", text: value };
+    case "boolean":
+      return { kind: "boolean", value: value === "true" };
+    case "case":
+      return { kind: "case", name: value };
+    default:
+      return { kind: "string", value };
+  }
+}
+
+/** Whether `text` is a reference to a named value as an edit writes one: names joined by dots. */
+export function isReferencePath(text: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(text);
 }
 
 /** Every editable value of the tree, by key. */
@@ -117,18 +158,29 @@ export function editTargets(index: TreeIndex): Map<string, EditTarget> {
  * or is optional.
  */
 export function isRemovable(index: TreeIndex, at: number): boolean {
+  return removalOf(index, at) !== undefined;
+}
+
+/**
+ * How the attribute at `at` is left out: `reset` to the default its property has, `remove` for an
+ * optional property, or nothing for one that may not be left out.
+ */
+export function removalOf(index: TreeIndex, at: number): "reset" | "remove" | undefined {
   const { tree } = index;
   const attribute = tree.nodes[at];
   if (attribute?.role !== "attribute" || attribute.flags?.includes("content") === true || attribute.parent === undefined) {
-    return false;
+    return undefined;
   }
   const element = tree.nodes[attribute.parent]!;
   const declaration = element.declaration === undefined ? undefined : tree.declarations[element.declaration];
   if (element.role !== "element" || declaration === undefined || declaration.kind === "union") {
-    return false;
+    return undefined;
   }
   const property = declaration.properties?.find((candidate) => candidate.name === attribute.name);
-  return property !== undefined && (property.default !== undefined || property.flags?.includes("optional") === true);
+  if (property?.default !== undefined) {
+    return "reset";
+  }
+  return property?.flags?.includes("optional") === true ? "remove" : undefined;
 }
 
 function targetOf(
@@ -144,28 +196,47 @@ function targetOf(
     const value = (node.value ?? "").trimEnd();
     return isPlainRun(index, at) && value !== "" ? { at, key, kind: "run", value } : undefined;
   }
-  if ((node.role !== "literal" && node.role !== "case") || !isWholeValue(index, at)) {
+  if (!isWholeValue(index, at)) {
     return undefined;
   }
-  const declared = resolveType(index, declaredType(index, at));
+  const spelled = declaredType(index, at);
+  const declared = resolveType(index, spelled);
+  const hints = hintsOf(index, at, spelled);
+  const property = propertyOf(index, at);
+  const extra = { ...(hints === undefined ? {} : { hints }), ...(property === undefined ? {} : { property }) };
+  if (node.role === "reference" || node.role === "member") {
+    // A named value, as `{accent}` or `theme.accent`, edits with its type's editor.
+    const path = referencePath(index, at);
+    const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
+    // A literal written over a braced reference loses the braces, so a number may take a sign there.
+    const signed = owner?.role === "attribute" || owner?.role === "declaration";
+    const kind = path === undefined ? undefined : editorOfType(index, spelled, formats.get(at) ?? declared.format, signed);
+    if (path === undefined || kind === undefined) {
+      return undefined;
+    }
+    return { at, key, ...kind, value: path, reference: path, ...extra };
+  }
+  if (node.role !== "literal" && node.role !== "case") {
+    return undefined;
+  }
   if (node.role === "case") {
     const union = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
     const cases = union?.kind === "union" ? (union.cases ?? []).filter((candidate) => (candidate.properties ?? []).length === 0) : [];
-    return cases.length > 0 && node.name !== undefined ? { at, key, kind: "case", value: node.name, cases } : undefined;
+    return cases.length > 0 && node.name !== undefined ? { at, key, kind: "case", value: node.name, cases, ...extra } : undefined;
   }
   const written = node.value ?? "";
   if (written.startsWith('"') && written.endsWith('"') && written.length >= 2) {
     const format = formats.get(at) ?? declared.format;
     const value = decodeString(written);
-    return value === undefined ? undefined : { at, key, kind: format === "color" ? "color" : "text", value };
+    return value === undefined ? undefined : { at, key, kind: format === "color" ? "color" : "text", value, ...extra };
   }
   if (written === "true" || written === "false") {
-    return { at, key, kind: "boolean", value: written };
+    return { at, key, kind: "boolean", value: written, ...extra };
   }
   if (isNumericLiteral(written) && (declared.base === undefined || NUMBER_TYPES.has(declared.base))) {
     const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
     const signed = (owner?.role === "attribute" || owner?.role === "declaration") && node.flags?.includes("braced") !== true;
-    return { at, key, kind: "number", value: written, signed };
+    return { at, key, kind: "number", value: written, signed, ...extra };
   }
   // A literal of any other kind, or a number where something else is declared, reads as it is.
   return undefined;
@@ -246,14 +317,17 @@ function declaredType(index: TreeIndex, at: number): string | undefined {
 
 /**
  * A spelled type followed through the aliases the tree declares: the type it ends at, without its
- * `?`, `+` or `*`, and the format the first alias with a visualizer gives its values.
+ * `?`, `+` or `*`; the format and the editor hints the first alias with a visualizer gives its
+ * values; and whether it is a list anywhere along the way.
  */
 function resolveType(
   index: TreeIndex,
   spelled: string | undefined
-): { base: string | undefined; format: SourceValueFormat | undefined } {
+): { base: string | undefined; format: SourceValueFormat | undefined; editor: SourceEditorHints | undefined; list: boolean } {
   let name = spelled?.replace(/[?+*]+$/, "").trim();
+  let list = spelled !== undefined && /[+*]/.test(spelled.trim().slice(-2));
   let format: SourceValueFormat | undefined;
+  let editor: SourceEditorHints | undefined;
   for (let depth = 0; name !== undefined && name !== "" && depth < 8; depth++) {
     const current: string = name;
     const alias = index.tree.declarations.find((entry) => entry.kind === "alias" && entry.name === current);
@@ -261,7 +335,141 @@ function resolveType(
       break;
     }
     format ??= alias.visualizer?.format;
+    editor ??= alias.visualizer?.editor;
+    list ||= /[+*]/.test(alias.type.trim().slice(-2));
     name = alias.type.replace(/[?+*]+$/, "").trim();
   }
-  return { base: name === "" ? undefined : name, format };
+  return { base: name === "" ? undefined : name, format, editor, list };
+}
+
+/** The editor a value of the type `spelled` opens, and what it needs: nothing for a type no editor takes. */
+export interface TypeEditor {
+  readonly kind: Exclude<EditorKind, "run">;
+  readonly cases?: readonly SourceCase[];
+  readonly signed?: boolean;
+}
+
+/** The types a value of which reads as a boolean. */
+const BOOLEAN_TYPES = new Set(["boolean", "bool"]);
+
+/**
+ * The editor a value of the type `spelled` opens, formatted as `format` says: a number field, a
+ * toggle, a text field or a color's, or a union's cases where it has cases with no properties.
+ * Nothing for a list, a record, an element, a function or a type the tree does not know.
+ */
+export function editorOfType(
+  index: TreeIndex,
+  spelled: string | undefined,
+  format: SourceValueFormat | undefined,
+  signed = true
+): TypeEditor | undefined {
+  const declared = resolveType(index, spelled);
+  const base = declared.base;
+  if (base === undefined || declared.list) {
+    return undefined;
+  }
+  if (NUMBER_TYPES.has(base)) {
+    return { kind: "number", signed };
+  }
+  if (BOOLEAN_TYPES.has(base)) {
+    return { kind: "boolean" };
+  }
+  if (base === "string") {
+    return { kind: (format ?? declared.format) === "color" ? "color" : "text" };
+  }
+  const union = index.tree.declarations.find((entry) => entry.kind === "union" && entry.name === base);
+  const cases = (union?.cases ?? []).filter((candidate) => (candidate.properties ?? []).length === 0);
+  return cases.length > 0 ? { kind: "case", cases } : undefined;
+}
+
+/**
+ * The editor hints of the whole value at `at`, whose place declares `spelled`: its property's, as
+ * its element's visualizer resolves them, or else those of the alias its type names.
+ */
+function hintsOf(index: TreeIndex, at: number, spelled: string | undefined): SourceEditorHints | undefined {
+  const { tree } = index;
+  let place = tree.nodes[at]!.parent;
+  while (place !== undefined && tree.nodes[place]!.role === "sequence") {
+    place = tree.nodes[place]!.parent;
+  }
+  const attribute = place === undefined ? undefined : tree.nodes[place];
+  if (attribute?.role === "attribute" && attribute.parent !== undefined) {
+    const element = tree.nodes[attribute.parent]!;
+    const declaration = element.declaration === undefined ? undefined : tree.declarations[element.declaration];
+    const own = declaration?.visualizer?.properties?.find((candidate) => candidate.name === attribute.name)?.editor;
+    if (own !== undefined) {
+      return own;
+    }
+  }
+  return resolveType(index, spelled).editor;
+}
+
+/** The element and the property whose value the node at `at` is: an attribute's whole value, not an item. */
+function propertyOf(index: TreeIndex, at: number): EditTarget["property"] {
+  const { tree } = index;
+  const attribute = tree.nodes[at]!.parent === undefined ? undefined : tree.nodes[tree.nodes[at]!.parent!];
+  if (attribute?.role !== "attribute" || attribute.parent === undefined || attribute.name === undefined) {
+    return undefined;
+  }
+  if (attribute.flags?.includes("content") === true) {
+    return undefined;
+  }
+  return { element: tree.nodes[attribute.parent]!.key, name: attribute.name };
+}
+
+/** The reference path the node at `at` is written as, its braces left out, or nothing when it is not one. */
+function referencePath(index: TreeIndex, at: number): string | undefined {
+  const node = index.tree.nodes[at]!;
+  const written = new TextDecoder()
+    .decode(index.bytes.subarray(node.range.startByte, node.range.endByte))
+    .trim()
+    .replace(/^\{\s*([^{}]*?)\s*\}$/, "$1");
+  return isReferencePath(written) ? written : undefined;
+}
+
+/** A property an element does not write, as the reading offers it to add. */
+export interface UnwrittenProperty {
+  readonly property: SourceProperty;
+  /** How its value edits, or nothing when no editor takes its type, as a record's or a list's. */
+  readonly editor: TypeEditor | undefined;
+  readonly hints: SourceEditorHints | undefined;
+  readonly format: SourceValueFormat | undefined;
+}
+
+/**
+ * The properties the element at `at` declares and does not write, its content left out, in the
+ * order its visualizer lists them, else in declaration order. Nothing for a node that is not an
+ * element, or an element of a union's case.
+ */
+export function unwrittenProperties(index: TreeIndex, at: number): UnwrittenProperty[] {
+  const { tree } = index;
+  const node = tree.nodes[at];
+  const declaration = node?.declaration === undefined ? undefined : tree.declarations[node.declaration];
+  if (node?.role !== "element" || declaration === undefined || declaration.kind === "union") {
+    return [];
+  }
+  const written = new Set(
+    (index.children[at] ?? []).flatMap((child) => (tree.nodes[child]!.role === "attribute" ? [tree.nodes[child]!.name ?? ""] : []))
+  );
+  const properties = (declaration.properties ?? []).filter(
+    (property) => property.flags?.includes("content") !== true && !written.has(property.name)
+  );
+  const order = (declaration.visualizer?.properties ?? []).map((candidate) => candidate.name);
+  const rank = (name: string): number => {
+    const found = order.indexOf(name);
+    return found < 0 ? order.length : found;
+  };
+  return properties
+    .map((property, position) => ({ property, position }))
+    .sort((a, b) => rank(a.property.name) - rank(b.property.name) || a.position - b.position)
+    .map(({ property }) => {
+      const visualizer = declaration.visualizer?.properties?.find((candidate) => candidate.name === property.name);
+      const format = visualizer?.format ?? resolveType(index, property.type).format;
+      return {
+        property,
+        editor: editorOfType(index, property.type, format),
+        hints: visualizer?.editor ?? resolveType(index, property.type).editor,
+        format
+      };
+    });
 }

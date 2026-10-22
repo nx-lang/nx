@@ -24,9 +24,9 @@ optional field `icon:string` naming an icon from the Lucide set, and an optional
 `properties` holding one or more `<PropertyVisualizer Target=Target/>`. `IdPosition` SHALL be the
 constant union `start | end`. `PropertyVisualizer` SHALL be a record with the type parameter
 `Target`, a required field `property:Target.Property`, an optional field `format:ValueFormat`, the
-editor hints `editor:ValueEditor?`, `min:float64?`, `max:float64?`, `step:float64?`, `stops:float64*`
-and `unit:string?`, a field `multiline:boolean` defaulting to `false`, and an optional field
-`placeholder:string`.
+editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float64`, `step:float64`,
+`stops:float64+` and `unit:string`, a field `multiline:boolean` defaulting to `false`, and an optional
+field `placeholder:string`.
 
 #### Scenario: An element visualizer with property visualizers
 - **WHEN** a module declares `type Choice = { value:string label:string description?:string }` and `visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot"><PropertyVisualizer property=description format=id /></ElementVisualizer>`
@@ -42,9 +42,9 @@ and `unit:string?`, a field `multiline:boolean` defaulting to `false`, and an op
 
 ### Requirement: `ValueVisualizer` formats a scalar type
 `ValueVisualizer` SHALL be a record with the type parameter `Target`, an optional field
-`format:ValueFormat`, and the editor hints `editor:ValueEditor?`, `min:float64?`, `max:float64?`,
-`step:float64?`, `stops:float64*` and `unit:string?`. `ValueFormat` SHALL be the constant union
-`id | color`.
+`format:ValueFormat`, and the editor hints as optional fields `editor:ValueEditor`, `min:float64`,
+`max:float64`, `step:float64`, `stops:float64+` and `unit:string`. `ValueFormat` SHALL be the constant
+union `id | color`.
 
 #### Scenario: A color alias
 - **WHEN** a module declares `type Color = string` and `visualizer Color = <ValueVisualizer format=color />`
