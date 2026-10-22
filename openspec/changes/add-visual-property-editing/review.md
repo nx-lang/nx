@@ -354,7 +354,7 @@ language snapshot and the built viewer under jsdom.
 
 ## New Findings Discovered During 2026-10-22 09:07 Verification
 
-### 🟡 Fixed - RF17 `without_repeats` is quadratic in diagnostics that share a message
+### ✅ Verified - RF17 `without_repeats` is quadratic in diagnostics that share a message
 - **Severity:** Low
 - **Evidence:** `without_repeats` (`crates/nx-types/src/infer.rs:8528`) groups diagnostics by message and
   compares a new one with every kept one of the same message. Diagnostics that share a message but not a
@@ -369,6 +369,20 @@ language snapshot and the built viewer under jsdom.
   keying on the message and the labels together. Add a test or a benchmark that checks many
   same-message diagnostics at distinct ranges. **Confidence in fix: high.**
 - **Fix:** `Diagnostic` and `Label` derive `Hash`. `without_repeats` keeps an `FxHashSet` of the diagnostics seen, so each lookup is constant-time. Unit test `without_repeats_keeps_one_of_each_and_every_distinct_range` sends 20,000 same-message diagnostics at distinct ranges, each twice, and checks that 20,000 are kept in order. It counts and does not time, since wall-clock asserts flake in CI.
+- **Verification:** Confirmed. `Hash` and `PartialEq` are both derived over the same fields (`Severity`,
+  `String`, `Option<String>`, `Vec<Label>`, and in `Label` the file, `TextRange`, message and `primary`,
+  all of which hash as they compare), so equal diagnostics hash alike and the set drops exactly what the
+  old full comparison dropped. Nothing implements these traits by hand, and every field already had
+  `Hash`; `cargo check --workspace --all-targets` and clippy on both crates are clean, the Node binding's
+  `pnpm test` passes (37), and the wasm module rebuilds. Timed in release with a scratch probe, the
+  pass over N same-message diagnostics at distinct ranges, each twice, takes 1.0, 4.5 and 10 ms at
+  2,000, 8,000 and 16,000 (the old code: 29 ms, 1.08 s, 5.5 s, with equal output) and 46 ms at 64,000.
+  `check_str` over N `<Theme accent=5 />` lets now costs what the same lets without an error cost: 0.30
+  against 0.29 s at 16,000 and 0.70 against 0.68 s at 32,000. The unit test keeps every distinct range
+  and the order and drops each repeat, so it fails for a key too coarse (message only keeps 1) or no
+  deduplication (40,000); a return to a quadratic pass shows as the test taking about 20 s in debug, against
+  0.08 s, rather than as a failure, which is the trade the fix note names. `cargo test -p nx-diagnostics -p
+  nx-types` passes. **Confidence: high.**
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -414,3 +428,8 @@ language snapshot and the built viewer under jsdom.
 - Fourth verification (2026-10-22 09:07): RF15 and RF16 are verified. RF17 is new and Low: the
   deduplication that fixed RF16 is quadratic in diagnostics that share a message, which takes seconds at
   several thousand of them.
+- Fifth verification (2026-10-22 09:18): RF17 is verified, and nothing new was found. The deduplication
+  is now linear, and a file of many same-message errors checks as fast as one without them. In this
+  environment the wasm package's `recursion-stack` test fails (the `forLoop` shape traps under the
+  0.5 MB worker stack), but it fails the same way built from the change's base, `806223f`, so it is not
+  this change's.
