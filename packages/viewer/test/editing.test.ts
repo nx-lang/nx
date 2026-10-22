@@ -1331,6 +1331,24 @@ describe("steppers", () => {
     assert.equal(tools(element), null, "gone over another property");
   });
 
+  it("keeps a let's steppers over its unit, and moves them to the next number in a row", async () => {
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    element.selection = "pad";
+    over(rendered(element, "pad.value"));
+    const shown = tools(element)!;
+    assert.equal(shown.previousElementSibling?.className, "unit");
+    over(shown.previousElementSibling!);
+    assert.equal(tools(element), shown, "over a let's unit");
+
+    const edges = show(await fixture("editingEdges"));
+    edges.selection = "box";
+    over(rendered(edges, "box.value.items.value[0]"));
+    assert.equal(tools(edges)!.dataset["toolsFor"], "box.value.items.value[0]");
+    over(rendered(edges, "box.value.items.value[1]"));
+    assert.equal(tools(edges)!.dataset["toolsFor"], "box.value.items.value[1]", "on the number under the pointer");
+  });
+
   it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);

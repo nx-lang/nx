@@ -628,7 +628,7 @@ export const styles = `
 .popover .choice-value { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); white-space: nowrap; }
 .popover .choice-value.alone { color: inherit; }
 /* With one column, the default's row keeps "Default" and the default on one line. */
-.popover .choices-list:not(.labeled) .option.choice-default { display: flex; gap: 16px; }
+.popover .choices-list:not(.labeled) .option.choice-default:not([hidden]) { display: flex; gap: 16px; }
 .popover .choice-default .choice-label { font-family: var(--nx-viewer-prose-font-family, inherit); font-size: 13px; }
 .popover .choices-rule {
   grid-column: 1 / -1;

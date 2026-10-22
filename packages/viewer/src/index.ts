@@ -2455,10 +2455,10 @@ export class NxViewerElement extends ElementBase {
     if (element !== null && this.#tools.contains(element)) {
       return;
     }
-    // On the way from the value to the tools, the pointer crosses its unit and the gap: anything in
-    // the value's own row keeps them.
+    // On the way from the value to the tools, the pointer crosses its unit and the space around it,
+    // which keep them; the gap past the unit is the tools' own.
     const shown = this.#toolsHover === undefined || !this.#tools.isConnected ? undefined : this.#rendered.get(this.#toolsHover);
-    if (shown !== undefined && element !== null && this.#rowOf(element) === this.#rowOf(shown)) {
+    if (shown !== undefined && element !== null && this.#onTheWay(shown, element)) {
       return;
     }
     const value = element?.closest?.(".editable-value.edit-number") as HTMLElement | null | undefined;
@@ -2484,9 +2484,18 @@ export class NxViewerElement extends ElementBase {
     this.#toolsHover = key;
   }
 
-  /** The row a value is drawn in: a sheet's row, a property of a one-line element, or its line. */
-  #rowOf(element: Element): Element | null {
-    return element.closest?.(".line-property, .sheet-row") ?? element.closest?.(".editable-value")?.parentElement ?? null;
+  /**
+   * Whether `element` lies between the value `shown` and its tools: the value, its unit, or the
+   * row or line that holds them, though not another value in it.
+   */
+  #onTheWay(shown: HTMLElement, element: Element): boolean {
+    const unit = shown.nextElementSibling;
+    return (
+      shown.contains(element) ||
+      (unit?.classList.contains("unit") === true && unit.contains(element)) ||
+      element === shown.parentElement ||
+      element === shown.closest(".line-property, .sheet-row")
+    );
   }
 
   #onToolsPointerDown(event: PointerEvent): void {

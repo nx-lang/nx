@@ -1807,9 +1807,6 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    /// Checks each `ValueChoice` among `content` against a value of `kind`, the value of the
-    /// property `property` when there is one: a number takes number literals, a string string
-    /// literals, and nothing else takes choices.
     /// Whether a value of `ty` is a whole number: an `int`, `int32` or `int64`.
     fn is_integral(ty: &Type) -> bool {
         matches!(
@@ -1819,7 +1816,8 @@ impl<'a> InferenceContext<'a> {
     }
 
     /// Checks each `ValueChoice` among `content` against a value of `kind`, a whole number when
-    /// `integral`, the value of the property `property` when there is one.
+    /// `integral`, the value of the property `property` when there is one: a number takes number
+    /// literals, a string string literals, and nothing else takes choices.
     fn check_choices(
         &mut self,
         content: &[ExprId],

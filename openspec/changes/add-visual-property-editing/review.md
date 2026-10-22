@@ -415,8 +415,21 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   to the tools' box. Add a test that hovers the value, then the unit, then the tools, and clicks.
   **Confidence: high.**
 - **Fix:** In `#hoverTools`, a pointer over anything in the shown value's row (`#rowOf`: the closest `.line-property` or `.sheet-row`, else the value's parent) keeps the tools, so the unit and the gap no longer hide them. The CSS uses `padding-left: 4px` instead of a margin, so the gap is the tools' box. Test "keeps the steppers as the pointer crosses the value's unit and the gap to reach them" hovers the value, the unit, the row and the tools, clicks, and checks the tools go over another property.
+- **Verification:** Partly fixed. In a property row the unit and the gap now keep the tools: rechecked under
+  jsdom on a one-line `box.value.pad` and a multi-line `tall.value.pad`, both with `px`, and the padding
+  makes the gap the tools' own box. But `#rowOf` (`index.ts:2488`) falls back to
+  `closest(".editable-value")?.parentElement` outside a `.line-property` or `.sheet-row`. That is the
+  value's parent for the value, and `null` for its unit, because `#markUnits` draws the unit as the
+  value's sibling, not inside it. So a number with a unit outside a property row still loses its
+  steppers on the unit. Confirmed under jsdom with `type Spacing = int`,
+  `visualizer Spacing = <ValueVisualizer min=0 max=64 unit="px" />` and `let pad:Spacing = 8`, with
+  `pad` selected: hovering `8` shows the tools, and hovering ` px` hides them. The new test covers
+  only a property. The same check also caused RF29. Still to do: compare the hovered element with the
+  shown value, its unit (`shown.nextElementSibling` when it is a `.unit`) and the tools, or use the
+  shown value's own parent as the row for both. Add the `let` case to the test. **Confidence: high.**
+- **Fix:** (second round) `#rowOf` is replaced by `#onTheWay(shown, element)`: the tools stay while the pointer is over the shown value, its unit (the value's next sibling with `.unit`), the value's parent, or its `.line-property`/`.sheet-row` itself, but not another value inside it. That covers a `let`'s unit outside any property row. Test "keeps a let's steppers over its unit, and moves them to the next number in a row" (fixture `adding` gained `let pad:Spacing = 8`).
 
-### 🟡 Fixed - RF19 A tree that arrives during a stepper drag drops the drag and leaves the reading stuck in `stepping`
+### ✅ Verified - RF19 A tree that arrives during a stepper drag drops the drag and leaves the reading stuck in `stepping`
 - **Severity:** Medium
 - **Evidence:** `#render` calls `#dropSession` (`index.ts:832`). That clears `#stepping`
   (`index.ts:1805`) and removes the tools, but it does not remove the body's `stepping` class, which
@@ -435,8 +448,15 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   key, and show its value again. If the drag cannot go on, finish it from its last value. Add a test
   that sets a tree mid-drag and checks the class and the edit on release. **Confidence: high.**
 - **Fix:** `#render` keeps `#stepping` across `#dropSession` and calls the new `#resumeStepping` after the editor is reopened: it redraws the tools past the same number (or the reopened field), recaptures the pointer, puts back `.body.stepping` and shows the reached value. When the number is gone the press ends. `#dropSession` now always removes `stepping` from the body, which also covers `disconnectedCallback`. Test "carries a drag on through a new tree, and ends it cleanly when the reading goes" sets the tree mid-drag, keeps dragging, checks one edit on release and the class cleared, then removes the element mid-drag.
+- **Verification:** Confirmed. `#render` keeps the press, and `#resumeStepping` redraws the tools,
+  recaptures the pointer and shows the value reached. `#dropSession` always clears `.body.stepping`,
+  which also covers `disconnectedCallback`. The new test sets a tree mid-drag, drags on to `16`, and
+  checks one edit and the class cleared on release. It then removes the element mid-drag. Also checked
+  under jsdom with the field open: press up on `gap`'s open field, drag to `9`, set the tree, drag on
+  and release. The field reads `14`, nothing fires, and `stepping` is gone. When the number is no
+  longer in the tree, the press ends with no edit, as the note says. **Confidence: high.**
 
-### 🟡 Fixed - RF20 A stepper drag that ends where it began leaves the value muted as pending
+### ✅ Verified - RF20 A stepper drag that ends where it began leaves the value muted as pending
 - **Severity:** Low
 - **Evidence:** When a drag ends on its starting value, `#onToolsPointerUp` calls
   `#showStepped(target, stepping.from)` (`index.ts:2534-2538`). That calls `showValue`, which always
@@ -449,8 +469,14 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   `#onToolsPointerUp`. It commits when the value changed, and otherwise shows the pending value or
   re-renders. Add a test for a drag back to the start. **Confidence: high.**
 - **Fix:** New `#endNumberDrag(target, from, value, commit)` is shared by the name scrub's `#onPointerUp` and `#onToolsPointerUp`: it commits when the value changed and the field would take it, and otherwise shows the pending value or re-renders. Test "shows the value as before when a drag ends where it began".
+- **Verification:** Confirmed. `#endNumberDrag` is now the one release path for both the name
+  scrub and a stepper drag with the field closed. A drag back to the start re-renders when nothing is
+  pending, so the value reads `4` and is not muted (test). A cancelled drag with the field open puts
+  the start back in the field. One side effect, not a defect: the re-render also drops the steppers
+  under the pointer until it enters the value again. The name scrub's release already did the same.
+  **Confidence: high.**
 
-### 🟡 Fixed - RF21 Picking a choice skips the checks the field makes, and analysis lets through choices the field would refuse
+### ✅ Verified - RF21 Picking a choice skips the checks the field makes, and analysis lets through choices the field would refuse
 - **Severity:** Medium
 - **Evidence:** `#pickChoice` (`index.ts:2362-2372`) commits `row.dataset.value` without
   `#problemOf`. The viewer spec says "Choosing a choice SHALL commit its value as the field would".
@@ -471,8 +497,17 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   `fitting_choices`. Consider warning for a choice outside the resolved `min`/`max`. Add the viewer
   and analysis tests. **Confidence: high.**
 - **Fix:** Viewer: `#pickChoice` checks a non-default choice with `#problemOf`; a refused one closes the list and stays in the field (or the color's hex input), selected, with the note shown at once. Analysis: `check_choices` takes an `integral` flag (`is_integral`: int, int32, int64) and warns `editor-hint-mismatch` ("must be a whole number") for a fractional choice; `fitting_choices` leaves such choices out for the new `HintValueKind::Integer`. Out-of-range choices are left to the viewer's check. Tests: viewer "keeps a choice the field would refuse in the field, with its note" (fixture `count` gained choices `5` and `99` under `max=10`), Rust `choices_keep_their_literals_and_a_whole_number_takes_no_fraction` and a new mismatch case in `visualizer_declarations_tests`. Spec, README: a refused choice stays in the field; new scenario "A refused choice".
+- **Verification:** Confirmed in both layers. Viewer: `#pickChoice` checks a non-default choice
+  with `#problemOf`. The new test picks `99` under `max=10`: nothing fires, the field holds `99` with
+  `aria-invalid`, and the list is closed. Picking `5` then commits. A color, checked under jsdom:
+  `<ValueChoice value="red" />` under `format=color` leaves `red` in the hex input with `aria-invalid`,
+  and `#00ff00` commits. Analysis, through the wasm snapshot: a fractional choice warns
+  `editor-hint-mismatch` on an alias of `int` (`ValueVisualizer`), an alias chain (`gap:Gap` with
+  `Gap = Spacing`), an optional `int`, an `int64` and an `int+` property. The tree leaves each one
+  out. It keeps `4.0` (as `4`) on an `int` and every choice on a `float32` or `float64`. Choices out of
+  range stay listed and are refused when picked, as the spec now says. **Confidence: high.**
 
-### 🟡 Fixed - RF22 An integer choice past 2^53 is written as a different number
+### ✅ Verified - RF22 An integer choice past 2^53 is written as a different number
 - **Severity:** Low
 - **Evidence:** A choice's number is read as `VisualizerAttribute::Number(OrderedFloat)`
   (`crates/nx-api/src/program_visualizers.rs:333`), and `fitting_choices` spells it with
@@ -485,6 +520,11 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   value in `VisualizerChoice`, and pass it through as `SourceEditValue::Number { text }`. Add a
   source-tree test with a large integer, a negative real and a hex literal. **Confidence: high.**
 - **Fix:** `VisualizerChoice` gained `number_text`, the literal's own value text (`choice_value_expr`, `number_text` in `program_visualizers.rs`: ints as written in decimal, hex as its value, floats as parsed, a sign kept); `fitting_choices` uses it. Test covers `9007199254740993`, `-4`, `0x10` (reads `16`) and `-2.5`.
+- **Verification:** Confirmed. Through the wasm snapshot, `9007199254740993` on an `int64`
+  property reaches the tree with every digit, `4.0` on an `int` reads `4`, and `-2.5` and `0.1` on
+  reals read as written. The source-tree test covers a large integer, a sign, a hex literal (written
+  as its value, `16`, which the finding called harmless) and a dropped fraction. `number_text` mirrors
+  `number_value`, negation included. **Confidence: high.**
 
 ### 🟡 Fixed - RF23 With unlabeled choices, the default's row stacks `Default` over its value
 - **Severity:** Low
@@ -500,8 +540,20 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   unlabeled choices and a default. **Confidence: medium-high** (read from the CSS; jsdom does not lay
   out grids).
 - **Fix:** CSS: in an unlabeled list, the default's row is `display: flex; gap: 16px`, so `Default` and the default share a line. The `count` fixture is an unlabeled list with a default; the test checks the list is not `labeled` (jsdom does not lay out grids).
+- **Verification:** The default's row now stays on one line in an unlabeled list, but the new rule
+  breaks the filter. `.popover .choices-list:not(.labeled) .option.choice-default` (`styles.ts:631`)
+  has five class-level selectors and sets `display: flex`. That outranks
+  `.popover .option.choice[hidden] { display: none; }`, which has four. Typing in the field hides the
+  rows that do not match (`#filterChoices`), so in an unlabeled list the default's row stays in sight
+  after it is filtered out, and its rule does not. Under jsdom, typing `9` in `card.value.count`
+  (choices `5` and `99`, default `0`) sets `hidden` on the default's row. In headless Chromium, a page
+  with the same four rules computes `display: flex` for that hidden row, and `none` for a hidden
+  choice. The test checks only the `labeled` class, so it cannot see this. Still to do: add
+  `:not([hidden])` to the new rule, and add a test that a filtered-out default's row is hidden.
+  **Confidence: high.**
+- **Fix:** (second round) The rule is `.choices-list:not(.labeled) .option.choice-default:not([hidden])`, so filtering hides the default's row again.
 
-### 🟡 Fixed - RF24 The choices field's ARIA does not form a combobox
+### ✅ Verified - RF24 The choices field's ARIA does not form a combobox
 - **Severity:** Low
 - **Evidence:** A field with choices keeps `role="textbox"` (`index.ts:1522`). It gains
   `aria-haspopup`, `aria-controls`, `aria-activedescendant` and `aria-expanded` (`index.ts:2217-2220`,
@@ -515,8 +567,14 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   the rule presentational (`role="none"`, `aria-hidden`), or put the choices in a `role="group"` after
   the default's option. **Confidence: medium-high.**
 - **Fix:** A field with choices gets `role="combobox"` and `aria-autocomplete="list"`; `aria-controls` is set only while the list is open, and removed on close. The rule is `role="none"` with `aria-hidden`. Asserted in the refused-choice test.
+- **Verification:** Confirmed. A field with choices takes `role="combobox"` and
+  `aria-autocomplete="list"`, and `aria-expanded` follows the list. `aria-controls` is set only while
+  the list is drawn and is removed on close. The test asserts this before opening, while open and
+  after a refused pick. The rule is `role="none"` and `aria-hidden`, so the listbox owns only options.
+  A color's input keeps a fixed `aria-controls`, which is right, since its list is always drawn in its
+  popover. **Confidence: medium-high** (no screen reader was run).
 
-### 🟡 Fixed - RF25 A stepper drag with the field open does not commit on release, as the spec says it does
+### ✅ Verified - RF25 A stepper drag with the field open does not commit on release, as the spec says it does
 - **Severity:** Low
 - **Evidence:** The viewer spec says "Pressing a stepper and dragging up or down SHALL ... commit it
   once on release", and the design and the viewer README say the same. With the field open,
@@ -528,8 +586,12 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   change the spec scenario and the README to say a drag with the field open fills the field, as a
   click does. Add a test either way. **Confidence: high.**
 - **Fix:** Kept the behavior and changed the docs: a drag with the field open fills the field, as a click does. Viewer spec, design and README now say so, with a new scenario "A stepper dragged". Test "fills an open field from a drag, which commits".
+- **Verification:** Confirmed. The spec, the design and the README now say a drag with the field
+  open fills the field, which matches the code. A scenario covers the drag with the field closed. The
+  test drags up on `count`'s open field to `5`: nothing fires, and Enter commits `5`.
+  **Confidence: high.**
 
-### 🟡 Fixed - RF26 On a one-line element, the steppers and the chevron cover the start of the next property
+### ✅ Verified - RF26 On a one-line element, the steppers and the chevron cover the start of the next property
 - **Severity:** Low
 - **Evidence:** The design draws the steppers "over the gap just past a number, as the case chevron is
   drawn". The case chevron is 8px, inside the one-space gap (`styles.ts:397-410`). The tools are a
@@ -543,8 +605,10 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   the "Visual test cases" screenshots at 375 pixels wide. **Confidence: medium** (from the CSS; not
   seen in a browser).
 - **Fix:** Accepted as a trade-off and written into the design's Steppers entry: they show only on the selected row and while the field is open, and drawing them above or below would cover a neighboring line instead.
+- **Verification:** Confirmed. The design's Steppers entry now states the trade-off, as the
+  recommendation's first option allows. **Confidence: high.**
 
-### 🟡 Fixed - RF27 Small leftovers in the docs after the respec
+### ✅ Verified - RF27 Small leftovers in the docs after the respec
 - **Severity:** Low
 - **Evidence:**
   - `sites/playground/src/language/worker.ts:2` now reads "Hover, completions, diagnostics, document
@@ -559,8 +623,11 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   own comments. Add a short paragraph and example for the visualizer `editor` value, with `choices`,
   under `sourceTree` in the protocol README. **Confidence: high.**
 - **Fix:** Worker doc names source edits again; `answer.ts` documents `key` and `edit` separately; the protocol README describes the `visualizers` option, `editor` and its hints, and `choices` with an example noting a choice's value is passed on as a `setValue` value.
+- **Verification:** Confirmed. The worker's doc names source edits, and `key` and `edit` have their
+  own comments. The protocol README's new paragraph and example match `SourceTreeVisualizersOption`,
+  `SourceEditorHints` and `SourceChoice` field for field. **Confidence: high.**
 
-### 🟡 Fixed - RF28 Rust tests miss the choice paths most likely to regress
+### ✅ Verified - RF28 Rust tests miss the choice paths most likely to regress
 - **Severity:** Low
 - **Evidence:** `source_tree_tests.rs:1925-2010` covers an alias's choices, a property's replacing them,
   and one mismatched string choice beside a fitting one. Nothing tests the following:
@@ -573,6 +640,48 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
     `hints_take_signed_and_real_numbers` only checks that analysis is clean.
 - **Recommendation:** Add source-tree tests for each, one assertion apiece. **Confidence: high.**
 - **Fix:** New source-tree tests over a `CHOICES` library: `choices_keep_their_literals_and_a_whole_number_takes_no_fraction` (spellings), `choices_that_all_mismatch_leave_the_types_choices`, and `choices_reach_through_an_alias_chain_and_inheritance` (`Gap = Spacing`, and a base's property visualizer inherited).
+- **Verification:** Confirmed. The three tests pass, and each catches its regression. Removing the
+  all-mismatch filter leaves `tight` with no choices instead of `4, 8`. `gap:Gap` checks the alias
+  chain, `pad` the inheritance through `merge_child`, and `big` the spellings.
+  `cargo test -q -p nx-language-service -p nx-api -p nx-types` passes, and clippy is clean on the three
+  crates. **Confidence: high.**
+
+## New Findings Discovered During 2026-10-22 23:36 Verification
+
+Scope of this pass: `git show a12f726`, the fixes for RF18 to RF28. Checks run: `packages/viewer`
+`pnpm test` (160 passed); `cargo test -q -p nx-language-service -p nx-api -p nx-types` (all passed);
+clippy on those three crates (clean); `openspec validate add-visual-property-editing --strict`
+(valid). Suspected bugs were confirmed with throwaway scripts, kept outside the repository, that drive
+the built viewer under jsdom and the wasm language snapshot. One CSS cascade was checked in headless
+Chromium.
+
+### 🟡 Fixed - RF29 Within one row, the steppers stay on the first number hovered and never move to another
+- **Severity:** Low
+- **Evidence:** RF18's fix makes `#hoverTools` return early whenever the hovered element is in the
+  shown value's row (`packages/viewer/src/index.ts:2459-2463`). It returns before it looks at which
+  value is hovered. A row can hold more than one number: the items of a braced list (`items={ 1 2 }`)
+  share one `.line-property`. Confirmed under jsdom on the `editingEdges` fixture with `box.value`
+  selected: hovering `items[0]` shows its tools, and hovering `items[1]` then leaves them on
+  `items[0]` (`data-tools-for` does not change). Before `a12f726`, the tools moved to `items[1]`. A
+  multi-line element's list row behaves the same. To reach `items[1]`'s steppers, the pointer must
+  leave the row and come back in on `items[1]` without crossing `items[0]`. Nothing is edited by
+  mistake, because the tools stay drawn beside the number they step. But the spec's "while the pointer
+  is over its value on the selected row" no longer holds for the second item.
+- **Recommendation:** Check the hovered value first, and apply the row rule only when the hovered
+  element is not inside another `.editable-value.edit-number`. This fits with the fix RF18 still
+  needs. Add a test that hovers two items of one list. **Confidence: high.**
+- **Fix:** Fixed with RF18's second round: only the row or line element itself keeps the tools, so hovering another number in the row moves them to it. Covered by the same test, over `items={ 1 2 }` in `editingEdges`.
+
+### 🟡 Fixed - RF30 `is_integral` carries `check_choices`' old doc comment
+- **Severity:** Low
+- **Evidence:** The fix inserted `is_integral` (`crates/nx-types/src/infer.rs:1810-1814`) between
+  `check_choices`' old doc comment and its function. `check_choices` got a new comment, so the old
+  three lines are left over, and `is_integral`'s rustdoc now reads "Checks each `ValueChoice` among
+  `content` against a value of `kind`, ... and nothing else takes choices. Whether a value of `ty` is
+  a whole number: ...".
+- **Recommendation:** Delete the three stale lines above `is_integral`'s own comment.
+  **Confidence: high.**
+- **Fix:** The three stray lines are gone; their content ("a number takes number literals, a string string literals, and nothing else takes choices") is folded into `check_choices`' own doc comment.
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -635,3 +744,10 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   arrives during a stepper drag drops it and leaves the reading's `stepping` cursor stuck (RF19), and
   a picked choice skips the field's checks while analysis lets an `int` take a fractional choice
   (RF21). The rest are Low: RF20 and RF22 to RF28.
+- Verification of the respec fixes (2026-10-22 23:36): RF19 to RF22 and RF24 to RF28 are verified.
+  Two are reopened. RF18: outside a property row, as for a `let`'s number, the unit still hides the
+  steppers. RF23: the new rule for the default's row outranks `[hidden]`, so a filtered-out default's
+  row stays in sight. Two Low findings are new: RF29, where the steppers stay on the first number
+  hovered in a row, such as a braced list's first item (a regression from the RF18 fix), and RF30, a
+  stale doc comment on `is_integral`. Viewer tests (160), the three crates' Rust tests, clippy and
+  `openspec validate --strict` pass.
