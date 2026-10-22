@@ -212,7 +212,7 @@ fn each_hint_is_checked_against_its_type() {
         // Multi-line on a number.
         ("type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size multiline=true placeholder=\"Size\" /></ElementVisualizer>", 2),
         // A segmented control on a union with a payload case.
-        ("type Extra = | none | syrup { flavor:string }\ntype Cup = { extra:Extra = none }\nvisualizer Cup = <ElementVisualizer><PropertyVisualizer property=extra editor=segmented /></ElementVisualizer>", 1),
+        ("type Extra = none | syrup { flavor:string }\ntype Cup = { extra:Extra = none }\nvisualizer Cup = <ElementVisualizer><PropertyVisualizer property=extra editor=segmented /></ElementVisualizer>", 1),
         // Every hint that fits.
         ("type Card = { size?:float64 label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=field min=0 max=1 step=0.1 unit=\"em\" /><PropertyVisualizer property=label multiline=true /></ElementVisualizer>", 0),
     ] {

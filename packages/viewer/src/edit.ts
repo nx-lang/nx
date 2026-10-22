@@ -15,7 +15,7 @@ import type {
 } from "@nx-lang/language-protocol";
 
 import { decodeString, formattedNodes } from "./source.js";
-import type { TreeIndex } from "./tree.js";
+import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
 
 /**
  * The editor a value opens: a text field (strings, UI text and ids), a number field, a toggle, a
@@ -58,7 +58,7 @@ export interface EditTarget {
 }
 
 /** The types a number field edits, and their aliases' ends. */
-const NUMBER_TYPES = new Set(["int", "float", "float32", "float64"]);
+const NUMBER_TYPES = new Set(["int", "int32", "int64", "float32", "float64"]);
 
 /** Whether `text` is an NX numeric literal: an integer, a real or a hex literal, with a leading minus. */
 export function isNumericLiteral(text: string): boolean {
@@ -172,11 +172,10 @@ export function removalOf(index: TreeIndex, at: number): "reset" | "remove" | un
     return undefined;
   }
   const element = tree.nodes[attribute.parent]!;
-  const declaration = element.declaration === undefined ? undefined : tree.declarations[element.declaration];
-  if (element.role !== "element" || declaration === undefined || declaration.kind === "union") {
+  if (element.role !== "element") {
     return undefined;
   }
-  const property = declaration.properties?.find((candidate) => candidate.name === attribute.name);
+  const property = elementProperties(tree, element)?.find((candidate) => candidate.name === attribute.name);
   if (property?.default !== undefined) {
     return "reset";
   }
@@ -206,7 +205,7 @@ function targetOf(
   const extra = { ...(hints === undefined ? {} : { hints }), ...(property === undefined ? {} : { property }) };
   if (node.role === "reference" || node.role === "member") {
     // A named value, as `{accent}` or `theme.accent`, edits with its type's editor.
-    const path = referencePath(index, at);
+    const path = namesValue(index, at) ? referencePath(index, at) : undefined;
     const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
     // A literal written over a braced reference loses the braces, so a number may take a sign there.
     const signed = owner?.role === "attribute" || owner?.role === "declaration";
@@ -298,9 +297,11 @@ function declaredType(index: TreeIndex, at: number): string | undefined {
   const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
   switch (owner?.role) {
     case "attribute": {
-      const element = owner.parent === undefined ? undefined : tree.nodes[owner.parent];
-      const declaration = element?.declaration === undefined ? undefined : tree.declarations[element.declaration];
-      return declaration?.properties?.find((property) => property.name === owner.name)?.type;
+      const elementAt = attributeElement(tree, node.parent!);
+      const element = elementAt === undefined ? undefined : tree.nodes[elementAt];
+      return element?.role === "element"
+        ? elementProperties(tree, element)?.find((property) => property.name === owner.name)?.type
+        : undefined;
     }
     case "declaration": {
       const written = (index.children[node.parent!] ?? []).find(
@@ -350,7 +351,7 @@ export interface TypeEditor {
 }
 
 /** The types a value of which reads as a boolean. */
-const BOOLEAN_TYPES = new Set(["boolean", "bool"]);
+const BOOLEAN_TYPES = new Set(["boolean"]);
 
 /**
  * The editor a value of the type `spelled` opens, formatted as `format` says: a number field, a
@@ -393,8 +394,9 @@ function hintsOf(index: TreeIndex, at: number, spelled: string | undefined): Sou
     place = tree.nodes[place]!.parent;
   }
   const attribute = place === undefined ? undefined : tree.nodes[place];
-  if (attribute?.role === "attribute" && attribute.parent !== undefined) {
-    const element = tree.nodes[attribute.parent]!;
+  const elementAt = attribute?.role === "attribute" ? attributeElement(tree, place!) : undefined;
+  if (attribute !== undefined && elementAt !== undefined) {
+    const element = tree.nodes[elementAt]!;
     const declaration = element.declaration === undefined ? undefined : tree.declarations[element.declaration];
     const own = declaration?.visualizer?.properties?.find((candidate) => candidate.name === attribute.name)?.editor;
     if (own !== undefined) {
@@ -407,14 +409,13 @@ function hintsOf(index: TreeIndex, at: number, spelled: string | undefined): Sou
 /** The element and the property whose value the node at `at` is: an attribute's whole value, not an item. */
 function propertyOf(index: TreeIndex, at: number): EditTarget["property"] {
   const { tree } = index;
-  const attribute = tree.nodes[at]!.parent === undefined ? undefined : tree.nodes[tree.nodes[at]!.parent!];
-  if (attribute?.role !== "attribute" || attribute.parent === undefined || attribute.name === undefined) {
+  const attributeAt = tree.nodes[at]!.parent;
+  const attribute = attributeAt === undefined ? undefined : tree.nodes[attributeAt];
+  if (attribute?.role !== "attribute" || attribute.name === undefined || attribute.flags?.includes("content") === true) {
     return undefined;
   }
-  if (attribute.flags?.includes("content") === true) {
-    return undefined;
-  }
-  return { element: tree.nodes[attribute.parent]!.key, name: attribute.name };
+  const element = attributeElement(tree, attributeAt!);
+  return element === undefined ? undefined : { element: tree.nodes[element]!.key, name: attribute.name };
 }
 
 /** The reference path the node at `at` is written as, its braces left out, or nothing when it is not one. */
@@ -427,6 +428,26 @@ function referencePath(index: TreeIndex, at: number): string | undefined {
   return isReferencePath(written) ? written : undefined;
 }
 
+/**
+ * Whether the reference at `at` names a named value: its innermost name, the reference itself or a
+ * member's innermost object, refers to a `let`. A parameter or a loop variable is a binding, which
+ * an edit must not replace with a literal.
+ */
+function namesValue(index: TreeIndex, at: number): boolean {
+  const { tree } = index;
+  let current = at;
+  while (tree.nodes[current]!.role === "member") {
+    const object = index.children[current]!.find((child) => index.slots[child] === "object");
+    if (object === undefined) {
+      return false;
+    }
+    current = object;
+  }
+  const node = tree.nodes[current]!;
+  const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+  return node.role === "reference" && declaration?.kind === "value";
+}
+
 /** A property an element does not write, as the reading offers it to add. */
 export interface UnwrittenProperty {
   readonly property: SourceProperty;
@@ -437,21 +458,24 @@ export interface UnwrittenProperty {
 }
 
 /**
- * The properties the element at `at` declares and does not write, its content left out, in the
- * order its visualizer lists them, else in declaration order. Nothing for a node that is not an
- * element, or an element of a union's case.
+ * The properties the element at `at` declares and does not write, even under a property-list
+ * condition, its content left out, in the order its visualizer lists them, else in declaration
+ * order. Nothing for a node that is not an element.
  */
 export function unwrittenProperties(index: TreeIndex, at: number): UnwrittenProperty[] {
   const { tree } = index;
   const node = tree.nodes[at];
   const declaration = node?.declaration === undefined ? undefined : tree.declarations[node.declaration];
-  if (node?.role !== "element" || declaration === undefined || declaration.kind === "union") {
+  const declared = node?.role === "element" ? elementProperties(tree, node) : undefined;
+  if (declaration === undefined || declared === undefined) {
     return [];
   }
   const written = new Set(
-    (index.children[at] ?? []).flatMap((child) => (tree.nodes[child]!.role === "attribute" ? [tree.nodes[child]!.name ?? ""] : []))
+    tree.nodes.flatMap((candidate, position) =>
+      candidate.role === "attribute" && attributeElement(tree, position) === at ? [candidate.name ?? ""] : []
+    )
   );
-  const properties = (declaration.properties ?? []).filter(
+  const properties = declared.filter(
     (property) => property.flags?.includes("content") !== true && !written.has(property.name)
   );
   const order = (declaration.visualizer?.properties ?? []).map((candidate) => candidate.name);

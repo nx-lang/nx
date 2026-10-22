@@ -121,9 +121,10 @@ For `addProperty`, the target SHALL be an element, and the service SHALL write t
 `name=value`, the value spelled as `setValue` spells it at an attribute, after the element's last
 attribute and in the element's layout: on the tag's line, after a space, when the element writes its
 attributes on that line or has none; on a line of its own at the indentation of the element's other
-attributes when it writes them a line each. The service SHALL refuse as `invalidValue` a property the
-element already writes, one its declaration does not have, and a content property. It SHALL NOT check
-the value against the property's type.
+attributes when it writes them a line each. An element of a union's case SHALL take the union's
+shared properties and its case's. The service SHALL refuse as `invalidValue` a property the element
+already writes, directly or in any branch of a property-list condition or match, one its declaration
+does not have, and a content property. It SHALL NOT check the value against the property's type.
 
 #### Scenario: On one line
 - **WHEN** a client adds `iced` with the boolean `true` to `<Drink code="LAT" name="Latte" />`
@@ -138,6 +139,15 @@ the value against the property's type.
 #### Scenario: A property already written
 - **WHEN** a client adds `name` to `<Drink code="LAT" name="Latte" />`
 - **THEN** the answer SHALL hold no edits and the refusal `invalidValue`
+
+#### Scenario: A property written under a condition
+- **WHEN** a client adds `iced` to `<Drink code="A" if flag { iced=true } />`
+- **THEN** the answer SHALL hold no edits and the refusal `invalidValue`
+
+#### Scenario: A union case's element
+- **WHEN** a client adds `pumps` with the number `2` to `<Extra.syrup flavor="mocha" />`, where the
+  case `syrup` declares `flavor` and `pumps`
+- **THEN** the document SHALL read `<Extra.syrup flavor="mocha" pumps=2 />`
 
 #### Scenario: A named value
 - **WHEN** a client adds `color` with the reference `accent` to `<Drink code="LAT" name="Latte" />`

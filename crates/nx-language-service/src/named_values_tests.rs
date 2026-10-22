@@ -95,3 +95,32 @@ fn named_values_round_trip_through_json() {
     let back: Vec<NamedValue> = serde_json::from_str(&json).expect("back");
     assert_eq!(back, values);
 }
+
+#[test]
+fn an_optional_property_takes_optional_members_and_values() {
+    let source = r##"type Color = string
+type Theme = { accent:Color muted?:Color }
+type Card = { tint?:Color fill:Color = "#000000" }
+let theme = <Theme accent="#111111" muted="#222222" />
+let maybe:Color? = "#333333"
+let card = <Card />
+"##;
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![DocumentInput::new(URI, source).with_version(1)],
+    )
+    .expect("snapshot");
+    let uri = DocumentUri::from(URI);
+    let optional = snapshot
+        .named_values(&uri, "card.value", "tint")
+        .expect("named values");
+    assert_eq!(
+        paths(&optional),
+        ["theme.accent", "theme.muted", "maybe"],
+        "{optional:#?}"
+    );
+    let required = snapshot
+        .named_values(&uri, "card.value", "fill")
+        .expect("named values");
+    assert_eq!(paths(&required), ["theme.accent"], "{required:#?}");
+}

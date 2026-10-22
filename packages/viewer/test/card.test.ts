@@ -52,7 +52,7 @@ describe("hover cards", () => {
     });
     assert.deepEqual(await property("label"), { signature: "(property) label?: string", doc: "Words under it." });
     assert.deepEqual(await property("visible"), {
-      signature: "(property) visible: bool = true",
+      signature: "(property) visible: boolean = true",
       doc: "Whether it shows.",
     }, "a property of the base it extends");
   });

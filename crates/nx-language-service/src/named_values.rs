@@ -103,6 +103,9 @@ fn named_values_in(
     if matches!(expected, Type::Error | Type::Unknown) {
         return Some(Vec::new());
     }
+    // An optional property admits absence, as the checker reads `p?:T`: an optional member or a
+    // `T?` value fits it.
+    let expected = nx_types::read_type(&expected, declared.flags.contains(&SourceFlag::Optional));
 
     // The declaration the element is in cannot refer to itself.
     let mut root = node;

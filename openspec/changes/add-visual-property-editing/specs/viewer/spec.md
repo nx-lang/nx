@@ -29,7 +29,9 @@ select the element that held the row.
 ### Requirement: A selected element offers the properties it does not write
 When the host has set `editable` and an element is selected, the element SHALL end it with a quiet
 row reading `+ N more`, N being how many of the element's declared properties it does not write,
-content properties left out; an element that writes all of them SHALL show no such row, and only the
+content properties left out; for an element of a union's case, its declared properties are the
+union's shared ones and the case's, and a property written in any branch of a property-list
+condition or match counts as written; an element that writes all of them SHALL show no such row, and only the
 selected element SHALL show one. Opening the row, by a click or Enter, SHALL draw each unwritten
 property under it as a dimmed row, in the order its resolved visualizer lists properties, else in
 declaration order: its name, and its default read as the reading reads values, followed by a quiet
@@ -88,12 +90,18 @@ A value written as a reference to a named value SHALL be editable when the host 
 and its property's type has an editor, the reference being a name or a path of names, in braces or
 bare: it SHALL open that
 editor with the reference marked as the current item of the named values list, and an entry the
-reader types SHALL replace the reference with a literal. A reference whose type has no editor SHALL
-fire `nx-open` as an expression does.
+reader types SHALL replace the reference with a literal. A named value is a `let` without
+parameters: the reference's name, or a path's first name, SHALL refer to one, as the tree's
+declaration for it says. A reference whose type has no editor, and a reference to anything else,
+such as a component's parameter or a loop variable, SHALL fire `nx-open` as an expression does.
 
 #### Scenario: From a token back to a literal
 - **WHEN** the reader opens the editor of `color={accent}` and types `#ffffff` in the hex field
 - **THEN** the element SHALL fire `nx-edit` setting the string `#ffffff`
+
+#### Scenario: A parameter is not a named value
+- **WHEN** the reader double-clicks `{name}` in `let <Special name:string /> = <Drink name={name} />`
+- **THEN** no editor SHALL open, and the element SHALL fire `nx-open` with its key
 
 ### Requirement: Editor hints choose and shape a value's editor
 The element SHALL edit a value as its property's resolved editor hints, from the tree's visualizer

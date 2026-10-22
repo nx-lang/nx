@@ -2083,12 +2083,17 @@ impl<'a> TreeBuilder<'a> {
         let resolved = resolved.unwrap_or_default();
         // A property's own hints win one by one over those of the alias its type names.
         let editor = |name: &str, child: Option<&crate::visualizers::ResolvedChild>| {
+            // The property's own hints win one by one over its type's, but only those that fit:
+            // a mismatched one is left out, and the type's hint of that name stays in force.
+            let kind = value_kind(name);
             let mut hints = child
                 .map(|child| {
                     child
                         .attributes
                         .iter()
-                        .filter(|(key, _)| EDITOR_HINTS.contains(&key.as_str()))
+                        .filter(|(key, value)| {
+                            EDITOR_HINTS.contains(&key.as_str()) && hint_fits(key, value, kind)
+                        })
                         .cloned()
                         .collect::<Vec<_>>()
                 })
@@ -2098,7 +2103,7 @@ impl<'a> TreeBuilder<'a> {
                     hints.push((key, value));
                 }
             }
-            editor_hints(&hints, value_kind(name))
+            editor_hints(&hints, kind)
         };
         let mut properties = resolved
             .properties
@@ -2376,35 +2381,49 @@ fn hint_value_kind(
     }
 }
 
-/// The editor hints among `hints` that fit a value of `kind`, or `None` when none does. Analysis
-/// reports a hint that does not fit as `editor-hint-mismatch`, and a reader never sees it.
-fn editor_hints(hints: &[(String, String)], kind: HintValueKind) -> Option<SourceEditorHints> {
+/// Whether the editor hint `key=value` fits a value of `kind`. Analysis reports a hint that does not
+/// fit as `editor-hint-mismatch`, and a reader never sees it.
+fn hint_fits(key: &str, value: &str, kind: HintValueKind) -> bool {
     let fits = |needs: HintValueKind| kind == HintValueKind::Unknown || kind == needs;
+    match key {
+        "editor" => match value {
+            "field" | "slider" => fits(HintValueKind::Number),
+            "dropdown" | "segmented" => fits(HintValueKind::Cases),
+            _ => false,
+        },
+        "min" | "max" | "step" | "stops" | "unit" => fits(HintValueKind::Number),
+        "multiline" | "placeholder" => fits(HintValueKind::String),
+        _ => false,
+    }
+}
+
+/// The editor hints among `hints` that fit a value of `kind`, or `None` when none does. A hint
+/// that does not fit is left out, and so is a range whose `min` is above its `max`, which analysis
+/// reports as `editor-hint-range`.
+fn editor_hints(hints: &[(String, String)], kind: HintValueKind) -> Option<SourceEditorHints> {
     let get = |name: &str| {
         hints
             .iter()
-            .find(|(key, _)| key == name)
+            .find(|(key, value)| key == name && hint_fits(key, value, kind))
             .map(|(_, value)| value.as_str())
     };
     let number = |name: &str| {
         get(name)
-            .filter(|_| fits(HintValueKind::Number))
             .and_then(|text| text.parse::<f64>().ok())
             .map(SourceNumber)
     };
+    let (mut min, mut max) = (number("min"), number("max"));
+    if let (Some(low), Some(high)) = (&min, &max) {
+        if low.0 > high.0 {
+            (min, max) = (None, None);
+        }
+    }
     let editor = SourceEditorHints {
-        kind: get("editor")
-            .filter(|kind| match *kind {
-                "field" | "slider" => fits(HintValueKind::Number),
-                "dropdown" | "segmented" => fits(HintValueKind::Cases),
-                _ => false,
-            })
-            .map(str::to_string),
-        min: number("min"),
-        max: number("max"),
+        kind: get("editor").map(str::to_string),
+        min,
+        max,
         step: number("step"),
         stops: get("stops")
-            .filter(|_| fits(HintValueKind::Number))
             .map(|text| {
                 text.split_whitespace()
                     .filter_map(|stop| stop.parse::<f64>().ok())
@@ -2412,15 +2431,11 @@ fn editor_hints(hints: &[(String, String)], kind: HintValueKind) -> Option<Sourc
                     .collect()
             })
             .unwrap_or_default(),
-        unit: get("unit")
-            .filter(|_| fits(HintValueKind::Number))
-            .map(str::to_string),
+        unit: get("unit").map(str::to_string),
         multiline: get("multiline")
-            .filter(|value| *value == "true" && fits(HintValueKind::String))
+            .filter(|value| *value == "true")
             .map(|_| true),
-        placeholder: get("placeholder")
-            .filter(|_| fits(HintValueKind::String))
-            .map(str::to_string),
+        placeholder: get("placeholder").map(str::to_string),
     };
     (editor != SourceEditorHints::default()).then_some(editor)
 }

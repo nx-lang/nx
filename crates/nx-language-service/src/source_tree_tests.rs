@@ -2000,3 +2000,51 @@ fn an_aliass_chain_is_listed_to_its_end() {
     assert!(names.contains(&"Theme"), "{names:?}");
     assert!(names.contains(&"Mode"), "{names:?}");
 }
+
+fn hinted_tree(library: &str) -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/hinted.nx", library).with_version(1),
+            DocumentInput::new(URI, "import \"./hinted.nx\"\n\nlet box = <Box />\n")
+                .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+#[test]
+fn a_mismatched_property_hint_leaves_the_aliass_in_force() {
+    let tree = hinted_tree(
+        r#"import "@nx/visualizer"
+
+export type Width = int
+export type Box = { width:Width = 1 }
+
+visualizer Width = <ValueVisualizer editor=field min=0 max=10 />
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width editor=dropdown />
+</ElementVisualizer>
+"#,
+    );
+    let width = editor_of(visualizer(&tree, "Box"), "width").expect("width's hints");
+    assert_eq!(width.kind.as_deref(), Some("field"));
+    assert_eq!(width.max, Some(SourceNumber(10.0)));
+}
+
+#[test]
+fn an_empty_range_is_left_out() {
+    let tree = hinted_tree(
+        r#"import "@nx/visualizer"
+
+export type Width = int
+export type Box = { width:Width = 1 }
+
+visualizer Width = <ValueVisualizer min=10 max=0 step=2 />
+"#,
+    );
+    let width = editor_of(visualizer(&tree, "Box"), "width").expect("width's hints");
+    assert_eq!((width.min, width.max), (None, None));
+    assert_eq!(width.step, Some(SourceNumber(2.0)));
+}

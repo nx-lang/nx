@@ -142,6 +142,10 @@ export function rangeProblem(entry: string, hints: SourceEditorHints | undefined
     return undefined;
   }
   const unit = hints.unit === undefined ? "" : ` ${hints.unit}`;
+  if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
+    // An empty range bounds nothing.
+    return undefined;
+  }
   if (hints.min !== undefined && value < hints.min) {
     return `At least ${hints.min}${unit}`;
   }
@@ -155,6 +159,9 @@ export function rangeProblem(entry: string, hints: SourceEditorHints | undefined
 export function isSlider(target: EditTarget): boolean {
   const hints = target.hints;
   if (target.kind !== "number" || hints === undefined) {
+    return false;
+  }
+  if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
     return false;
   }
   return hints.kind === "slider" || (hints.kind === undefined && hints.min !== undefined && hints.max !== undefined);

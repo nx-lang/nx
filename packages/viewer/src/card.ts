@@ -4,7 +4,7 @@
  */
 import type { SourceDeclaration, SourceNode, SourceProperty } from "@nx-lang/language-protocol";
 
-import type { TreeIndex } from "./tree.js";
+import { elementProperties, type TreeIndex } from "./tree.js";
 
 /** A hover card's content. */
 export interface Card {
@@ -132,8 +132,8 @@ function declarationSignature(
 function propertyCard(index: TreeIndex, node: SourceNode): Card | undefined {
   const { tree } = index;
   const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
-  const declaration = owner?.declaration === undefined ? undefined : tree.declarations[owner.declaration];
-  const property = declaration?.properties?.find((candidate) => candidate.name === node.name);
+  const property =
+    owner?.role === "element" ? elementProperties(tree, owner)?.find((candidate) => candidate.name === node.name) : undefined;
   return property === undefined ? undefined : propertyCardOf(property);
 }
 

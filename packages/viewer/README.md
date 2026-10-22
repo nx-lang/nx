@@ -264,7 +264,7 @@ reads muted; a host that sets the same tree again, as after a refused edit, has 
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
 | A run of text on one line                          | A one-line field                                              |
-| A reference to a named value, as `{accent}` or `theme.accent` | Its type's editor, with the reference marked among the named values |
+| A reference to a named value, a `let` without parameters, as `{accent}` or `theme.accent` | Its type's editor, with the reference marked among the named values; a parameter or a loop variable opens Source |
 
 Editor hints from the tree's visualizers shape the editors:
 
@@ -300,7 +300,9 @@ press it. A written row shows a quiet `⋯` at its end under the pointer and whe
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default, Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 
-A selected element ends with a quiet row, `+ N more`, N being the properties it does not write. A
+A selected element ends with a quiet row, `+ N more`, N being the properties it does not write; one
+written under a property-list `if` or match counts as written, and an element of a union's case
+offers its case's properties. A
 click on it, or Enter, lists them as dimmed rows in its visualizer's order, else declaration order,
 each with its default and a quiet `default`, and a filter field past twelve. A dimmed row edits as a
 written value does, opening on its default; a commit fires `nx-edit` with the element's key and

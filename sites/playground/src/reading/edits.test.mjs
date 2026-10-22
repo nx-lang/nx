@@ -140,3 +140,20 @@ test("a step taken after an edit is fired waits for it, as an undo pressed while
   await Promise.all([edit, undo]);
   assert.deepEqual(order, ["edit", "undo"]);
 });
+
+test("the worker lists a property's named values, and picking one writes a reference", async () => {
+  const cases = readFileSync(new URL("../examples/nx/visual-test-cases.nx", import.meta.url), "utf8");
+  const values = await session.answer({
+    kind: "language",
+    id: ++id,
+    query: "namedValues",
+    request: { documents: [{ uri, source: cases }], uri, key: "banner.value", property: "tint" },
+  });
+  const paths = values.map((value) => value.path);
+  assert.deepEqual(paths.slice(0, 3), ["accent", "theme.accent", "theme.muted"], paths.join(" "));
+  assert.equal(values[0].doc, "The brand's warm accent.");
+  const edited = document(cases);
+  const queue = createEditQueue(service, uri, edited, () => undefined);
+  await queue({ key: "banner.value.tint.value", edit: { kind: "setValue", value: { kind: "reference", path: "theme.muted" } } });
+  assert.ok(edited.text().includes("tint={theme.muted}"), edited.text());
+});

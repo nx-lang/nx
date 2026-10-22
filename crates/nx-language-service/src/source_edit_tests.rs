@@ -1,5 +1,8 @@
 use super::*;
-use crate::source_edit::{is_numeric_literal, is_reference_path, is_whole_value, spell_value};
+use crate::source_edit::{
+    attribute_element, element_properties, is_numeric_literal, is_reference_path, is_whole_value,
+    spell_value,
+};
 use std::path::{Path, PathBuf};
 
 const URI: &str = "nx://tenant/edit.nx";
@@ -538,21 +541,20 @@ fn adding_defaults_over_the_repository() {
             if node.role != SourceRole::Element {
                 continue;
             }
-            let Some(declaration) = node
-                .declaration
-                .and_then(|entry| tree.declarations.get(entry as usize))
-            else {
+            let Some(properties) = element_properties(&tree, node) else {
                 continue;
             };
+            // What the element writes, under a property-list condition too.
             let written = tree
                 .nodes
                 .iter()
                 .filter(|child| {
-                    child.parent == Some(at as u32) && child.role == SourceRole::Attribute
+                    child.role == SourceRole::Attribute
+                        && attribute_element(&tree, child) == Some(at)
                 })
                 .filter_map(|child| child.name.clone())
                 .collect::<Vec<_>>();
-            let Some((property, value)) = declaration.properties.iter().find_map(|property| {
+            let Some((property, value)) = properties.into_iter().find_map(|property| {
                 if written.contains(&property.name) || property.flags.contains(&SourceFlag::Content)
                 {
                     return None;
@@ -766,6 +768,82 @@ fn adding_a_named_value() {
     );
 }
 
+#[test]
+fn adding_after_a_value_over_several_lines() {
+    let source = "type Drink = { code:string name:string iced:boolean = false }\nlet tag = <Drink code=\"M\" name=\"a\nb\" />\nlet rows = <Drink\n    code=\"M\"\n    name=\"a\nb\"\n  />\n";
+    let after = edited(
+        source,
+        "tag.value",
+        add("iced", SourceEditValue::Boolean { value: true }),
+    );
+    assert!(after.contains("name=\"a\nb\" iced=true />"), "{after}");
+    let after = edited(
+        source,
+        "rows.value",
+        add("iced", SourceEditValue::Boolean { value: true }),
+    );
+    assert!(
+        after.contains("    name=\"a\nb\"\n    iced=true\n  />"),
+        "{after}"
+    );
+}
+
+#[test]
+fn a_property_written_under_a_condition_is_not_added_again() {
+    let source = "type Drink = { code:string iced:boolean = false price?:float64 }\nlet flag = true\nlet d = <Drink code=\"A\" if flag { iced=true } />\n";
+    let answer = edit(
+        source,
+        "d.value",
+        add("iced", SourceEditValue::Boolean { value: false }),
+    );
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+    // Another property goes after the element's own attributes.
+    let after = edited(
+        source,
+        "d.value",
+        add(
+            "price",
+            SourceEditValue::Number {
+                text: "2".to_string(),
+            },
+        ),
+    );
+    assert!(
+        after.contains(r#"<Drink code="A" price=2 if flag { iced=true } />"#),
+        "{after}"
+    );
+}
+
+#[test]
+fn adding_to_a_union_cases_element() {
+    let source = "type Extra = none | syrup { flavor:string pumps:int = 1 }\nlet promo = <Extra.syrup flavor=\"mocha\" />\n";
+    let after = edited(
+        source,
+        "promo.value",
+        add(
+            "pumps",
+            SourceEditValue::Number {
+                text: "2".to_string(),
+            },
+        ),
+    );
+    assert!(
+        after.contains(r#"<Extra.syrup flavor="mocha" pumps=2 />"#),
+        "{after}"
+    );
+    let answer = edit(
+        source,
+        "promo.value",
+        add(
+            "flavor",
+            SourceEditValue::String {
+                value: "x".to_string(),
+            },
+        ),
+    );
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+}
+
 // --- References ------------------------------------------------------------------------------------
 
 #[test]
@@ -811,6 +889,14 @@ fn a_reference_is_bare_in_a_sequence_and_a_let() {
         }
     )
     .contains("let n = total"));
+}
+
+#[test]
+fn a_literal_or_case_over_a_braced_reference_in_a_let_drops_the_braces() {
+    let source =
+        "type S = s0 | large\nlet s:S = s0\nlet x:S = {s}\nlet total = 3\nlet n:int = {total}\n";
+    assert!(edited(source, "x.value", case("large")).contains("let x:S = large\n"));
+    assert!(edited(source, "n.value", number("-4")).contains("let n:int = -4\n"));
 }
 
 #[test]

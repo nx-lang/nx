@@ -186,6 +186,10 @@ function spoken(element: Element): string {
       return;
     }
     const child = node as Element;
+    if (child.classList.contains("row-menu")) {
+      // The row's menu mark is a button of its own, not part of what the row says.
+      return;
+    }
     const label = child.getAttribute("role") === "img" ? child.getAttribute("aria-label") : null;
     if (label !== null) {
       words.push(`${label} `);
@@ -369,7 +373,15 @@ export class NxViewerElement extends ElementBase {
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
     this.#closedOnPress = undefined;
-    if (this.#menuKey !== undefined && !event.composedPath().includes(this.#menu)) {
+    // A press on the open menu's own mark leaves it to the click that follows, which closes it.
+    const onMark = event
+      .composedPath()
+      .some(
+        (node) =>
+          (node as Element).classList?.contains("row-menu") === true &&
+          (node as Element).closest<HTMLElement>(".sheet-row[data-key]")?.dataset["key"] === this.#menuKey
+      );
+    if (this.#menuKey !== undefined && !onMark && !event.composedPath().includes(this.#menu)) {
       this.#closeMenu(false);
     }
     if (session !== undefined && session.field === undefined && !event.composedPath().includes(this.#popover)) {
@@ -841,10 +853,13 @@ export class NxViewerElement extends ElementBase {
     this.#index = index;
     this.#runs = readingRuns(index);
     this.#folded = this.#chosenFolded ?? new Set(defaultFolded(index));
+    const targets = editTargets(index);
     const draw = (wrapped?: ReadonlySet<string>): void => {
       this.#body.replaceChildren(
         renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning })
       );
+      // Units are drawn before lines are measured, so a line that fits fits with them.
+      this.#markUnits(targets);
     };
     try {
       draw();
@@ -870,8 +885,6 @@ export class NxViewerElement extends ElementBase {
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
-    const targets = editTargets(index);
-    this.#markUnits(targets);
     if (this.#editable) {
       this.#targets = targets;
       this.#markEditable();
@@ -1324,11 +1337,24 @@ export class NxViewerElement extends ElementBase {
    * the value, so it is drawn beside it.
    */
   #markUnits(targets: ReadonlyMap<string, EditTarget>): void {
+    const units = new Map<string, string>();
     for (const target of targets.values()) {
-      const span = this.#rendered.get(target.key);
-      if (target.kind === "number" && target.reference === undefined && target.hints?.unit !== undefined && span !== undefined) {
-        span.after(this.#unitMark(target.hints.unit));
+      if (target.kind === "number" && target.reference === undefined && target.hints?.unit !== undefined) {
+        units.set(target.key, target.hints.unit);
       }
+    }
+    if (units.size === 0) {
+      return;
+    }
+    // The last element drawn for a key is the one the reading keeps for it.
+    const drawn = new Map<string, HTMLElement>();
+    for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
+      if (units.has(element.dataset["key"]!)) {
+        drawn.set(element.dataset["key"]!, element);
+      }
+    }
+    for (const [key, span] of drawn) {
+      span.after(this.#unitMark(units.get(key)!));
     }
   }
 

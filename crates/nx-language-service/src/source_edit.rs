@@ -9,7 +9,9 @@
 //! <para>The shape is unstable: it is published for the viewer to build on, and a later change
 //! commits to it.</para>
 
-use crate::source_tree::{SourceFlag, SourceNode, SourceRole, SourceTree};
+use crate::source_tree::{
+    SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty, SourceRole, SourceTree,
+};
 use crate::{DocumentUri, EditorRange, LineIndex, SnapshotError, WorkspaceSnapshot};
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
 use serde::{Deserialize, Serialize};
@@ -243,9 +245,12 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
         };
         return Ok(Some((start, end, text)));
     }
-    // A literal or a case over a braced reference at an attribute is written as the attribute
+    // A literal or a case over a braced reference at an attribute or a `let` is written as the place
     // usually spells it, its braces dropped.
-    if is_reference && braced && owner == Some(SourceRole::Attribute) {
+    if is_reference
+        && braced
+        && matches!(owner, Some(SourceRole::Attribute | SourceRole::Declaration))
+    {
         if let Some((open, close)) = enclosing_braces(source, start, end) {
             return Ok(Some((open, close, text)));
         }
@@ -489,23 +494,27 @@ fn add_property(
     if node.role != SourceRole::Element {
         return Err(SourceEditRefusal::NotEditable);
     }
-    // The property must be one the element's declaration has, other than its content, and one it
-    // does not write yet.
-    let declared = node
-        .declaration
-        .and_then(|index| tree.declarations.get(index as usize))
-        .and_then(|declaration| {
-            declaration
-                .properties
-                .iter()
-                .find(|property| property.name == name)
-        });
+    // The property must be one the element's declaration has, or its union case's, other than its
+    // content, and one it does not write yet, even under a condition.
+    let declared = element_properties(tree, node).and_then(|properties| {
+        properties
+            .into_iter()
+            .find(|property| property.name == name)
+    });
     let Some(declared) = declared else {
         return Err(SourceEditRefusal::InvalidValue);
     };
     if declared.flags.contains(&SourceFlag::Content) {
         return Err(SourceEditRefusal::InvalidValue);
     }
+    if tree.nodes.iter().any(|candidate| {
+        candidate.role == SourceRole::Attribute
+            && candidate.name.as_deref() == Some(name)
+            && attribute_element(tree, candidate) == Some(at)
+    }) {
+        return Err(SourceEditRefusal::InvalidValue);
+    }
+    // The new attribute goes after the element's last own attribute, not one under a condition.
     let attributes = tree
         .nodes
         .iter()
@@ -515,12 +524,6 @@ fn add_property(
                 && !candidate.flags.contains(&SourceFlag::Content)
         })
         .collect::<Vec<_>>();
-    if attributes
-        .iter()
-        .any(|attribute| attribute.name.as_deref() == Some(name))
-    {
-        return Err(SourceEditRefusal::InvalidValue);
-    }
     // An attribute's value is spelled as `setValue` spells it there: unbraced, with braces around a
     // reference.
     let spelled = spell_value(value)?;
@@ -569,6 +572,40 @@ fn add_property(
         insert_at,
         format!("{newline}{indent}{attribute}"),
     )))
+}
+
+/// The properties an element's declaration has: a record's, an action's or a component's, or for an
+/// element of a union's case, the union's shared ones and then the case's.
+pub(crate) fn element_properties<'t>(
+    tree: &'t SourceTree,
+    element: &SourceNode,
+) -> Option<Vec<&'t SourceProperty>> {
+    let declaration = tree.declarations.get(element.declaration? as usize)?;
+    let mut properties = declaration.properties.iter().collect::<Vec<_>>();
+    if declaration.kind == SourceDeclarationKind::Union {
+        let written = element.name.as_deref()?;
+        let case = written.rsplit('.').next()?;
+        let case = declaration
+            .cases
+            .iter()
+            .find(|candidate| candidate.name == case)?;
+        properties.extend(case.properties.iter());
+    }
+    Some(properties)
+}
+
+/// The element an attribute sets a property of: its parent, or the element whose property-list
+/// condition or match it is written under.
+pub(crate) fn attribute_element(tree: &SourceTree, attribute: &SourceNode) -> Option<usize> {
+    let mut current = attribute.parent?;
+    loop {
+        let node = tree.nodes.get(current as usize)?;
+        match node.role {
+            SourceRole::Element => return Some(current as usize),
+            SourceRole::Attribute | SourceRole::Declaration => return None,
+            _ => current = node.parent?,
+        }
+    }
 }
 
 /// The byte just past an element's tag name, read from the syntax tree.

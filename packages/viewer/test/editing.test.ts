@@ -3,9 +3,9 @@ import { document } from "./dom.js";
 import assert from "node:assert/strict";
 import { after, describe, it, type TestContext } from "node:test";
 
-import { fixture, nxHost, type Fixture } from "./fixtures.js";
+import { fixture, nxHost, treeOf, type Fixture } from "./fixtures.js";
 import { editTargets, isRemovable, unwrittenProperties } from "../src/edit.js";
-import { offsetAtPoint } from "../src/editors.js";
+import { isSlider, offsetAtPoint, rangeProblem } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
 
@@ -873,6 +873,25 @@ describe("what an element does not write", () => {
     assert.equal(element.selection, "latte.value", "the selection is kept");
   });
 
+  it("moves nothing when the newer tree writes the added property", async () => {
+    const fixed = await fixture("adding");
+    const element = show(fixed);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    rendered(element, "latte.value.iced.value").click();
+    const text = fixed.text.replace('size=small />', "size=small iced=true />");
+    assert.notEqual(text, fixed.text);
+    element.tree = (await treeOf([{ uri: "nx:///adding.nx", identity: "adding.nx", source: text }], { visualizers: { modules: [] } })).tree;
+    assert.equal(element.selection, "latte.value", "the selection is kept");
+    assert.ok(rendered(element, "latte.value.iced"), "the property reads as written");
+    assert.equal(moreToggle(element)?.textContent, "+ 3 more");
+    assert.deepEqual(
+      moreRows(element).map((row) => row.dataset["name"]),
+      ["note", "shots", "color"],
+      "the list stays open on the rest"
+    );
+  });
+
   it("opens a dimmed number on its default and adds what is typed", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
@@ -944,6 +963,26 @@ describe("a row's menu", () => {
     assert.deepEqual(menuOf("latte.value.name"), ["Show in Source"], "a required property is not left out");
     root(element).querySelector<HTMLElement>(".menu-item")!.click();
     assert.deepEqual(opens.map((open) => open.key), ["latte.value.name.value"]);
+  });
+
+  it("closes on a second press and click on its mark, and is not read as part of the row", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const mark = rendered(element, "latte.value.size").querySelector<HTMLElement>(":scope > .row-menu")!;
+    const menu = root(element).querySelector<HTMLElement>(".menu")!;
+    const pressAndClick = () => {
+      mark.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+      mark.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true }));
+      mark.click();
+    };
+    pressAndClick();
+    assert.equal(menu.hidden, false, "the first opens it");
+    pressAndClick();
+    assert.equal(menu.hidden, true, "the second closes it");
+    element.selection = "latte.value.size";
+    assert.ok(!(element.getAttribute("aria-label") ?? "").includes("\u22EF"));
+    const status = root(element).querySelector("[aria-live]")?.textContent ?? "";
+    assert.ok(!status.includes("\u22EF"), status);
   });
 
   it("opens from the keyboard on the selected row", async (t) => {
@@ -1132,10 +1171,85 @@ describe("named values", () => {
     assert.equal(card.hidden, true, "it closes with the popover");
   });
 
+  it("lists named values above a case popover's cases, and gives up a segmented row for them", async () => {
+    const element = show(await fixture("adding"));
+    element.namedValues = async () => [{ path: "house", type: "Mode", value: "dark" }];
+    const { edits } = events(element);
+    rendered(element, "card.value.mode.value").click();
+    assert.ok(popover(element).classList.contains("segmented"), "segmented until named values come");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(!popover(element).classList.contains("segmented"), "a list holds named values and cases");
+    const named = popover(element).querySelector<HTMLElement>(".option.named")!;
+    assert.equal(named.dataset["reference"], "house");
+    assert.ok(popover(element).querySelector(".option:not(.named)"), "the cases follow");
+    named.click();
+    assert.deepEqual(edits, [{ key: "card.value.mode.value", edit: { kind: "setValue", value: { kind: "reference", path: "house" } } }]);
+  });
+
   it("reads as before with no host function", async () => {
     const element = show(await fixture("adding"));
     rendered(element, "mocha.value.color.value").click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(popover(element).querySelector(".named"), null);
+  });
+});
+
+describe("bindings and other elements", () => {
+  it("edits a reference to a named value, never a parameter or a loop variable", async () => {
+    const { tree, text } = await fixture("bindings");
+    const targets = editTargets(indexTree(tree, text));
+    assert.equal(targets.get("banded.value.color.value")?.reference, "palette.accent", "a let's member");
+    assert.equal(targets.get("tinted.value.color.value")?.reference, "accent", "a let");
+    assert.equal(targets.get("Special.body.name.value"), undefined, "a component's parameter");
+    assert.equal(targets.get("menu.body[0].size.value"), undefined, "a loop variable");
+  });
+
+  it("opens Source for a binding, never an editor", async () => {
+    const element = show(await fixture("bindings"));
+    const { edits, opens } = events(element);
+    const name = rendered(element, "Special.body.name.value");
+    assert.ok(!name.classList.contains("editable-value"));
+    name.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.deepEqual(opens.map((open) => open.key), ["Special.body.name.value"]);
+    assert.deepEqual(edits, []);
+  });
+
+  it("edits every integer and float type NX has, and its one boolean", async () => {
+    const { tree, text } = await fixture("bindings");
+    const index = indexTree(tree, text);
+    assert.equal(editTargets(index).get("banded.value.big.value")?.kind, "number", "an int64");
+    const listed = unwrittenProperties(index, index.byKey.get("banded.value")!).map(
+      (entry) => `${entry.property.name}:${entry.editor?.kind ?? "-"}`
+    );
+    assert.deepEqual(listed, ["size:case", "few:number", "iced:boolean", "extra:case"]);
+  });
+
+  it("counts a property written under a condition as written", async () => {
+    const { tree, text } = await fixture("bindings");
+    const index = indexTree(tree, text);
+    const names = unwrittenProperties(index, index.byKey.get("sometimes.value")!).map((entry) => entry.property.name);
+    assert.ok(!names.includes("iced"), names.join(" "));
+  });
+
+  it("offers a union case's element the properties it does not write", async () => {
+    const element = show(await fixture("bindings"));
+    const { edits } = events(element);
+    element.selection = "promo.value";
+    assert.equal(moreToggle(element)?.textContent, "+ 1 more");
+    moreToggle(element)!.click();
+    assert.deepEqual(moreRows(element).map(reads), ["pumps 1 default"]);
+    rendered(element, "promo.value.pumps.value").click();
+    const open = field(element)!;
+    open.textContent = "2";
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "promo.value", edit: { kind: "addProperty", name: "pumps", value: { kind: "number", text: "2" } } }]);
+  });
+
+  it("bounds nothing with an empty range, and gives it no slider", () => {
+    const hints = { min: 10, max: 0 };
+    assert.equal(rangeProblem("5", hints), undefined);
+    assert.equal(rangeProblem("20", hints), undefined);
+    assert.equal(isSlider({ at: 0, key: "k", kind: "number", value: "5", hints }), false);
+    assert.equal(isSlider({ at: 0, key: "k", kind: "number", value: "5", hints: { min: 0, max: 10 } }), true);
   });
 });

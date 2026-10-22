@@ -5,7 +5,9 @@ Each property in a declaration's `visualizer` `properties` list SHALL carry, whe
 request asks for `visualizers`, besides its name and format, an `editor` value holding its resolved
 editor hints that fit its type, as the visualizer-declarations capability resolves them: `kind`
 (`field`, `slider`, `dropdown` or `segmented`), `min`, `max`, `step`, `stops`, `unit`, `multiline`
-and `placeholder`, each only when set. A hint reported as `editor-hint-mismatch` SHALL be left out.
+and `placeholder`, each only when set. A hint reported as `editor-hint-mismatch` SHALL be left out,
+and a property's own mismatched hint SHALL NOT hide its type's hint of the same name. A `min` above
+the `max`, reported as `editor-hint-range`, SHALL leave out both.
 An alias's `visualizer` value SHALL carry its own hints the same way. A property with no hints SHALL
 carry no `editor` value, and an entry whose only resolved values are hints SHALL carry a `visualizer`
 value as one with a format does. The values SHALL round-trip through JSON without loss.
@@ -21,6 +23,10 @@ value as one with a format does. The values SHALL round-trip through JSON withou
 #### Scenario: A mismatched hint is left out
 - **WHEN** `Card.title` is a `string` hinted `editor=slider placeholder="Title"`
 - **THEN** the entry for `title` SHALL carry an `editor` value with the placeholder `Title` and no kind
+
+#### Scenario: An empty range is left out
+- **WHEN** `Card.padding` is typed `Spacing`, hinted `min=10 max=0`
+- **THEN** the entry for `padding` SHALL carry neither a minimum nor a maximum
 
 ### Requirement: The types of unwritten properties are listed
 When a `sourceTree` request asks for `visualizers`, the declaration table SHALL also list the
