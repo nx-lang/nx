@@ -1127,6 +1127,34 @@ describe("choices", () => {
     assert.equal(field(element), null);
   });
 
+  it("keeps a choice the field would refuse in the field, with its note; a field with choices is a combobox", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    assert.equal(open.getAttribute("role"), "combobox");
+    assert.equal(open.getAttribute("aria-autocomplete"), "list");
+    assert.equal(open.getAttribute("aria-controls"), null, "no list is named while none is drawn");
+    press(open, "ArrowDown", { altKey: true });
+    assert.deepEqual(shownChoices(element), ["Default 0", "5", "99"]);
+    assert.ok(!popover(element).querySelector(".choices-list")!.classList.contains("labeled"), "one column");
+    const list = popover(element).querySelector(".choices-list")!;
+    assert.equal(open.getAttribute("aria-controls"), list.id);
+    const rule = list.querySelector(".choices-rule")!;
+    assert.equal(rule.getAttribute("role"), "none");
+    assert.equal(rule.getAttribute("aria-hidden"), "true");
+    choices(element)[2]!.click();
+    assert.deepEqual(edits, [], "past its max");
+    assert.equal(field(element), open, "the field stays open");
+    assert.equal(open.textContent, "99");
+    assert.equal(open.getAttribute("aria-invalid"), "true");
+    assert.equal(open.getAttribute("aria-expanded"), "false");
+    assert.equal(open.getAttribute("aria-controls"), null);
+    press(open, "ArrowDown", { altKey: true });
+    choices(element)[1]!.click();
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+  });
+
   it("opens from its chevron, and picks with the pointer", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
@@ -1283,6 +1311,76 @@ describe("steppers", () => {
     up.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 60 }));
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
     assert.equal(element.selection, "card.value.gap", "the selection stays");
+  });
+  it("keeps the steppers as the pointer crosses the value's unit and the gap to reach them", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.padding";
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const value = rendered(element, "card.value.padding.value");
+    over(value);
+    const shown = tools(element)!;
+    over(shown.previousElementSibling!);
+    assert.equal(tools(element), shown, "over the unit");
+    over(value.closest(".line-property")!);
+    assert.equal(tools(element), shown, "over the gap in the value's row");
+    over(shown);
+    pressTool(shown.querySelector(".stepper.up")!);
+    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } }]);
+    over(rendered(element, "card.value.gap.value").closest(".line-property")!);
+    assert.equal(tools(element), null, "gone over another property");
+  });
+
+  it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 80 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "14");
+    element.tree = element.tree;
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "14", "still shown");
+    assert.ok(body(element).classList.contains("stepping"));
+    const again = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 76 }));
+    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 76 }));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
+    assert.ok(!body(element).classList.contains("stepping"));
+
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const down = tools(element)!.querySelector<HTMLElement>(".stepper.down")!;
+    down.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    down.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 110 }));
+    assert.ok(body(element).classList.contains("stepping"));
+    element.remove();
+    assert.ok(!body(element).classList.contains("stepping"), "nothing is left resizing");
+  });
+
+  it("shows the value as before when a drag ends where it began", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [90, 100] });
+    assert.deepEqual(edits, []);
+    const value = rendered(element, "card.value.gap.value");
+    assert.equal(value.textContent, "4");
+    assert.ok(!value.classList.contains("pending"), "nothing is waiting");
+  });
+
+  it("fills an open field from a drag, which commits", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94] });
+    assert.equal(open.textContent, "5");
+    assert.equal(field(element), open);
+    assert.deepEqual(edits, []);
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
   });
 });
 

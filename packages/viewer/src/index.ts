@@ -245,7 +245,7 @@ interface Scrub {
 
 /** A stepper pressed on a number, and dragged up or down once the press became a drag. */
 interface Stepping {
-  readonly target: EditTarget;
+  target: EditTarget;
   readonly pointer: number;
   readonly y: number;
   /** Which stepper: up, `1`, or down, `-1`. */
@@ -829,6 +829,8 @@ export class NxViewerElement extends ElementBase {
     if (session !== undefined && !session.closed) {
       this.#reopen = { key: session.target.key, draft: this.#draftOf(session), caret: this.#caretOf(session) };
     }
+    // A press on a stepper goes on with the next tree, on the same number.
+    const stepping = this.#stepping;
     this.#dropSession();
     this.#pointedKey = undefined;
     this.#rendered.clear();
@@ -933,6 +935,9 @@ export class NxViewerElement extends ElementBase {
       // reopened editor never selects, so the next key does not replace it.
       const end = reopen.draft?.length ?? 0;
       this.#openEditor(reopen.key, reopen.draft, reopen.caret ?? { start: end, end });
+    }
+    if (stepping !== undefined) {
+      this.#resumeStepping(stepping);
     }
     // Fonts that arrive later change where the rows fall, and what fits on a line.
     const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
@@ -1802,6 +1807,7 @@ export class NxViewerElement extends ElementBase {
     this.#closePopover();
     this.#hideTools();
     this.#stepping = undefined;
+    this.#body.classList.remove("stepping");
   }
 
   /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
@@ -2208,18 +2214,22 @@ export class NxViewerElement extends ElementBase {
     if (rows[0]?.dataset["default"] === "true") {
       const rule = document.createElement("div");
       rule.className = "choices-rule";
-      rule.setAttribute("role", "separator");
+      rule.setAttribute("role", "none");
+      rule.setAttribute("aria-hidden", "true");
       rows[0].after(rule);
     }
     session.choices = rows;
     session.choiceList = list;
     const input = session.field ?? session.input;
     input?.setAttribute("aria-haspopup", "listbox");
-    input?.setAttribute("aria-controls", list.id);
     if (session.field !== undefined) {
-      input?.setAttribute("aria-expanded", "false");
+      // A field with choices is a combobox; it names the list only while the list is drawn.
+      session.field.setAttribute("role", "combobox");
+      session.field.setAttribute("aria-autocomplete", "list");
+      session.field.setAttribute("aria-expanded", "false");
       return;
     }
+    input?.setAttribute("aria-controls", list.id);
     // A color's popover is open already: its choices lead it.
     this.#popover.prepend(list);
     this.#popover.classList.add("with-choices");
@@ -2263,6 +2273,11 @@ export class NxViewerElement extends ElementBase {
     }
     session.choicesOpen = open;
     session.field.setAttribute("aria-expanded", String(open));
+    if (open) {
+      session.field.setAttribute("aria-controls", list.id);
+    } else {
+      session.field.removeAttribute("aria-controls");
+    }
     this.#tools.classList.toggle("open", open);
     if (!open) {
       this.#setChoiceActive(session, undefined);
@@ -2361,13 +2376,26 @@ export class NxViewerElement extends ElementBase {
    */
   #pickChoice(session: EditSession, row: HTMLElement): void {
     const target = session.target;
+    const value = row.dataset["value"]!;
+    // A choice the field would refuse stays in it, with the note, as a typed entry does.
+    if (row.dataset["default"] !== "true" && this.#problemOf(target, value) !== undefined) {
+      if (session.field !== undefined) {
+        this.#setChoicesOpen(session, false);
+        session.field.textContent = value;
+        this.#selectAll(session.field);
+      } else if (session.input !== undefined) {
+        session.input.value = value;
+      }
+      this.#validate(session, true);
+      return;
+    }
     this.#endSession(session, true);
     session.host?.replaceChildren(...session.restore!);
     if (row.dataset["default"] === "true") {
       this.#resetValue(target);
       return;
     }
-    this.#commitValue(target, row.dataset["value"]!);
+    this.#commitValue(target, value);
   }
 
   /** Leaves out `target`'s attribute, so its property reads its default, as Reset does. */
@@ -2427,6 +2455,12 @@ export class NxViewerElement extends ElementBase {
     if (element !== null && this.#tools.contains(element)) {
       return;
     }
+    // On the way from the value to the tools, the pointer crosses its unit and the gap: anything in
+    // the value's own row keeps them.
+    const shown = this.#toolsHover === undefined || !this.#tools.isConnected ? undefined : this.#rendered.get(this.#toolsHover);
+    if (shown !== undefined && element !== null && this.#rowOf(element) === this.#rowOf(shown)) {
+      return;
+    }
     const value = element?.closest?.(".editable-value.edit-number") as HTMLElement | null | undefined;
     const key = value === null || value === undefined ? undefined : keyOf(value);
     const target = key === undefined ? undefined : this.#targets.get(key);
@@ -2448,6 +2482,11 @@ export class NxViewerElement extends ElementBase {
     }
     this.#showTools(value!, target);
     this.#toolsHover = key;
+  }
+
+  /** The row a value is drawn in: a sheet's row, a property of a one-line element, or its line. */
+  #rowOf(element: Element): Element | null {
+    return element.closest?.(".line-property, .sheet-row") ?? element.closest?.(".editable-value")?.parentElement ?? null;
   }
 
   #onToolsPointerDown(event: PointerEvent): void {
@@ -2510,31 +2549,67 @@ export class NxViewerElement extends ElementBase {
     this.#stepping = undefined;
     this.#body.classList.remove("stepping");
     const target = stepping.target;
+    const dragged = stepping.value !== undefined;
+    const value = !commit
+      ? stepping.from
+      : (stepping.value ??
+        stepNumber(stepping.from, stepping.direction * (event.shiftKey ? 10 : 1), target.signed !== false, target.hints));
+    if (value === undefined || (!dragged && value === stepping.from)) {
+      return;
+    }
     const session = this.#session?.target.key === target.key && this.#session.field !== undefined ? this.#session : undefined;
-    if (!commit) {
-      if (stepping.value !== undefined) {
-        this.#showStepped(target, stepping.from);
-        if (session === undefined && !this.#pending.has(target.key)) {
-          this.#render();
-        }
+    if (session !== undefined) {
+      this.#showStepped(target, value);
+      if (commit) {
+        this.#selectAll(session.field!);
       }
       return;
     }
-    const value =
-      stepping.value ??
-      stepNumber(stepping.from, stepping.direction * (event.shiftKey ? 10 : 1), target.signed !== false, target.hints);
-    if (value === undefined) {
+    this.#endNumberDrag(target, stepping.from, value, commit);
+  }
+
+  /**
+   * Carries a press on a stepper on through a reading drawn again: its tools drawn past the same
+   * number, showing the number it has reached. When the number is gone, the press ends.
+   */
+  #resumeStepping(stepping: Stepping): void {
+    const target = this.#targets.get(stepping.target.key);
+    const session = this.#session?.target.key === stepping.target.key ? this.#session : undefined;
+    const span = session?.span ?? this.#rendered.get(stepping.target.key);
+    if (target === undefined || target.kind !== "number" || span === undefined) {
       return;
     }
-    if (session !== undefined) {
-      this.#showStepped(target, value);
-      this.#selectAll(session.field!);
-      return;
+    stepping.target = target;
+    this.#stepping = stepping;
+    this.#showTools(span, target);
+    try {
+      this.#tools.querySelector(stepping.direction === 1 ? ".stepper.up" : ".stepper.down")?.setPointerCapture?.(stepping.pointer);
+    } catch {
+      // A pointer the DOM no longer knows ends with its next event.
     }
-    if (value !== stepping.from && this.#problemOf(target, value) === undefined) {
+    if (stepping.value !== undefined) {
+      this.#body.classList.add("stepping");
+      this.#showStepped(target, stepping.value);
+    }
+  }
+
+  /**
+   * Ends a drag that has moved `target`'s number from `from` to `value`, its field closed: committed
+   * once, unless it was cancelled or is back where it began; then shown as before.
+   */
+  #endNumberDrag(target: EditTarget, from: string, value: string, commit: boolean): void {
+    if (commit && value !== from && this.#problemOf(target, value) === undefined) {
       this.#commitValue(target, value);
-    } else if (stepping.value !== undefined) {
-      this.#showStepped(target, stepping.from);
+      return;
+    }
+    const span = this.#rendered.get(target.key);
+    if (span === undefined) {
+      return;
+    }
+    if (this.#pending.has(target.key)) {
+      showValue(span, target, this.#writtenOf(target), from);
+    } else {
+      this.#render();
     }
   }
 
@@ -3027,19 +3102,7 @@ export class NxViewerElement extends ElementBase {
     this.#body.classList.remove("scrubbing");
     this.#ignoreClick = true;
     setTimeout(() => (this.#ignoreClick = false), 0);
-    if (commit && scrub.value !== scrub.from) {
-      this.#commitValue(scrub.target, scrub.value);
-      return;
-    }
-    // Back where it started: shown as before.
-    const span = this.#rendered.get(scrub.target.key);
-    if (span !== undefined) {
-      if (this.#pending.has(scrub.target.key)) {
-        showValue(span, scrub.target, this.#writtenOf(scrub.target), scrub.from);
-      } else {
-        this.#render();
-      }
-    }
+    this.#endNumberDrag(scrub.target, scrub.from, scrub.value, commit);
   }
 
   #onClick(event: MouseEvent): void {

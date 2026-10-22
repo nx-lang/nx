@@ -284,14 +284,15 @@ marked. While the list is closed, Up and Down step a number; while it is open, t
 Enter picks the active row, and Escape closes the list before the field. Picking a choice commits its
 value, never its label; picking the default's row fires `{ kind: "remove" }` for the attribute, as
 Reset to default does, or, on a dimmed row, adds nothing. The field stays typeable: a choice is a
-suggestion, and any entry the field takes commits. A color's choices lead its popover, over its hex
+suggestion, and any entry the field takes commits. A choice the field would refuse, as one past
+`max`, stays in the field with the field's note. A color's choices lead its popover, over its hex
 field.
 
 A number shows steppers, an up and a down button drawn just past the value and its unit so nothing
 moves, while its field is open and while the pointer rests on its value in the selected row. A click
 steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
-Pressing a stepper and dragging up or down scrubs the number, a step every two pixels, shown in place
-and committed once on release. Their tooltip names the keys that do the same.
+Pressing a stepper and dragging up or down scrubs the number, a step every two pixels, shown in place:
+on release it goes into the open field, or is committed once. Their tooltip names the keys that do the same.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does: a field opens with the

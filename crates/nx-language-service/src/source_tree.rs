@@ -2395,8 +2395,10 @@ struct Hints {
 /// What kind of value an editor hint edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HintValueKind {
-    /// A number of any width.
+    /// A real number.
     Number,
+    /// A whole number: an `int`, `int32` or `int64`.
+    Integer,
     /// A string.
     String,
     /// A union of cases with no properties.
@@ -2419,7 +2421,8 @@ fn hint_value_kind(
         return HintValueKind::Other;
     };
     match name.as_str() {
-        "int" | "int32" | "int64" | "float32" | "float64" => return HintValueKind::Number,
+        "int" | "int32" | "int64" => return HintValueKind::Integer,
+        "float32" | "float64" => return HintValueKind::Number,
         "string" => return HintValueKind::String,
         "boolean" => return HintValueKind::Other,
         _ => {}
@@ -2450,7 +2453,11 @@ fn hint_value_kind(
 /// Whether the editor hint `key=value` fits a value of `kind`. Analysis reports a hint that does not
 /// fit as `editor-hint-mismatch`, and a reader never sees it.
 fn hint_fits(key: &str, value: &str, kind: HintValueKind) -> bool {
-    let fits = |needs: HintValueKind| kind == HintValueKind::Unknown || kind == needs;
+    let fits = |needs: HintValueKind| {
+        kind == HintValueKind::Unknown
+            || kind == needs
+            || (needs == HintValueKind::Number && kind == HintValueKind::Integer)
+    };
     match key {
         "editor" => match value {
             "field" => fits(HintValueKind::Number),
@@ -2473,10 +2480,19 @@ fn fitting_choices(choices: &[VisualizerChoice], kind: HintValueKind) -> Vec<Sou
             let value = match (&choice.value, kind) {
                 (
                     VisualizerAttribute::Number(number),
-                    HintValueKind::Number | HintValueKind::Unknown,
-                ) => SourceEditValue::Number {
-                    text: number.0.to_string(),
-                },
+                    HintValueKind::Number | HintValueKind::Integer | HintValueKind::Unknown,
+                ) => {
+                    // A whole number takes no fraction, which analysis reports.
+                    if kind == HintValueKind::Integer && number.0.fract() != 0.0 {
+                        return None;
+                    }
+                    SourceEditValue::Number {
+                        text: choice
+                            .number_text
+                            .clone()
+                            .unwrap_or_else(|| number.0.to_string()),
+                    }
+                }
                 (
                     VisualizerAttribute::Text(text),
                     HintValueKind::String | HintValueKind::Unknown,

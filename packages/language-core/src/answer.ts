@@ -43,8 +43,9 @@ export interface AnswerRequest {
   position: TextPosition | undefined;
   /** What a source-tree query asks to have resolved besides the tree. */
   visualizers?: SourceTreeVisualizersOption | undefined;
-  /** The node a source-edit query edits, and the edit. */
+  /** The key of the node a source-edit query edits. */
   key?: string | undefined;
+  /** The edit a source-edit query makes. */
   edit?: SourceEdit | undefined;
 }
 

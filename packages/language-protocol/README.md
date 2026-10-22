@@ -194,6 +194,27 @@ type, its default as written, and whether it is optional, content or inherited),
 component's state, a union's cases, an alias's type, and a value's type and the range of its value.
 Optional properties of a node or a declaration are absent rather than `null` when they do not apply.
 
+A request with `visualizers: {}` (or `visualizers: { modules: [...] }`, naming further visualizer
+modules the host supplies) also resolves visualizer declarations: each declaration that has one
+carries a `visualizer`, with its title, id and icon, its properties in the order to show them, and,
+for each property or alias, a `format` and an `editor`. `editor` holds the editor hints that fit the
+type: `kind` (`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `unit`, `multiline`,
+`placeholder` and `choices`. Each choice's `value` is typed as a `sourceEdit` `setValue` value, so a
+client passes it on as it is to write the choice:
+
+```ts
+const sizeProperty: SourcePropertyVisualizer = {
+  name: "size",
+  editor: {
+    unit: "px",
+    choices: [
+      { value: { kind: "number", text: "12" }, label: "sm" },
+      { value: { kind: "number", text: "16" }, label: "base" },
+    ],
+  },
+};
+```
+
 ### `sourceEdit` (unstable)
 
 **Unstable:** the request's and the answer's shapes may change in any release until a later one

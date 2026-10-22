@@ -1,6 +1,6 @@
 /**
- * Hover, completions, diagnostics, document symbols and the source tree, answered in the app's
- * compiler worker.
+ * Hover, completions, diagnostics, document symbols, the source tree and source edits, answered in
+ * the app's compiler worker.
  *
  * <para>The same host that evaluates answers these, so a hover range and a diagnostic land on the
  * same line of the visitor's own text. Each query carries the editor's `AbortSignal`: an answer

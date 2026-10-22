@@ -1652,7 +1652,8 @@ impl<'a> InferenceContext<'a> {
             nx_hir::VisualizerRecord::Value => {
                 let kind = self.hint_value_kind(target_ty);
                 self.check_hint_attributes(&properties, kind, None);
-                self.check_choices(&content, kind, None);
+                let integral = Self::is_integral(target_ty);
+                self.check_choices(&content, kind, integral, None);
             }
             nx_hir::VisualizerRecord::Element => {
                 let shape = match target_ty {
@@ -1689,7 +1690,8 @@ impl<'a> InferenceContext<'a> {
                         self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty);
                     let kind = self.hint_value_kind(&field_ty);
                     self.check_hint_attributes(&child_properties, kind, Some(&field.name));
-                    self.check_choices(&choices, kind, Some(&field.name));
+                    let integral = Self::is_integral(&field_ty);
+                    self.check_choices(&choices, kind, integral, Some(&field.name));
                 }
             }
         }
@@ -1808,7 +1810,23 @@ impl<'a> InferenceContext<'a> {
     /// Checks each `ValueChoice` among `content` against a value of `kind`, the value of the
     /// property `property` when there is one: a number takes number literals, a string string
     /// literals, and nothing else takes choices.
-    fn check_choices(&mut self, content: &[ExprId], kind: HintValueKind, property: Option<&Name>) {
+    /// Whether a value of `ty` is a whole number: an `int`, `int32` or `int64`.
+    fn is_integral(ty: &Type) -> bool {
+        matches!(
+            ty.item(),
+            Type::Primitive(Primitive::Int | Primitive::Int32 | Primitive::Int64)
+        )
+    }
+
+    /// Checks each `ValueChoice` among `content` against a value of `kind`, a whole number when
+    /// `integral`, the value of the property `property` when there is one.
+    fn check_choices(
+        &mut self,
+        content: &[ExprId],
+        kind: HintValueKind,
+        integral: bool,
+        property: Option<&Name>,
+    ) {
         if kind == HintValueKind::Unknown {
             return;
         }
@@ -1826,7 +1844,19 @@ impl<'a> InferenceContext<'a> {
             else {
                 continue;
             };
-            let written = if self.hint_number(value.value).is_some() {
+            let number = self.hint_number(value.value);
+            if kind == HintValueKind::Number && integral && number.is_some_and(|n| n.fract() != 0.0)
+            {
+                self.warn(
+                    "editor-hint-mismatch",
+                    format!(
+                        "A choice for {subject} must be a whole number; a viewer ignores this one"
+                    ),
+                    value.span,
+                );
+                continue;
+            }
+            let written = if number.is_some() {
                 HintValueKind::Number
             } else if matches!(
                 self.module.raw_module().expr(value.value),

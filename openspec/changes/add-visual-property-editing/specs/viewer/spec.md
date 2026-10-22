@@ -95,7 +95,8 @@ that the list is there; a click on it, or Alt+Down, SHALL open the list, and so 
 then holding the choices whose label or value holds what was typed. While the list is closed, Up and
 Down SHALL step a number; while it is open, they SHALL move through it, Enter SHALL choose the active
 row, and Escape SHALL close the list before the field. Choosing a choice SHALL commit its value as
-the field would, and choosing the default's row SHALL leave the attribute out, as the row's Reset to
+the field would: a value the field would refuse SHALL stay in the field, the list closed, with the
+field's note. Choosing the default's row SHALL leave the attribute out, as the row's Reset to
 default does, or, on a dimmed row, add nothing. The field SHALL stay typeable: the choices suggest
 and never restrict, and any entry the field takes SHALL commit.
 
@@ -104,7 +105,7 @@ that nothing moves, while its field is open and while the pointer is over its va
 row, when the host has set `editable`. A click SHALL step the number once by `step`, or by one, and
 Shift+click by ten steps, within `min` and `max`: into the field while it is open, else committed at
 once. Pressing a stepper and dragging up or down SHALL change the number by a step for every few
-pixels, show it in place, and commit it once on release. The steppers' tooltip SHALL name the arrow
+pixels and show it in place: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow
 keys, Shift and dragging. Dragging the property's name sideways SHALL still change the number.
 
 In any string field, Shift+Enter SHALL make a line break. A string literal written over several lines
@@ -129,6 +130,17 @@ SHALL still fire `nx-open`.
 - **WHEN** the row `padding=8` is selected and the reader clicks the up stepper past its value, and
   then Shift-clicks it
 - **THEN** the element SHALL fire `nx-edit` setting the number `9`, and then the number `19`
+
+#### Scenario: A stepper dragged
+- **WHEN** the reader presses the up stepper of `gap=4` on its selected row, drags up, and lets go
+  at `14`
+- **THEN** the number SHALL read `14` in place while dragging, and the element SHALL fire `nx-edit`
+  setting the number `14` once, on release
+
+#### Scenario: A refused choice
+- **WHEN** the reader opens a number hinted `max=10` with the choices `5` and `99`, and chooses `99`
+- **THEN** no `nx-edit` SHALL fire, and the field SHALL stay open holding `99` with the note
+  `At most 10`
 
 #### Scenario: Out of range
 - **WHEN** the reader types `80` in the field of a number hinted `max=64` and presses Enter

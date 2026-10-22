@@ -219,6 +219,8 @@ fn each_hint_is_checked_against_its_type() {
         ("type Extra = none | syrup { flavor:string }\ntype Cup = { extra:Extra = none }\nvisualizer Cup = <ElementVisualizer><PropertyVisualizer property=extra editor=segmented /></ElementVisualizer>", 1),
         // A string choice for a number, and a number choice for a string.
         ("type Card = { size:int label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=\"Hi\" /><ValueChoice value=3 /></PropertyVisualizer><PropertyVisualizer property=label><ValueChoice value=3 /><ValueChoice value=\"Hi\" /></PropertyVisualizer></ElementVisualizer>", 2),
+        // A fraction for a whole number.
+        ("type Card = { size:int32 ratio:float64 }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=2.5 /><ValueChoice value=-3 /></PropertyVisualizer><PropertyVisualizer property=ratio><ValueChoice value=2.5 /></PropertyVisualizer></ElementVisualizer>", 1),
         // Choices on an alias of neither, one warning a choice.
         ("type Flag = boolean\nvisualizer Flag = <ValueVisualizer><ValueChoice value=true /><ValueChoice value=\"yes\" /></ValueVisualizer>", 2),
         // Every hint that fits.

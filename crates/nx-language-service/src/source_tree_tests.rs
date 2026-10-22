@@ -1982,6 +1982,109 @@ fn a_mismatched_hint_is_left_out() {
     );
 }
 
+/// A library whose choices take every path: spellings, a mismatched set, an alias chain and
+/// inheritance.
+const CHOICES: &str = r#"import "@nx/visualizer"
+
+export type Spacing = int
+export type Gap = Spacing
+export type Ratio = float64
+export abstract type Base = { pad:Spacing = 8 }
+export type Panel extends Base = {
+  big:int = 0
+  ratio:Ratio = 1
+  gap:Gap = 4
+  tight:Spacing = 2
+}
+
+visualizer Spacing = <ValueVisualizer>
+  <ValueChoice value=4 label="xs" />
+  <ValueChoice value=8 label="sm" />
+</ValueVisualizer>
+visualizer Ratio = <ValueVisualizer>
+  <ValueChoice value=-2.5 />
+  <ValueChoice value=0.1 />
+</ValueVisualizer>
+visualizer Base = <ElementVisualizer>
+  <PropertyVisualizer property=pad>
+    <ValueChoice value=6 label="base" />
+  </PropertyVisualizer>
+</ElementVisualizer>
+visualizer Panel = <ElementVisualizer>
+  <PropertyVisualizer property=big>
+    <ValueChoice value=9007199254740993 />
+    <ValueChoice value=-4 />
+    <ValueChoice value=0x10 />
+    <ValueChoice value=2.5 />
+  </PropertyVisualizer>
+  <PropertyVisualizer property=tight>
+    <ValueChoice value="wide" />
+  </PropertyVisualizer>
+</ElementVisualizer>
+"#;
+
+fn choices_tree() -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/choices.nx", CHOICES).with_version(1),
+            DocumentInput::new(URI, "import \"./choices.nx\"\n\nlet panel = <Panel />\n")
+                .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+fn choice_texts(visualizer: &SourceVisualizer, property: &str) -> Vec<String> {
+    editor_of(visualizer, property)
+        .map(|hints| {
+            hints
+                .choices
+                .iter()
+                .map(|choice| match &choice.value {
+                    SourceEditValue::Number { text } => text.clone(),
+                    SourceEditValue::String { value } => format!("{value:?}"),
+                    other => format!("{other:?}"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn choices_keep_their_literals_and_a_whole_number_takes_no_fraction() {
+    let tree = choices_tree();
+    let panel = visualizer(&tree, "Panel");
+    assert_eq!(
+        choice_texts(panel, "big"),
+        vec!["9007199254740993", "-4", "16"],
+        "every digit, a sign, and a hex literal as its value; 2.5 is left out of an int"
+    );
+    assert_eq!(choice_texts(panel, "ratio"), vec!["-2.5", "0.1"]);
+}
+
+#[test]
+fn choices_that_all_mismatch_leave_the_types_choices() {
+    let tree = choices_tree();
+    assert_eq!(
+        choice_texts(visualizer(&tree, "Panel"), "tight"),
+        vec!["4", "8"]
+    );
+}
+
+#[test]
+fn choices_reach_through_an_alias_chain_and_inheritance() {
+    let tree = choices_tree();
+    let panel = visualizer(&tree, "Panel");
+    assert_eq!(choice_texts(panel, "gap"), vec!["4", "8"], "Gap = Spacing");
+    assert_eq!(
+        choice_texts(panel, "pad"),
+        vec!["6"],
+        "Base's property visualizer, inherited"
+    );
+}
+
 #[test]
 fn hints_round_trip_through_json() {
     let tree = cards_tree();

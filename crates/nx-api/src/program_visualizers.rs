@@ -292,6 +292,8 @@ pub struct VisualizerChild {
 pub struct VisualizerChoice {
     /// The value: a number or a string literal.
     pub value: VisualizerAttribute,
+    /// A number's literal as an edit writes it, exactly, so a large integer keeps every digit.
+    pub number_text: Option<String>,
     /// The label, when the choice has one.
     pub label: Option<String>,
 }
@@ -390,9 +392,9 @@ pub fn read_visualizer_value(module: &LoweredModule, value: ExprId) -> Option<Vi
 fn choices_of(module: &LoweredModule, content: &[ExprId]) -> Vec<VisualizerChoice> {
     content
         .iter()
-        .filter_map(|child| element_parts(module, *child))
-        .filter(|(tag, _, _)| tag == "ValueChoice")
-        .filter_map(|(_, attributes, _)| {
+        .filter_map(|child| Some((*child, element_parts(module, *child)?)))
+        .filter(|(_, (tag, _, _))| tag == "ValueChoice")
+        .filter_map(|(child, (_, attributes, _))| {
             let value = attribute(&attributes, "value")
                 .filter(|value| {
                     matches!(
@@ -405,7 +407,16 @@ fn choices_of(module: &LoweredModule, content: &[ExprId]) -> Vec<VisualizerChoic
                 Some(VisualizerAttribute::Text(text)) => Some(text.clone()),
                 _ => None,
             };
-            Some(VisualizerChoice { value, label })
+            let number_text = matches!(value, VisualizerAttribute::Number(_))
+                .then(|| {
+                    choice_value_expr(module, child).and_then(|expr| number_text(module, expr))
+                })
+                .flatten();
+            Some(VisualizerChoice {
+                value,
+                number_text,
+                label,
+            })
         })
         .collect()
 }
@@ -460,6 +471,42 @@ fn attribute_value(module: &LoweredModule, expr: ExprId) -> Option<VisualizerAtt
             Some(VisualizerAttribute::Name(case.as_str().to_string()))
         }
         _ => number_value(module, expr).map(VisualizerAttribute::Number),
+    }
+}
+
+/// The expression a `ValueChoice` writes as its `value`.
+fn choice_value_expr(module: &LoweredModule, expr: ExprId) -> Option<ExprId> {
+    match module.expr(expr) {
+        Expr::Element { element, .. } => module
+            .element(*element)
+            .properties
+            .iter()
+            .find(|property| property.key.as_str() == "value")
+            .map(|property| property.value),
+        Expr::RecordLiteral { properties, .. } => properties
+            .iter()
+            .find(|property| property.name.as_str() == "value")
+            .map(|property| property.value),
+        _ => None,
+    }
+}
+
+/// A number literal, or a negated one, spelled as an edit writes it: an integer with every digit,
+/// a real as its shortest round-trip spelling.
+fn number_text(module: &LoweredModule, expr: ExprId) -> Option<String> {
+    match module.expr(expr) {
+        Expr::Literal(Literal::Int(value)) => Some(value.to_string()),
+        Expr::Literal(Literal::Int32(value)) => Some(value.to_string()),
+        Expr::Literal(Literal::Float(value) | Literal::Float32(value)) => Some(value.0.to_string()),
+        Expr::UnaryOp {
+            op: UnOp::Neg,
+            expr,
+            ..
+        } => number_text(module, *expr).map(|text| match text.strip_prefix('-') {
+            Some(positive) => positive.to_string(),
+            None => format!("-{text}"),
+        }),
+        _ => None,
     }
 }
 

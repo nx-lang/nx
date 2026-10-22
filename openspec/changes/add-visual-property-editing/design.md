@@ -121,8 +121,12 @@ changes what a program means.
   number, as the case chevron is drawn, so nothing moves. They show while the number's field is open
   and on hover of a value in the selected row, not everywhere, so the reading does not flicker under
   a passing pointer. A click steps once (Shift ten steps), into the open field or committed at once;
-  pressing one and dragging up or down scrubs, committed once on release. Their tooltip names the
-  keys. Dragging a number's name sideways stays, as before.
+  pressing one and dragging up or down scrubs, into the open field on release, else committed once.
+  Their tooltip names the keys. Dragging a number's name sideways stays, as before. On a one-line
+  element the steppers, and the chevron while a field with choices is open, are wider than the one
+  space past the value, so they cover the start of the next property while they show. That is the
+  trade for nothing moving: they show only on the selected row and while the field is open, and
+  drawing them above or below the line would cover a neighboring line instead.
 - **Segmented** (`editor=segmented`): the case popover shows the cases as one row of buttons. With more
   than five cases, or names too long for the reading's width, it falls back to the list.
 - **Dropdown** (`editor=dropdown`): the phase 1 case popover, named so a library can say it.
