@@ -494,6 +494,16 @@ describe("the reading", () => {
     assert.ok(written.textContent!.includes('\n      note="n"'), "its later line keeps the source's indentation");
   });
 
+  it("keeps text that starts on its element's tag from reaching left of where the item is drawn", async () => {
+    const poem = await fixture("textOnItsTag");
+    const element = show(poem);
+    const item = root(element).querySelector<HTMLElement>(".sheet-item.as-written")!;
+    assert.ok(item, "the text over two lines reads as written");
+    // Its first line starts at column 16, on the tag, and its second at column 2: measured from the
+    // first, the second would be drawn 14 columns left of the item.
+    assert.equal(item.style.getPropertyValue("--column"), "2", "measured from its least indented line");
+  });
+
   it("puts an id last in a group's header when its visualizer puts it at the end", async (t) => {
     const ids = await fixture("groupIdAtEnd");
     narrow(t, 20);

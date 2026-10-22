@@ -1,13 +1,14 @@
 import "@nx/visualizer"
 
-// Test cases for Visual, one or two of each. Hover a name for its doc. Click a value to edit it,
-// Enter or F2 to edit the selected row, Escape to cancel, Delete to leave out a property that has a
-// default or is optional, and Ctrl+Z to undo. After each edit, check Source.
+// Test cases for Visual, one or two of each. Hover a name, or select it and press i, for its card.
+// Click a value, or press Enter or F2 on the selected row, to edit it; Tab and Shift+Tab move between
+// values and Escape cancels. Delete (Cmd+Backspace on a Mac) leaves out a property that has a default
+// or is optional. Ctrl or Cmd+Z and Shift+Z, or the title bar's buttons, undo and redo. After each
+// edit, check Source.
 
-/// Text a person reads.
 type uitext = string
-/// A color, as CSS writes one.
 type Color = string
+type Code = string
 type Count = int
 
 /// How big a cup is.
@@ -19,59 +20,78 @@ type Size =
   /// 16 oz
   | large
 
-/// Something on the menu.
+type Extra = | none | syrup { flavor:uitext pumps:Count = 1 }
+type Cup = { sleeve?:string lid:boolean = true }
+
 abstract type Item = {
-  code:string
+  code:Code
   name:uitext
   note?:uitext
 }
 
+/// A drink, hot or iced.
 type Drink extends Item = {
   size:Size = medium
   iced:boolean = false
+  /// Shots of espresso.
   shots:Count = 1
   price:float64 = 4.5
   color?:Color
   ratings?:int+
+  cup?:Cup
+  extra?:Extra
 }
 
 type Pastry extends Item = {
   warm:boolean = false
-  pairsWith?:string
+  pairsWith?:Code
 }
 
+type Water extends Item = { sparkling:boolean = false }
 type Note = { content text:uitext }
 type Menu = { title:uitext content items:Item+ }
 
 visualizer Color = <ValueVisualizer format=color />
+visualizer Code = <ValueVisualizer format=id />
 visualizer Item = <ElementVisualizer title=name id=code icon="coffee" />
-visualizer Pastry =
-  <ElementVisualizer title=name id=code idPosition=end icon="croissant">
-    <PropertyVisualizer property=pairsWith format=id />
-  </ElementVisualizer>
-visualizer Menu = <ElementVisualizer title=title icon="book-open" />
+visualizer Pastry = <ElementVisualizer idPosition=end icon="croissant" />
+visualizer Water = <ElementVisualizer icon="no-such-icon" />
+visualizer Cup = <ElementVisualizer><PropertyVisualizer property=sleeve format=color /></ElementVisualizer>
 
-// Values: a number, an untyped number, a string with escapes, and one with \n (it opens in Source)
+// Values: an untyped int and float; a string with escapes, which opens without them; and one with \n,
+// which Enter or a double-click opens in Source
 let total = 3
 let ratio = 1.5
 let greeting = "Say \"hi\" \\ bye"
 let lines = "one\ntwo"
 
-// Text content: each run edits as one line; the space before {total} stays
+// Text content: each run edits as one line, and the space before {total} stays. Typing a < b is
+// refused, and the run over two lines does not edit.
 let welcome = <Note>Welcome back</Note>
 let note = <Note>Ask for oat milk {total} times</Note>
+let poem = <Note>Two lines
+  of text</Note>
+// A union case on its own line: the tag icon
+let promo =
+  <Extra.syrup flavor="mocha" />
 
-// Functions: a value from one is not edited here; one used as an element reads with its own icon
+// Functions: priceOf's values are code and do not edit, but those Special's body writes do. Special
+// used as an element reads with the function icon.
 let priceOf(size:Size): float64 = { if size == Size.large { 5.5 } else { 4.5 } }
 let <Special name:uitext /> = <Drink code="SPC" name={name} size=large />
+// A qualified case edits as a case and keeps its Size.
 let sizes:Size+ = { Size.small Size.large }
 
 let root(): Menu = {
+  // No visualizer: the box icon, and folded (its chevron, or Left) it counts its children
   <Menu title="Morning menu">
-    // One line: Tab through its values; a case opens a popover of cases with their docs
-    <Drink code="LAT" name="Latte" size=small iced=false shots=2 />
-    // A sheet: Delete leaves out size, iced, color (and its comment) or note, but not name; ratings
-    // takes no negative number; double-click total + 1 to open it in Source
+    // One line: Space or a click toggles iced; Up and Down step shots, Shift by 10, or drag its name;
+    // 12px is not a number; size opens a popover of cases with their docs, and edits right after an
+    // emoji
+    <Drink code="LAT" name="☕ Latte" size=small iced=false shots=2 />
+    // A sheet: Delete leaves out size, iced, color (and its comment), note, cup or extra, but not
+    // name; iced keeps its braces; price is a float64; color and cup's sleeve open a hex field and a
+    // picker; ratings takes no negative number; double-click total + 1 to open it in Source
     <Drink
       code="CBR"
       name="Cold brew"
@@ -82,9 +102,13 @@ let root(): Menu = {
       color="#5a3a22" // leaves with color
       note="Say \"hi\" \\ bye"
       ratings={ 4 2 5 }
+      cup=<Cup sleeve="#c8a27a" lid=false />
+      extra=<Extra.syrup flavor="caramel" pumps=2 />
     />
-    // Its own visualizer: the id reads last, and pairsWith as an id
+    // Item's visualizer, merged: the id reads last, and pairsWith, a Code, as an id
     <Pastry code="CRO" name="Croissant" warm={true} pairsWith="LAT" />
+    // An icon Visual cannot draw gives way to the box
+    <Water code="H2O" name="Water" />
     <Special name="Flat white" />
     // Built from data: for and if read as written
     for size in sizes {

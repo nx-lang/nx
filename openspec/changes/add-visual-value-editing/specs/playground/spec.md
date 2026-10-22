@@ -81,14 +81,17 @@ and each SHALL link to the documentation page for its topic.
 #### Scenario: Larger examples
 - **WHEN** a visitor opens the examples drop-down
 - **THEN** the larger examples SHALL be grouped under "Larger examples", and the playground's tests
-  SHALL count only the other examples toward the 10 to 20
+  SHALL count toward the 10 to 20 only the examples under neither "Larger examples" nor "Test cases"
 
 #### Scenario: Visual test cases
 - **WHEN** a visitor opens the "Visual test cases" example and switches to Visual
-- **THEN** it SHALL hold, with a comment for each, a one-line element, a property sheet, an element
-  whose visualizer puts its id last and formats a property as an id, a function used as an element,
-  text content around a braced value, and a value of every kind Visual edits: a string with escapes,
-  `uitext`, an id, an `int`, an alias of one, a `float64`, an untyped number, a boolean written bare
-  and in braces, a case, a color and a sequence of numbers, together with a string Visual opens in
-  Source, an expression, a `for` and an `if`, and properties that may and may not be left out
-
+- **THEN** it SHALL hold, with a comment for each saying what to try, a one-line element, a property
+  sheet, an element as a property's value, a union case as an element, a group with no title to fold,
+  an element whose visualizer merges with its base's and puts its id last, an icon Visual cannot draw,
+  a function used as an element, text content around a braced value and over two lines, a doc on a
+  type and on a property, and a value of every kind Visual edits: a string with escapes, `uitext`, an
+  id formatted by a value visualizer, an `int`, an alias of one, a `float64`, an untyped number, a
+  boolean written bare and in braces, a case written bare and qualified, a color formatted by a value
+  visualizer and by a property visualizer, a value after an emoji and a sequence of numbers, together
+  with a string Visual opens in Source, an expression, a `for` and an `if`, and properties that may
+  and may not be left out

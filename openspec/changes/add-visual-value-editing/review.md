@@ -472,6 +472,143 @@ Checks:
 
   `ownTexts.test.mjs`: 7/7 pass.
 
+## New Findings Discovered During 2026-10-22 03:27 Review
+
+Scope of this pass: commit bb1a25a, which adds:
+- the playground example `visual-test-cases.nx` under the new topic "Test cases";
+- the MODIFIED "Examples get a visitor started" requirement;
+- task 8.1, the README paragraph and `check-examples`' `UNCOUNTED_TOPICS`.
+
+I checked the example against the viewer spec (main and delta), the source-edits spec and
+`@nx/visualizer`.
+
+Checks:
+- `pnpm run check-examples` passes: 24 examples match their expected output.
+- In Chromium against the dev server (`/play/visual-test-cases`), these comments held as written:
+  - Tab on the Latte line runs code → name → size (popover of cases with their docs) → shots, and then
+    on into the next drink. It passes over `iced`, which is by design.
+  - Delete removes `size`, `iced`, `note` and `ratings` (each whole line), and removes `color` together
+    with its `// leaves with color`. Delete does nothing on `name` or `code`. Backspace does nothing,
+    and Cmd+Backspace removes.
+  - `-1` in `ratings` stays in the field with the note "Cannot be negative here", and no edit fires.
+    `-1` in the Latte's `shots` is written.
+  - Double-clicking `total + 1` or `priceOf(size)`, or double-clicking `lines` (or clicking it and
+    pressing Enter), switches to Source at that line.
+  - The run before `{total}` opens as `Ask for oat milk`; setting it to `Oat milk` keeps the space.
+  - `greeting` opens unescaped and is written back escaped.
+  - `pairsWith` reads as an id, and Croissant's id reads last.
+  - The Up arrow, Shift+Up, `12px` ("Not a number"), Space on a braced boolean (which stays braced),
+    the qualified case in `sizes` (which keeps `Size.`), the color popover's hex field, and Ctrl+Z and
+    Ctrl+Y all behaved as specified.
+- The example is concise for what it covers (96 lines, about one line per case). No case is
+  redundant. `welcome`, a run with no braced value, and `greeting` next to the sheet's `note`, which is
+  drawn as code as opposed to decoded, each cover a case of their own.
+
+### 🟡 Fixed - RF20 Several cases Visual reads or edits have no instance in the test cases
+- **Severity:** Medium (confidence: high)
+- **Evidence:** The example has nothing for these cases from the viewer spec and `@nx/visualizer`:
+  - **An element as a property's value.** For example, `padding=<Thickness left=1 top=2 />`. It reads
+    as a line in its row, or as a group under the property's name when it is too long. Its own
+    attributes are editable values ("an attribute's value"). Nothing exercises either.
+  - **The visualizer formats not used.** The example has no `ValueVisualizer format=id` (an alias that
+    reads as an id), and no `PropertyVisualizer format=color`. It uses only the other two
+    combinations.
+  - **Kinds' icons and the fallback.** Only `square-function` (Special) and visualizer icons appear.
+    None of these appears:
+    - a record with no visualizer on a line of its own (`box`);
+    - a union case written as an element (`tag`), which in a row is also "An element sharing its line";
+    - a visualizer icon the host cannot draw.
+
+    `Note` has no visualizer, but both `Note`s share their line with a `let`, so neither has an icon.
+  - **A folded group's child count.** Every group here has a title, so folding shows the title, never
+    `N children`. No comment mentions folding at all, although an `if` and a `for` are present.
+  - **Text after an emoji.** Offsets are UTF-8 in the tree and UTF-16 in Monaco, so editing a value
+    that follows an emoji on its line checks the reading ("Text after an emoji"). It also checks that
+    the playground applies `sourceEdit`'s ranges to the right characters. This is the edit path most
+    likely to break unnoticed.
+  - **A text run Visual will not take.** There is no run over several lines (`notEditable`), and
+    nothing invites typing `a < b` into a run (`invalidValue`).
+- **Recommendation:** Add the cases without growing the example much. For example:
+  - give `Drink` a `cup?:Cup` property, where `Cup` is a record with no visualizer and one of whose
+    fields is a `Color` formatted through a `PropertyVisualizer`;
+  - set `cup=<Cup …/>` on the sheet;
+  - put a `<Size.large />`-style case element and a `Tip` with `icon="no-such-icon"` in the menu;
+  - give one value an emoji before it (`name="☕ Latte"`, then edit `size` after it);
+  - add a no-title group holding the `for`, with a line in the header saying "fold it".
+
+  Then mention each case in its comment.
+- **Fix:** The example now has `cup=<Cup …/>` (an element as a value, with `PropertyVisualizer format=color` on `sleeve`), `extra=<Extra.syrup …/>` in the sheet and `let promo` on its own line (the `tag` icon), `Menu` with no visualizer (the `box` icon, and "6 children" folded), `Water` with `icon="no-such-icon"` (gives way to `box`), `type Code` with `ValueVisualizer format=id` (so `pairsWith` reads as an id through its type, and `Pastry`'s visualizer merges with `Item`'s), `name="☕ Latte"` before `size`, and `poem`, a run over two lines. The comment on text content invites `a < b`. Checked in Chromium: `size` after the emoji writes `size=medium` with the name intact; `a < b` shows "Text cannot hold < or {"; `poem` has no field; `pumps` and `sleeve` edit; folding `Menu` shows "6 children". `poem`, written starting on its tag, showed its second line left of the pane; fixed in `writeItems` (the column is the least of the item's start and its later lines' indentation), with a test in `element.test.ts`.
+
+### 🟡 Fixed - RF21 "Hover a name for its doc" finds a doc only on cases; the four doc comments sit where no hover in Visual reaches
+- **Severity:** Low (confidence: high, checked in Chromium)
+- **Evidence:** The docs are on `uitext`, `Color`, `Size` and `Item`. In Visual:
+  - Hovering `Drink` shows `type Drink extends Item` with no doc, because `Drink` has none and the card
+    does not show the base's doc.
+  - Every property card is `(property) name: Type …` with no doc, because no property has one.
+  - The type docs appear only in the folded declarations, where Visual gives no hover.
+
+  So the hover cases "An element's declaration" (signature and doc) and "A property's type, default
+  and doc" are not exercised. Only the case docs (`Size.small 8 oz` and the others) show. The `i` key,
+  "From the keyboard", is not mentioned.
+- **Recommendation:** Put the doc where a hover reaches it:
+  - a `///` on `Drink`, or move `Something on the menu.` there;
+  - a `///` on one property, such as `shots`.
+
+  Add "or press i" to the header.
+- **Fix:** `/// A drink, hot or iced.` on `Drink` and `/// Shots of espresso.` on `shots`; the docs on `uitext`, `Color` and `Item`, which no hover reached, are gone. The header says "Hover a name, or select it and press i, for its card". Checked in Chromium: both cards show their doc.
+
+### 🟡 Fixed - RF22 Three comments say less, or other, than Visual does
+- **Severity:** Low (confidence: high, checked in Chromium)
+- **Evidence:**
+  - **"Functions: a value from one is not edited here."** This is true of `priceOf`'s `5.5`, but
+    `Special`'s body values do edit: setting `SPC` to `SP2` and choosing `large` both write to the
+    source. The comment reads as if function bodies do not edit.
+  - **"One used as an element reads with its own icon."** `<Special>` reads with the function icon,
+    `square-function`, not `Drink`'s `coffee`, which "its own" could be taken to mean.
+  - **"Values: a number, an untyped number…"** Both `total` and `ratio` are untyped (an int and a
+    float). The same comment's "(it opens in Source)" needs a double-click or Enter, since a click
+    only selects.
+- **Recommendation:** Reword these comments. For example:
+  - "Functions: priceOf's values are code and do not edit, but the attributes Special's body writes
+    do; Special used as an element reads with the function icon";
+  - "an untyped int and float";
+  - "(double-click or Enter opens it in Source)".
+- **Fix:** Reworded: "an untyped int and float"; "one with \n, which Enter or a double-click opens in Source"; "priceOf's values are code and do not edit, but those Special's body writes do. Special used as an element reads with the function icon."
+
+### 🟡 Fixed - RF23 Several kinds of value have no comment saying what to try, which the requirement asks of each
+- **Severity:** Low (confidence: high)
+- **Evidence:** The MODIFIED requirement says each case has "a comment saying what to try", and the
+  scenario says "with a comment for each". These have none, or only a mention in the Delete line:
+  - the color popover, with its hex field and picker;
+  - a number's arrow keys, Shift for 10, and dragging the property's name;
+  - "Not a number" (`12px`);
+  - a boolean, clicked or toggled with Space, and the braced `iced={true}` staying braced;
+  - `sizes`, the qualified case that keeps `Size.`, which has no comment at all;
+  - the alias `shots:Count` and the `float64` `price`;
+  - Shift+Tab;
+  - Cmd+Backspace on a Mac;
+  - the title bar's Undo and Redo, and redo itself.
+
+  The header's "Ctrl+Z to undo" is also wrong on a Mac, where it is Cmd+Z.
+- **Recommendation:** Fold these into the existing comments rather than adding lines. For example:
+  - on the Latte line: "Space or a click toggles iced; arrows step shots (Shift: 10), or drag its
+    name; try 12px";
+  - on the sheet: "the color opens a hex field and a picker; iced keeps its braces";
+  - over `sizes`: "a qualified case keeps Size.";
+  - in the header: "Ctrl/Cmd+Z and Shift+Z, or the title bar's buttons".
+- **Fix:** Folded into the comments: the header names Shift+Tab, Cmd+Backspace on a Mac, Ctrl or Cmd+Z and Shift+Z and the title bar's buttons; the Latte line names Space or a click on `iced`, Up and Down with Shift, dragging the name, `12px` and the case popover; the sheet names `iced` keeping its braces, `price` as a float64 and the color popovers; `sizes` has "A qualified case edits as a case and keeps its Size."; `shots` is a `Count`.
+
+### 🟡 Fixed - RF24 The "Larger examples" scenario still says the tests count every other example
+- **Severity:** Low (confidence: high)
+- **Evidence:** The MODIFIED requirement and `UNCOUNTED_TOPICS` leave out "Test cases" as well as
+  "Larger examples". The scenario "Larger examples" still ends "the playground's tests SHALL count
+  only the other examples toward the 10 to 20", and "the other examples" includes "Visual test cases".
+  The "Visual test cases" scenario says nothing about counting.
+- **Recommendation:** Have one scenario state the rule: the tests count the examples outside "Larger
+  examples" and "Test cases". Do this either in the "Larger examples" scenario or in a THEN clause of
+  "Visual test cases".
+- **Fix:** The "Larger examples" scenario now counts only the examples under neither "Larger examples" nor "Test cases", and the "Visual test cases" scenario lists the added cases.
+
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
   now, because `#openEditor` toggles. Spec and design say Enter "opens" the value, and Tab skips booleans.
