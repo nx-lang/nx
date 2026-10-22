@@ -394,7 +394,7 @@ removal of the slider, `stops`, braced number lists, `namedValues` and the `refe
 complete: no code, CSS, docs or tests still name them, and a written reference opens Source again
 (`bindings` tests).
 
-### 🟡 Fixed - RF18 A selected row's hover steppers vanish before the pointer can reach them
+### ✅ Verified - RF18 A selected row's hover steppers vanish before the pointer can reach them
 - **Severity:** Medium
 - **Evidence:** `#hoverTools` (`packages/viewer/src/index.ts:2423-2445`) keeps the steppers only while
   the pointer is over the value itself (`closest(".editable-value.edit-number")`) or over the tools.
@@ -428,6 +428,14 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   shown value, its unit (`shown.nextElementSibling` when it is a `.unit`) and the tools, or use the
   shown value's own parent as the row for both. Add the `let` case to the test. **Confidence: high.**
 - **Fix:** (second round) `#rowOf` is replaced by `#onTheWay(shown, element)`: the tools stay while the pointer is over the shown value, its unit (the value's next sibling with `.unit`), the value's parent, or its `.line-property`/`.sheet-row` itself, but not another value inside it. That covers a `let`'s unit outside any property row. Test "keeps a let's steppers over its unit, and moves them to the next number in a row" (fixture `adding` gained `let pad:Spacing = 8`).
+- **Verification:** (second round) Confirmed. `#onTheWay` keeps the tools over the shown value,
+  its unit, the value's parent, and the `.line-property` or `.sheet-row` element itself. Under jsdom
+  the unit now keeps them in every place checked: a `let`'s number (`let pad:Spacing = 8`), a
+  one-line and a multi-line element's `pad`, the items of a braced list in an element, and the items
+  of a top-level `let xs:Spacing+ = { 5 6 }`. The space between a list's items (the list's own span)
+  keeps them too. They still go over another property's row and over the gap between properties
+  (the `.line-element`). The new test covers the `let` and passes with the other 160.
+  **Confidence: high.**
 
 ### ✅ Verified - RF19 A tree that arrives during a stepper drag drops the drag and leaves the reading stuck in `stepping`
 - **Severity:** Medium
@@ -552,6 +560,19 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   `:not([hidden])` to the new rule, and add a test that a filtered-out default's row is hidden.
   **Confidence: high.**
 - **Fix:** (second round) The rule is `.choices-list:not(.labeled) .option.choice-default:not([hidden])`, so filtering hides the default's row again.
+- **Verification:** (second round) The `[hidden]` half is fixed: in headless Chromium, with the
+  viewer's whole built stylesheet and rows marked up as `choiceRows` draws them, a hidden default's
+  row computes `display: none` in both an unlabeled and a labeled list. But the same check shows the
+  original finding was never fixed, which the first verification missed. `.popover .option`
+  (`styles.ts:493-496`) sets `display: flex; flex-direction: column`, and the new rule changes only
+  `display` and `gap`. So in an unlabeled list the default's row is still a column: `Default` sits at
+  top 20 and `0` at top 55, 16px further down because of the `gap`. In a labeled list both spans sit
+  at the same top (20). No test can see this under jsdom, and the second round added no test that a
+  filtered-out default's row is hidden. Still to do: give the rule `flex-direction: row` and
+  `align-items: baseline`, or lay the row out as `grid-template-columns: max-content minmax(0, 1fr)`.
+  Check it in a browser or a screenshot of the playground's unlabeled choices with a default.
+  **Confidence: high.**
+- **Fix:** (third round) The rule also sets `flex-direction: row; align-items: baseline`, overriding the base `.popover .option` column. Measured in headless Chromium with the built stylesheet: in an unlabeled list, `Default` and `0` share a top (15px) with a 16px gap, as in a labeled list.
 
 ### ✅ Verified - RF24 The choices field's ARIA does not form a combobox
 - **Severity:** Low
@@ -655,7 +676,7 @@ clippy on those three crates (clean); `openspec validate add-visual-property-edi
 the built viewer under jsdom and the wasm language snapshot. One CSS cascade was checked in headless
 Chromium.
 
-### 🟡 Fixed - RF29 Within one row, the steppers stay on the first number hovered and never move to another
+### ✅ Verified - RF29 Within one row, the steppers stay on the first number hovered and never move to another
 - **Severity:** Low
 - **Evidence:** RF18's fix makes `#hoverTools` return early whenever the hovered element is in the
   shown value's row (`packages/viewer/src/index.ts:2459-2463`). It returns before it looks at which
@@ -671,8 +692,12 @@ Chromium.
   element is not inside another `.editable-value.edit-number`. This fits with the fix RF18 still
   needs. Add a test that hovers two items of one list. **Confidence: high.**
 - **Fix:** Fixed with RF18's second round: only the row or line element itself keeps the tools, so hovering another number in the row moves them to it. Covered by the same test, over `items={ 1 2 }` in `editingEdges`.
+- **Verification:** Confirmed. `#onTheWay` keeps the tools only for the row or line element
+  itself, not for another value in it, so `#hoverTools` goes on to the hovered value. Under jsdom on
+  `editingEdges`, hovering `items[0]` and then `items[1]` moves the tools to `items[1]`. Then
+  `items[1]`'s unit and the tools keep them. The new test asserts the move. **Confidence: high.**
 
-### 🟡 Fixed - RF30 `is_integral` carries `check_choices`' old doc comment
+### ✅ Verified - RF30 `is_integral` carries `check_choices`' old doc comment
 - **Severity:** Low
 - **Evidence:** The fix inserted `is_integral` (`crates/nx-types/src/infer.rs:1810-1814`) between
   `check_choices`' old doc comment and its function. `check_choices` got a new comment, so the old
@@ -682,6 +707,9 @@ Chromium.
 - **Recommendation:** Delete the three stale lines above `is_integral`'s own comment.
   **Confidence: high.**
 - **Fix:** The three stray lines are gone; their content ("a number takes number literals, a string string literals, and nothing else takes choices") is folded into `check_choices`' own doc comment.
+- **Verification:** Confirmed. `is_integral` has only its own comment, and `check_choices`' comment
+  now holds the folded-in sentence. `cargo test -q -p nx-types` passes, and clippy is clean.
+  **Confidence: high.**
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -751,3 +779,8 @@ Chromium.
   hovered in a row, such as a braced list's first item (a regression from the RF18 fix), and RF30, a
   stale doc comment on `is_integral`. Viewer tests (160), the three crates' Rust tests, clippy and
   `openspec validate --strict` pass.
+- Verification of the second round (2026-10-22 23:47, commit `40335dc`): RF18, RF29 and RF30 are
+  verified. RF23 is reopened. Filtering hides the default's row again, but headless Chromium shows
+  that in an unlabeled list the row still stacks `Default` over its value. The base `.popover .option`
+  rule sets `flex-direction: column`, and the first verification missed this. Nothing new was found.
+  Viewer tests (161), `nx-types` tests and clippy pass.
