@@ -165,6 +165,33 @@ describe("what the reading can edit", () => {
   });
 });
 
+describe("a reading drawn again", () => {
+  it("keeps its height while it is drawn, so what scrolls it does not move up", async () => {
+    const editing = await fixture("editing");
+    const element = show(editing);
+    const body = root(element).querySelector<HTMLElement>(".body")!;
+    // jsdom lays nothing out: the reading is 500 pixels tall, and the fitting's first measure, taken
+    // on a draft that may be shorter, says what holds the reading's height then.
+    let held: string | undefined;
+    Object.defineProperty(body, "offsetHeight", { configurable: true, get: () => 500 });
+    Object.defineProperty(body, "clientWidth", {
+      configurable: true,
+      get: () => {
+        held = body.style.minHeight;
+        return 0;
+      }
+    });
+    // As the playground gives a tree after an edit: none, then the next.
+    element.tree = undefined;
+    element.tree = editing.tree;
+    assert.equal(held, "500px", "the height it had holds while it is measured");
+    assert.equal(body.style.minHeight, "", "and lets go once it is drawn");
+    element.tree = undefined;
+    await Promise.resolve();
+    assert.equal(body.style.minHeight, "", "a reading left empty lets go too");
+  });
+});
+
 describe("where a click puts the caret", () => {
   it("falls before or after the character the point is over, on the point's line", (t) => {
     // Lays out text as jsdom does not: eight pixels a character, four characters a line.

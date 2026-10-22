@@ -684,11 +684,24 @@ export class NxViewerElement extends ElementBase {
     this.#pointedKey = undefined;
     this.#rendered.clear();
     this.#hoveredUnit = undefined;
+    // The reading keeps the height it had while it is drawn again, so the shorter drafts the fitting
+    // below measures, or no tree between two, do not pull up what scrolls it: after an edit near
+    // the bottom, the reader stays where they were.
+    if (this.#body.style.minHeight === "" && this.#body.childElementCount > 0) {
+      this.#body.style.minHeight = `${this.#body.offsetHeight}px`;
+    }
     this.#body.replaceChildren();
     this.#body.classList.toggle("editable", this.#editable);
     this.#index = undefined;
     this.#targets = new Map();
     if (tree === undefined) {
+      // A host that sets the next tree at once keeps the height; one that leaves the reading empty
+      // lets it go.
+      queueMicrotask(() => {
+        if (this.#tree === undefined) {
+          this.#body.style.minHeight = "";
+        }
+      });
       return;
     }
     // A drag on a number's name goes on with the next tree, on the same number.
@@ -721,6 +734,7 @@ export class NxViewerElement extends ElementBase {
       found.forEach((key) => wrapped.add(key));
       draw(wrapped);
     }
+    this.#body.style.minHeight = "";
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       this.#rendered.set(element.dataset["key"]!, element);
     }
