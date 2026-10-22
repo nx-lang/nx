@@ -274,6 +274,8 @@ pub struct VisualizerValue {
     pub attributes: Vec<(String, VisualizerAttribute)>,
     /// The `PropertyVisualizer`s of an `ElementVisualizer`, in source order.
     pub children: Vec<VisualizerChild>,
+    /// The `ValueChoice`s of a `ValueVisualizer`, in source order.
+    pub choices: Vec<VisualizerChoice>,
 }
 
 /// One child visualizer record: a `PropertyVisualizer`.
@@ -281,6 +283,17 @@ pub struct VisualizerValue {
 pub struct VisualizerChild {
     /// The attributes, in source order.
     pub attributes: Vec<(String, VisualizerAttribute)>,
+    /// Its `ValueChoice`s, in source order.
+    pub choices: Vec<VisualizerChoice>,
+}
+
+/// One `ValueChoice`: a value a viewer offers to pick, and the label it reads by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisualizerChoice {
+    /// The value: a number or a string literal.
+    pub value: VisualizerAttribute,
+    /// The label, when the choice has one.
+    pub label: Option<String>,
 }
 
 impl VisualizerValue {
@@ -318,23 +331,15 @@ pub enum VisualizerAttribute {
     Name(String),
     /// A number literal, signed or not.
     Number(OrderedFloat),
-    /// A braced list of number literals.
-    Numbers(Vec<OrderedFloat>),
 }
 
 impl VisualizerAttribute {
-    /// The value as text: a string's text, a name, `true`/`false`, a number, or numbers
-    /// separated by spaces.
+    /// The value as text: a string's text, a name, `true`/`false`, or a number.
     pub fn text(&self) -> String {
         match self {
             VisualizerAttribute::Text(text) | VisualizerAttribute::Name(text) => text.clone(),
             VisualizerAttribute::Boolean(value) => value.to_string(),
             VisualizerAttribute::Number(value) => value.0.to_string(),
-            VisualizerAttribute::Numbers(values) => values
-                .iter()
-                .map(|value| value.0.to_string())
-                .collect::<Vec<_>>()
-                .join(" "),
         }
     }
 
@@ -342,17 +347,6 @@ impl VisualizerAttribute {
     pub fn number(&self) -> Option<f64> {
         match self {
             VisualizerAttribute::Number(value) => Some(value.0),
-            _ => None,
-        }
-    }
-
-    /// The value as numbers, when it is a number or a list of them.
-    pub fn numbers(&self) -> Option<Vec<f64>> {
-        match self {
-            VisualizerAttribute::Number(value) => Some(vec![value.0]),
-            VisualizerAttribute::Numbers(values) => {
-                Some(values.iter().map(|value| value.0).collect())
-            }
             _ => None,
         }
     }
@@ -371,16 +365,49 @@ pub fn read_visualizer_value(module: &LoweredModule, value: ExprId) -> Option<Vi
         _ => return None,
     };
     let children = content
-        .into_iter()
-        .filter_map(|child| element_parts(module, child))
+        .iter()
+        .filter_map(|child| element_parts(module, *child))
         .filter(|(tag, _, _)| tag == "PropertyVisualizer")
-        .map(|(_, attributes, _)| VisualizerChild { attributes })
+        .map(|(_, attributes, content)| VisualizerChild {
+            attributes,
+            choices: choices_of(module, &content),
+        })
         .collect();
+    let choices = match record {
+        VisualizerRecord::Value => choices_of(module, &content),
+        VisualizerRecord::Element => Vec::new(),
+    };
     Some(VisualizerValue {
         record,
         attributes,
         children,
+        choices,
     })
+}
+
+/// The `ValueChoice`s among `content`, in order, leaving out one whose value is neither a number nor
+/// a string literal, which analysis reports.
+fn choices_of(module: &LoweredModule, content: &[ExprId]) -> Vec<VisualizerChoice> {
+    content
+        .iter()
+        .filter_map(|child| element_parts(module, *child))
+        .filter(|(tag, _, _)| tag == "ValueChoice")
+        .filter_map(|(_, attributes, _)| {
+            let value = attribute(&attributes, "value")
+                .filter(|value| {
+                    matches!(
+                        value,
+                        VisualizerAttribute::Number(_) | VisualizerAttribute::Text(_)
+                    )
+                })?
+                .clone();
+            let label = match attribute(&attributes, "label") {
+                Some(VisualizerAttribute::Text(text)) => Some(text.clone()),
+                _ => None,
+            };
+            Some(VisualizerChoice { value, label })
+        })
+        .collect()
 }
 
 type ElementParts = (String, Vec<(String, VisualizerAttribute)>, Vec<ExprId>);
@@ -432,11 +459,6 @@ fn attribute_value(module: &LoweredModule, expr: ExprId) -> Option<VisualizerAtt
         Expr::ResolvedUnionCase { case, .. } => {
             Some(VisualizerAttribute::Name(case.as_str().to_string()))
         }
-        Expr::Array { elements, .. } => elements
-            .iter()
-            .map(|element| number_value(module, *element))
-            .collect::<Option<Vec<_>>>()
-            .map(VisualizerAttribute::Numbers),
         _ => number_value(module, expr).map(VisualizerAttribute::Number),
     }
 }

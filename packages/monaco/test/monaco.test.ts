@@ -42,7 +42,6 @@ function fakeService(overrides: Partial<NxLanguageService> = {}): NxLanguageServ
     documentSymbols: record([]),
     sourceTree: record({ uri: FORM, identity: "model/1", version: 1, nodes: [], declarations: [] }),
     sourceEdit: record({ edits: [] }),
-    namedValues: record([]),
     ...overrides,
   };
 }

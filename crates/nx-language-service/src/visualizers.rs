@@ -8,7 +8,8 @@
 
 use crate::{DeclarationOrigin, WorkspaceDeclarations};
 use nx_api::{
-    ProgramModule, ProgramVisualizer, VisualizerAttribute, VisualizerChild, VisualizerValue,
+    ProgramModule, ProgramVisualizer, VisualizerAttribute, VisualizerChild, VisualizerChoice,
+    VisualizerValue,
 };
 use nx_hir::VisualizerRecord;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -148,28 +149,31 @@ pub(crate) struct ResolvedVisualizer {
     pub format: Option<String>,
     /// A `ValueVisualizer`'s editor hints, by name, as text.
     pub hints: Vec<(String, String)>,
+    /// A `ValueVisualizer`'s choices, when one gives any: the last such one's, whole.
+    pub choices: Option<Vec<VisualizerChoice>>,
     /// The property visualizers, in their resolved order.
     pub properties: Vec<ResolvedChild>,
 }
 
-/// The editor hints a `PropertyVisualizer` or a `ValueVisualizer` may set, `multiline` and
-/// `placeholder` on a `PropertyVisualizer` only.
-pub(crate) const EDITOR_HINTS: [&str; 8] = [
+/// The editor hints a `PropertyVisualizer` or a `ValueVisualizer` may set as attributes,
+/// `multiline` and `placeholder` on a `PropertyVisualizer` only. Choices are their content.
+pub(crate) const EDITOR_HINTS: [&str; 7] = [
     "editor",
     "min",
     "max",
     "step",
-    "stops",
     "unit",
     "multiline",
     "placeholder",
 ];
 
-/// One merged `PropertyVisualizer`: the property it describes and the attributes it sets.
+/// One merged `PropertyVisualizer`: the property it describes, the attributes it sets, and its
+/// choices when one of those merged gives any (the last such one's, whole).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedChild {
     pub property: String,
     pub attributes: Vec<(String, String)>,
+    pub choices: Option<Vec<VisualizerChoice>>,
 }
 
 impl ResolvedChild {
@@ -240,7 +244,7 @@ impl ResolvedVisualizer {
                         Some(index) => earlier.remove(index),
                         None => ResolvedChild {
                             property,
-                            attributes: Vec::new(),
+                            ..ResolvedChild::default()
                         },
                     };
                     merge_child(&mut merged, child);
@@ -249,6 +253,9 @@ impl ResolvedVisualizer {
                 self.properties.extend(earlier);
             }
             VisualizerRecord::Value => {
+                if !value.choices.is_empty() {
+                    self.choices = Some(value.choices.clone());
+                }
                 for name in EDITOR_HINTS {
                     if let Some(value) = text(name) {
                         match self.hints.iter_mut().find(|(key, _)| key == name) {
@@ -267,6 +274,9 @@ fn property_of(child: &VisualizerChild) -> Option<String> {
 }
 
 fn merge_child(merged: &mut ResolvedChild, child: &VisualizerChild) {
+    if !child.choices.is_empty() {
+        merged.choices = Some(child.choices.clone());
+    }
     for (name, value) in &child.attributes {
         let text = value.text();
         if name != "property" && is_known_value(name, &text) {
@@ -282,7 +292,7 @@ fn is_known_value(name: &str, text: &str) -> bool {
     match name {
         "idPosition" => matches!(text, "start" | "end"),
         "format" => matches!(text, "id" | "color"),
-        "editor" => matches!(text, "field" | "slider" | "dropdown" | "segmented"),
+        "editor" => matches!(text, "field" | "dropdown" | "segmented"),
         _ => true,
     }
 }

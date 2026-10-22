@@ -358,8 +358,6 @@ export const styles = `
   overflow-wrap: break-word;
 }
 .card[hidden] { display: none; }
-/* A named value's card opens beside its popover, over it. */
-.card.over-popover { z-index: 6; }
 .card-signature {
   font-family: var(--nx-viewer-source-font-family, var(--mono));
   font-variation-settings: var(--nx-viewer-source-font-variation, normal);
@@ -602,16 +600,6 @@ export const styles = `
 .menu[hidden] { display: none; }
 .menu-item { padding: 2px 8px; border-radius: 4px; cursor: pointer; outline: none; }
 .menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
-/* A slider: its track, with its stops as ticks under it, then the number's field and its unit. */
-.popover.slider { min-width: 16rem; }
-.popover .slider-row { display: flex; align-items: center; gap: 8px; }
-.popover .slider-track { position: relative; flex: 1; min-width: 8rem; padding-bottom: 4px; }
-.popover .popover-slider { display: block; width: 100%; margin: 0; accent-color: var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
-.popover .slider-ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 4px; pointer-events: none; }
-.popover .slider-tick { position: absolute; width: 1px; height: 4px; background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a)); }
-.popover input.popover-number { width: 7ch; flex: none; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
-.popover input.popover-number.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
-.popover .popover-unit { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); }
 /* Segmented, a few cases read as one row of buttons; the filter takes the keys out of sight. */
 .popover.segmented { min-width: 0; }
 .popover.segmented > .popover-filter { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; }
@@ -623,13 +611,35 @@ export const styles = `
 }
 .popover.segmented .option.current { background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78)); }
 .popover.segmented .option.current::before, .popover.segmented .option-doc { display: none; }
-/* Named values listed with an editor: above a color's or a slider's field, or under a field. */
-.popover.with-named { flex-wrap: wrap; }
-.popover.colors.with-named > .popover-hex { flex: 1 1 auto; width: auto; min-width: 0; }
-.popover .named-list { flex: 1 0 100%; margin: 0 0 4px; }
-.popover .named-list[hidden] { display: none; }
-.popover.named .named-list { margin: 0; }
-.popover .option-type { color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a)); font-size: 12px; }
+/* A choices list, Paper-style: each choice's label, then its value, quieter, in a second column; one
+   column when no choice has a label. The default's row leads, set off by a rule. */
+.popover.choices { min-width: 8rem; }
+.popover .choices-list { margin-top: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.popover .choices-list.labeled { grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; }
+.popover .option.choice {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+}
+.popover .option.choice[hidden] { display: none; }
+.popover .choice-value { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); white-space: nowrap; }
+.popover .choice-value.alone { color: inherit; }
+.popover .choice-default .choice-label { font-family: var(--nx-viewer-prose-font-family, inherit); font-size: 13px; }
+.popover .choices-rule {
+  grid-column: 1 / -1;
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+}
+.popover .choices-rule[hidden] { display: none; }
+/* A color's choices lead its popover, over its field and picker. */
+.popover.colors.with-choices { flex-wrap: wrap; }
+.popover.colors.with-choices > .popover-hex { flex: 1 1 auto; width: auto; min-width: 0; }
+.popover.colors .choices-list { flex: 1 0 100%; margin: 0 0 4px; }
+.popover .choices-list[hidden] { display: none; }
 .popover .option .swatch {
   display: inline-block;
   width: 0.75em;
@@ -639,5 +649,43 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
   vertical-align: -0.05em;
 }
-.popover .option.named + .option:not(.named) { border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f)); }
+/* A number's steppers, Framer-style, and a field's choices chevron: drawn where they would stand in
+   the line, just past the value and its unit, and taken out of it, so nothing moves. */
+.source .value-tools {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 1lh;
+  margin-left: 4px;
+  user-select: none;
+  white-space: nowrap;
+}
+.source .value-tools .steppers, .source .value-tools .choices-toggle { display: none; }
+.source .value-tools.with-steppers .steppers {
+  display: inline-flex;
+  flex-direction: column;
+  width: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
+  box-shadow: inset 0 0 0 1px var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+}
+.source .value-tools .stepper { position: relative; flex: 1; cursor: ns-resize; }
+.source .value-tools .stepper:hover { background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
+.source .value-tools .stepper::after, .source .value-tools .choices-toggle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 8px no-repeat;
+}
+.source .value-tools .stepper.up::after { transform: rotate(180deg); }
+.source .value-tools .stepper:hover::after, .source .value-tools .choices-toggle:hover::after {
+  background: var(--nx-viewer-foreground, CanvasText);
+}
+.source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
+.source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
+.body.stepping, .body.stepping * { cursor: ns-resize !important; user-select: none; }
 `;

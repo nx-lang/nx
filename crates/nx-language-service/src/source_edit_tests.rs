@@ -1,7 +1,6 @@
 use super::*;
 use crate::source_edit::{
-    attribute_element, element_properties, is_numeric_literal, is_reference_path, is_whole_value,
-    spell_value,
+    attribute_element, element_properties, is_numeric_literal, is_whole_value, spell_value,
 };
 use std::path::{Path, PathBuf};
 
@@ -576,7 +575,7 @@ fn adding_defaults_over_the_repository() {
                     SourceEditValue::Number {
                         text: default.to_string(),
                     }
-                } else if is_reference_path(default) && !default.contains('.') {
+                } else if is_case_name(default) {
                     SourceEditValue::Case {
                         name: default.to_string(),
                     }
@@ -645,10 +644,11 @@ fn add(name: &str, value: SourceEditValue) -> SourceEdit {
     }
 }
 
-fn reference(path: &str) -> SourceEditValue {
-    SourceEditValue::Reference {
-        path: path.to_string(),
-    }
+/// Whether a default is written as a bare case name, such as `medium`.
+fn is_case_name(text: &str) -> bool {
+    text.starts_with(|first: char| first.is_ascii_alphabetic() || first == '_')
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !matches!(text, "true" | "false" | "null")
 }
 
 const ADDING: &str = r##"type Color = string
@@ -761,14 +761,6 @@ fn adding_what_cannot_be_added_is_refused() {
 }
 
 #[test]
-fn adding_a_named_value() {
-    assert!(
-        edited(ADDING, "one.value", add("color", reference("accent")))
-            .contains(r#"let one = <Drink code="LAT" name="Latte" color={accent} />"#)
-    );
-}
-
-#[test]
 fn adding_after_a_value_over_several_lines() {
     let source = "type Drink = { code:string name:string iced:boolean = false }\nlet tag = <Drink code=\"M\" name=\"a\nb\" />\nlet rows = <Drink\n    code=\"M\"\n    name=\"a\nb\"\n  />\n";
     let after = edited(
@@ -844,75 +836,25 @@ fn adding_to_a_union_cases_element() {
     assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
 }
 
-// --- References ------------------------------------------------------------------------------------
+// --- References ---------------------------------------------------------------------------------
 
 #[test]
-fn setting_a_reference_and_a_literal_over_one() {
-    let after = edited(
-        ADDING,
-        "theme.value.color.value",
-        SourceEdit::SetValue {
-            value: reference("theme.color"),
-        },
-    );
-    assert!(after.contains(r#"color={theme.color}"#), "{after}");
+fn a_reference_is_not_editable() {
     let source = ADDING.replace(r##"color="#5a3a22""##, "color={accent}");
-    let after = edited(&source, "theme.value.color.value", string("#5a3a22"));
-    assert!(after.contains(r##"color="#5a3a22""##), "{after}");
-    // A reference replaced by a reference stays braced once.
-    let after = edited(
-        &source,
-        "theme.value.color.value",
-        SourceEdit::SetValue {
-            value: reference("x.y"),
-        },
+    let snapshot = snapshot_for(&source);
+    let uri = DocumentUri::from(URI);
+    let tree = snapshot.source_tree(&uri).expect("tree");
+    let reference = tree
+        .nodes
+        .iter()
+        .find(|node| node.key.starts_with("theme.value.color.value"))
+        .expect("the reference's node");
+    let answer = edit(&source, &reference.key, string("#5a3a22"));
+    assert_eq!(
+        answer.refused,
+        Some(SourceEditRefusal::NotEditable),
+        "{}",
+        reference.key
     );
-    assert!(after.contains("color={x.y}"), "{after}");
-}
-
-#[test]
-fn a_reference_is_bare_in_a_sequence_and_a_let() {
-    let source = "let total = 4\nlet primes:int+ = { 2 3 5 }\nlet n = 1\n";
-    assert!(edited(
-        source,
-        "primes.value[1]",
-        SourceEdit::SetValue {
-            value: reference("total")
-        }
-    )
-    .contains("{ 2 total 5 }"));
-    assert!(edited(
-        source,
-        "n.value",
-        SourceEdit::SetValue {
-            value: reference("total")
-        }
-    )
-    .contains("let n = total"));
-}
-
-#[test]
-fn a_literal_or_case_over_a_braced_reference_in_a_let_drops_the_braces() {
-    let source =
-        "type S = s0 | large\nlet s:S = s0\nlet x:S = {s}\nlet total = 3\nlet n:int = {total}\n";
-    assert!(edited(source, "x.value", case("large")).contains("let x:S = large\n"));
-    assert!(edited(source, "n.value", number("-4")).contains("let n:int = -4\n"));
-}
-
-#[test]
-fn a_bad_path_is_refused() {
-    for path in ["", "a..b", "a.1", "true", "a b"] {
-        let answer = edit(
-            ADDING,
-            "one.value.code.value",
-            SourceEdit::SetValue {
-                value: reference(path),
-            },
-        );
-        assert_eq!(
-            answer.refused,
-            Some(SourceEditRefusal::InvalidValue),
-            "{path:?}"
-        );
-    }
+    assert!(answer.edits.is_empty());
 }

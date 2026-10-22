@@ -25,8 +25,6 @@ import {
   type NxLanguageService,
   type SourceEditAnswer,
   type SourceEditRequest,
-  type NamedValue,
-  type NamedValuesRequest,
   type SourceTree,
   type SourceTreeRequest,
 } from "../src/index.js";
@@ -154,20 +152,8 @@ export const addPropertyRequest: SourceEditRequest = {
   documents,
   uri: "nx://tenant/ui.nx",
   key: "root.value",
-  edit: { kind: "addProperty", name: "color", value: { kind: "reference", path: "theme.accent" } },
+  edit: { kind: "addProperty", name: "color", value: { kind: "string", value: "#c8a27a" } },
 };
-
-export const namedValuesRequest: NamedValuesRequest = {
-  documents,
-  uri: "nx://tenant/ui.nx",
-  key: "root.value",
-  property: "color",
-};
-
-export const namedValuesAnswer: NamedValue[] = [
-  { path: "accent", type: "Color", doc: "The brand's accent.", value: '"#c8a27a"' },
-  { path: "theme.muted", type: "Color" },
-];
 
 /** An in-process implementation, the shape an editor integration is tested against. */
 export const fakeService: NxLanguageService = {
@@ -177,7 +163,6 @@ export const fakeService: NxLanguageService = {
   documentSymbols: async () => documentSymbolsAnswer,
   sourceTree: async () => sourceTreeAnswer,
   sourceEdit: async () => sourceEditAnswer,
-  namedValues: async () => namedValuesAnswer,
 };
 
 test("every example round-trips through JSON without loss", () => {
@@ -196,8 +181,6 @@ test("every example round-trips through JSON without loss", () => {
     sourceEditAnswer,
     sourceEditRefusal,
     addPropertyRequest,
-    namedValuesRequest,
-    namedValuesAnswer,
   ]) {
     assert.deepEqual(JSON.parse(JSON.stringify(example)), example);
   }
@@ -211,7 +194,6 @@ test("the request and answer maps name exactly the defined queries", () => {
     documentSymbols: true,
     sourceTree: true,
     sourceEdit: true,
-    namedValues: true,
   };
   const answers: Record<keyof LanguageQueryAnswers, true> = requests;
   assert.deepEqual(Object.keys(answers).sort(), [...LANGUAGE_QUERIES].sort());

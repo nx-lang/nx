@@ -82,7 +82,6 @@ test("registers against a 0.52-shaped global namespace and serves hover, complet
       documentSymbols: async () => [],
       sourceTree: async (request) => ({ uri: request.uri, identity: "editor.nx", version: 1, nodes: [], declarations: [] }),
       sourceEdit: async () => ({ edits: [] }),
-      namedValues: async () => [],
     };
 
     const registration = registerNxLanguage((globalThis as unknown as { monaco: MonacoNamespace }).monaco, {

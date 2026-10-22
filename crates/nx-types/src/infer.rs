@@ -1652,6 +1652,7 @@ impl<'a> InferenceContext<'a> {
             nx_hir::VisualizerRecord::Value => {
                 let kind = self.hint_value_kind(target_ty);
                 self.check_hint_attributes(&properties, kind, None);
+                self.check_choices(&content, kind, None);
             }
             nx_hir::VisualizerRecord::Element => {
                 let shape = match target_ty {
@@ -1659,7 +1660,8 @@ impl<'a> InferenceContext<'a> {
                     _ => None,
                 };
                 for child in content {
-                    let Some((child_properties, _)) = self.visualizer_element_parts(child) else {
+                    let Some((child_properties, choices)) = self.visualizer_element_parts(child)
+                    else {
                         continue;
                     };
                     let property = child_properties.iter().find_map(|property| {
@@ -1687,6 +1689,7 @@ impl<'a> InferenceContext<'a> {
                         self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty);
                     let kind = self.hint_value_kind(&field_ty);
                     self.check_hint_attributes(&child_properties, kind, Some(&field.name));
+                    self.check_choices(&choices, kind, Some(&field.name));
                 }
             }
         }
@@ -1757,13 +1760,13 @@ impl<'a> InferenceContext<'a> {
                     ast::Expr::Ident(case)
                     | ast::Expr::ContextualName { name: case, .. }
                     | ast::Expr::ResolvedUnionCase { case, .. } => match case.as_str() {
-                        "field" | "slider" => HintValueKind::Number,
+                        "field" => HintValueKind::Number,
                         "dropdown" | "segmented" => HintValueKind::Cases,
                         _ => continue,
                     },
                     _ => continue,
                 },
-                "min" | "max" | "step" | "stops" | "unit" => HintValueKind::Number,
+                "min" | "max" | "step" | "unit" => HintValueKind::Number,
                 "multiline" | "placeholder" => HintValueKind::String,
                 _ => continue,
             };
@@ -1799,6 +1802,69 @@ impl<'a> InferenceContext<'a> {
                     span,
                 );
             }
+        }
+    }
+
+    /// Checks each `ValueChoice` among `content` against a value of `kind`, the value of the
+    /// property `property` when there is one: a number takes number literals, a string string
+    /// literals, and nothing else takes choices.
+    fn check_choices(&mut self, content: &[ExprId], kind: HintValueKind, property: Option<&Name>) {
+        if kind == HintValueKind::Unknown {
+            return;
+        }
+        let subject = match property {
+            Some(name) => format!("'{name}'"),
+            None => "this type".to_string(),
+        };
+        for choice in content {
+            let Some((attributes, _)) = self.visualizer_choice_parts(*choice) else {
+                continue;
+            };
+            let Some(value) = attributes
+                .iter()
+                .find(|attribute| attribute.key.as_str() == "value")
+            else {
+                continue;
+            };
+            let written = if self.hint_number(value.value).is_some() {
+                HintValueKind::Number
+            } else if matches!(
+                self.module.raw_module().expr(value.value),
+                ast::Expr::Literal(ast::Literal::String(_))
+            ) {
+                HintValueKind::String
+            } else {
+                HintValueKind::Other
+            };
+            let message = match kind {
+                HintValueKind::Number | HintValueKind::String if written == kind => continue,
+                HintValueKind::Number => format!(
+                    "A choice for {subject} must be a number literal; a viewer ignores this one"
+                ),
+                HintValueKind::String => format!(
+                    "A choice for {subject} must be a string literal; a viewer ignores this one"
+                ),
+                _ => format!(
+                    "Choices apply to a number or a string, and {subject} is neither; a viewer ignores them"
+                ),
+            };
+            self.warn("editor-hint-mismatch", message, value.span);
+        }
+    }
+
+    /// The attributes of a `ValueChoice` element or record in a visualizer declaration's value.
+    fn visualizer_choice_parts(
+        &self,
+        expr: ExprId,
+    ) -> Option<(Vec<nx_hir::Property>, Vec<ExprId>)> {
+        let parts = self.visualizer_element_parts(expr)?;
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Element { element, .. }
+                if self.module.raw_module().element(*element).tag.as_str() == "ValueChoice" =>
+            {
+                Some(parts)
+            }
+            _ => None,
         }
     }
 

@@ -14,7 +14,6 @@ function fakeSnapshot(onDispose: () => void): SnapshotLike {
     documentSymbols: () => [],
     sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
     sourceEdit: () => ({ edits: [] }),
-    namedValues: () => [],
     dispose: onDispose,
   };
 }

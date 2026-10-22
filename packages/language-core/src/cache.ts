@@ -8,7 +8,6 @@ export interface SnapshotLike {
   documentSymbols(uri: string): unknown;
   sourceTree(uri: string, options?: { visualizers?: { modules?: string[] } }): unknown;
   sourceEdit(uri: string, key: string, edit: SourceEdit): unknown;
-  namedValues(uri: string, key: string, property: string): unknown;
   dispose(): void;
 }
 

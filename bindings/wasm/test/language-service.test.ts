@@ -4,7 +4,6 @@ import { createNxLanguageHandler } from "@nx-lang/language-http";
 import type {
   DiagnosticReport,
   Hover,
-  NamedValue,
   SourceEdit,
   SourceEditAnswer,
   SourceTree
@@ -129,14 +128,11 @@ describe("the wasm SDK's in-process language service", () => {
             { kind: "setValue", value: { kind: "boolean", value: true } }
           ];
         case "case":
-          return [
-            { kind: "setValue", value: { kind: "case", name: "dark" } },
-            { kind: "setValue", value: { kind: "reference", path: "xs" } }
-          ];
+          return [{ kind: "setValue", value: { kind: "case", name: "dark" } }];
         case "element":
           return [
             { kind: "addProperty", name: "title", value: { kind: "string", value: "y" } },
-            { kind: "addProperty", name: "mode", value: { kind: "reference", path: "xs" } },
+            { kind: "addProperty", name: "mode", value: { kind: "case", name: "dark" } },
             { kind: "addProperty", name: "nope", value: { kind: "boolean", value: true } }
           ];
         case "text":
@@ -162,33 +158,6 @@ describe("the wasm SDK's in-process language service", () => {
     }
     expect(made).toBeGreaterThan(5);
     expect(refused).toBeGreaterThan(5);
-  });
-
-  // Spec: "Parity between Rust and TypeScript" for named values: every element of a small corpus
-  // asked for each of its kind's properties, through the wasm module and through the HTTP handler.
-  it("answers named values identically to the HTTP handler", async () => {
-    const valuesSource = [
-      "type Color = string",
-      "type Theme = { accent:Color radius:int = 4 }",
-      'let accent:Color = "#c8a27a"',
-      "let theme = <Theme accent=\"#5a3a22\" />",
-      "type Drink = { name:string color?:Color size:int = 1 }",
-      'let latte = <Drink name="Latte" />',
-      ""
-    ].join("\n");
-    const request = { documents: [{ uri, source: valuesSource, version: 9 }], uri };
-    const tree = await service.sourceTree(request);
-    let listed = 0;
-    for (const node of tree.nodes.filter((candidate) => candidate.role === "element")) {
-      for (const property of ["name", "color", "size", "accent", "radius", "nope"]) {
-        const valuesRequest = { ...request, key: node.key, property };
-        const fromWasm = await service.namedValues(valuesRequest);
-        const fromRust = await overHttp<NamedValue[]>("namedValues", valuesRequest);
-        expect(JSON.parse(JSON.stringify(fromWasm))).toEqual(fromRust);
-        listed += fromWasm.length;
-      }
-    }
-    expect(listed).toBeGreaterThan(3);
   });
 
   it("refuses a malformed source edit as an invalid request", async () => {

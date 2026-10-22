@@ -129,8 +129,8 @@ props, so a visualizer declaration cannot name them.
 
 ## Values are written out
 
-A visualizer declaration's value may hold only `@nx/visualizer` constructions, string and boolean literals,
-and bare names of properties or cases. A braced expression, a reference to a value, a conditional, a
+A visualizer declaration's value may hold only `@nx/visualizer` constructions, string, boolean and number
+literals, and bare names of properties or cases. A braced expression, a reference to a value, a conditional, a
 loop, an interpolated string and a call are each rejected. That lets the compiler read every visualizer
 declaration without evaluating it:
 
@@ -160,9 +160,9 @@ way:
 - **Formats.** A string bound to a property with the format `id` reads as a quiet token, and one with
   the format `color` reads with a small square of its color before it. A format changes how a value
   looks, never what it is, and does nothing to a value that is not a string literal.
-- **Editor hints.** A number hinted with a range edits with a slider that snaps to its `stops` and
-  reads its `unit` after it; a union hinted `segmented` edits as a row of buttons; a string hinted
-  `multiline` takes line breaks. See [editor hints](/reference/libraries/visualizer#editor-hints).
+- **Editor hints.** A number hinted with a range steps within it and reads its `unit` after it; a
+  number or a string with `ValueChoice` content offers those values to pick under its field; a union
+  hinted `segmented` edits as a row of buttons; a string hinted `multiline` takes line breaks. See [editor hints](/reference/libraries/visualizer#editor-hints).
 
 A property's format, and each of its editor hints, comes from its `PropertyVisualizer` when that sets one, and otherwise from the
 `ValueVisualizer` of the alias its type names, read as written, through `?`, `+` and `*`. In the survey

@@ -2,7 +2,7 @@
  * The pieces of the reading's editors: where in a value's rendering its text sits, the value shown
  * once an edit is made and before the host answers, a number's steps, and the popovers' content.
  */
-import type { NamedValue, SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
+import type { SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
 
 import { isNumericLiteral, type EditTarget, type TypeEditor } from "./edit.js";
 import { decodeString } from "./source.js";
@@ -155,94 +155,109 @@ export function rangeProblem(entry: string, hints: SourceEditorHints | undefined
   return undefined;
 }
 
-/** Whether a number edits with a slider: its hints ask for one, or give a range and ask for nothing. */
-export function isSlider(target: EditTarget): boolean {
-  const hints = target.hints;
-  if (target.kind !== "number" || hints === undefined) {
-    return false;
-  }
-  if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
-    return false;
-  }
-  return hints.kind === "slider" || (hints.kind === undefined && hints.min !== undefined && hints.max !== undefined);
+/** A choice as the list offers it: the text its editor holds for it, and its label. */
+export interface Choice {
+  readonly value: string;
+  readonly label?: string | undefined;
 }
 
 /**
- * The number a slider at `position` stands for, written as the number it started from is: snapped
- * to the nearest of its hints' stops unless `free`, and to its step.
+ * The choices of `hints` that `kind`'s editor takes, as its field holds them: a number's text for a
+ * number, a string's content for a text or a color.
  */
-export function slidValue(position: number, hints: SourceEditorHints, from: string, free: boolean): string {
-  let value = position;
-  const stops = hints.stops ?? [];
-  if (!free && stops.length > 0) {
-    value = stops.reduce((best, stop) => (Math.abs(stop - position) < Math.abs(best - position) ? stop : best), stops[0]!);
-  } else if (hints.step !== undefined && hints.step > 0) {
-    const base = hints.min ?? 0;
-    value = base + Math.round((position - base) / hints.step) * hints.step;
+export function choicesOf(hints: SourceEditorHints | undefined, kind: EditTarget["kind"]): Choice[] {
+  const choices: Choice[] = [];
+  for (const choice of hints?.choices ?? []) {
+    const value = choice.value;
+    if (kind === "number" && value.kind === "number" && isNumericLiteral(value.text)) {
+      choices.push({ value: value.text, label: choice.label });
+    } else if ((kind === "text" || kind === "color") && value.kind === "string") {
+      choices.push({ value: value.value, label: choice.label });
+    }
   }
-  value = clamp(value, hints);
-  const decimals = Math.max(decimalsOf(from.trim()), hints.step === undefined ? 0 : decimalsOf(String(hints.step)));
-  // Between stops, with no step, a real keeps two decimals at most and an integer stays one.
-  if (free && stops.length > 0 && hints.step === undefined && decimals === 0) {
-    return String(Math.round(value));
-  }
-  return decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
+  return choices;
 }
 
-/** Shows the named value `path` in place of what `span` draws, muted as waiting for the host. */
-export function showReference(span: HTMLElement, path: string): void {
-  span.classList.add("pending");
-  span.replaceChildren(path);
+/** Whether `a` and `b` are the same value of `kind`: the same number, however written, or the same text. */
+export function sameValue(kind: EditTarget["kind"], a: string, b: string): boolean {
+  if (kind === "number") {
+    const left = Number(a.trim());
+    const right = Number(b.trim());
+    return a.trim() !== "" && b.trim() !== "" && Number.isFinite(left) && left === right;
+  }
+  return a === b;
 }
 
 /**
- * The options listing named values: each one's path, its color as a swatch when its value is a
- * color literal, its type and its doc's first paragraph, whose whole doc a card shows; `current`,
- * the value's own reference, marked.
+ * The rows of a choices list: the default's first, when `fallback` gives one, reading `Default` and
+ * its value; then each choice, its label and its value after it, quieter, or its value alone when
+ * no choice has a label. The row of `current` is marked: the default's when `current` is undefined.
  */
-export function namedOptions(document: Document, values: readonly NamedValue[], current: string | undefined): HTMLElement[] {
-  return values.map((named) => {
-    const row = document.createElement("div");
-    row.className = named.path === current ? "option named current" : "option named";
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", String(named.path === current));
-    row.dataset["reference"] = named.path;
-    row.dataset["name"] = named.path;
-    const name = document.createElement("span");
-    name.className = "option-name";
-    const color = colorOf(document, named.value);
-    if (color !== undefined) {
+export function choiceRows(
+  document: Document,
+  target: EditTarget,
+  choices: readonly Choice[],
+  current: string | undefined,
+  fallback: string | undefined
+): HTMLElement[] {
+  const unit = target.kind === "number" ? target.hints?.unit : undefined;
+  const labeled = choices.some((choice) => choice.label !== undefined);
+  const row = (value: string, label: string | undefined, marked: boolean): HTMLElement => {
+    const option = document.createElement("div");
+    option.className = marked ? "option choice current" : "option choice";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(marked));
+    option.dataset["value"] = value;
+    if (label !== undefined) {
+      option.dataset["label"] = label;
+      const name = document.createElement("span");
+      name.className = "choice-label";
+      name.textContent = label;
+      option.append(name);
+    } else if (labeled) {
+      option.append(Object.assign(document.createElement("span"), { className: "choice-label" }));
+    }
+    const shown = document.createElement("span");
+    shown.className = label === undefined && !labeled ? "choice-value alone" : "choice-value";
+    if (target.kind === "color") {
       const swatch = document.createElement("span");
       swatch.className = "swatch";
-      swatch.style.backgroundColor = color;
+      swatch.style.backgroundColor = value.trim();
       swatch.setAttribute("aria-hidden", "true");
-      name.append(swatch);
+      if (swatch.style.backgroundColor !== "") {
+        shown.append(swatch);
+      }
     }
-    name.append(named.path);
-    const type = document.createElement("span");
-    type.className = "option-type";
-    type.textContent = named.type;
-    name.append(" ", type);
-    row.append(name);
-    const words = firstParagraph(named.doc);
-    if (words !== "") {
-      const doc = document.createElement("span");
-      doc.className = "option-doc";
-      doc.textContent = words;
-      row.append(doc);
-    }
-    return row;
-  });
+    shown.append(unit === undefined ? value : `${value} ${unit}`);
+    option.append(shown);
+    return option;
+  };
+  const rows: HTMLElement[] = [];
+  if (fallback !== undefined) {
+    const option = row(fallback, "Default", current === undefined);
+    option.classList.add("choice-default");
+    option.dataset["default"] = "true";
+    rows.push(option);
+  }
+  const marked = current === undefined ? -1 : choices.findIndex((choice) => sameValue(target.kind, choice.value, current));
+  choices.forEach((choice, position) => rows.push(row(choice.value, choice.label, position === marked)));
+  return rows;
 }
 
-/** The color a literal names, as `"#c8a27a"` does, or nothing when it names none. */
-function colorOf(document: Document, literal: string | undefined): string | undefined {
-  if (literal === undefined || !literal.startsWith('"') || !literal.endsWith('"') || literal.length < 2) {
-    return undefined;
+/** Whether the choice `option` holds `typed`: in its label or its value, ignoring case. */
+export function choiceMatches(option: HTMLElement, typed: string, kind: EditTarget["kind"]): boolean {
+  const query = typed.trim().toLowerCase();
+  if (query === "") {
+    return true;
   }
-  const probe = document.createElement("span");
-  probe.style.backgroundColor = literal.slice(1, -1).trim();
-  return probe.style.backgroundColor === "" ? undefined : probe.style.backgroundColor;
+  const label = (option.dataset["label"] ?? "").toLowerCase();
+  const value = (option.dataset["value"] ?? "").toLowerCase();
+  if (label.includes(query) || value.includes(query)) {
+    return true;
+  }
+  // A number typed with its unit, as `16px`, matches the number.
+  const number = kind === "number" ? query.replace(/[^\d.+-]+$/, "") : query;
+  return number !== "" && number !== query && value.includes(number);
 }
 
 /**

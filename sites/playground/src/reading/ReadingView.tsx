@@ -13,7 +13,6 @@ import {
   type NxSelectDetail,
   type NxViewerElement,
   type NxViewerIcons,
-  type NxViewerNamedValues,
 } from "@nx-lang/viewer";
 import { colorize, loadHighlighter, type NxValueHighlighter } from "@nx-lang/value-view";
 import { EDITOR_THEMES } from "../theme.ts";
@@ -44,8 +43,6 @@ export interface ReadingViewProps {
   readonly onDraft?: (changed: boolean) => void;
   /** A value Visual cannot edit, to show in Source. */
   readonly onOpen?: (detail: NxOpenDetail) => void;
-  /** The named values a property can take, which Visual's editors list. */
-  readonly namedValues?: NxViewerNamedValues;
   /** Ctrl or Cmd+Z, and Ctrl+Y or Ctrl or Cmd+Shift+Z, pressed in Visual, for the editor's history. */
   readonly onUndo?: () => void;
   readonly onRedo?: () => void;
@@ -97,7 +94,6 @@ export function ReadingView({
   onUndo,
   onRedo,
   revision,
-  namedValues,
 }: ReadingViewProps) {
   const element = useRef<NxViewerElement>(null);
   const latestFold = useRef(onFold);
@@ -163,7 +159,6 @@ export function ReadingView({
     target.folded = folded;
     target.icons = icons;
     target.editable = editable;
-    target.namedValues = namedValues;
     target.colors = highlighter !== null ? colorize(highlighter, reading.text, EDITOR_THEMES) : [];
     target.tree = reading.tree;
     // `revision` gives the tree again after an edit that changed nothing.

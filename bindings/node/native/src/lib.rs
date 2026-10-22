@@ -397,16 +397,6 @@ impl NativeNxLanguageSnapshot {
         result_json(&answer)
     }
 
-    /// The named values one property of an element can take, as JSON. Unstable.
-    #[napi]
-    pub fn named_values(&self, uri: String, key: String, property: String) -> Result<String> {
-        let snapshot = self.snapshot()?;
-        let values = snapshot
-            .named_values(&DocumentUri::new(uri), &key, &property)
-            .map_err(snapshot_error)?;
-        result_json(&values)
-    }
-
     #[napi]
     pub fn dispose(&mut self) {
         self.snapshot = None;

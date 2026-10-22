@@ -59,7 +59,6 @@ export interface NxWasmExports {
   nx_wasm_snapshot_document_symbols(handle: number, pointer: number, length: number): number;
   nx_wasm_snapshot_source_tree(handle: number, pointer: number, length: number): number;
   nx_wasm_snapshot_source_edit(handle: number, pointer: number, length: number): number;
-  nx_wasm_snapshot_named_values(handle: number, pointer: number, length: number): number;
   nx_wasm_snapshot_free(handle: number): void;
   /**
    * Present only in a module built with the crate's `debug-trap` feature; it traps on purpose.

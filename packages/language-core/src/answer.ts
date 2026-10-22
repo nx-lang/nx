@@ -14,7 +14,6 @@ import type {
   Hover,
   LanguageDocument,
   LanguageQueryName,
-  NamedValue,
   SourceEdit,
   SourceEditAnswer,
   SourceTree,
@@ -44,12 +43,9 @@ export interface AnswerRequest {
   position: TextPosition | undefined;
   /** What a source-tree query asks to have resolved besides the tree. */
   visualizers?: SourceTreeVisualizersOption | undefined;
-  /** The node a source-edit query edits, or the element a named-values query asks about. */
+  /** The node a source-edit query edits, and the edit. */
   key?: string | undefined;
-  /** The edit a source-edit query makes. */
   edit?: SourceEdit | undefined;
-  /** The property a named-values query asks about. */
-  property?: string | undefined;
 }
 
 /**
@@ -165,7 +161,5 @@ export function answerQuery(
       );
     case "sourceEdit":
       return snapshot.sourceEdit(request.uri, request.key ?? "", request.edit as SourceEdit) as SourceEditAnswer;
-    case "namedValues":
-      return snapshot.namedValues(request.uri, request.key ?? "", request.property ?? "") as NamedValue[];
   }
 }

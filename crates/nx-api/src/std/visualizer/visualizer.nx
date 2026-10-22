@@ -49,10 +49,8 @@ export type PropertyVisualizer = {
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
   max?: float64
-  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The numbers a slider snaps to, in order.
-  stops?: float64+
   /// The unit a number is in, such as `"px"`: shown after the number, and never written.
   unit?: string
   /// Whether the property's string field takes line breaks: Enter starts a new line, and the
@@ -60,6 +58,9 @@ export type PropertyVisualizer = {
   multiline: boolean = false
   /// Text shown in the property's empty field, quieter than a value, and never written.
   placeholder?: string
+  /// The values a viewer offers to pick for the property, in order. They suggest and never
+  /// restrict: any value the property's type takes may still be written.
+  content choices?: ValueChoice+
 }
 
 /// How a viewer presents values of a scalar type.
@@ -74,12 +75,23 @@ export type ValueVisualizer = {
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
   max?: float64
-  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The numbers a slider snaps to, in order.
-  stops?: float64+
   /// The unit a number is in, such as `"px"`: shown after the number, and never written.
   unit?: string
+  /// The values a viewer offers to pick for a value of the type, in order. They suggest and never
+  /// restrict: any value of the type may still be written.
+  content choices?: ValueChoice+
+}
+
+/// A value a viewer offers to pick, such as a size on a type's scale. Picking it writes the value,
+/// never the label.
+export type ValueChoice = {
+  /// The value written when the choice is picked: a number literal for a number, or a string
+  /// literal for a string.
+  value: object
+  /// The name the choice reads by, beside its value, such as `"lg"`.
+  label?: string
 }
 
 /// How a string value is shown. A format changes how the value looks, never what it is.
@@ -93,8 +105,6 @@ export type ValueFormat =
 export type ValueEditor =
   /// A number field, with arrow-key steps, even when the number has a range.
   | field
-  /// A slider with a number field beside it, for a number with `min` and `max`.
-  | slider
   /// A list of a union's cases.
   | dropdown
   /// A union's cases as one row of buttons.

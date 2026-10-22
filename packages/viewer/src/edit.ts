@@ -41,11 +41,11 @@ export interface EditTarget {
    * since in a sequence or inside braces `-` reads as an operator.
    */
   readonly signed?: boolean;
-  /** How its property's visualizers say it edits: a slider, a range, a unit, several lines. */
+  /** How its property's visualizers say it edits: a range, a unit, choices, several lines. */
   readonly hints?: SourceEditorHints;
   /**
    * The element and the property the value is set on, for a whole value of an attribute or of a
-   * property the element does not write: what the host's named values are asked for.
+   * property the element does not write.
    */
   readonly property?: { readonly element: string; readonly name: string };
   /**
@@ -53,8 +53,6 @@ export interface EditTarget {
    * property's default, or nothing, and its node is the element's.
    */
   readonly adding?: boolean;
-  /** The reference path the value is written as, as `theme.accent`, when it is a named value. */
-  readonly reference?: string;
 }
 
 /** The types a number field edits, and their aliases' ends. */
@@ -110,11 +108,6 @@ export function editOf(target: EditTarget, value: string): SourceEdit {
   return valueEdit(target, valueOf(target, value));
 }
 
-/** The edit that sets `target` to the named value at `path`, written as a reference to it. */
-export function referenceEditOf(target: EditTarget, path: string): SourceEdit {
-  return valueEdit(target, { kind: "reference", path });
-}
-
 function valueEdit(target: EditTarget, value: SourceEditValue): SourceEdit {
   return target.adding === true && target.property !== undefined
     ? { kind: "addProperty", name: target.property.name, value }
@@ -132,11 +125,6 @@ function valueOf(target: EditTarget, value: string): SourceEditValue {
     default:
       return { kind: "string", value };
   }
-}
-
-/** Whether `text` is a reference to a named value as an edit writes one: names joined by dots. */
-export function isReferencePath(text: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(text);
 }
 
 /** Every editable value of the tree, by key. */
@@ -203,18 +191,6 @@ function targetOf(
   const hints = hintsOf(index, at, spelled);
   const property = propertyOf(index, at);
   const extra = { ...(hints === undefined ? {} : { hints }), ...(property === undefined ? {} : { property }) };
-  if (node.role === "reference" || node.role === "member") {
-    // A named value, as `{accent}` or `theme.accent`, edits with its type's editor.
-    const path = namesValue(index, at) ? referencePath(index, at) : undefined;
-    const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
-    // A literal written over a braced reference loses the braces, so a number may take a sign there.
-    const signed = owner?.role === "attribute" || owner?.role === "declaration";
-    const kind = path === undefined ? undefined : editorOfType(index, spelled, formats.get(at) ?? declared.format, signed);
-    if (path === undefined || kind === undefined) {
-      return undefined;
-    }
-    return { at, key, ...kind, value: path, reference: path, ...extra };
-  }
   if (node.role !== "literal" && node.role !== "case") {
     return undefined;
   }
@@ -416,36 +392,6 @@ function propertyOf(index: TreeIndex, at: number): EditTarget["property"] {
   }
   const element = attributeElement(tree, attributeAt!);
   return element === undefined ? undefined : { element: tree.nodes[element]!.key, name: attribute.name };
-}
-
-/** The reference path the node at `at` is written as, its braces left out, or nothing when it is not one. */
-function referencePath(index: TreeIndex, at: number): string | undefined {
-  const node = index.tree.nodes[at]!;
-  const written = new TextDecoder()
-    .decode(index.bytes.subarray(node.range.startByte, node.range.endByte))
-    .trim()
-    .replace(/^\{\s*([^{}]*?)\s*\}$/, "$1");
-  return isReferencePath(written) ? written : undefined;
-}
-
-/**
- * Whether the reference at `at` names a named value: its innermost name, the reference itself or a
- * member's innermost object, refers to a `let`. A parameter or a loop variable is a binding, which
- * an edit must not replace with a literal.
- */
-function namesValue(index: TreeIndex, at: number): boolean {
-  const { tree } = index;
-  let current = at;
-  while (tree.nodes[current]!.role === "member") {
-    const object = index.children[current]!.find((child) => index.slots[child] === "object");
-    if (object === undefined) {
-      return false;
-    }
-    current = object;
-  }
-  const node = tree.nodes[current]!;
-  const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
-  return node.role === "reference" && declaration?.kind === "value";
 }
 
 /** A property an element does not write, as the reading offers it to add. */

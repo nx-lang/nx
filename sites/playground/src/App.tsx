@@ -242,19 +242,6 @@ export function App() {
     setMode("source");
   };
 
-  // The named values a property can take, asked of the text whose tree Visual's keys are from.
-  const readingText = useRef<string | null>(null);
-  readingText.current = reading.text;
-  const namedValuesOf = useMemo(
-    () => (key: string, property: string) => {
-      const text = readingText.current;
-      return text === null
-        ? Promise.resolve([])
-        : languageService.namedValues({ documents: [{ uri: MODEL_URI, source: text }], uri: MODEL_URI, key, property });
-    },
-    [],
-  );
-
   useEffect(() => {
     const offset = cursorToSelect.current;
     const { tree, text } = reading;
@@ -470,7 +457,6 @@ export function App() {
               }}
               onDraft={onVisualDraft}
               onOpen={openInSource}
-              namedValues={namedValuesOf}
               onUndo={() => visualHistory("undo")}
               onRedo={() => visualHistory("redo")}
               revision={visualRevision}

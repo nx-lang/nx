@@ -98,7 +98,6 @@ declare module "react" {
 | `stale`     | property and attribute | The reading is muted and badged "Out of date"; selection still works         |
 | `selection` | property               | The selected node's key; setting it scrolls the node into view               |
 | `editable`  | property               | Values edit in place, and edits fire `nx-edit`; off by default               |
-| `namedValues` | property             | Answers the named values a property can take, which editors list; none without it |
 
 ## How it reads
 
@@ -264,21 +263,35 @@ reads muted; a host that sets the same tree again, as after a refused edit, has 
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
 | A run of text on one line                          | A one-line field                                              |
-| A reference to a named value, a `let` without parameters, as `{accent}` or `theme.accent` | Its type's editor, with the reference marked among the named values; a parameter or a loop variable opens Source |
 
 Editor hints from the tree's visualizers shape the editors:
 
 | Hint                                         | Editor                                                     |
 | -------------------------------------------- | ---------------------------------------------------------- |
-| `editor=slider`, or `min` and `max` and no `editor` | A popover under the number with a slider, its `stops` as ticks it snaps to unless Alt is held, and the number's field beside it; dragging shows the value in place and commits once on release |
-| `editor=field`                               | A number field even with `min` and `max`                   |
-| `min`, `max`, `step`                         | Arrows, dragging and the slider stay in the range and step by `step`; a typed number outside it stays in the field with a note, as `At most 64` |
+| `editor=field`                               | The number field every number has                          |
+| `min`, `max`, `step`                         | Arrows, steppers and dragging stay in the range and step by `step`; a typed number outside it stays in the field with a note, as `At most 64` |
+| `ValueChoice` content (`choices`)            | A list under a number's or a string's field: each choice's label, then its value, quieter, or the value alone when none has a label; the default's row, `Default 16`, leads it |
 | `unit`                                       | Read after the number, quieter (`8 px`), and after its field; typing it, as `12px`, is taken as the number |
 | `editor=segmented`                           | A case's popover shows the cases as one row of buttons, or the list past five cases or when they do not fit |
 | `multiline`                                  | Enter breaks the line, and Ctrl or Cmd+Enter commits      |
 | `placeholder`                                | Shown, quieter, in the empty field; never written         |
 
 In any string's field Shift+Enter breaks the line, and a string written over several lines edits too.
+
+A field with choices shows a chevron just past it. A click on the chevron, Alt+Down, or typing lists
+them, typing keeping those whose label or value holds what was typed; the current value's row is
+marked. While the list is closed, Up and Down step a number; while it is open, they move through it,
+Enter picks the active row, and Escape closes the list before the field. Picking a choice commits its
+value, never its label; picking the default's row fires `{ kind: "remove" }` for the attribute, as
+Reset to default does, or, on a dimmed row, adds nothing. The field stays typeable: a choice is a
+suggestion, and any entry the field takes commits. A color's choices lead its popover, over its hex
+field.
+
+A number shows steppers, an up and a down button drawn just past the value and its unit so nothing
+moves, while its field is open and while the pointer rests on its value in the selected row. A click
+steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
+Pressing a stepper and dragging up or down scrubs the number, a step every two pixels, shown in place
+and committed once on release. Their tooltip names the keys that do the same.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does: a field opens with the
@@ -310,13 +323,8 @@ written value does, opening on its default; a commit fires `nx-edit` with the el
 property no editor takes, such as a record, fires `nx-open` with the element's key on Enter or a
 double-click. Escape, or selecting another unit, closes the list.
 
-Given `namedValues`, a function of an element's key and a property's name answering a promise of the
-language service's `namedValues`, an editor opened on a property's value asks it and lists the
-answer above its own entry: in a popover under a field, and above a case's, a color's or a slider's
-own choices, each with its path, a swatch for a color, its type and its doc. Typing filters them,
-the arrows walk them (in a number's field, with Alt), and choosing one fires `nx-edit` setting
-`{ kind: "reference", path }`. Enter or a double-click on a value the reading
-cannot edit, such as an expression, fires `nx-open` with the node's `{ key, role, range }`, for the
+Enter or a double-click on a value the reading cannot edit, such as an expression or a reference to
+a named value, fires `nx-open` with the node's `{ key, role, range }`, for the
 host to show it in its editor. With the reading focused and no editor open, Ctrl or Cmd with Z or Y
 are left to the host; inside a field, they are the field's. The element fires `nx-draft`, whose
 `detail` is `{ changed }`, when an open editor comes to hold an entry that differs from its value and
@@ -327,8 +335,6 @@ the focus, which commits the field, and the host then takes that edit back.
 import { NX_EDIT_EVENT, NX_OPEN_EVENT, type NxEditDetail, type NxOpenDetail } from "@nx-lang/viewer";
 
 viewer.editable = true;
-viewer.namedValues = (key, property) =>
-  service.namedValues({ documents: [{ uri, source: model.getValue() }], uri, key, property });
 viewer.addEventListener(NX_EDIT_EVENT, async (event) => {
   const { key, edit } = (event as CustomEvent<NxEditDetail>).detail;
   const text = model.getValue();

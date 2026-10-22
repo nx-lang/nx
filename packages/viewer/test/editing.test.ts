@@ -6,7 +6,7 @@ import { after, describe, it, type TestContext } from "node:test";
 import { fixture, nxHost, treeOf, type Fixture } from "./fixtures.js";
 import { editTargets, isRemovable, unwrittenProperties } from "../src/edit.js";
 import { cardOf } from "../src/card.js";
-import { isSlider, offsetAtPoint, rangeProblem } from "../src/editors.js";
+import { offsetAtPoint, rangeProblem } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
 
@@ -1007,44 +1007,25 @@ describe("editor hints", () => {
     assert.equal(reads(value.parentElement!).includes("8 px"), true);
   });
 
-  it("slides a spacing to the nearest stop and commits once on release", async () => {
-    const element = show(await fixture("adding"));
-    const { edits } = events(element);
-    rendered(element, "card.value.padding.value").click();
-    const slider = root(element).querySelector<HTMLInputElement>(".popover-slider");
-    assert.ok(slider, "a slider opens");
-    assert.equal(root(element).querySelectorAll(".slider-tick").length, 5, "its stops as ticks");
-    slider.value = "15";
-    slider.dispatchEvent(new window.Event("input", { bubbles: true }));
-    assert.equal(rendered(element, "card.value.padding.value").textContent, "16", "the value reads the stop while dragged");
-    assert.deepEqual(edits, []);
-    slider.dispatchEvent(new window.Event("change", { bubbles: true }));
-    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
-  });
-
   it("takes a typed number with its unit, and keeps one out of range with a note", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     rendered(element, "card.value.padding.value").click();
-    const input = root(element).querySelector<HTMLInputElement>(".popover-number")!;
-    input.value = "80";
+    const input = field(element)!;
+    input.textContent = "80";
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     press(input, "Enter");
     assert.deepEqual(edits, []);
     assert.equal(root(element).querySelector(".edit-problem")?.textContent, "At most 64 px");
-    input.value = "12px";
+    input.textContent = "12px";
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     press(input, "Enter");
     assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
   });
 
-  it("gives a range a slider unless the editor is a field, which steps within the range", async () => {
+  it("steps a number within its range", async () => {
     const element = show(await fixture("adding"));
-    rendered(element, "card.value.gap.value").click();
-    assert.ok(root(element).querySelector(".popover-slider"), "a range with no editor slides");
-    press(root(element).querySelector(".popover-number")!, "Escape");
     rendered(element, "card.value.count.value").click();
-    assert.equal(root(element).querySelector(".popover-slider"), null);
     const open = field(element)!;
     open.textContent = "9";
     press(open, "ArrowUp", { shiftKey: true });
@@ -1095,123 +1076,236 @@ describe("editor hints", () => {
   });
 });
 
-describe("named values", () => {
-  const named = [
-    { path: "accent", type: "string", doc: "The brand's accent.", value: '"#c8a27a"' },
-    { path: "theme.accent", type: "Swatch", value: '"#111111"' }
-  ];
+/** The rows of the choices list, shown or not. */
+function choices(element: NxViewerElement): HTMLElement[] {
+  return Array.from(popover(element).querySelectorAll<HTMLElement>(".option.choice"));
+}
 
-  it("lists the host's named values in a color popover, and writes the chosen one as a reference", async () => {
-    const element = show(await fixture("adding"));
-    const asked: string[] = [];
-    element.namedValues = async (key, property) => {
-      asked.push(`${key} ${property}`);
-      return named;
-    };
-    const { edits } = events(element);
-    rendered(element, "mocha.value.color.value").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(asked, ["mocha.value color"]);
-    const options = Array.from(popover(element).querySelectorAll<HTMLElement>(".option.named"));
-    assert.deepEqual(options.map((option) => option.dataset["reference"]), ["accent", "theme.accent"]);
-    assert.ok(options[0]!.querySelector(".swatch"), "a color shows its swatch");
-    options[0]!.click();
-    assert.deepEqual(edits, [{ key: "mocha.value.color.value", edit: { kind: "setValue", value: { kind: "reference", path: "accent" } } }]);
-    assert.equal(rendered(element, "mocha.value.color.value").textContent, "accent");
-  });
+/** What the shown rows of the choices list read. */
+function shownChoices(element: NxViewerElement): string[] {
+  return popover(element).hidden ? [] : choices(element).filter((row) => !row.hidden).map(reads);
+}
 
-  it("opens a reference with its type's editor, the reference marked, and a typed color replaces it", async () => {
-    const element = show(await fixture("adding"));
-    element.namedValues = async () => named;
-    const { edits } = events(element);
-    rendered(element, "tinted.value.color.value").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.ok(popover(element).classList.contains("colors"), "a color's popover");
-    const current = popover(element).querySelector<HTMLElement>(".option.named.current");
-    assert.equal(current?.dataset["reference"], "accent");
-    const hex = root(element).querySelector<HTMLInputElement>(".popover-hex")!;
-    hex.value = "#ffffff";
-    hex.dispatchEvent(new window.Event("input", { bubbles: true }));
-    press(hex, "Enter");
-    assert.deepEqual(edits, [{ key: "tinted.value.color.value", edit: { kind: "setValue", value: { kind: "string", value: "#ffffff" } } }]);
-  });
+function tools(element: NxViewerElement): HTMLElement | null {
+  return root(element).querySelector<HTMLElement>(".value-tools");
+}
 
-  it("filters a field's named values as the reader types, and adds one from a dimmed row", async () => {
+/** Presses `part` of the tools and lets go over it, as a click does, at the heights given. */
+function pressTool(part: Element, init: { shiftKey?: boolean; from?: number; to?: number[] } = {}): void {
+  const at = (type: string, clientY: number) =>
+    part.dispatchEvent(new window.MouseEvent(type, { bubbles: true, composed: true, cancelable: true, clientY, shiftKey: init.shiftKey === true }));
+  at("pointerdown", init.from ?? 0);
+  for (const y of init.to ?? []) {
+    at("pointermove", y);
+  }
+  at("pointerup", init.to?.at(-1) ?? init.from ?? 0);
+}
+
+describe("choices", () => {
+  it("lists a number's labeled choices under its field once asked, the default first, and picks one", async () => {
     const element = show(await fixture("adding"));
-    element.namedValues = async () => [{ path: "spacing", type: "int", value: "8" }, { path: "gutter", type: "int", value: "16" }];
     const { edits } = events(element);
-    element.selection = "bare.value";
-    moreToggle(element)!.click();
-    rendered(element, "bare.value.count.value").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const options = () => Array.from(popover(element).querySelectorAll<HTMLElement>(".option.named")).filter((option) => !option.hidden);
-    assert.equal(options().length, 2);
+    rendered(element, "base.value.size.value").click();
     const open = field(element)!;
-    open.textContent = "gu";
-    open.dispatchEvent(new window.Event("input", { bubbles: true }));
-    assert.deepEqual(options().map((option) => option.dataset["reference"]), ["gutter"]);
+    assert.ok(popover(element).hidden, "the list waits to be asked for");
+    assert.ok(tools(element)?.classList.contains("with-choices"), "a chevron says it is there");
+    assert.equal(open.getAttribute("aria-expanded"), "false");
     press(open, "ArrowDown", { altKey: true });
+    assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16", "lg 20"]);
+    assert.ok(popover(element).querySelector(".choices-list.labeled"), "two columns");
+    assert.ok(popover(element).querySelector(".option.choice-default + .choices-rule"), "a rule sets the default apart");
+    assert.deepEqual(
+      choices(element).filter((row) => row.classList.contains("current")).map(reads),
+      ["base 16"],
+      "the current value's choice is marked, not the default's"
+    );
+    assert.equal(open.getAttribute("aria-expanded"), "true");
+    press(open, "ArrowUp");
+    assert.equal(open.getAttribute("aria-activedescendant"), choices(element)[3]!.id, "Up from the field reaches the last");
     press(open, "Enter");
-    assert.deepEqual(edits, [{ key: "bare.value", edit: { kind: "addProperty", name: "count", value: { kind: "reference", path: "gutter" } } }]);
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "20" } } }]);
+    assert.equal(field(element), null);
   });
 
-  it("shows a named value's doc in a card beside the popover", async (t) => {
+  it("opens from its chevron, and picks with the pointer", async () => {
     const element = show(await fixture("adding"));
-    element.namedValues = async () => named;
-    rendered(element, "mocha.value.color.value").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    t.mock.timers.enable({ apis: ["setTimeout"] });
-    const option = popover(element).querySelector<HTMLElement>(".option.named")!;
-    option.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    t.mock.timers.tick(500);
-    const card = root(element).querySelector<HTMLElement>(".card")!;
-    assert.equal(card.hidden, false);
-    assert.equal(card.querySelector(".card-signature")?.textContent, "accent: string");
-    assert.equal(card.querySelector(".card-doc")?.textContent?.trim(), "The brand's accent.");
-    press(root(element).querySelector(".popover-hex")!, "Escape");
-    assert.equal(card.hidden, true, "it closes with the popover");
-  });
-
-  it("lists named values above a case popover's cases, and gives up a segmented row for them", async () => {
-    const element = show(await fixture("adding"));
-    element.namedValues = async () => [{ path: "house", type: "Mode", value: "dark" }];
     const { edits } = events(element);
-    rendered(element, "card.value.mode.value").click();
-    assert.ok(popover(element).classList.contains("segmented"), "segmented until named values come");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.ok(!popover(element).classList.contains("segmented"), "a list holds named values and cases");
-    const named = popover(element).querySelector<HTMLElement>(".option.named")!;
-    assert.equal(named.dataset["reference"], "house");
-    assert.ok(popover(element).querySelector(".option:not(.named)"), "the cases follow");
-    named.click();
-    assert.deepEqual(edits, [{ key: "card.value.mode.value", edit: { kind: "setValue", value: { kind: "reference", path: "house" } } }]);
+    rendered(element, "base.value.size.value").click();
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.equal(shownChoices(element).length, 4);
+    assert.ok(tools(element)!.classList.contains("open"));
+    choices(element)[1]!.click();
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
   });
 
-  it("reads as before with no host function", async () => {
+  it("resets to the default from its row, and adds nothing from it on a dimmed row", async () => {
     const element = show(await fixture("adding"));
-    rendered(element, "mocha.value.color.value").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(popover(element).querySelector(".named"), null);
+    const { edits } = events(element);
+    rendered(element, "big.value.size.value").click();
+    press(field(element)!, "ArrowDown", { altKey: true });
+    choices(element)[0]!.click();
+    assert.deepEqual(edits, [{ key: "big.value.size", edit: { kind: "remove" } }]);
+    element.selection = "plain.value";
+    moreToggle(element)!.click();
+    rendered(element, "plain.value.size.value").click();
+    press(field(element)!, "ArrowDown", { altKey: true });
+    assert.ok(choices(element)[0]!.classList.contains("current"), "a dimmed row reads its default");
+    choices(element)[0]!.click();
+    assert.equal(edits.length, 1, "nothing to add");
+    assert.equal(field(element), null);
+  });
+
+  it("filters as the reader types, and takes what is typed past them", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    open.textContent = "1";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16"], "typing opens the list, by value");
+    open.textContent = "l";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(shownChoices(element), ["Default 16", "lg 20"], "and by label");
+    open.textContent = "17";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(shownChoices(element), [], "none holds it");
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "17" } } }]);
+  });
+
+  it("closes the list with Escape before the field, and steps the number while it is closed", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    press(open, "ArrowDown", { altKey: true });
+    press(open, "Escape");
+    assert.ok(popover(element).hidden);
+    assert.equal(field(element), open, "the field stays open");
+    press(open, "ArrowUp");
+    assert.equal(open.textContent, "17");
+    press(open, "Escape");
+    assert.equal(field(element), null);
+    assert.deepEqual(edits, []);
+  });
+
+  it("lists a string's choices in one column when none has a label", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.tone.value").click();
+    press(field(element)!, "ArrowDown", { altKey: true });
+    assert.deepEqual(shownChoices(element), ["warm", "cool"]);
+    assert.equal(popover(element).querySelector(".choices-list.labeled"), null);
+    assert.ok(choices(element)[0]!.classList.contains("current"));
+    choices(element)[1]!.click();
+    assert.deepEqual(edits, [{ key: "base.value.tone.value", edit: { kind: "setValue", value: { kind: "string", value: "cool" } } }]);
+  });
+
+  it("lists a color's choices over its field", async () => {
+    const source = [
+      'import "@nx/visualizer"',
+      "type Swatch = string",
+      'visualizer Swatch = <ValueVisualizer format=color><ValueChoice value="#c8a27a" label="tan" /><ValueChoice value="#5a3a22" label="brown" /></ValueVisualizer>',
+      'type Cup = { color:Swatch = "#ffffff" }',
+      'let cup = <Cup color="#c8a27a" />',
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///cup.nx", identity: "cup.nx", source }], { visualizers: { modules: [] } }));
+    const { edits } = events(element);
+    rendered(element, "cup.value.color.value").click();
+    assert.ok(popover(element).classList.contains("with-choices"));
+    assert.deepEqual(shownChoices(element), ["Default #ffffff", "tan #c8a27a", "brown #5a3a22"]);
+    assert.ok(choices(element)[1]!.querySelector(".swatch"), "each with its swatch");
+    const hex = root(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    press(hex, "ArrowDown");
+    press(hex, "ArrowDown");
+    press(hex, "ArrowDown");
+    press(hex, "Enter");
+    assert.deepEqual(edits, [{ key: "cup.value.color.value", edit: { kind: "setValue", value: { kind: "string", value: "#5a3a22" } } }]);
+  });
+});
+
+describe("steppers", () => {
+  it("steps the selected row's number on a click, and ten steps on Shift+click, committed at once", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    const value = rendered(element, "card.value.padding.value");
+    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    assert.equal(tools(element), null, "not on a row that is not selected");
+    element.selection = "card.value.padding";
+    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-steppers"));
+    assert.ok(!shown.classList.contains("with-choices"));
+    assert.equal(shown.previousElementSibling?.className, "unit", "past the value's unit");
+    const up = shown.querySelector<HTMLElement>(".stepper.up")!;
+    assert.match(up.title, /\u2191/);
+    assert.match(up.title, /Shift/);
+    assert.match(up.title, /[Dd]rag/);
+    pressTool(up);
+    pressTool(up, { shiftKey: true });
+    assert.deepEqual(edits, [
+      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } },
+      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }
+    ]);
+    root(element).querySelector(".toolbar")!.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
+    assert.equal(tools(element), null, "gone once the pointer leaves");
+  });
+
+  it("steps into an open field, which commits", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(open.textContent, "3");
+    pressTool(tools(element)!.querySelector(".stepper.down")!, { shiftKey: true });
+    assert.equal(open.textContent, "0", "kept at the least");
+    assert.deepEqual(edits, []);
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "0" } } }]);
+  });
+
+  it("scrubs as a stepper is dragged up or down, shown in place and committed once on release", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    const value = rendered(element, "card.value.gap.value");
+    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 90 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "9", "shown as it moves");
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 60 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "16", "kept within the range");
+    assert.deepEqual(edits, []);
+    up.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 60 }));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
+    assert.equal(element.selection, "card.value.gap", "the selection stays");
   });
 });
 
 describe("bindings and other elements", () => {
-  it("edits a reference to a named value, never a parameter or a loop variable", async () => {
+  it("edits no reference, to a named value, a parameter or a loop variable", async () => {
     const { tree, text } = await fixture("bindings");
     const targets = editTargets(indexTree(tree, text));
-    assert.equal(targets.get("banded.value.color.value")?.reference, "palette.accent", "a let's member");
-    assert.equal(targets.get("tinted.value.color.value")?.reference, "accent", "a let");
+    assert.equal(targets.get("banded.value.color.value"), undefined, "a let's member");
+    assert.equal(targets.get("tinted.value.color.value"), undefined, "a let");
     assert.equal(targets.get("Special.body.name.value"), undefined, "a component's parameter");
     assert.equal(targets.get("menu.body[0].size.value"), undefined, "a loop variable");
   });
 
-  it("opens Source for a binding, never an editor", async () => {
+  it("opens Source for a binding or a reference, never an editor", async () => {
     const element = show(await fixture("bindings"));
     const { edits, opens } = events(element);
     const name = rendered(element, "Special.body.name.value");
     assert.ok(!name.classList.contains("editable-value"));
     name.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
-    assert.deepEqual(opens.map((open) => open.key), ["Special.body.name.value"]);
+    const tint = rendered(element, "tinted.value.color.value");
+    assert.ok(!tint.classList.contains("editable-value"));
+    tint.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.deepEqual(opens.map((open) => open.key), ["Special.body.name.value", "tinted.value.color.value"]);
     assert.deepEqual(edits, []);
   });
 
@@ -1255,11 +1349,9 @@ describe("bindings and other elements", () => {
     assert.deepEqual(edits, [{ key: "promo.value", edit: { kind: "addProperty", name: "pumps", value: { kind: "number", text: "2" } } }]);
   });
 
-  it("bounds nothing with an empty range, and gives it no slider", () => {
+  it("bounds nothing with an empty range", () => {
     const hints = { min: 10, max: 0 };
     assert.equal(rangeProblem("5", hints), undefined);
     assert.equal(rangeProblem("20", hints), undefined);
-    assert.equal(isSlider({ at: 0, key: "k", kind: "number", value: "5", hints }), false);
-    assert.equal(isSlider({ at: 0, key: "k", kind: "number", value: "5", hints: { min: 0, max: 10 } }), true);
   });
 });

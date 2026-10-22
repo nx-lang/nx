@@ -66,12 +66,6 @@ pub enum SourceEditValue {
         /// The case's name.
         name: String,
     },
-    /// A reference to a named value, written as its path: in braces as an attribute's value, and
-    /// bare elsewhere.
-    Reference {
-        /// The path, identifiers joined by dots, such as `theme.accent`.
-        path: String,
-    },
 }
 
 /// One replacement in a document's text.
@@ -213,17 +207,15 @@ pub(crate) fn is_whole_value(tree: &SourceTree, at: usize) -> bool {
 
 fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue) -> Replacement {
     let node = &tree.nodes[at];
+    if !matches!(node.role, SourceRole::Literal | SourceRole::Case) || !is_whole_value(tree, at) {
+        return Err(SourceEditRefusal::NotEditable);
+    }
     let (start, end) = byte_span(node);
+    // A literal's range is its own token; braces written around it stay where they are. A string
+    // literal's span is checked so that nothing but the token is replaced.
     let Some(written) = source.get(start..end) else {
         return Err(SourceEditRefusal::NotEditable);
     };
-    let is_reference = matches!(node.role, SourceRole::Reference | SourceRole::Member)
-        && is_reference_path(written);
-    if !(matches!(node.role, SourceRole::Literal | SourceRole::Case) || is_reference)
-        || !is_whole_value(tree, at)
-    {
-        return Err(SourceEditRefusal::NotEditable);
-    }
     let text = spell_value(value)?;
     let owner = parent(tree, node).map(|owner| owner.role);
     let braced = node.flags.contains(&SourceFlag::Braced);
@@ -236,25 +228,6 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
             return Ok(Some((start + dot + 1, end, text)));
         }
     }
-    if let SourceEditValue::Reference { .. } = value {
-        // An attribute's value needs braces around a reference; braces already written stay.
-        let text = if owner == Some(SourceRole::Attribute) && !braced {
-            format!("{{{text}}}")
-        } else {
-            text
-        };
-        return Ok(Some((start, end, text)));
-    }
-    // A literal or a case over a braced reference at an attribute or a `let` is written as the place
-    // usually spells it, its braces dropped.
-    if is_reference
-        && braced
-        && matches!(owner, Some(SourceRole::Attribute | SourceRole::Declaration))
-    {
-        if let Some((open, close)) = enclosing_braces(source, start, end) {
-            return Ok(Some((open, close, text)));
-        }
-    }
     // Only a value written unbraced after `=` takes a minus sign or a bare case name: in braces or
     // in a list, `-3` is an operator and `large` a reference to a name.
     let unbraced =
@@ -264,27 +237,6 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
         return Err(SourceEditRefusal::InvalidValue);
     }
     Ok(Some((start, end, text)))
-}
-
-/// The bytes from the `{` before `start` to just past the `}` after `end`, when only blanks lie
-/// between them and the value.
-fn enclosing_braces(source: &str, start: usize, end: usize) -> Option<(usize, usize)> {
-    let before = source[..start].trim_end();
-    let after = source[end..].trim_start();
-    if !before.ends_with('{') || !after.starts_with('}') {
-        return None;
-    }
-    let open = before.len() - 1;
-    let close = source.len() - after.len() + 1;
-    Some((open, close))
-}
-
-/// Whether `text` is a reference path: identifiers joined by dots, with nothing between them.
-pub(crate) fn is_reference_path(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .split('.')
-            .all(|part| is_identifier(part) && part != "true" && part != "false")
 }
 
 /// Spells a value as NX source, or refuses one that cannot be spelled.
@@ -302,13 +254,6 @@ pub(crate) fn spell_value(value: &SourceEditValue) -> Result<String, SourceEditR
         SourceEditValue::Case { name } => {
             if is_identifier(name) && name != "true" && name != "false" {
                 Ok(name.clone())
-            } else {
-                Err(SourceEditRefusal::InvalidValue)
-            }
-        }
-        SourceEditValue::Reference { path } => {
-            if is_reference_path(path) {
-                Ok(path.clone())
             } else {
                 Err(SourceEditRefusal::InvalidValue)
             }
@@ -524,14 +469,8 @@ fn add_property(
                 && !candidate.flags.contains(&SourceFlag::Content)
         })
         .collect::<Vec<_>>();
-    // An attribute's value is spelled as `setValue` spells it there: unbraced, with braces around a
-    // reference.
-    let spelled = spell_value(value)?;
-    let spelled = match value {
-        SourceEditValue::Reference { .. } => format!("{{{spelled}}}"),
-        _ => spelled,
-    };
-    let attribute = format!("{name}={spelled}");
+    // An attribute's value is spelled as `setValue` spells it there.
+    let attribute = format!("{name}={}", spell_value(value)?);
     let (element_start, _) = byte_span(node);
     let bytes = source.as_bytes();
     let line_start = |at: usize| source[..at].rfind('\n').map_or(0, |line| line + 1);

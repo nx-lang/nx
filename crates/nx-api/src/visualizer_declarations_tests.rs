@@ -11,10 +11,11 @@ use nx_value::NxValue;
 
 const VISUALIZER_ROOT: &str = "@nx/visualizer";
 
-const VISUALIZER_TYPES: [&str; 6] = [
+const VISUALIZER_TYPES: [&str; 7] = [
     "ElementVisualizer",
     "IdPosition",
     "PropertyVisualizer",
+    "ValueChoice",
     "ValueEditor",
     "ValueFormat",
     "ValueVisualizer",
@@ -67,7 +68,7 @@ fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
 // --- The library ------------------------------------------------------------------------------
 
 #[test]
-fn the_visualizer_library_exports_exactly_its_six_types() {
+fn the_visualizer_library_exports_exactly_its_seven_types() {
     let library = standard_library(VISUALIZER_ROOT).expect("the visualizer library");
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
     let mut exported = library
@@ -150,7 +151,7 @@ fn a_color_alias() {
 fn a_property_with_editor_hints() {
     assert_clean(
         "type Card = { title:string padding:int = 8 body?:string }\n\
-         visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding editor=slider min=0 max=48 stops={ 0 4 8 16 24 48 } unit=\"px\" /><PropertyVisualizer property=body multiline=true placeholder=\"What it says\" /></ElementVisualizer>",
+         visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding editor=field min=0 max=48 unit=\"px\"><ValueChoice value=8 label=\"sm\" /><ValueChoice value=16 /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder=\"What it says\" /></ElementVisualizer>",
     );
 }
 
@@ -158,7 +159,10 @@ fn a_property_with_editor_hints() {
 fn a_spacing_alias_with_no_format() {
     assert_clean(
         "type Spacing = int\n\
-         visualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={ 0 4 8 16 24 32 48 64 } unit=\"px\" />",
+         visualizer Spacing = <ValueVisualizer min=0 max=64 unit=\"px\">\n\
+           <ValueChoice value=4 label=\"xs\" />\n\
+           <ValueChoice value=8 label=\"sm\" />\n\
+         </ValueVisualizer>",
     );
 }
 
@@ -166,7 +170,7 @@ fn a_spacing_alias_with_no_format() {
 fn hints_take_signed_and_real_numbers() {
     assert_clean(
         "type Offset = float64\n\
-         visualizer Offset = <ValueVisualizer min=-10 max=10.5 step=0.5 stops={2} />",
+         visualizer Offset = <ValueVisualizer min=-10 max=10.5 step=0.5><ValueChoice value=-2.5 /><ValueChoice value=0x10 /></ValueVisualizer>",
     );
 }
 
@@ -187,9 +191,9 @@ fn warnings_of(body: &str, code: &str) -> Vec<NxDiagnostic> {
 }
 
 #[test]
-fn a_slider_on_a_string_is_a_warning() {
+fn a_field_on_a_string_is_a_warning() {
     let body = "type Card = { title:string }\n\
-                visualizer Card = <ElementVisualizer><PropertyVisualizer property=title editor=slider placeholder=\"Title\" /></ElementVisualizer>";
+                visualizer Card = <ElementVisualizer><PropertyVisualizer property=title editor=field placeholder=\"Title\" /></ElementVisualizer>";
     let warnings = warnings_of(body, "editor-hint-mismatch");
     assert_eq!(warnings.len(), 1, "{warnings:#?}");
     assert_eq!(warnings[0].severity, NxSeverity::Warning);
@@ -213,12 +217,29 @@ fn each_hint_is_checked_against_its_type() {
         ("type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size multiline=true placeholder=\"Size\" /></ElementVisualizer>", 2),
         // A segmented control on a union with a payload case.
         ("type Extra = none | syrup { flavor:string }\ntype Cup = { extra:Extra = none }\nvisualizer Cup = <ElementVisualizer><PropertyVisualizer property=extra editor=segmented /></ElementVisualizer>", 1),
+        // A string choice for a number, and a number choice for a string.
+        ("type Card = { size:int label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=\"Hi\" /><ValueChoice value=3 /></PropertyVisualizer><PropertyVisualizer property=label><ValueChoice value=3 /><ValueChoice value=\"Hi\" /></PropertyVisualizer></ElementVisualizer>", 2),
+        // Choices on an alias of neither, one warning a choice.
+        ("type Flag = boolean\nvisualizer Flag = <ValueVisualizer><ValueChoice value=true /><ValueChoice value=\"yes\" /></ValueVisualizer>", 2),
         // Every hint that fits.
-        ("type Card = { size?:float64 label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=field min=0 max=1 step=0.1 unit=\"em\" /><PropertyVisualizer property=label multiline=true /></ElementVisualizer>", 0),
+        ("type Card = { size?:float64 label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=field min=0 max=1 step=0.1 unit=\"em\" /><PropertyVisualizer property=label multiline=true><ValueChoice value=\"Hi\" label=\"greeting\" /></PropertyVisualizer></ElementVisualizer>", 0),
     ] {
         let warnings = warnings_of(body, "editor-hint-mismatch");
         assert_eq!(warnings.len(), count, "{body}: {warnings:#?}");
     }
+}
+
+#[test]
+fn a_mismatched_choice_names_its_property() {
+    let warnings = warnings_of(
+        "type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=\"Hi\" /></PropertyVisualizer></ElementVisualizer>",
+        "editor-hint-mismatch",
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    assert!(
+        warnings[0].message.contains("'size'") && warnings[0].message.contains("number literal"),
+        "{warnings:#?}"
+    );
 }
 
 #[test]

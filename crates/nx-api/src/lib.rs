@@ -79,7 +79,7 @@ pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};
 pub use program_visualizers::{
     duplicate_program_visualizers, duplicate_visualizer_diagnostics, program_modules,
     program_visualizers, read_visualizer_value, ProgramModule, ProgramVisualizer,
-    VisualizerAttribute, VisualizerChild, VisualizerValue,
+    VisualizerAttribute, VisualizerChild, VisualizerChoice, VisualizerValue,
 };
 pub use schema::{
     program_artifact_boundary_subtype_modules, program_artifact_function_schema,

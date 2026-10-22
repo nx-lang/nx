@@ -16,12 +16,14 @@
 //! <para>The shape is unstable: it is published for the visualizer and the change view to build on,
 //! and a later change commits to it.</para>
 
+use crate::source_edit::SourceEditValue;
 use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer, EDITOR_HINTS};
 use crate::{
     is_unresolved_type, type_ref_display, DeclarationOrigin, DocumentScope, DocumentUri,
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
     WorkspaceDeclarations, WorkspaceSnapshot,
 };
+use nx_api::{VisualizerAttribute, VisualizerChoice};
 use nx_hir::{
     ast::Expr, Doc, ExprId, FunctionForm, Item, LocalDefinitionId, RecordField, RecordKind,
 };
@@ -308,7 +310,7 @@ pub struct SourcePropertyVisualizer {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceEditorHints {
-    /// The editor asked for: `field`, `slider`, `dropdown` or `segmented`.
+    /// The editor asked for: `field`, `dropdown` or `segmented`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     /// The smallest number the editor offers.
@@ -320,9 +322,6 @@ pub struct SourceEditorHints {
     /// How far one step moves a number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<SourceNumber>,
-    /// The numbers a slider snaps to, in order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stops: Vec<SourceNumber>,
     /// The unit shown after a number, never written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
@@ -332,6 +331,20 @@ pub struct SourceEditorHints {
     /// Text shown in an empty field, never written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
+    /// The values offered to pick, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<SourceChoice>,
+}
+
+/// A value an editor offers to pick: the value, typed as `setValue` takes it, and its label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceChoice {
+    /// The value picking the choice writes: a number or a string.
+    pub value: SourceEditValue,
+    /// The name the choice reads by, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// A number in the source tree's JSON, compared by its bits so the tree stays `Eq`.
@@ -2095,9 +2108,12 @@ impl<'a> TreeBuilder<'a> {
             .map(|property| property.name.clone())
             .collect::<Vec<_>>();
         if resolved.is_none()
-            && !names
-                .iter()
-                .any(|name| type_format(name).is_some() || !type_hints(name).is_empty())
+            && !names.iter().any(|name| {
+                let hints = type_hints(name);
+                type_format(name).is_some()
+                    || !hints.attributes.is_empty()
+                    || hints.choices.is_some()
+            })
         {
             return None;
         }
@@ -2107,22 +2123,36 @@ impl<'a> TreeBuilder<'a> {
             // The property's own hints win one by one over its type's, but only those that fit:
             // a mismatched one is left out, and the type's hint of that name stays in force.
             let kind = value_kind(name);
-            let mut hints = child
-                .map(|child| {
-                    child
-                        .attributes
-                        .iter()
-                        .filter(|(key, value)| {
-                            EDITOR_HINTS.contains(&key.as_str()) && hint_fits(key, value, kind)
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            for (key, value) in type_hints(name) {
-                if !hints.iter().any(|(existing, _)| *existing == key) {
-                    hints.push((key, value));
+            let mut hints = Hints {
+                attributes: child
+                    .map(|child| {
+                        child
+                            .attributes
+                            .iter()
+                            .filter(|(key, value)| {
+                                EDITOR_HINTS.contains(&key.as_str()) && hint_fits(key, value, kind)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                // The property's own choices, when any of them fit, replace its type's whole.
+                choices: child
+                    .and_then(|child| child.choices.clone())
+                    .filter(|choices| !fitting_choices(choices, kind).is_empty()),
+            };
+            let type_hints = type_hints(name);
+            for (key, value) in type_hints.attributes {
+                if !hints
+                    .attributes
+                    .iter()
+                    .any(|(existing, _)| *existing == key)
+                {
+                    hints.attributes.push((key, value));
                 }
+            }
+            if hints.choices.is_none() {
+                hints.choices = type_hints.choices;
             }
             editor_hints(&hints, kind)
         };
@@ -2315,8 +2345,8 @@ fn alias_hints(
     workspace: &WorkspaceDeclarations,
     origin: &DeclarationOrigin,
     visualizers: &ProgramVisualizers,
-) -> Vec<(String, String)> {
-    let mut hints: Vec<(String, String)> = Vec::new();
+) -> Hints {
+    let mut hints = Hints::default();
     let mut current = origin.clone();
     let mut seen = Vec::new();
     loop {
@@ -2325,9 +2355,16 @@ fn alias_hints(
         };
         if let Some(resolved) = visualizers.resolve(&current, &[]) {
             for (key, value) in resolved.hints {
-                if !hints.iter().any(|(existing, _)| *existing == key) {
-                    hints.push((key, value));
+                if !hints
+                    .attributes
+                    .iter()
+                    .any(|(existing, _)| *existing == key)
+                {
+                    hints.attributes.push((key, value));
                 }
+            }
+            if hints.choices.is_none() {
+                hints.choices = resolved.choices;
             }
         }
         seen.push(current.clone());
@@ -2345,6 +2382,14 @@ fn alias_hints(
         }
         current = next;
     }
+}
+
+/// A visualizer's editor hints as written: its hint attributes by name, as text, and its choices
+/// when it gives any.
+#[derive(Debug, Clone, Default)]
+struct Hints {
+    attributes: Vec<(String, String)>,
+    choices: Option<Vec<VisualizerChoice>>,
 }
 
 /// What kind of value an editor hint edits.
@@ -2408,22 +2453,53 @@ fn hint_fits(key: &str, value: &str, kind: HintValueKind) -> bool {
     let fits = |needs: HintValueKind| kind == HintValueKind::Unknown || kind == needs;
     match key {
         "editor" => match value {
-            "field" | "slider" => fits(HintValueKind::Number),
+            "field" => fits(HintValueKind::Number),
             "dropdown" | "segmented" => fits(HintValueKind::Cases),
             _ => false,
         },
-        "min" | "max" | "step" | "stops" | "unit" => fits(HintValueKind::Number),
+        "min" | "max" | "step" | "unit" => fits(HintValueKind::Number),
         "multiline" | "placeholder" => fits(HintValueKind::String),
         _ => false,
     }
 }
 
+/// The choices among `choices` that fit a value of `kind`, typed as `setValue` takes them: number
+/// literals for a number, string literals for a string. Analysis reports any other as
+/// `editor-hint-mismatch`.
+fn fitting_choices(choices: &[VisualizerChoice], kind: HintValueKind) -> Vec<SourceChoice> {
+    choices
+        .iter()
+        .filter_map(|choice| {
+            let value = match (&choice.value, kind) {
+                (
+                    VisualizerAttribute::Number(number),
+                    HintValueKind::Number | HintValueKind::Unknown,
+                ) => SourceEditValue::Number {
+                    text: number.0.to_string(),
+                },
+                (
+                    VisualizerAttribute::Text(text),
+                    HintValueKind::String | HintValueKind::Unknown,
+                ) => SourceEditValue::String {
+                    value: text.clone(),
+                },
+                _ => return None,
+            };
+            Some(SourceChoice {
+                value,
+                label: choice.label.clone(),
+            })
+        })
+        .collect()
+}
+
 /// The editor hints among `hints` that fit a value of `kind`, or `None` when none does. A hint
 /// that does not fit is left out, and so is a range whose `min` is above its `max`, which analysis
 /// reports as `editor-hint-range`.
-fn editor_hints(hints: &[(String, String)], kind: HintValueKind) -> Option<SourceEditorHints> {
+fn editor_hints(hints: &Hints, kind: HintValueKind) -> Option<SourceEditorHints> {
     let get = |name: &str| {
         hints
+            .attributes
             .iter()
             .find(|(key, value)| key == name && hint_fits(key, value, kind))
             .map(|(_, value)| value.as_str())
@@ -2444,19 +2520,16 @@ fn editor_hints(hints: &[(String, String)], kind: HintValueKind) -> Option<Sourc
         min,
         max,
         step: number("step"),
-        stops: get("stops")
-            .map(|text| {
-                text.split_whitespace()
-                    .filter_map(|stop| stop.parse::<f64>().ok())
-                    .map(SourceNumber)
-                    .collect()
-            })
-            .unwrap_or_default(),
         unit: get("unit").map(str::to_string),
         multiline: get("multiline")
             .filter(|value| *value == "true")
             .map(|_| true),
         placeholder: get("placeholder").map(str::to_string),
+        choices: hints
+            .choices
+            .as_deref()
+            .map(|choices| fitting_choices(choices, kind))
+            .unwrap_or_default(),
     };
     (editor != SourceEditorHints::default()).then_some(editor)
 }

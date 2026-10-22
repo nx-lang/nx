@@ -8,7 +8,7 @@
  * reads as written, in the colors the host's editor gives it. Every piece carries its node's key.
  * It has no framework dependency and keeps its markup and styles in a shadow root.</para>
  */
-import type { EditorRange, NamedValue, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
+import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
 import { cardOf, propertyCardOf, type Card } from "./card.js";
 import {
@@ -18,7 +18,6 @@ import {
   isNumericLiteral,
   isRemovable,
   isWholeValue,
-  referenceEditOf,
   removalOf,
   runProblem,
   unwrittenProperties,
@@ -27,24 +26,23 @@ import {
 } from "./edit.js";
 import {
   caseOptions,
+  choiceMatches,
+  choiceRows,
+  choicesOf,
   defaultShown,
   defaultValue,
-  isSlider,
-  namedOptions,
   numberEntry,
   offsetAtPoint,
   pickerColor,
   rangeProblem,
-  showReference,
   showValue,
-  slidValue,
   stepNumber,
   valueHost
 } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
-import { indexTree, nodeOf, type TreeIndex } from "./tree.js";
+import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
 export { keyAtRange, rangeOfKey } from "./selection.js";
@@ -119,14 +117,8 @@ export interface NxSelectDetail {
 /** Renders a doc comment's Markdown as the host wants it read. */
 export type NxViewerMarkdown = (markdown: string) => Node;
 
-/**
- * Answers the named values the property `property` of the element with the key `element` can take,
- * as the language service's `namedValues` query answers them.
- */
-export type NxViewerNamedValues = (element: string, property: string) => Promise<readonly NamedValue[]>;
-
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable", "namedValues"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable"] as const;
 
 /** How many unwritten properties a selected element lists before a filter field leads them. */
 const MORE_FILTER_PAST = 12;
@@ -216,13 +208,12 @@ interface EditSession {
   /** A case popover's options, and the one Enter chooses. */
   readonly options?: readonly HTMLElement[];
   active?: HTMLElement | undefined;
-  /** A slider's track, beside its number field. */
-  readonly slider?: HTMLInputElement;
-  /** The named values listed with a field, a color or a slider, and the one Enter chooses. */
-  named?: HTMLElement[];
-  namedActive?: HTMLElement | undefined;
-  /** Whether the reader has typed in the editor, after which the named values filter by it. */
-  typed?: boolean;
+  /** The rows of the choices listed with a field or a color, their list, and the one Enter picks. */
+  choices?: HTMLElement[];
+  choiceList?: HTMLElement;
+  choiceActive?: HTMLElement | undefined;
+  /** Whether a field's choices are listed under it; a color's always are. */
+  choicesOpen?: boolean;
   closed: boolean;
 }
 
@@ -251,6 +242,25 @@ interface Scrub {
   /** The number now, once the press became a drag. */
   value: string | undefined;
 }
+
+/** A stepper pressed on a number, and dragged up or down once the press became a drag. */
+interface Stepping {
+  readonly target: EditTarget;
+  readonly pointer: number;
+  readonly y: number;
+  /** Which stepper: up, `1`, or down, `-1`. */
+  readonly direction: 1 | -1;
+  /** The number when the press began. */
+  readonly from: string;
+  /** The number now, once the press became a drag. */
+  value: string | undefined;
+}
+
+/** A stepper's tooltip, which names the keys that do the same. */
+const STEPPER_TITLES = {
+  up: "Step up (\u2191). Shift+click steps 10. Drag up or down to scrub.",
+  down: "Step down (\u2193). Shift+click steps 10. Drag up or down to scrub."
+} as const;
 
 function keyOf(element: Element): string | undefined {
   return (element as HTMLElement).dataset["key"];
@@ -320,12 +330,8 @@ export class NxViewerElement extends ElementBase {
   #ignoreClick = false;
   /** The value whose popover a press on it closed, which the click that follows leaves closed. */
   #closedOnPress: string | undefined;
-  /** Each value set to a named value since the host last set a tree, by key: its reference path. */
-  #pendingReferences = new Map<string, string>();
-  /** Answers the named values a property can take, as the host gives it. */
-  #namedValues: NxViewerNamedValues | undefined;
-  /** The named values asked for since the host last set a tree, by element and property. */
-  #namedAnswers = new Map<string, Promise<readonly NamedValue[]>>();
+  /** A stepper pressed, and dragged up or down once the press became a drag. */
+  #stepping: Stepping | undefined;
   /** The key of the element whose unwritten properties are listed. */
   #moreOpen: string | undefined;
   /** What the filter of the unwritten properties holds. */
@@ -341,8 +347,6 @@ export class NxViewerElement extends ElementBase {
   #moreCards = new Map<string, Card>();
   /** The menu of a row's actions, when open: the row's key. */
   #menuKey: string | undefined;
-  /** The cards of the named values listed, by their options. */
-  #namedCards = new WeakMap<Element, Card>();
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -353,8 +357,12 @@ export class NxViewerElement extends ElementBase {
   readonly #frame: HTMLDivElement;
   /** The hover card: what a name or a value under the pointer is, and its doc. */
   readonly #card: HTMLDivElement;
-  /** The popover a case or a color is chosen in. */
+  /** The popover a case or a color is chosen in, or a field's choices are listed in. */
   readonly #popover: HTMLDivElement;
+  /** A number's steppers and a field's choices chevron, drawn past the value they act on. */
+  readonly #tools: HTMLSpanElement;
+  /** The value the steppers were drawn past while the pointer rests on it, with no editor open. */
+  #toolsHover: string | undefined;
   /** The menu of a row's actions. */
   readonly #menu: HTMLDivElement;
   /** Whether the open editor holds an entry that differs from its value, as `nx-draft` last said. */
@@ -461,19 +469,12 @@ export class NxViewerElement extends ElementBase {
       if (option === null || session === undefined) {
         return;
       }
-      const reference = option.dataset["reference"];
-      if (reference !== undefined) {
-        this.#chooseReference(session, reference);
+      if (option.classList.contains("choice")) {
+        this.#pickChoice(session, option);
       } else if (session.options !== undefined) {
         this.#choose(session, option.dataset["name"]!);
       }
     });
-    // A named value's doc opens in a card beside the popover, once the pointer rests on it.
-    this.#popover.addEventListener("pointerover", (event) => {
-      const option = (event.target as Element).closest?.(".option.named") as HTMLElement | null;
-      this.#pointNamed(option ?? undefined);
-    });
-    this.#popover.addEventListener("pointerleave", () => this.#pointNamed(undefined));
     this.#popover.addEventListener("focusout", (event) => {
       const next = event.relatedTarget as Node | null;
       const session = this.#session;
@@ -481,6 +482,34 @@ export class NxViewerElement extends ElementBase {
         this.#cancel(session, false);
       }
     });
+
+    // The tools are drawn in the reading, just past the value they act on, over the gap after it,
+    // so nothing moves; they keep the pointer's presses to themselves.
+    this.#tools = document.createElement("span");
+    this.#tools.className = "value-tools";
+    this.#tools.setAttribute("aria-hidden", "true");
+    const steppers = document.createElement("span");
+    steppers.className = "steppers";
+    for (const direction of ["up", "down"] as const) {
+      const stepper = document.createElement("span");
+      stepper.className = `stepper ${direction}`;
+      stepper.title = STEPPER_TITLES[direction];
+      steppers.append(stepper);
+    }
+    const toggle = document.createElement("span");
+    toggle.className = "choices-toggle";
+    toggle.title = "Choices (Alt+\u2193)";
+    this.#tools.append(steppers, toggle);
+    this.#tools.addEventListener("pointerdown", (event) => this.#onToolsPointerDown(event));
+    this.#tools.addEventListener("pointermove", (event) => this.#onToolsPointerMove(event));
+    this.#tools.addEventListener("pointerup", (event) => this.#onToolsPointerUp(event, true));
+    this.#tools.addEventListener("pointercancel", (event) => this.#onToolsPointerUp(event, false));
+    for (const name of ["click", "dblclick", "mousedown"]) {
+      this.#tools.addEventListener(name, (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+      });
+    }
 
     this.#problem = document.createElement("div");
     this.#problem.className = "edit-problem";
@@ -518,10 +547,12 @@ export class NxViewerElement extends ElementBase {
     this.#body.addEventListener("pointerover", (event) => {
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
       this.#point(this.#hoverTargetOf(event.target));
+      this.#hoverTools(event.target as Element);
     });
     this.#body.addEventListener("pointerleave", () => {
       this.#setHoveredUnit(undefined);
       this.#point(undefined);
+      this.#hoverTools(null);
     });
     // The highlights follow the layout: a wider pane moves the right edge they run to.
     if (typeof ResizeObserver !== "undefined") {
@@ -575,9 +606,7 @@ export class NxViewerElement extends ElementBase {
     this.#tree = tree;
     // A new tree says what each edit made of the source, or that it made nothing.
     this.#pending.clear();
-    this.#pendingReferences.clear();
     this.#removed.clear();
-    this.#namedAnswers.clear();
     this.#render();
   }
 
@@ -670,21 +699,6 @@ export class NxViewerElement extends ElementBase {
   /** Unfolds everything. */
   expandAll(): void {
     this.#setFolded(new Set());
-  }
-
-  /**
-   * Answers the named values a property can take: given an element's key and a property's name, a
-   * promise of the values in the document's scope its type accepts, as the language service's
-   * `namedValues` query answers them. Editors list them, and choosing one writes a reference to it.
-   * Without it, editors list none.
-   */
-  get namedValues(): NxViewerNamedValues | undefined {
-    return this.#namedValues;
-  }
-
-  set namedValues(namedValues: NxViewerNamedValues | undefined) {
-    this.#namedValues = typeof namedValues === "function" ? namedValues : undefined;
-    this.#namedAnswers.clear();
   }
 
   /** Whether the tree is out of date: the reading is muted and badged, and still works. */
@@ -1230,6 +1244,10 @@ export class NxViewerElement extends ElementBase {
     if (this.#menuKey !== undefined && this.#menuKey !== key) {
       this.#closeMenu(false);
     }
+    // Steppers drawn while the pointer rested on a value belong to the row that was selected.
+    if (this.#session === undefined && this.#stepping === undefined && this.#tools.isConnected) {
+      this.#hideTools();
+    }
     this.#selectNode(key, fire, reveal);
     this.#drawMore();
   }
@@ -1311,12 +1329,6 @@ export class NxViewerElement extends ElementBase {
         showValue(span, target, this.#writtenOf(target), value);
       }
     }
-    for (const [key, path] of this.#pendingReferences) {
-      const span = this.#rendered.get(key);
-      if (span !== undefined) {
-        showReference(span, path);
-      }
-    }
     for (const key of this.#removed) {
       this.#rendered.get(key)?.classList.add("pending");
     }
@@ -1339,7 +1351,7 @@ export class NxViewerElement extends ElementBase {
   #markUnits(targets: ReadonlyMap<string, EditTarget>): void {
     const units = new Map<string, string>();
     for (const target of targets.values()) {
-      if (target.kind === "number" && target.reference === undefined && target.hints?.unit !== undefined) {
+      if (target.kind === "number" && target.hints?.unit !== undefined) {
         units.set(target.key, target.hints.unit);
       }
     }
@@ -1391,15 +1403,7 @@ export class NxViewerElement extends ElementBase {
 
   /** The value `target` reads as now: as the reader left it, or as the tree gives it. */
   #currentOf(target: EditTarget): string {
-    return this.#pendingReferences.get(target.key) ?? this.#pending.get(target.key) ?? target.value;
-  }
-
-  /** The reference path `target` reads as now, when it is a named value. */
-  #referenceOf(target: EditTarget): string | undefined {
-    if (this.#pendingReferences.has(target.key)) {
-      return this.#pendingReferences.get(target.key);
-    }
-    return this.#pending.has(target.key) ? undefined : target.reference;
+    return this.#pending.get(target.key) ?? target.value;
   }
 
   #fire(name: string, detail: NxEditDetail | NxOpenDetail): void {
@@ -1422,7 +1426,6 @@ export class NxViewerElement extends ElementBase {
     this.#closeCard();
     this.#closeMenu(false);
     const current = this.#currentOf(target);
-    const reference = this.#referenceOf(target);
     switch (target.kind) {
       case "boolean":
         this.#commitValue(target, current === "true" ? "false" : "true");
@@ -1431,22 +1434,15 @@ export class NxViewerElement extends ElementBase {
         this.#openCases(target, span, draft ?? "", caret);
         break;
       case "color":
-        // A named value's path is no hex: the field starts empty, the path its placeholder.
-        this.#openColor(target, span, draft ?? (reference === undefined ? current : ""), caret);
-        break;
-      case "number":
-        if (isSlider(target)) {
-          this.#openSlider(target, span, draft ?? current, caret);
-        } else {
-          this.#openField(target, span, draft ?? current, caret);
-        }
+        this.#openColor(target, span, draft ?? current, caret);
         break;
       default:
         this.#openField(target, span, draft ?? current, caret);
     }
     const session = this.#session;
     if (session !== undefined && session.target === target) {
-      this.#askNamedValues(session);
+      this.#listChoices(session);
+      this.#showTools(session.span, target);
     }
   }
 
@@ -1543,9 +1539,9 @@ export class NxViewerElement extends ElementBase {
     this.#session = session;
     field.addEventListener("keydown", (event) => this.#onFieldKey(event, session));
     field.addEventListener("input", () => {
-      session.typed = true;
       this.#validate(session);
-      this.#filterNamed(session, field.textContent ?? "");
+      // Typing lists the choices that hold what is typed.
+      this.#filterChoices(session, field.textContent ?? "", true);
     });
     field.addEventListener("blur", () => {
       if (!session.closed) {
@@ -1586,10 +1582,6 @@ export class NxViewerElement extends ElementBase {
 
   /** Why the field's entry cannot be taken, or nothing when it can. */
   #problemOf(target: EditTarget, value: string): string | undefined {
-    // A named value left as it is, as its path, is no entry to check.
-    if (this.#referenceOf(target) !== undefined && value.trim() === this.#currentOf(target)) {
-      return undefined;
-    }
     switch (target.kind) {
       case "number": {
         const entry = numberEntry(value, target.hints);
@@ -1618,13 +1610,6 @@ export class NxViewerElement extends ElementBase {
   #validate(session: EditSession, now = false): void {
     const input = session.field ?? session.input;
     if (input === undefined || session.target.kind === "case") {
-      return;
-    }
-    // A named value's color popover starts empty, which leaves the value as it is.
-    if (session.input !== undefined && session.input.value === "" && session.target.kind === "color" && this.#referenceOf(session.target) !== undefined) {
-      this.#reportDraft(false);
-      input.classList.remove("invalid");
-      this.#hideProblem();
       return;
     }
     this.#reportDraft(this.#draftOf(session) !== this.#currentOf(session.target));
@@ -1687,18 +1672,25 @@ export class NxViewerElement extends ElementBase {
     event.stopPropagation();
     const field = session.field!;
     const target = session.target;
-    // The named values listed with the field: the arrows walk them, in a number's field with Alt,
-    // since there they step the number.
-    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.named?.length ?? 0) > 0 && (target.kind !== "number" || event.altKey)) {
-      event.preventDefault();
-      this.#stepNamed(session, event.key === "ArrowDown" ? 1 : -1);
-      return;
+    // The choices listed with the field: Alt+Down lists them and Alt+Up hides them; listed, the
+    // arrows walk them, and otherwise a number's arrows step it.
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.choices?.length ?? 0) > 0) {
+      if (event.altKey) {
+        event.preventDefault();
+        this.#toggleChoices(session, event.key === "ArrowDown");
+        return;
+      }
+      if (session.choicesOpen === true) {
+        event.preventDefault();
+        this.#stepChoice(session, event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
     }
     switch (event.key) {
       case "Enter":
         event.preventDefault();
-        if (session.namedActive !== undefined) {
-          this.#chooseReference(session, session.namedActive.dataset["reference"]!);
+        if (session.choicesOpen === true && session.choiceActive !== undefined) {
+          this.#pickChoice(session, session.choiceActive);
           return;
         }
         // Shift+Enter breaks a string's line; in a field hinted for several lines, Enter does, and
@@ -1711,6 +1703,11 @@ export class NxViewerElement extends ElementBase {
         return;
       case "Escape":
         event.preventDefault();
+        // Escape hides the choices first, then cancels.
+        if (session.choicesOpen === true) {
+          this.#toggleChoices(session, false);
+          return;
+        }
         this.#cancel(session, true);
         return;
       case "Tab":
@@ -1773,11 +1770,6 @@ export class NxViewerElement extends ElementBase {
   #cancel(session: EditSession, refocus: boolean): void {
     this.#endSession(session, refocus);
     session.host?.replaceChildren(...session.restore!);
-    // A slider shows where it was dragged; back, it shows what was last committed.
-    const pending = this.#pending.get(session.target.key);
-    if (session.slider !== undefined && pending !== undefined) {
-      showValue(session.span, session.target, this.#writtenOf(session.target), pending);
-    }
   }
 
   /** Closes `session`: its popover goes, and with `refocus`, the reading takes the keys again. */
@@ -1789,8 +1781,9 @@ export class NxViewerElement extends ElementBase {
     session.span.classList.remove("editing");
     this.#hideProblem();
     this.#reportDraft(false);
-    // A field's popover lists its named values; a popover editor is the popover itself.
+    // A field's popover lists its choices; a popover editor is the popover itself.
     this.#closePopover();
+    this.#hideTools();
     if (refocus) {
       this.#body.focus({ preventScroll: true });
     }
@@ -1807,13 +1800,12 @@ export class NxViewerElement extends ElementBase {
     this.#hideProblem();
     this.#reportDraft(false);
     this.#closePopover();
+    this.#hideTools();
+    this.#stepping = undefined;
   }
 
   /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
   #closePopover(): void {
-    if (this.#card.classList.contains("over-popover")) {
-      this.#closeCard();
-    }
     this.#popover.hidden = true;
     this.#popover.className = "popover";
     this.#popover.replaceChildren();
@@ -1821,32 +1813,16 @@ export class NxViewerElement extends ElementBase {
 
   /** Sets `target` to `value`: fires `nx-edit` and shows the value, muted, until the host's tree. */
   #commitValue(target: EditTarget, value: string): void {
-    if (value === this.#currentOf(target) && this.#referenceOf(target) === undefined) {
+    if (value === this.#currentOf(target)) {
       return;
     }
     this.#pending.set(target.key, value);
-    this.#pendingReferences.delete(target.key);
     const span = this.#rendered.get(target.key);
     if (span !== undefined) {
       showValue(span, target, this.#writtenOf(target), value);
       this.#markAdded(target, span);
     }
     this.#fire(NX_EDIT_EVENT, { key: this.#editKeyOf(target), edit: editOf(target, value) });
-  }
-
-  /** Sets `target` to the named value at `path`, written as a reference to it. */
-  #commitReference(target: EditTarget, path: string): void {
-    if (this.#referenceOf(target) === path) {
-      return;
-    }
-    this.#pendingReferences.set(target.key, path);
-    this.#pending.delete(target.key);
-    const span = this.#rendered.get(target.key);
-    if (span !== undefined) {
-      showReference(span, path);
-      this.#markAdded(target, span);
-    }
-    this.#fire(NX_EDIT_EVENT, { key: this.#editKeyOf(target), edit: referenceEditOf(target, path) });
   }
 
   /** The key an edit of `target` is aimed at: its node's, or, for a property it adds, its element's. */
@@ -2030,7 +2006,7 @@ export class NxViewerElement extends ElementBase {
     list.className = "options";
     list.id = "nx-viewer-options";
     list.setAttribute("role", "listbox");
-    const current = this.#referenceOf(target) === undefined ? this.#currentOf(target) : "";
+    const current = this.#currentOf(target);
     const options = caseOptions(document, target.cases ?? [], current);
     options.forEach((option, position) => (option.id = `nx-viewer-option-${position}`));
     list.append(...options);
@@ -2108,10 +2084,6 @@ export class NxViewerElement extends ElementBase {
     picker.className = "popover-picker";
     picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
     picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
-    const reference = this.#referenceOf(target);
-    if (reference !== undefined) {
-      input.placeholder = reference;
-    }
     this.#popover.className = "popover colors";
     this.#popover.replaceChildren(input, picker);
     this.#popover.hidden = false;
@@ -2119,9 +2091,8 @@ export class NxViewerElement extends ElementBase {
     const session: EditSession = { target, span, input, closed: false };
     this.#session = session;
     input.addEventListener("input", () => {
-      session.typed = true;
       this.#validate(session);
-      this.#filterNamed(session, input.value);
+      this.#filterChoices(session, input.value, true);
     });
     picker.addEventListener("input", () => {
       input.value = picker.value;
@@ -2162,10 +2133,7 @@ export class NxViewerElement extends ElementBase {
         this.#setActive(session, next);
       } else if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        const reference = session.active?.dataset["reference"];
-        if (reference !== undefined) {
-          this.#chooseReference(session, reference);
-        } else if (session.active !== undefined) {
+        if (session.active !== undefined) {
           this.#choose(session, session.active.dataset["name"]!);
         }
         if (event.key === "Tab") {
@@ -2175,30 +2143,22 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     const target = session.target;
-    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.named?.length ?? 0) > 0 && (session.slider === undefined || event.altKey)) {
+    // A color's choices are listed over its field, and the arrows walk them.
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.choices?.length ?? 0) > 0) {
       event.preventDefault();
-      this.#stepNamed(session, event.key === "ArrowDown" ? 1 : -1);
-      return;
-    }
-    if (session.slider !== undefined && (event.key === "ArrowDown" || event.key === "ArrowUp") && event.target === session.input) {
-      event.preventDefault();
-      const steps = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
-      const stepped = stepNumber(numberEntry(session.input.value, target.hints), steps, target.signed !== false, target.hints);
-      if (stepped !== undefined) {
-        this.#slideTo(session, stepped);
-      }
+      this.#stepChoice(session, event.key === "ArrowDown" ? 1 : -1);
       return;
     }
     if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      if (session.namedActive !== undefined) {
-        this.#chooseReference(session, session.namedActive.dataset["reference"]!);
+      if (event.key === "Enter" && session.choiceActive !== undefined) {
+        this.#pickChoice(session, session.choiceActive);
         return;
       }
       const raw = session.input?.value ?? "";
       const value = target.kind === "number" ? numberEntry(raw, target.hints) : raw.trim();
-      // A named value's popover left empty, or as it was, leaves the value as it is.
-      if ((value === "" && this.#referenceOf(target) !== undefined) || value === this.#currentOf(target)) {
+      // A popover left as it was leaves the value as it is.
+      if (value === this.#currentOf(target)) {
         this.#cancel(session, true);
       } else if (this.#problemOf(target, value) !== undefined) {
         this.#validate(session, true);
@@ -2218,240 +2178,377 @@ export class NxViewerElement extends ElementBase {
     this.#commitValue(session.target, value);
   }
 
-  /** Closes a popover with the named value at `path` chosen. */
-  #chooseReference(session: EditSession, path: string): void {
-    this.#endSession(session, true);
-    session.host?.replaceChildren(...session.restore!);
-    this.#commitReference(session.target, path);
-  }
-
-  // ---- Sliders ------------------------------------------------------------------------------
+  // ---- Choices ------------------------------------------------------------------------------
 
   /**
-   * A slider for a number its hints give a range: a track under the value, with its stops as ticks,
-   * and the number's field beside it, its unit after.
+   * Lists the choices `session`'s value offers, when its hints give any it takes: under a field, once
+   * the reader asks for them or types, and over a color's field at once. The default's row leads
+   * them when the property has a default, and the value's own row is marked.
    */
-  #openSlider(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
-    const document = this.ownerDocument;
-    const hints = target.hints ?? {};
-    const start = Number(numberEntry(text, hints));
-    const min = hints.min ?? Math.min(0, Number.isFinite(start) ? start : 0);
-    const max = hints.max ?? Math.max(min + 100, Number.isFinite(start) ? start : 0);
-    const { host } = valueHost(span, this.#writtenOf(target));
-    const restore = [...host.childNodes];
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.className = "popover-slider";
-    slider.min = String(min);
-    slider.max = String(max);
-    // With stops the thumb snaps to them itself; otherwise it moves by the hinted step, or by one.
-    slider.step = (hints.stops?.length ?? 0) > 0 ? "any" : String(hints.step ?? (/\./.test(text) ? "any" : 1));
-    slider.value = String(Number.isFinite(start) ? Math.min(max, Math.max(min, start)) : min);
-    slider.setAttribute("aria-label", this.#labelOf(target));
-    const track = document.createElement("div");
-    track.className = "slider-track";
-    track.append(slider);
-    if ((hints.stops?.length ?? 0) > 0 && max > min) {
-      const ticks = document.createElement("div");
-      ticks.className = "slider-ticks";
-      ticks.setAttribute("aria-hidden", "true");
-      for (const stop of hints.stops!) {
-        if (stop < min || stop > max) {
-          continue;
-        }
-        const tick = document.createElement("span");
-        tick.className = "slider-tick";
-        tick.style.left = `${((stop - min) / (max - min)) * 100}%`;
-        ticks.append(tick);
-      }
-      track.append(ticks);
-    }
-    const input = document.createElement("input");
-    input.className = "popover-number";
-    input.value = text;
-    input.spellcheck = false;
-    input.setAttribute("aria-label", `${this.#labelOf(target)}: number`);
-    const row = document.createElement("div");
-    row.className = "slider-row";
-    row.append(track, input);
-    if (hints.unit !== undefined) {
-      const unit = document.createElement("span");
-      unit.className = "popover-unit";
-      unit.textContent = hints.unit;
-      row.append(unit);
-    }
-    this.#popover.className = "popover slider";
-    this.#popover.replaceChildren(row);
-    this.#popover.hidden = false;
-    span.classList.add("editing");
-    const session: EditSession = { target, span, host, restore, input, slider, closed: false };
-    this.#session = session;
-    // Alt held while dragging lets the thumb go between the stops.
-    let free = false;
-    const note = (event: PointerEvent | KeyboardEvent): void => {
-      free = event.altKey;
-    };
-    slider.addEventListener("pointerdown", note);
-    slider.addEventListener("pointermove", note);
-    slider.addEventListener("keydown", note);
-    slider.addEventListener("input", () => {
-      const value = slidValue(Number(slider.value), hints, text, free);
-      input.value = value;
-      showValue(span, target, this.#writtenOf(target), value);
-      this.#validate(session);
-    });
-    // Let go, the number is committed once; the slider stays open on it.
-    slider.addEventListener("change", () => {
-      const value = slidValue(Number(slider.value), hints, text, free);
-      input.value = value;
-      if (this.#problemOf(target, value) === undefined) {
-        this.#commitValue(target, value);
-      }
-      this.#validate(session);
-    });
-    input.addEventListener("input", () => {
-      session.typed = true;
-      this.#validate(session);
-      const entry = Number(numberEntry(input.value, hints));
-      if (Number.isFinite(entry)) {
-        slider.value = String(entry);
-      }
-      this.#filterNamed(session, input.value);
-    });
-    this.#validate(session);
-    this.#placeCard(span, this.#popover);
-    input.focus({ preventScroll: true });
-    if (caret === undefined) {
-      input.select();
-    } else {
-      input.setSelectionRange(caret.start, caret.end);
-    }
-  }
-
-  /** Puts a slider's field and track at `value`, as the arrows in its field do. */
-  #slideTo(session: EditSession, value: string): void {
-    session.input!.value = value;
-    session.slider!.value = value;
-    session.input!.select();
-    this.#validate(session);
-  }
-
-  // ---- Named values -------------------------------------------------------------------------
-
-  /** Asks the host for the named values `session`'s property can take, and lists them when they come. */
-  #askNamedValues(session: EditSession): void {
-    const ask = this.#namedValues;
-    const property = session.target.property;
-    if (ask === undefined || property === undefined || session.target.kind === "run") {
+  #listChoices(session: EditSession): void {
+    const target = session.target;
+    if (target.kind !== "number" && target.kind !== "text" && target.kind !== "color") {
       return;
     }
-    const key = `${property.element}\u0000${property.name}`;
-    let answer = this.#namedAnswers.get(key);
-    if (answer === undefined) {
-      try {
-        answer = Promise.resolve(ask(property.element, property.name));
-      } catch (error) {
-        answer = Promise.reject(error);
-      }
-      // A failed answer is asked again next time.
-      answer.catch(() => this.#namedAnswers.delete(key));
-      this.#namedAnswers.set(key, answer);
-    }
-    answer.then(
-      (values) => {
-        if (!session.closed && this.#session === session && Array.isArray(values) && values.length > 0) {
-          this.#showNamed(session, values);
-        }
-      },
-      () => undefined
-    );
-  }
-
-  /**
-   * Lists `values` with `session`'s editor: above a case's own choices, above a color's or a
-   * slider's field, or in a popover under a field. The value's own reference is marked.
-   */
-  #showNamed(session: EditSession, values: readonly NamedValue[]): void {
-    const document = this.ownerDocument;
-    const options = namedOptions(document, values, this.#referenceOf(session.target));
-    options.forEach((option, position) => {
-      option.id = `nx-viewer-named-${position}`;
-      const named = values[position]!;
-      this.#namedCards.set(option, named.doc === undefined ? { signature: `${named.path}: ${named.type}` } : { signature: `${named.path}: ${named.type}`, doc: named.doc });
-    });
-    const current = options.find((option) => option.classList.contains("current"));
-    if (session.options !== undefined) {
-      // A case's popover: one list, the named values first.
-      const list = this.#popover.querySelector(".options")!;
-      list.prepend(...options);
-      (session as { options: readonly HTMLElement[] }).options = [...options, ...session.options];
-      this.#popover.classList.remove("segmented");
-      this.#filterCases(session, current ?? session.active);
+    const choices = choicesOf(target.hints, target.kind);
+    if (choices.length === 0) {
       return;
     }
+    const document = this.ownerDocument;
+    // A property not written reads as its default until the reader sets it.
+    const current = target.adding === true && !this.#pending.has(target.key) ? undefined : this.#currentOf(target);
+    const rows = choiceRows(document, target, choices, current, this.#defaultOf(target));
+    rows.forEach((row, position) => (row.id = `nx-viewer-choice-${position}`));
     const list = document.createElement("div");
-    list.className = "options named-list";
+    list.className = choices.some((choice) => choice.label !== undefined) ? "options choices-list labeled" : "options choices-list";
+    list.id = "nx-viewer-choices";
     list.setAttribute("role", "listbox");
-    list.setAttribute("aria-label", "Named values");
-    list.append(...options);
-    session.named = options;
+    list.setAttribute("aria-label", `${this.#labelOf(target)}: choices`);
+    list.append(...rows);
+    if (rows[0]?.dataset["default"] === "true") {
+      const rule = document.createElement("div");
+      rule.className = "choices-rule";
+      rule.setAttribute("role", "separator");
+      rows[0].after(rule);
+    }
+    session.choices = rows;
+    session.choiceList = list;
+    const input = session.field ?? session.input;
+    input?.setAttribute("aria-haspopup", "listbox");
+    input?.setAttribute("aria-controls", list.id);
     if (session.field !== undefined) {
-      this.#popover.className = "popover named";
+      input?.setAttribute("aria-expanded", "false");
+      return;
+    }
+    // A color's popover is open already: its choices lead it.
+    this.#popover.prepend(list);
+    this.#popover.classList.add("with-choices");
+    session.choicesOpen = true;
+    this.#placeCard(session.span, this.#popover);
+  }
+
+  /**
+   * The default of `target`'s property as its choices list reads it, the literal its editor holds or
+   * the default as written; nothing for a property with no default, or a value of no property.
+   */
+  #defaultOf(target: EditTarget): string | undefined {
+    const index = this.#index;
+    const property = target.property;
+    const at = property === undefined ? undefined : index?.byKey.get(property.element);
+    const element = at === undefined ? undefined : index!.tree.nodes[at];
+    const declared = element === undefined ? undefined : elementProperties(index!.tree, element)?.find((candidate) => candidate.name === property!.name);
+    const written = declared?.default?.trim();
+    if (written === undefined || (target.kind !== "number" && target.kind !== "text" && target.kind !== "color")) {
+      return undefined;
+    }
+    const literal = defaultValue(written, { kind: target.kind });
+    return literal !== "" || written === '""' ? literal : written;
+  }
+
+  /** Lists `session`'s choices under its field, all of them, or hides them. */
+  #toggleChoices(session: EditSession, open: boolean): void {
+    if (open) {
+      for (const row of session.choices ?? []) {
+        row.hidden = false;
+      }
+      session.choiceList?.querySelector<HTMLElement>(".choices-rule")?.removeAttribute("hidden");
+    }
+    this.#setChoicesOpen(session, open);
+  }
+
+  #setChoicesOpen(session: EditSession, open: boolean): void {
+    const list = session.choiceList;
+    if (session.field === undefined || list === undefined) {
+      return;
+    }
+    session.choicesOpen = open;
+    session.field.setAttribute("aria-expanded", String(open));
+    this.#tools.classList.toggle("open", open);
+    if (!open) {
+      this.#setChoiceActive(session, undefined);
+      this.#closePopover();
+      return;
+    }
+    if (this.#popover.hidden || !this.#popover.contains(list)) {
+      this.#popover.className = "popover choices";
       this.#popover.replaceChildren(list);
       this.#popover.hidden = false;
-      this.#placeCard(session.span, this.#popover);
-    } else {
-      this.#popover.prepend(list);
-      this.#popover.classList.add("with-named");
-      this.#placeCard(session.span, this.#popover);
     }
-    if (session.typed === true) {
-      this.#filterNamed(session, this.#draftOf(session) ?? "");
+    this.#placeCard(session.span, this.#popover);
+    if (session.choiceActive === undefined) {
+      // The value's own row is in view.
+      const marked = session.choices?.find((row) => row.classList.contains("current") && !row.hidden);
+      if (marked !== undefined) {
+        this.#scrollToChoice(marked);
+      }
     }
   }
 
-  /** Shows the named values whose paths hold what the reader typed, once they have typed. */
-  #filterNamed(session: EditSession, typed: string): void {
-    const named = session.named;
-    if (named === undefined || session.typed !== true) {
+  /**
+   * Shows the choices whose label or value holds `typed`; a field's list opens with `open`, as the
+   * reader types, and closes when none match.
+   */
+  #filterChoices(session: EditSession, typed: string, open: boolean): void {
+    const rows = session.choices;
+    if (rows === undefined) {
       return;
     }
-    const query = typed.trim().toLowerCase();
-    for (const option of named) {
-      option.hidden = query !== "" && !option.dataset["reference"]!.toLowerCase().includes(query);
+    for (const row of rows) {
+      row.hidden = !choiceMatches(row, typed, session.target.kind);
     }
-    if (session.namedActive?.hidden === true) {
-      this.#setNamedActive(session, undefined);
+    const rule = session.choiceList?.querySelector<HTMLElement>(".choices-rule");
+    rule?.toggleAttribute("hidden", rows[0]?.hidden !== false || rows.slice(1).every((row) => row.hidden));
+    if (session.choiceActive?.hidden === true) {
+      this.#setChoiceActive(session, undefined);
     }
-    const none = named.every((option) => option.hidden);
-    if (session.field !== undefined) {
-      this.#popover.hidden = none;
-    } else {
-      this.#popover.querySelector<HTMLElement>(".named-list")?.toggleAttribute("hidden", none);
+    const none = rows.every((row) => row.hidden);
+    if (session.field === undefined) {
+      session.choiceList?.toggleAttribute("hidden", none);
+      this.#placeCard(session.span, this.#popover);
+      return;
+    }
+    if (none) {
+      this.#setChoicesOpen(session, false);
+    } else if (open || session.choicesOpen === true) {
+      this.#setChoicesOpen(session, true);
     }
   }
 
-  /** Moves the active named value one up or down among those shown. */
-  #stepNamed(session: EditSession, direction: 1 | -1): void {
-    const shown = (session.named ?? []).filter((option) => !option.hidden);
+  /** Moves the active choice one up or down among those shown; past either end, none is active. */
+  #stepChoice(session: EditSession, direction: 1 | -1): void {
+    const shown = (session.choices ?? []).filter((row) => !row.hidden);
     if (shown.length === 0) {
       return;
     }
-    const at = session.namedActive === undefined ? -1 : shown.indexOf(session.namedActive);
+    const at = session.choiceActive === undefined ? -1 : shown.indexOf(session.choiceActive);
     const next = at < 0 ? (direction === 1 ? 0 : shown.length - 1) : at + direction;
-    this.#setNamedActive(session, next < 0 || next >= shown.length ? undefined : shown[next]);
+    this.#setChoiceActive(session, next < 0 || next >= shown.length ? undefined : shown[next]);
   }
 
-  #setNamedActive(session: EditSession, option: HTMLElement | undefined): void {
-    session.namedActive = option;
-    for (const candidate of session.named ?? []) {
-      candidate.classList.toggle("active", candidate === option);
+  #setChoiceActive(session: EditSession, row: HTMLElement | undefined): void {
+    session.choiceActive = row;
+    for (const candidate of session.choices ?? []) {
+      candidate.classList.toggle("active", candidate === row);
     }
     const input = session.field ?? session.input;
-    if (option === undefined) {
+    if (row === undefined) {
       input?.removeAttribute("aria-activedescendant");
     } else {
-      input?.setAttribute("aria-activedescendant", option.id);
+      input?.setAttribute("aria-activedescendant", row.id);
+      this.#scrollToChoice(row);
+    }
+  }
+
+  /** Scrolls `row`'s list, and nothing else, so the row is in view. */
+  #scrollToChoice(row: HTMLElement): void {
+    const list = row.parentElement;
+    if (list === null) {
+      return;
+    }
+    const shown = row.getBoundingClientRect();
+    const port = list.getBoundingClientRect();
+    if (shown.top < port.top) {
+      list.scrollTop -= port.top - shown.top;
+    } else if (shown.bottom > port.bottom) {
+      list.scrollTop += shown.bottom - port.bottom;
+    }
+  }
+
+  /**
+   * Closes `session` with the choice `row` picked: its value written as a literal, or, for the
+   * default's row, the property reset as the row menu's Reset does. On a property not written, the
+   * default's row adds nothing.
+   */
+  #pickChoice(session: EditSession, row: HTMLElement): void {
+    const target = session.target;
+    this.#endSession(session, true);
+    session.host?.replaceChildren(...session.restore!);
+    if (row.dataset["default"] === "true") {
+      this.#resetValue(target);
+      return;
+    }
+    this.#commitValue(target, row.dataset["value"]!);
+  }
+
+  /** Leaves out `target`'s attribute, so its property reads its default, as Reset does. */
+  #resetValue(target: EditTarget): void {
+    const index = this.#index;
+    const attribute = index?.tree.nodes[target.at]?.parent;
+    if (target.adding === true || index === undefined || attribute === undefined || removalOf(index, attribute) !== "reset") {
+      return;
+    }
+    const key = index.tree.nodes[attribute]!.key;
+    if (this.#removed.has(key)) {
+      return;
+    }
+    this.#removed.add(key);
+    (this.#rendered.get(key) ?? this.#rendered.get(target.key))?.classList.add("pending");
+    this.#fire(NX_EDIT_EVENT, { key, edit: { kind: "remove" } });
+  }
+
+  // ---- Steppers -----------------------------------------------------------------------------
+
+  /**
+   * Draws the tools past the value `span` draws for `target`, after its unit: a number's steppers,
+   * and, while its field is open with choices, their chevron. Nothing for a value with neither.
+   */
+  #showTools(span: HTMLElement, target: EditTarget): void {
+    const session = this.#session?.target.key === target.key ? this.#session : undefined;
+    const steppers = target.kind === "number";
+    const chevron = session?.field !== undefined && (session.choices?.length ?? 0) > 0;
+    if (!steppers && !chevron) {
+      this.#hideTools();
+      return;
+    }
+    this.#tools.classList.toggle("with-steppers", steppers);
+    this.#tools.classList.toggle("with-choices", chevron);
+    this.#tools.classList.toggle("open", session?.choicesOpen === true);
+    this.#tools.dataset["toolsFor"] = target.key;
+    const unit = span.nextElementSibling;
+    (unit?.classList.contains("unit") === true ? unit : span).after(this.#tools);
+    this.#toolsHover = undefined;
+  }
+
+  #hideTools(): void {
+    this.#tools.remove();
+    this.#tools.classList.remove("open");
+    delete this.#tools.dataset["toolsFor"];
+    this.#toolsHover = undefined;
+  }
+
+  /**
+   * Shows a number's steppers while the pointer rests on its value in the selected row, with no
+   * editor open, and hides them once it leaves for anything but them.
+   */
+  #hoverTools(element: Element | null): void {
+    if (!this.#editable || this.#session !== undefined || this.#stepping !== undefined) {
+      return;
+    }
+    if (element !== null && this.#tools.contains(element)) {
+      return;
+    }
+    const value = element?.closest?.(".editable-value.edit-number") as HTMLElement | null | undefined;
+    const key = value === null || value === undefined ? undefined : keyOf(value);
+    const target = key === undefined ? undefined : this.#targets.get(key);
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    // On the selected row: the row itself, a one-line element, or a property selected within one.
+    const onSelected =
+      value !== null &&
+      value !== undefined &&
+      selected?.contains(value) === true &&
+      (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS));
+    if (!onSelected || target === undefined || this.#rendered.get(key!) !== value) {
+      if (this.#tools.isConnected) {
+        this.#hideTools();
+      }
+      return;
+    }
+    if (this.#toolsHover === key && this.#tools.isConnected) {
+      return;
+    }
+    this.#showTools(value!, target);
+    this.#toolsHover = key;
+  }
+
+  #onToolsPointerDown(event: PointerEvent): void {
+    event.stopPropagation();
+    // The open field keeps the focus, and nothing is selected as text.
+    event.preventDefault();
+    const part = (event.target as Element).closest?.(".stepper, .choices-toggle") as HTMLElement | null;
+    const key = this.#tools.dataset["toolsFor"];
+    const target = key === undefined ? undefined : this.#targets.get(key);
+    if (part === null || target === undefined || event.button !== 0) {
+      return;
+    }
+    const session = this.#session?.target.key === key ? this.#session : undefined;
+    if (part.classList.contains("choices-toggle")) {
+      if (session !== undefined) {
+        this.#toggleChoices(session, session.choicesOpen !== true);
+      }
+      return;
+    }
+    const from = session?.field !== undefined ? numberEntry(session.field.textContent ?? "", target.hints) : this.#currentOf(target);
+    this.#stepping = { target, pointer: event.pointerId, y: event.clientY, direction: part.classList.contains("up") ? 1 : -1, from, value: undefined };
+    try {
+      part.setPointerCapture?.(event.pointerId);
+    } catch {
+      // A pointer the element cannot capture still steps on release over it.
+    }
+  }
+
+  #onToolsPointerMove(event: PointerEvent): void {
+    const stepping = this.#stepping;
+    if (stepping === undefined || event.pointerId !== stepping.pointer) {
+      return;
+    }
+    event.stopPropagation();
+    // Up is more, as the steppers point.
+    const moved = stepping.y - event.clientY;
+    if (stepping.value === undefined && Math.abs(moved) < SCRUB_SLOP) {
+      return;
+    }
+    const target = stepping.target;
+    const steps = Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
+    const value = stepNumber(stepping.from, steps, target.signed !== false, target.hints) ?? stepping.from;
+    if (stepping.value === undefined) {
+      this.#body.classList.add("stepping");
+    }
+    stepping.value = value;
+    this.#showStepped(target, value);
+  }
+
+  /**
+   * Ends a press on a stepper: a click steps once, or ten steps with Shift; a drag has scrubbed. Into
+   * the open field, or committed once, at release; a cancelled drag puts the value back.
+   */
+  #onToolsPointerUp(event: PointerEvent, commit: boolean): void {
+    const stepping = this.#stepping;
+    if (stepping === undefined || event.pointerId !== stepping.pointer) {
+      return;
+    }
+    event.stopPropagation();
+    this.#stepping = undefined;
+    this.#body.classList.remove("stepping");
+    const target = stepping.target;
+    const session = this.#session?.target.key === target.key && this.#session.field !== undefined ? this.#session : undefined;
+    if (!commit) {
+      if (stepping.value !== undefined) {
+        this.#showStepped(target, stepping.from);
+        if (session === undefined && !this.#pending.has(target.key)) {
+          this.#render();
+        }
+      }
+      return;
+    }
+    const value =
+      stepping.value ??
+      stepNumber(stepping.from, stepping.direction * (event.shiftKey ? 10 : 1), target.signed !== false, target.hints);
+    if (value === undefined) {
+      return;
+    }
+    if (session !== undefined) {
+      this.#showStepped(target, value);
+      this.#selectAll(session.field!);
+      return;
+    }
+    if (value !== stepping.from && this.#problemOf(target, value) === undefined) {
+      this.#commitValue(target, value);
+    } else if (stepping.value !== undefined) {
+      this.#showStepped(target, stepping.from);
+    }
+  }
+
+  /** Shows `value` as `target`'s number while it steps: in its open field, or in its place, muted. */
+  #showStepped(target: EditTarget, value: string): void {
+    const session = this.#session;
+    if (session?.target.key === target.key && session.field !== undefined) {
+      session.field.textContent = value;
+      this.#validate(session);
+      return;
+    }
+    const span = this.#rendered.get(target.key);
+    if (span !== undefined) {
+      showValue(span, target, this.#writtenOf(target), value);
     }
   }
 
@@ -2473,7 +2570,6 @@ export class NxViewerElement extends ElementBase {
       field.textContent = `${before.slice(0, caret.start)}\n${before.slice(caret.end)}`;
       this.#placeCaret(field, { start: caret.start + 1, end: caret.start + 1 });
     }
-    session.typed = true;
     this.#validate(session);
   }
 
@@ -2581,13 +2677,8 @@ export class NxViewerElement extends ElementBase {
     for (const value of this.#moreKeys) {
       const span = this.#rendered.get(value);
       const pending = this.#pending.get(value);
-      const reference = this.#pendingReferences.get(value);
-      if (span !== undefined && (pending !== undefined || reference !== undefined)) {
-        if (reference !== undefined) {
-          showReference(span, reference);
-        } else {
-          showValue(span, this.#targets.get(value)!, "", pending!);
-        }
+      if (span !== undefined && pending !== undefined) {
+        showValue(span, this.#targets.get(value)!, "", pending);
         this.#markAdded(this.#targets.get(value)!, span);
       }
     }
@@ -3199,47 +3290,12 @@ export class NxViewerElement extends ElementBase {
     signature.className = "card-signature";
     signature.textContent = card.signature;
     this.#card.replaceChildren(signature);
-    this.#card.classList.remove("over-popover");
     if (card.doc !== undefined) {
       const doc = document.createElement("div");
       doc.className = "card-doc";
       doc.append(this.#renderDoc(card.doc));
       this.#card.append(doc);
     }
-  }
-
-  /**
-   * Opens the card of the named value `option` lists, once the pointer rests on it: beside the
-   * popover, over the reading, so it hides none of the list.
-   */
-  #pointNamed(option: HTMLElement | undefined): void {
-    clearTimeout(this.#cardOpenTimer);
-    const card = option === undefined ? undefined : this.#namedCards.get(option);
-    if (card === undefined) {
-      if (this.#card.classList.contains("over-popover")) {
-        this.#hideCard();
-      }
-      return;
-    }
-    this.#cardOpenTimer = setTimeout(() => {
-      if (this.#popover.hidden || !this.#popover.contains(option!)) {
-        return;
-      }
-      this.#fillCard(card);
-      this.#card.classList.add("over-popover");
-      this.#card.hidden = false;
-      const frame = this.#frame.getBoundingClientRect();
-      const box = this.getBoundingClientRect();
-      const list = this.#popover.getBoundingClientRect();
-      const row = option!.getBoundingClientRect();
-      this.#card.style.left = "0px";
-      this.#card.style.top = "0px";
-      const size = this.#card.getBoundingClientRect();
-      const right = list.right + CARD_GAP;
-      const x = right + size.width <= box.right ? right : Math.max(box.left, list.left - CARD_GAP - size.width);
-      this.#card.style.left = `${x - frame.left}px`;
-      this.#card.style.top = `${row.top - frame.top}px`;
-    }, CARD_DELAY);
   }
 
   /** A doc's Markdown as the host renders it, or as the built-in renderer does. */
@@ -3307,7 +3363,6 @@ export class NxViewerElement extends ElementBase {
     if (this.#card !== undefined && !this.#card.hidden) {
       this.#card.hidden = true;
       this.#card.replaceChildren();
-      this.#card.classList.remove("over-popover");
     }
   }
 }

@@ -17,8 +17,6 @@ import type {
   HoverRequest,
   LanguageDocument,
   LanguageQueryName,
-  NamedValue,
-  NamedValuesRequest,
   NxLanguageService,
   SourceEditAnswer,
   SourceEditRequest,
@@ -142,13 +140,6 @@ export function createSnapshotLanguageService(
       return answer(
         "sourceEdit",
         { ...toAnswerRequest(request, undefined), key: request.key, edit: request.edit },
-        signal
-      );
-    },
-    namedValues(request: NamedValuesRequest, signal?: AbortSignal): Promise<NamedValue[]> {
-      return answer(
-        "namedValues",
-        { ...toAnswerRequest(request, undefined), key: request.key, property: request.property },
         signal
       );
     },

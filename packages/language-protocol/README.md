@@ -212,40 +212,14 @@ const refused: SourceEditAnswer = { edits: [], refused: "notEditable" };
 ```
 
 The request names a node of the document's source tree by its `key` and one change: `setValue`
-with a typed value (`string`, `number` as typed, `boolean`, `case` by name, or `reference` by path)
-for a literal, a bare union case or a reference to a named value that is a whole value, `setText`
-with one line of text for a run of text content, `remove` for an attribute, or `addProperty` with a
-property's name and a typed value for an element, which writes the attribute after the element's
-last one, in its layout. A reference is written in braces as an attribute's value
-(`color={theme.accent}`) and bare elsewhere. The answer's `edits` make the change: every range is in the document
-as sent and no two overlap, so a host applies them together; the service writes the spelling (quotes, escapes, kept braces, an
+with a typed value (`string`, `number` as typed, `boolean`, or `case` by name) for a literal or a
+bare union case that is a whole value, `setText` with one line of text for a run of text content,
+`remove` for an attribute, or `addProperty` with a property's name and a typed value for an element,
+which writes the attribute after the element's last one, in its layout. The answer's `edits` make
+the change: every range is in the document as sent and no two overlap, so a host applies them together; the service writes the spelling (quotes, escapes, kept braces, an
 attribute's whole line). A change it cannot make answers no edits and `refused`: `unknownNode`,
 `notEditable` or `invalidValue`. A change that would leave the text as it is answers no edits and no
 refusal.
-
-### `namedValues` (unstable)
-
-**Unstable:** the request's and the answer's shapes may change in any release until a later one
-commits to them. It is published for the NX viewer's Visual editing to build on.
-
-```ts
-const request: NamedValuesRequest = { documents, uri: "nx://tenant/ui.nx", key: "root.value", property: "color" };
-
-const answer: NamedValue[] = [
-  { path: "accent", type: "Color", doc: "The brand's accent.", value: '"#c8a27a"' },
-  { path: "theme.muted", type: "Color" },
-];
-```
-
-The request names an element of the document's source tree by its `key` and one of its properties,
-written or not. The answer lists the named values in the document's scope that the type checker
-accepts for that property: each parameterless `let` the document declares or imports, and each
-member of such a `let` whose value is a record, one level deep, leaving out the declaration the
-element is in. An optional property also takes optional members and `T?` values, but not an optional
-member that a record literal never writes, in any branch, since that one is always absent. Each carries its reference path as the document would write it, its type, its doc
-comment, and its value's source text when that is a literal. The document's own values come first,
-then each import's, each in declaration order. A key that names no element, or a property the
-element does not have, answers an empty list.
 
 ### Reserved names
 
@@ -264,7 +238,6 @@ interface NxLanguageService {
   documentSymbols(request: DocumentSymbolsRequest, signal?: AbortSignal): Promise<DocumentSymbol[]>;
   sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree>; // unstable
   sourceEdit(request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer>; // unstable
-  namedValues(request: NamedValuesRequest, signal?: AbortSignal): Promise<NamedValue[]>; // unstable
 }
 ```
 

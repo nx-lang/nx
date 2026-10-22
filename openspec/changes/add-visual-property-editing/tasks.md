@@ -27,12 +27,12 @@
 
 ## 5. Choices and steppers instead of the slider and named values (Bret, 2026-10-22)
 
-- [ ] 5.1 Remove the slider, `editor=slider` and `stops` from the library, analysis, the source tree, the protocol, the viewer, tests and docs
-- [ ] 5.2 Remove named values: the `namedValues` query (language service, wasm and Node snapshots, `language-protocol`, `language-core`, `language-http`, `language-client`), the `reference` value of `setValue` and `addProperty`, the viewer's `namedValues` host function and lists, and the playground's; a value written as a reference opens Source again, as in phase 1
-- [ ] 5.3 `ValueChoice` in `@nx/visualizer` and `choices` content on `PropertyVisualizer` and `ValueVisualizer`; analysis warns `editor-hint-mismatch` at a choice that does not fit; resolution treats the choices as one hint; the source tree carries them typed as `setValue` values; verify with tests for each scenario in `visualizer-declarations`, `visualizer-library` and `source-tree`
-- [ ] 5.4 The viewer's choices list: two columns (one with no labels), the default's row on top, the current choice marked, a chevron, Alt+Down and typing to open, Up and Down stepping while closed and moving while open, picking commits the value, the default's row resets; verify each `viewer` scenario
-- [ ] 5.5 Steppers on numbers: an overlay past the value, shown while its field is open and on hover in the selected row; click, Shift+click, and a vertical drag committed once on release; a tooltip; verify each `viewer` scenario
-- [ ] 5.6 The "Visual test cases" example: choices for a number and a string, steppers, a reference opening Source; screenshots light and dark
+- [x] 5.1 Remove the slider, `editor=slider` and `stops` from the library, analysis, the source tree, the protocol, the viewer, tests and docs
+- [x] 5.2 Remove named values: the `namedValues` query (language service, wasm and Node snapshots, `language-protocol`, `language-core`, `language-http`, `language-client`), the `reference` value of `setValue` and `addProperty`, the viewer's `namedValues` host function and lists, and the playground's; a value written as a reference opens Source again, as in phase 1
+- [x] 5.3 `ValueChoice` in `@nx/visualizer` and `choices` content on `PropertyVisualizer` and `ValueVisualizer`; analysis warns `editor-hint-mismatch` at a choice that does not fit; resolution treats the choices as one hint; the source tree carries them typed as `setValue` values; verify with tests for each scenario in `visualizer-declarations`, `visualizer-library` and `source-tree`
+- [x] 5.4 The viewer's choices list: two columns (one with no labels), the default's row on top, the current choice marked, a chevron, Alt+Down and typing to open, Up and Down stepping while closed and moving while open, picking commits the value, the default's row resets; verify each `viewer` scenario
+- [x] 5.5 Steppers on numbers: an overlay past the value, shown while its field is open and on hover in the selected row; click, Shift+click, and a vertical drag committed once on release; a tooltip; verify each `viewer` scenario
+- [x] 5.6 The "Visual test cases" example: choices for a number and a string, steppers, a reference opening Source; screenshots light and dark
 
 ## 6. The playground and docs
 

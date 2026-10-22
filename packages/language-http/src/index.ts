@@ -126,7 +126,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     if ("problem" in validated) {
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
-    const { documents, uri, position, visualizers, key, edit, property } = validated;
+    const { documents, uri, position, visualizers, key, edit } = validated;
     const collision = contextCollision(documents, context);
     if (collision !== undefined) {
       return errorResponse(
@@ -138,7 +138,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position, visualizers, key, edit, property }, context, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position, visualizers, key, edit }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);
@@ -221,7 +221,6 @@ type ValidatedQuery =
       visualizers?: SourceTreeVisualizersOption;
       key?: string;
       edit?: SourceEdit;
-      property?: string;
     }
   | { problem: string };
 
@@ -316,14 +315,6 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
     }
     return { documents, uri, position, key: record.key, edit };
   }
-  if (query === "namedValues") {
-    if (typeof record.key !== "string" || typeof record.property !== "string") {
-      return {
-        problem: "The 'namedValues' query needs 'key', the key of the element, and 'property', the name of one of its properties.",
-      };
-    }
-    return { documents, uri, position, key: record.key, property: record.property };
-  }
   return { documents, uri, position };
 }
 
@@ -370,9 +361,6 @@ function sourceEditValueOf(candidate: unknown): SourceEditValue | undefined {
   }
   if (value.kind === "case" && typeof value.name === "string") {
     return { kind: "case", name: value.name };
-  }
-  if (value.kind === "reference" && typeof value.path === "string") {
-    return { kind: "reference", path: value.path };
   }
   return undefined;
 }

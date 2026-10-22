@@ -94,9 +94,10 @@ visualizer Question = <ElementVisualizer title=label id=id icon="circle-help" />
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ValueVisualizer` | `format?: ValueFormat`, the [editor hints](#editor-hints) | How a value of the alias is shown and edited. |
+| `ValueVisualizer` | `format?: ValueFormat`, the [editor hints](#editor-hints), content `choices?: ValueChoice+` | How a value of the alias is shown and edited. |
 | `ValueFormat` | `id`, `color` | A format changes how the value looks, never what it is. |
-| `ValueEditor` | `field`, `slider`, `dropdown`, `segmented` | The editor a viewer offers for a value. |
+| `ValueEditor` | `field`, `dropdown`, `segmented` | The editor a viewer offers for a value. |
+| `ValueChoice` | `value: object`, `label?: string` | A value a viewer offers to pick, such as a size on a scale. |
 
 | Format | Shows a string value |
 | --- | --- |
@@ -127,25 +128,40 @@ document may still write a number outside them.
 
 | Hint | Applies to | Says |
 | --- | --- | --- |
-| `editor: ValueEditor` | A number: `field`, `slider`. A union of cases with no properties: `dropdown`, `segmented` | Which editor to offer. |
-| `min`, `max: float64` | A number | The range the editor offers. A number with both and no `editor` gets a slider. |
-| `step: float64` | A number | How far one step moves the number, as an arrow key or a slider's notch does. |
-| `stops: float64+` | A number | The numbers a slider snaps to, in order. |
+| `editor: ValueEditor` | A number: `field`. A union of cases with no properties: `dropdown`, `segmented` | Which editor to offer. |
+| `min`, `max: float64` | A number | The range the editor's arrows, steppers and dragging keep to. |
+| `step: float64` | A number | How far one step moves the number, as an arrow key or a stepper does. |
 | `unit: string` | A number | The unit shown after the number, such as `"px"`; never written. |
 | `multiline: boolean` | A string, on a `PropertyVisualizer` only | The field takes line breaks: Enter starts a new line. |
 | `placeholder: string` | A string, on a `PropertyVisualizer` only | Text shown in the empty field; never written. |
+| content `choices: ValueChoice+` | A number or a string | The values offered to pick, in order: a number literal for a number, a string literal for a string. They suggest and never restrict. |
 
 A property's hints come from its `PropertyVisualizer`, hint by hint, and otherwise from the
-`ValueVisualizer` of the alias its type names, so a design system can say once how its spacing edits:
+`ValueVisualizer` of the alias its type names, so a design system can say once how its spacing and
+its text sizes edit. Choices are one hint: a `PropertyVisualizer` that gives any replaces all of its
+type's, so two scales never mix. Picking a choice writes its value, never its label:
 
 ```nx
 import "@nx/visualizer"
 
 export type Spacing = int
+export type FontSize = int
 export type Align = start | center | end
-export type Card = { title:string padding:Spacing = 8 gap:Spacing = 4 align:Align = start body?:string }
+export type Card = {
+  title:string
+  padding:Spacing = 8
+  gap:Spacing = 4
+  size:FontSize = 16
+  align:Align = start
+  body?:string
+}
 
-visualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={ 0 4 8 16 24 32 48 64 } unit="px" />
+visualizer Spacing = <ValueVisualizer min=0 max=64 unit="px" />
+visualizer FontSize = <ValueVisualizer min=8 max=96 unit="px">
+  <ValueChoice value=12 label="sm" />
+  <ValueChoice value=16 label="base" />
+  <ValueChoice value=20 label="lg" />
+</ValueVisualizer>
 visualizer Card =
   <ElementVisualizer title=title>
     <PropertyVisualizer property=gap max=16 />
@@ -154,8 +170,9 @@ visualizer Card =
   </ElementVisualizer>
 ```
 
-A hint that does not fit its property's type, such as `slider` on a string, is reported as the
-warning `editor-hint-mismatch` and ignored, and a `min` above its `max` as `editor-hint-range`.
+A hint that does not fit its property's type, such as `field` on a string or a string choice for a
+number, is reported as the warning `editor-hint-mismatch` and ignored, and a `min` above its `max` as
+`editor-hint-range`.
 Warnings, because a hint never changes what a program means.
 
 ## The library source
@@ -212,10 +229,8 @@ export type PropertyVisualizer = {
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
   max?: float64
-  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The numbers a slider snaps to, in order.
-  stops?: float64+
   /// The unit a number is in, such as `"px"`: shown after the number, and never written.
   unit?: string
   /// Whether the property's string field takes line breaks: Enter starts a new line, and the
@@ -223,6 +238,9 @@ export type PropertyVisualizer = {
   multiline: boolean = false
   /// Text shown in the property's empty field, quieter than a value, and never written.
   placeholder?: string
+  /// The values a viewer offers to pick for the property, in order. They suggest and never
+  /// restrict: any value the property's type takes may still be written.
+  content choices?: ValueChoice+
 }
 
 /// How a viewer presents values of a scalar type.
@@ -237,12 +255,23 @@ export type ValueVisualizer = {
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
   max?: float64
-  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The numbers a slider snaps to, in order.
-  stops?: float64+
   /// The unit a number is in, such as `"px"`: shown after the number, and never written.
   unit?: string
+  /// The values a viewer offers to pick for a value of the type, in order. They suggest and never
+  /// restrict: any value of the type may still be written.
+  content choices?: ValueChoice+
+}
+
+/// A value a viewer offers to pick, such as a size on a type's scale. Picking it writes the value,
+/// never the label.
+export type ValueChoice = {
+  /// The value written when the choice is picked: a number literal for a number, or a string
+  /// literal for a string.
+  value: object
+  /// The name the choice reads by, beside its value, such as `"lg"`.
+  label?: string
 }
 
 /// How a string value is shown. A format changes how the value looks, never what it is.
@@ -256,8 +285,6 @@ export type ValueFormat =
 export type ValueEditor =
   /// A number field, with arrow-key steps, even when the number has a range.
   | field
-  /// A slider with a number field beside it, for a number with `min` and `max`.
-  | slider
   /// A list of a union's cases.
   | dropdown
   /// A union's cases as one row of buttons.
