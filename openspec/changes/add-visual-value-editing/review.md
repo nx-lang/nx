@@ -341,6 +341,98 @@ icons, and the spec, design and tasks section 6). Checks:
 - **Fix:** `removalOf` is now `isRemovable`, a boolean; the `Removal` type is gone.
 - **Verification:** Verified (commit d785fbb). `removalOf` is now `isRemovable(index, at): boolean`, the `Removal` type is gone, and the one caller and the tests are updated.
 
+## New Findings Discovered During 2026-10-22 01:09 Review
+
+Scope of this pass: commits 37a008b, 4a2c49a and 4d58eec (`e4e82ac..4d58eec`):
+- the color popover's `[hidden]` rule, the `visualRevision` raised after undo and redo, and
+  `NxEditor`'s `unseenChanges`;
+- the reading's decoding of `\"` and `\\`, the `.edit-problem` note, the chevron, `nx-draft` and the
+  playground's Undo for drafts and edits in flight;
+- tasks section 7 and the spec deltas.
+
+Checks:
+- viewer tests 116/116;
+- in Chromium against the dev server (`/play/survey`):
+  - a changed draft enables Undo on an empty history, and Undo puts the title and the source back
+    (the scenario "Undo before the first edit");
+  - Redo brings the draft's edit back;
+  - an invalid number entry shows "Not a number" beside the field after the pause.
+
+### 🟡 Fixed - RF16 Undo pressed while a field holds an entry it cannot take discards the entry and also undoes the step before
+- **Severity:** Low (confidence: high, reproduced in Chromium)
+- **Evidence:** I committed a title edit, then typed `px` after a `minLength` number. Undo was enabled and the
+  note said "Not a number". I clicked the title bar's Undo:
+  1. The button's pointerdown blurs the field, and `#finishField(…, "blur")` cancels an invalid entry
+     without firing an edit.
+  2. `visualHistory("undo")` then takes back the previous step, the committed title edit.
+
+  The source ended with the title back to `Bullseye…`, and Redo was enabled. The reader asked to undo what
+  they were typing and lost an earlier, unrelated edit as well (Redo recovers it). The same happens for
+  an entry that differs from its value but commits to nothing: `#reportDraft` compares the raw draft,
+  while `#finishField` trims a number, so ` 12` against `12` counts as a change but commits as no
+  edit. This is RF11's case for entries that never become an edit.
+- **Recommendation:** When the press that blurred the field only cancelled it or committed nothing, the
+  undo should end there. For example:
+  - have `#finishField` report whether it fired an edit, and let the host skip the editor step when a
+    draft was only dropped;
+  - or have Undo with an open field cancel the field in the viewer (a viewer method, such as
+    `cancelEdit()`) instead of going through blur.
+
+  Add a playground or viewer test for an undo with an invalid draft and history behind it.
+- **Fix:** The playground notes when Visual closes a field's change without an edit (`nx-draft` going
+  false with no `nx-edit` after it) and when the Undo button was pressed. A press that closed such a
+  change took it back, which is the step Undo was asked for, so the editor's history is left alone.
+  A change that commits still commits and is undone, so Redo brings it back. Checked in Chromium: a
+  committed name edit survives Undo pressed on `3px` or on ` 3`, and a second Undo takes it back; a
+  valid draft is committed and undone, and Redo restores it. The playground has no DOM test harness,
+  so this is covered by those checks rather than an automated test.
+
+### 🟡 Fixed - RF17 Decoding `\"` in the reading's code-styled strings makes the quotes around a string indistinguishable from quotes inside it
+- **Severity:** Low (confidence: high)
+- **Evidence:** `writeReadable` (source.ts) now draws an element line's or a list item's string with its
+  `\"` read as `"`, and `"…"` around it as plain text in the same color. The viewer test expects
+  `"say "hi""`. A list written `{ "a\" \"b" }` now reads `{ "a" "b" }`, two items to the eye, and an
+  attribute `t="x\" y=\"z"` reads `t="x" y="z"`, two attributes. This applies to every reading, not only
+  an editable one: the DrawnUI fiddle and other hosts that never set `editable` change too. Yet the spec
+  sentence sits under "Values edit in place when the host allows it". Prose (`uitext`) and id chips are
+  fine, because their delimiting quotes are distinct `.quote` marks or not drawn at all.
+- **Recommendation:** In code-styled strings, draw the delimiting quotes as distinct marks (as
+  `writeQuoted` and `uitext` do) and show a decoded quote so it cannot be mistaken for one, or keep `\"`
+  as written there and decode only in prose and id chips. Move the sentence into the reading requirement
+  ("One element shows a source tree…"), since it applies with or without `editable`.
+- **Fix:** A string drawn as code, between its own quotes, reads as written again; only a property
+  sheet's value, UI text and ids, where the reading draws no quotes or quiet ones of its own, read
+  `\"` and `\\` decoded. A value shown pending in a code string is escaped as the reading draws it.
+  The sentence moved into "One element shows a source tree in any host", with its scenario. The viewer
+  test now expects `"say \"hi\""` for a list item, its field to hold `say "hi"`, and the pending value
+  to read escaped.
+
+### 🟡 Fixed - RF18 `NxEditor`'s `unseenChanges` bookkeeping, the fix for 7.3, has no test, and it keeps stale texts when changes end where they began
+- **Severity:** Low (confidence: medium)
+- **Evidence:** `NxEditor`'s value effect (editor/NxEditor.tsx) skips `setValue` for any `value` found in
+  `unseenChanges`, and trims the list only when the effect runs, which is only when `value` changes. It
+  does not run when changes return to the text the last render had. For example, Undo with a field open
+  applies the field's edit and undoes it in one task, so React batches both `setSource` calls and
+  `value` stays the same. The texts pushed then stay in the list until the next `value` change. If that
+  next change is an outside text equal to one of them (an address or history entry that restores an
+  edited text), it is taken for the editor's own and not set, and the editor and the app's `source`
+  disagree. Task 7.3 ("quick edits in a row all land and keep the undo history") has no automated test;
+  the playground's tests cover `createEditQueue` only.
+- **Recommendation:** Move the bookkeeping into a small pure helper, such as
+  `createValueTracker(): { reported(text), isOwn(value) }`, and unit-test it:
+  - two changes before a render;
+  - an edit and its undo batched;
+  - an outside value equal to a recently reported text.
+
+  Also have `isOwn` treat a `value` as the editor's own only when it equals the editor's current text or
+  a text reported since that text was last set. Clear the list when the editor's text and `value` agree.
+- **Fix:** The bookkeeping is `createOwnTexts()` in `editor/ownTexts.ts`, with `ownTexts.test.mjs`
+  covering two changes before a render, an edit and its undo batched into one render, an outside
+  value equal to a forgotten text, and no editor yet. It remembers the last rendered `value` and
+  forgets every reported text when the editor reports that value again, so changes that end where
+  they began leave nothing behind; it also forgets them whenever a render's `value` equals the
+  editor's text.
+
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
   now, because `#openEditor` toggles. Spec and design say Enter "opens" the value, and Tab skips booleans.

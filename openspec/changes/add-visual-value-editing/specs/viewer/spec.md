@@ -6,7 +6,11 @@ shows a `SourceTree`, as `@nx-lang/language-protocol` types it, together with th
 document the tree describes, as a reading of that text. The element SHALL depend on no UI framework,
 SHALL keep its markup and styles in a shadow root, and SHALL follow the page's light or dark scheme.
 Its properties SHALL be `tree`, `text`, `colors`, `icons`, `markdown`, `folded`, `selection`,
-`stale` and `editable`, and a property set before the element is defined SHALL take effect once it is. Where there
+`stale` and `editable`, and a property set before the element is defined SHALL take effect once it is.
+Where the reading shows a string without its quotes, or with quiet quotes of its own, as a property's
+value, UI text or an id, it SHALL read the string's `\"` and `\\` escapes as the quote and backslash
+they stand for; a string drawn as code, between its own quotes, and a string holding any other
+escape SHALL read as written. Where there
 is no DOM, importing the package SHALL do nothing, and the package SHALL export a function that
 defines the element in a registry the host chooses.
 
@@ -18,6 +22,10 @@ defines the element in a registry the host chooses.
 #### Scenario: Host styles don't reach in
 - **WHEN** the host page styles `div`, `span` or `button` elements globally
 - **THEN** the element's rendering SHALL not change
+
+#### Scenario: A quote in a string
+- **WHEN** a property's value, shown in a property sheet, is written `"Say \"hi\""`
+- **THEN** the reading SHALL read `Say "hi"`, as its field does
 
 #### Scenario: A stale tree
 - **WHEN** the host sets the element's `stale` property while it computes a newer tree
@@ -38,8 +46,7 @@ is a literal or a bare union case that is a whole value (an attribute's value, a
 sequence, or a parameterless `let`'s value), or a run of plain text content written on one line, and
 an editor fits it:
 
-- a string, a `uitext` string or an id: a text field holding the value without quotes or escapes,
-  which the reading also reads its `\"` and `\\` escapes as the quote and backslash they stand for;
+- a string, a `uitext` string or an id: a text field holding the value without quotes or escapes;
 - a number, typed `int`, `float32` or `float64` or by an alias of one, or a numeric literal where no
   type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and whose
   property name, dragged sideways, changes the value as the pointer moves;
@@ -107,9 +114,6 @@ closes. Opening an editor SHALL close any hover card.
 - **WHEN** the reader types `12px` in a number field and presses Enter
 - **THEN** no `nx-edit` SHALL fire and a note beside the field SHALL read `Not a number`
 
-#### Scenario: A quote in a string
-- **WHEN** a string is written `"Say \"hi\""`
-- **THEN** the reading SHALL read `Say "hi"`, as its field does
 
 #### Scenario: Nothing moves
 - **WHEN** the reader opens the editor of a value on a one-line element

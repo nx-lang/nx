@@ -282,16 +282,18 @@ export function renderSource(
   // editor shows them. Any other escape, as `\n`, leaves the words as written.
   const readable = (start: number, end: number): string =>
     decodeString(text.slice(start, end)) ?? text.slice(start + 1, end - 1);
-  // A string literal from `start` to `end`, quotes and all, written in the color the text has there,
-  // with its escapes read; or nothing, when it has none to read, so it is written as it is.
-  const writeReadable = (parent: HTMLElement, start: number, end: number, quoted: boolean): boolean => {
+  // A string literal's words from `start` to `end`, without its quotes, written in the color the text
+  // has there, with its escapes read; or nothing, when it has none to read, so it is written as it
+  // is. Only where the reading draws no quotes, or quiet ones of its own: in a string drawn as code,
+  // between its own quotes, a quote read from `\"` would look like the string's end.
+  const writeReadable = (parent: HTMLElement, start: number, end: number): boolean => {
     const written = text.slice(start + 1, end - 1);
     const words = readable(start, end);
     if (words === written) {
       return false;
     }
     const range = colors.find((candidate) => candidate.start <= start + 1 && candidate.end > start + 1);
-    piece(parent, start, end, range, quoted ? `"${words}"` : words);
+    piece(parent, start + 1, end - 1, range, words);
     return true;
   };
 
@@ -496,9 +498,7 @@ export function renderSource(
         if (square !== undefined) {
           element.append(square);
         }
-        if (!(quoted && writeReadable(element, start, end, true))) {
-          writeNodes(element, index.children[child] ?? [], start, end, idPlans.get(child));
-        }
+        writeNodes(element, index.children[child] ?? [], start, end, idPlans.get(child));
       }
       parent.append(element);
       at = end;
@@ -736,7 +736,7 @@ export function renderSource(
           words.classList.add("colored");
           words.append(square);
         }
-        if (!writeReadable(words, start, end, false)) {
+        if (!writeReadable(words, start, end)) {
           writeText(words, start + 1, end - 1);
         }
         cell.append(words);

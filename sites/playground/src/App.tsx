@@ -201,6 +201,19 @@ export function App() {
   const [visualDraft, setVisualDraft] = useState(false);
   const [editsInFlight, setEditsInFlight] = useState(0);
   const canUndo = history.canUndo || (mode === "visual" && (visualDraft || editsInFlight > 0));
+  // When Visual last closed a field's change without committing it, as leaving a field holding an
+  // entry it cannot take does, and when the Undo button was last pressed: a press that closed one
+  // took that change back, which is all the visitor asked Undo for.
+  const visualDraftRef = useRef(false);
+  const draftDroppedAt = useRef(Number.NEGATIVE_INFINITY);
+  const undoPressedAt = useRef(Number.POSITIVE_INFINITY);
+  const onVisualDraft = (changed: boolean) => {
+    if (!changed && visualDraftRef.current) {
+      draftDroppedAt.current = performance.now();
+    }
+    visualDraftRef.current = changed;
+    setVisualDraft(changed);
+  };
   /** Undo or redo, from Visual or the title bar: the editor's history, the same as in Source. */
   const visualHistory = (step: "undo" | "redo") => {
     // After any edit still being made, as a field's that pressing the button committed.
@@ -365,7 +378,16 @@ export function App() {
                 aria-label="Undo"
                 title={`Undo (${SHORTCUTS.undo})`}
                 disabled={!canUndo}
-                onClick={() => visualHistory("undo")}
+                onPointerDown={(event) => {
+                  undoPressedAt.current = event.timeStamp;
+                }}
+                onClick={() => {
+                  const dropped = draftDroppedAt.current >= undoPressedAt.current;
+                  undoPressedAt.current = Number.POSITIVE_INFINITY;
+                  if (!dropped) {
+                    visualHistory("undo");
+                  }
+                }}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M9 14 4 9l5-5" />
@@ -428,10 +450,12 @@ export function App() {
               }}
               commands={readingCommands}
               onEdit={(detail) => {
+                // The field's change was committed, not dropped: Undo takes back its edit.
+                draftDroppedAt.current = Number.NEGATIVE_INFINITY;
                 setEditsInFlight((count) => count + 1);
                 void applyVisualEdit(detail).finally(() => setEditsInFlight((count) => count - 1));
               }}
-              onDraft={setVisualDraft}
+              onDraft={onVisualDraft}
               onOpen={openInSource}
               onUndo={() => visualHistory("undo")}
               onRedo={() => visualHistory("redo")}

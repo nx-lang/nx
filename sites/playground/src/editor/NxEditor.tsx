@@ -7,6 +7,7 @@ import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic, DiagnosticSpan } from "../compile";
 import { createWorkerLanguageService } from "../language/worker.ts";
 import { EDITOR_THEMES, type Theme } from "../theme.ts";
+import { createOwnTexts } from "./ownTexts.ts";
 import { offsetOf, positionAt } from "./positions.ts";
 import { openSuggestionDetailsOnce } from "./suggestDetails.ts";
 
@@ -93,11 +94,9 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   latestValue.current = value;
   // Setting the text from outside (an example chosen, a link opened) is not an edit.
   const settingValue = useRef(false);
-  // The texts the editor has reported through `onChange` that no render has passed back as `value`
-  // yet, oldest first. Two changes can land between renders, as two quick edits from Visual do, and
-  // a render then passes a `value` the editor has already moved past: that is not a text from
-  // outside, and setting it would take back the newer change and clear the undo history.
-  const unseenChanges = useRef<string[]>([]);
+  // The texts the editor reported through `onChange`, so a render that passes one back late is not
+  // taken for a text from outside.
+  const ownTexts = useRef(createOwnTexts());
 
   useImperativeHandle(ref, () => ({
     select(start, end) {
@@ -201,7 +200,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
           const text = instance.getValue();
-          unseenChanges.current.push(text);
+          ownTexts.current.reported(text);
           latestChange.current(text);
         }
         reportHistory();
@@ -222,16 +221,8 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
 
   // An example chosen, or a link opened, replaces the whole document.
   useEffect(() => {
-    const unseen = unseenChanges.current;
-    const seen = unseen.indexOf(value);
-    if (seen !== -1) {
-      // The editor's own text, perhaps one it has since moved past.
-      unseen.splice(0, seen + 1);
-      return;
-    }
-    unseen.length = 0;
     const instance = editor.current;
-    if (instance !== null && instance.getValue() !== value) {
+    if (ownTexts.current.shouldSet(value, instance?.getValue() ?? null) && instance !== null) {
       settingValue.current = true;
       try {
         instance.setValue(value);

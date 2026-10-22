@@ -35,9 +35,15 @@ export function valueHost(span: HTMLElement, written: string): ValueHost {
   if (quotes === undefined) {
     const shown = host.textContent ?? "";
     const quoted = written.length >= 2 && written.startsWith('"') && written.endsWith('"');
-    // The reading draws a string's quote and backslash escapes as what they escape.
+    // The reading draws a string's quote and backslash escapes as what they escape, except in a
+    // string drawn as code, between its own quotes.
     const read = quoted ? `"${decodeString(written) ?? written.slice(1, -1)}"` : written;
-    quotes = quoted && shown === read ? "both" : quoted && shown === read.slice(1) ? "trail" : "none";
+    quotes =
+      quoted && shown === written
+        ? "both"
+        : quoted && (shown === written.slice(1) || shown === read.slice(1))
+          ? "trail"
+          : "none";
     span.dataset["quotes"] = quotes;
   }
   const both = quotes === "both";
@@ -80,7 +86,10 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
   for (const swatch of keep) {
     (swatch as HTMLElement).style.backgroundColor = value.trim();
   }
-  host.replaceChildren(...keep, ...(lead === undefined ? [] : [lead]), value, ...(trail === undefined ? [] : [trail]));
+  // A string drawn as code, between its own quotes, shows its quotes and backslashes escaped, as the
+  // reading draws it.
+  const shown = lead !== undefined && target.kind === "text" ? value.replace(/[\\"]/g, "\\$&") : value;
+  host.replaceChildren(...keep, ...(lead === undefined ? [] : [lead]), shown, ...(trail === undefined ? [] : [trail]));
 }
 
 /**

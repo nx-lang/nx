@@ -54,3 +54,4 @@
 - [x] 7.5 A note beside an invalid entry says why, once typing pauses or at once on Enter
 - [x] 7.6 A case's chevron sits nearer its value than the next name
 - [x] 7.7 `nx-draft`, and the playground's Undo enabled for a field's change not yet committed and for edits in flight
+- [x] 7.8 Review fixes RF16–RF18: Undo that only closes a field's change leaves the history alone; strings drawn as code keep their escapes; the editor's own-text bookkeeping is a tested helper

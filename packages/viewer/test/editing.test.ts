@@ -427,23 +427,24 @@ describe("editing in place", () => {
     assert.ok(open.classList.contains("invalid"));
   });
 
-  it("reads a string's quote and backslash escapes as what they escape, and other escapes as written", async (t) => {
+  it("reads a string's quote and backslash escapes as what they escape outside code, and other escapes as written", async (t) => {
     fakeSelection(t);
     const element = show(await fixture("editingEdges"));
     assert.equal(rendered(element, "box.value.note.value").textContent, 'say "hi" \\ ok');
     assert.equal(rendered(element, "box.value.title.value").textContent, "a\\nb");
     const { edits } = events(element);
-    // A string drawn with its quotes, as an item of a sequence is, keeps them around what it reads.
+    // A string drawn as code, between its own quotes, as an item of a sequence is, keeps its escapes:
+    // a bare quote there would look like the string's end.
     const item = root(element).querySelector<HTMLElement>('[data-key^="said."][data-role="literal"]')!;
-    assert.equal(item.textContent, '"say "hi""');
+    assert.equal(item.textContent, '"say \\"hi\\""');
     item.click();
     const open = field(element)!;
-    assert.equal(open.textContent, 'say "hi"');
-    assert.equal(item.textContent, '"say "hi""', "the field sits between the quotes the reading draws");
+    assert.equal(open.textContent, 'say "hi"', "its field holds the value itself");
+    assert.equal(item.textContent, '"say "hi""', "between the quotes the reading draws");
     open.textContent = 'say "yo"';
     press(open, "Enter");
     assert.deepEqual(edits, [{ key: item.dataset["key"], edit: { kind: "setValue", value: { kind: "string", value: 'say "yo"' } } }]);
-    assert.equal(item.textContent, '"say "yo""', "and shown so until the host's tree");
+    assert.equal(item.textContent, '"say \\"yo\\""', "and shown as the reading draws it until the host's tree");
   });
 
   it("offers no text field for a string with an escape other than a quote or a backslash", async () => {

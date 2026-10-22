@@ -270,9 +270,10 @@ with its text selected. Enter or leaving the field commits, Escape cancels, and 
 commit and open the next or previous value. An entry an editor cannot take, such as `12px` in a
 number field, stays in the field, marked, and once typing pauses, or at once on Enter, a note beside
 it says why. Fields take the value's own place and popovers open over the reading, so nothing else
-moves. A string's `\"` and `\\` escapes read as the quote and backslash they stand for, in the
-reading as in its field; a string with any other escape, as `\n`, reads as written and opens in the
-source.
+moves. A string's field holds its value without quotes or escapes; a string with an escape other
+than `\"` or `\\`, as `\n`, opens in the source instead. Where the reading shows a string without
+quotes, as in a property sheet, as UI text or as an id, it reads `\"` and `\\` as the quote and
+backslash they stand for; a string drawn as code, between its own quotes, reads as written.
 
 On a selected row whose property has a default or is optional, Delete, or Cmd+Backspace (a Mac
 laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribute, and the element it
