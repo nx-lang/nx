@@ -23,6 +23,12 @@ defines the element in a registry the host chooses.
 - **WHEN** the host sets the element's `stale` property while it computes a newer tree
 - **THEN** the element SHALL mute its reading and mark it out of date, and selection SHALL still work
 
+#### Scenario: Stale for a moment
+- **WHEN** the host sets `stale` and clears it again within half a second, as while an edit's tree is
+  on its way
+- **THEN** the reading SHALL NOT be muted or badged, and showing or hiding the badge SHALL NOT move
+  the reading
+
 ## ADDED Requirements
 
 ### Requirement: Values edit in place when the host allows it

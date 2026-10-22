@@ -43,3 +43,4 @@
 - [x] 6.3 Hover cues on every editable value (text cursor or hand, faint mark, a chevron after a case) and an input look for an open field: background, focus ring and its own selection color (revises 3.9)
 - [x] 6.4 Remove the row button and Backspace; Delete, or Cmd+Backspace on a Mac, removes a property with a default or an optional one (revises 3.7)
 - [x] 6.5 Playground: Undo and Redo buttons in the NX title bar for both views, disabled when there is nothing to undo or redo, tooltips naming the shortcuts; Collapse all and Expand all as icons on a narrow screen
+- [x] 6.6 The "Out of date" badge floats over the reading instead of taking a line, and the badge and the muting wait half a second, so an edit's brief staleness neither flashes nor moves the reading

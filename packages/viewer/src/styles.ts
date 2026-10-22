@@ -19,19 +19,19 @@ export const styles = `
 :host([hidden]) { display: none; }
 * { box-sizing: border-box; }
 .frame { position: relative; }
+/* The toolbar takes no room: what it shows floats over the reading's top right corner, so showing it
+   moves nothing. */
 .toolbar {
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 0;
-  min-height: 0;
+  height: 0;
 }
 .toolbar:empty { display: none; }
 .badge {
+  position: absolute;
+  top: 4px;
+  right: 8px;
   font-size: 11px;
   padding: 0 6px;
   border-radius: 4px;
@@ -58,7 +58,11 @@ export const styles = `
   white-space: pre;
   tab-size: 2;
 }
-:host([stale]) .source { opacity: 0.55; }
+/* A tree out of date for a moment, as while an edit's tree is on its way, reads as it is: the muting
+   and the badge come only once it stays out of date, and go at once. */
+:host([stale]) .source { opacity: 0.55; transition: opacity 0.15s ease-out 0.5s; }
+.badge:not([hidden]) { animation: nx-viewer-late 0.15s ease-out 0.5s both; }
+@keyframes nx-viewer-late { from { opacity: 0; } }
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
 .source .n { border-radius: 2px; }
 /* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
