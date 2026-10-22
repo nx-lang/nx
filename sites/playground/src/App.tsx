@@ -176,7 +176,8 @@ export function App() {
   const readingCommands = useRef<ReadingCommands | null>(null);
   // The text an edit made in Visual left, whose tree is asked for at once rather than after a pause.
   const immediateTree = useRef<string | null>(null);
-  // Raised by an edit made in Visual that changed nothing, to give Visual its tree again.
+  // Raised by an edit made in Visual that changed nothing, or by an undo or redo, to give Visual its
+  // tree again.
   const [visualRevision, setVisualRevision] = useState(0);
   const reading = useSourceTree(source, mode === "visual", undefined, immediateTree);
   // Visual's edits, made in the editor's text one after another, each one step of its undo history.
@@ -201,6 +202,10 @@ export function App() {
     void applyVisualEdit.after(() => {
       editor.current?.[step]();
       immediateTree.current = editor.current?.text() ?? null;
+      // The step can take the text back to what Visual's tree already describes, as Undo does with a
+      // field open, whose edit it commits and takes back at once. No newer tree comes then, so Visual
+      // gets its tree again, and drops the value it shows as pending.
+      setVisualRevision((revision) => revision + 1);
     });
   };
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.

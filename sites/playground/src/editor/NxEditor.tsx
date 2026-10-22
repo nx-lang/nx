@@ -93,6 +93,11 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   latestValue.current = value;
   // Setting the text from outside (an example chosen, a link opened) is not an edit.
   const settingValue = useRef(false);
+  // The texts the editor has reported through `onChange` that no render has passed back as `value`
+  // yet, oldest first. Two changes can land between renders, as two quick edits from Visual do, and
+  // a render then passes a `value` the editor has already moved past: that is not a text from
+  // outside, and setting it would take back the newer change and clear the undo history.
+  const unseenChanges = useRef<string[]>([]);
 
   useImperativeHandle(ref, () => ({
     select(start, end) {
@@ -195,7 +200,9 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       reportHistory();
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
-          latestChange.current(instance.getValue());
+          const text = instance.getValue();
+          unseenChanges.current.push(text);
+          latestChange.current(text);
         }
         reportHistory();
       });
@@ -215,6 +222,14 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
 
   // An example chosen, or a link opened, replaces the whole document.
   useEffect(() => {
+    const unseen = unseenChanges.current;
+    const seen = unseen.indexOf(value);
+    if (seen !== -1) {
+      // The editor's own text, perhaps one it has since moved past.
+      unseen.splice(0, seen + 1);
+      return;
+    }
+    unseen.length = 0;
     const instance = editor.current;
     if (instance !== null && instance.getValue() !== value) {
       settingValue.current = true;
