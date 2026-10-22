@@ -1176,15 +1176,17 @@ export function renderSource(
       // source has it, measured from where the item starts, wherever the group puts it.
       if (!onOneLine(start, end) && !(node.role === "element" && shapeOf(item) !== "written")) {
         line.classList.add("as-written");
-        // Measured from the item's start, or from its least indented later line when one sits
-        // further left, as text that starts on its element's tag can: no line is drawn before
-        // the item.
-        const later = text
-          .slice(start, end)
-          .split("\n")
-          .slice(1)
-          .filter((written) => written.trim() !== "")
-          .map((written) => written.length - written.trimStart().length);
+        // Measured from the item's start. An item that starts after other text on its line, as text
+        // on its element's tag does, is measured from its least indented later line when one sits
+        // further left, so no line is drawn before the item.
+        const later = startsItsLine(start)
+          ? []
+          : text
+              .slice(start, end)
+              .split("\n")
+              .slice(1)
+              .filter((written) => written.trim() !== "")
+              .map((written) => written.length - written.trimStart().length);
         const column = Math.min(start - (text.lastIndexOf("\n", start - 1) + 1), ...later);
         line.style.setProperty("--column", String(column));
         // Room for the item's own indentation on its first line, which its later lines share.

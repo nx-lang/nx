@@ -504,6 +504,15 @@ describe("the reading", () => {
     assert.equal(item.style.getPropertyValue("--column"), "2", "measured from its least indented line");
   });
 
+  it("measures a block on a line of its own from its start, whatever the lines inside it", async () => {
+    const panel = await fixture("textOnItsTagInBlock");
+    const element = show(panel);
+    const block = root(element).querySelector<HTMLElement>(".sheet-item.as-written")!;
+    assert.ok(block.textContent!.startsWith("if wide"), "the if reads as written");
+    // The text inside it continues at column 2, but the if starts its line at column 4.
+    assert.equal(block.style.getPropertyValue("--column"), "4", "its closing brace stays under its if");
+  });
+
   it("puts an id last in a group's header when its visualizer puts it at the end", async (t) => {
     const ids = await fixture("groupIdAtEnd");
     narrow(t, 20);

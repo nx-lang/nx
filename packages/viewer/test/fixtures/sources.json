@@ -85,6 +85,9 @@
   "textOnItsTag": {
     "source": "type Note = { content text:string }\n\nlet poem = <Note>Two lines\n  of text</Note>\n"
   },
+  "textOnItsTagInBlock": {
+    "source": "type Note = { content text:string }\ntype Panel = { content items:Note* }\n\nlet wide = true\nlet panel =\n  <Panel>\n    if wide {\n      <Note>Two lines\n  of text</Note>\n    }\n  </Panel>\n"
+  },
   "childCounts": {
     "source": "type Item = { name:string }\ntype Panel = { content items:Item+ }\n\nlet kids(): Item+ = { <Item name=\"k\" /> }\n\nlet root(wide:bool, names:string+, n:int) =\n  <Panel>\n    <Item name=\"x\" />\n    // A note is not a child.\n    if wide {\n      <Item name=\"b\" />\n      <Item name=\"c\" />\n    } else {\n      <Item name=\"d\" />\n    }\n    for title in names {\n      <Item name={title} />\n    }\n    if n is {\n      0 => <Item name=\"zero\" />\n      else => <Item name=\"many\" />\n    }\n  </Panel>\n\nlet given =\n  <Panel>\n    <Item name=\"y\" />\n    {kids()}\n  </Panel>\n",
     "visualizers": []

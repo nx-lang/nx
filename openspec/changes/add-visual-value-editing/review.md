@@ -504,7 +504,7 @@ Checks:
   redundant. `welcome`, a run with no braced value, and `greeting` next to the sheet's `note`, which is
   drawn as code as opposed to decoded, each cover a case of their own.
 
-### 🟡 Fixed - RF20 Several cases Visual reads or edits have no instance in the test cases
+### ✅ Verified - RF20 Several cases Visual reads or edits have no instance in the test cases
 - **Severity:** Medium (confidence: high)
 - **Evidence:** The example has nothing for these cases from the viewer spec and `@nx/visualizer`:
   - **An element as a property's value.** For example, `padding=<Thickness left=1 top=2 />`. It reads
@@ -538,8 +538,18 @@ Checks:
 
   Then mention each case in its comment.
 - **Fix:** The example now has `cup=<Cup …/>` (an element as a value, with `PropertyVisualizer format=color` on `sleeve`), `extra=<Extra.syrup …/>` in the sheet and `let promo` on its own line (the `tag` icon), `Menu` with no visualizer (the `box` icon, and "6 children" folded), `Water` with `icon="no-such-icon"` (gives way to `box`), `type Code` with `ValueVisualizer format=id` (so `pairsWith` reads as an id through its type, and `Pastry`'s visualizer merges with `Item`'s), `name="☕ Latte"` before `size`, and `poem`, a run over two lines. The comment on text content invites `a < b`. Checked in Chromium: `size` after the emoji writes `size=medium` with the name intact; `a < b` shows "Text cannot hold < or {"; `poem` has no field; `pumps` and `sleeve` edit; folding `Menu` shows "6 children". `poem`, written starting on its tag, showed its second line left of the pane; fixed in `writeItems` (the column is the least of the item's start and its later lines' indentation), with a test in `element.test.ts`.
+- **Verification:** Verified (commit 30fdf9b). I checked each added case in Chromium against the dev server, with the viewer rebuilt (viewer tests 117/117; `check-examples` 24/24):
+  - `cup=<Cup …/>` reads as a line in its row, and `sleeve` has a color square and the hex popover; editing `sleeve`, toggling `lid`, Up on `pumps` and editing `flavor` (in the sheet and in `promo`) write the right attribute.
+  - Delete leaves out `cup` and `extra`.
+  - Icons: `promo` has `tag`, while `Menu`, `Water` (`no-such-icon`) and `poem`'s `Note` have `box`.
+  - Left on `Menu` folds it to "6 children".
+  - `Pastry` merges with `Item`'s visualizer (title `Croissant`, `CRO` last), and `pairsWith` and every `code` read as ids through `Code`.
+  - `size` and `shots` after `☕ Latte`, and the name itself, edit cleanly. A link with `😀🥐` before them also edited cleanly, so surrogate pairs hold too. `☕` is in the BMP; an emoji outside it would make the example test that case itself.
+  - `a < b` stays in the field with "Text cannot hold < or {", and `poem` has no field.
 
-### 🟡 Fixed - RF21 "Hover a name for its doc" finds a doc only on cases; the four doc comments sit where no hover in Visual reaches
+  The `writeItems` change fixes `poem`, but it moves `if` and `for` blocks that hold such text: see RF25.
+
+### ✅ Verified - RF21 "Hover a name for its doc" finds a doc only on cases; the four doc comments sit where no hover in Visual reaches
 - **Severity:** Low (confidence: high, checked in Chromium)
 - **Evidence:** The docs are on `uitext`, `Color`, `Size` and `Item`. In Visual:
   - Hovering `Drink` shows `type Drink extends Item` with no doc, because `Drink` has none and the card
@@ -556,8 +566,9 @@ Checks:
 
   Add "or press i" to the header.
 - **Fix:** `/// A drink, hot or iced.` on `Drink` and `/// Shots of espresso.` on `shots`; the docs on `uitext`, `Color` and `Item`, which no hover reached, are gone. The header says "Hover a name, or select it and press i, for its card". Checked in Chromium: both cards show their doc.
+- **Verification:** Verified (commit 30fdf9b). In Chromium, hovering `Drink` shows `type Drink extends Item` and "A drink, hot or iced.". Hovering `shots` shows `(property) shots: Count = 1` and "Shots of espresso.". `i` on the sheet's `shots` row shows the same card. The doc comments no hover reached are gone.
 
-### 🟡 Fixed - RF22 Three comments say less, or other, than Visual does
+### ✅ Verified - RF22 Three comments say less, or other, than Visual does
 - **Severity:** Low (confidence: high, checked in Chromium)
 - **Evidence:**
   - **"Functions: a value from one is not edited here."** This is true of `priceOf`'s `5.5`, but
@@ -574,8 +585,13 @@ Checks:
   - "an untyped int and float";
   - "(double-click or Enter opens it in Source)".
 - **Fix:** Reworded: "an untyped int and float"; "one with \n, which Enter or a double-click opens in Source"; "priceOf's values are code and do not edit, but those Special's body writes do. Special used as an element reads with the function icon."
+- **Verification:** Verified (commit 30fdf9b). Each reworded comment matches Visual:
+  - `total` and `ratio` are an untyped int and float.
+  - `lines` opens in Source with a double-click, or with a click and then Enter.
+  - `priceOf`'s `5.5` has no editor, while `Special`'s `SPC` and `large` edit.
+  - `<Special>` reads with `square-function`.
 
-### 🟡 Fixed - RF23 Several kinds of value have no comment saying what to try, which the requirement asks of each
+### ✅ Verified - RF23 Several kinds of value have no comment saying what to try, which the requirement asks of each
 - **Severity:** Low (confidence: high)
 - **Evidence:** The MODIFIED requirement says each case has "a comment saying what to try", and the
   scenario says "with a comment for each". These have none, or only a mention in the Delete line:
@@ -597,8 +613,14 @@ Checks:
   - over `sizes`: "a qualified case keeps Size.";
   - in the header: "Ctrl/Cmd+Z and Shift+Z, or the title bar's buttons".
 - **Fix:** Folded into the comments: the header names Shift+Tab, Cmd+Backspace on a Mac, Ctrl or Cmd+Z and Shift+Z and the title bar's buttons; the Latte line names Space or a click on `iced`, Up and Down with Shift, dragging the name, `12px` and the case popover; the sheet names `iced` keeping its braces, `price` as a float64 and the color popovers; `sizes` has "A qualified case edits as a case and keeps its Size."; `shots` is a `Count`.
+- **Verification:** Verified (commit 30fdf9b). Every kind of value now has a comment saying what to try. In Chromium:
+  - Shift+Tab from `shots` opens `size`.
+  - Dragging `shots`' name 40px wrote `shots=22`.
+  - Ctrl+Z undid it, and Ctrl+Shift+Z redid it.
+  - The color popovers open on `color` and `sleeve`.
+  - Space, a click, the braced `iced`, `12px` and the qualified `sizes` behave as the comments say (checked in the previous pass).
 
-### 🟡 Fixed - RF24 The "Larger examples" scenario still says the tests count every other example
+### ✅ Verified - RF24 The "Larger examples" scenario still says the tests count every other example
 - **Severity:** Low (confidence: high)
 - **Evidence:** The MODIFIED requirement and `UNCOUNTED_TOPICS` leave out "Test cases" as well as
   "Larger examples". The scenario "Larger examples" still ends "the playground's tests SHALL count
@@ -608,6 +630,28 @@ Checks:
   examples" and "Test cases". Do this either in the "Larger examples" scenario or in a THEN clause of
   "Visual test cases".
 - **Fix:** The "Larger examples" scenario now counts only the examples under neither "Larger examples" nor "Test cases", and the "Visual test cases" scenario lists the added cases.
+- **Verification:** Verified (commit 30fdf9b). The "Larger examples" scenario now counts only the examples under neither topic, as `UNCOUNTED_TOPICS` does. The "Visual test cases" scenario lists every case the example now holds, and each case is in the example.
+
+## New Findings Discovered During 2026-10-22 03:58 Verification
+
+### 🟡 Fixed - RF25 The as-written column now counts lines of nested items, so an `if` or `for` holding text that continues further left draws its body and closing brace too far right
+- **Severity:** Low (confidence: high, reproduced in Chromium)
+- **Evidence:** `writeItems` takes the least indentation over all of the item's later lines, including lines that belong to an item nested inside it. A nested item is placed by its own `--column`. In this source:
+
+  ```nx
+      if wide {
+        <Note>Two lines
+  of text</Note>
+      }
+  ```
+
+  The `if` gets `--column: 0` from `of text`. Its first line is still drawn at the item's start, but every later line moves right by the `if`'s own column (4):
+  - the `Note` sits 6ch in, where the `for` beside it holds its `Note` 2ch in;
+  - the closing `}` sits 4ch right of its `if`, where the `for`'s `}` lines up with its `for`.
+
+  Before 30fdf9b, only `of text` would have gone left. I found no regression in the shipped examples. Every as-written item in `settings-screen`, `orders-dashboard`, `typed-text`, `agent` and `visual-test-cases` draws no glyph left of its start. A wrapped multi-line tag (`<Note` / `>tagged`) also reads as before.
+- **Recommendation:** When taking the least indentation, skip the lines of a nested as-written item, such as a text node or an element written over several lines inside the block, since that item places them itself. One way is to take the indentation only of lines that start outside a nested multi-line node's range. Add this block to `textOnItsTag` or a sibling fixture, and assert that the `if`'s `--column` stays 4.
+- **Fix:** `writeItems` takes the later lines' least indentation only for an item that starts after other text on its line, as text on its element's tag does; an item starting its own line, such as an `if` or a `for`, is measured from its start as before. Test "measures a block on a line of its own from its start, whatever the lines inside it" (fixture `textOnItsTagInBlock`, an `if` holding such text) fails under the previous rule (column 2) and passes now (column 4).
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
