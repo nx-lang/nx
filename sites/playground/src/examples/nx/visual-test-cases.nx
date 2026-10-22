@@ -92,7 +92,10 @@ let gutter:Spacing = 16
 let theme = <Theme accent="#7a4b2a" muted="#d9cfc4" />
 
 // Hints: padding opens a slider that snaps to its stops (hold Alt to go between them), reads "px",
-// and refuses 80 with "At most 64"; gap has a range and no editor, so it slides too; align is a row of
+// and refuses 80 with "At most 64". Its track labels its ends and marks gutter by name (click the
+// name to write {gutter}, or hover gutter in the list to light its mark); the arrows go stop to stop
+// (Alt+arrow by one, Home and End to the ends); the notch over 8 is the default, and a double-click
+// on the slider resets to it. gap has a range and no editor, so it slides too; align is a row of
 // buttons; tint is a reference to a named value: open it to see accent marked, or type a hex to
 // replace it. intro was written over two lines and edits with Shift+Enter for a line break. Select
 // the banner and open "+ 2 more": body is multi-line with a placeholder (Enter breaks a line, Ctrl or

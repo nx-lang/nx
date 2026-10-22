@@ -20,6 +20,7 @@
 
 - [x] 4.1 Read hints from the tree; a number with `min` and `max` and no `editor` takes the slider
 - [x] 4.2 The slider popover: ticks at `stops`, snapping unless Alt is held, the number field beside it, one commit on release; arrows, scrubbing and the slider kept in range and stepped by `step`; a typed number out of range kept with its note
+- [x] 4.2a Slider marks (after the comparison, 2026-10-22): stops labeled, named values' numbers marked and labeled by path (lit from the list, chosen by a click), arrows stop to stop with Alt by step and Home/End, the default as a notch and a double-click resetting to it; verify each scenario with tests
 - [x] 4.3 Units read after a number and shown after the field; typing the unit accepted and dropped
 - [x] 4.4 Segmented cases, falling back to the list past five cases or when too wide; `editor=dropdown` and `editor=field`
 - [x] 4.5 Multi-line string fields (Enter a line break, Ctrl/Cmd+Enter commits), Shift+Enter as a line break in any string field, strings written over several lines now editable, strings with escapes other than `\"` and `\\` still opening Source; placeholders

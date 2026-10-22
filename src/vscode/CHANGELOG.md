@@ -34,7 +34,8 @@ All notable changes to this project will be documented in this file.
   lists the types of the properties an element does not write.
 - `<nx-viewer>`: a selected element lists the properties it does not write under `+ N more`, and sets
   one where it reads; a written row has a menu (Reset to default or Remove, and Show in Source);
-  numbers edit with sliders, ranges and units, unions as segmented buttons and strings over several
+  numbers edit with sliders (labeled stops, named values marked on the track, arrows from stop to
+  stop, the default as a notch and a double-click to reset), ranges and units, unions as segmented buttons and strings over several
   lines as their hints say; Shift+Enter breaks a string's line; and with the new `namedValues`
   property, editors list the named values a property can take and write a reference to the one
   chosen. The playground passes its worker's `namedValues`.

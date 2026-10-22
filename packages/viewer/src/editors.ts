@@ -189,6 +189,109 @@ export function slidValue(position: number, hints: SourceEditorHints, from: stri
   return decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
 }
 
+/**
+ * The stop a slider's arrow keys go to from `current`: the next one up or down among its hints'
+ * stops within `min` to `max`. Nothing past the last stop either way.
+ */
+export function nextStop(current: number, direction: 1 | -1, hints: SourceEditorHints, min: number, max: number): number | undefined {
+  const stops = [...new Set(hints.stops ?? [])].filter((stop) => stop >= min && stop <= max).sort((a, b) => a - b);
+  return direction === 1 ? stops.find((stop) => stop > current) : stops.reverse().find((stop) => stop < current);
+}
+
+/** A mark under a slider's track: a stop, a named value's number, or the property's default. */
+export interface SliderMark {
+  /** Where on the track, from 0 at its start to 1 at its end. */
+  readonly at: number;
+  readonly value: number;
+  readonly kind: "stop" | "named" | "default";
+  /** The named values the mark stands for, the first of which its label shows. */
+  readonly references?: readonly string[];
+}
+
+/** A label under a slider's track: a stop's number or a named value's path. */
+export interface SliderLabel {
+  readonly at: number;
+  readonly value: number;
+  readonly text: string;
+  /** The named value a click on the label chooses. */
+  readonly reference?: string;
+}
+
+/** About how wide a character of a slider's labels is, and the least room kept between two. */
+const LABEL_CHARACTER = 6.6;
+const LABEL_GAP = 6;
+/** With more stops than this, only the first and last stops are labeled with their numbers. */
+const LABELED_STOPS = 7;
+
+/**
+ * A slider's marks and labels: a tick at each stop and at each named value whose literal number is
+ * in range, a notch at `fallback`, its default, when that is a number in range. Labels give the
+ * first stop's number, the named values' paths, the last stop's number, then the other stops' numbers
+ * when there are few, leaving out any that would overlap one already placed on a track `width` pixels
+ * wide.
+ */
+export function sliderMarks(
+  hints: SourceEditorHints,
+  min: number,
+  max: number,
+  named: readonly NamedValue[],
+  fallback: string | undefined,
+  width: number
+): { readonly marks: readonly SliderMark[]; readonly labels: readonly SliderLabel[] } {
+  if (!(max > min)) {
+    return { marks: [], labels: [] };
+  }
+  const at = (value: number): number => (value - min) / (max - min);
+  const inRange = (value: number): boolean => Number.isFinite(value) && value >= min && value <= max;
+  const stops = [...new Set(hints.stops ?? [])].filter(inRange).sort((a, b) => a - b);
+  const references = new Map<number, string[]>();
+  for (const value of named) {
+    const text = value.value?.trim();
+    if (text === undefined || !isNumericLiteral(text) || !inRange(Number(text))) {
+      continue;
+    }
+    const number = Number(text);
+    references.set(number, [...(references.get(number) ?? []), value.path]);
+  }
+  const marks: SliderMark[] = stops.filter((stop) => !references.has(stop)).map((stop) => ({ at: at(stop), value: stop, kind: "stop" }));
+  for (const [value, paths] of references) {
+    marks.push({ at: at(value), value, kind: "named", references: paths });
+  }
+  const start = fallback?.trim();
+  if (start !== undefined && isNumericLiteral(start) && inRange(Number(start))) {
+    marks.push({ at: at(Number(start)), value: Number(start), kind: "default" });
+  }
+  marks.sort((a, b) => a.at - b.at);
+
+  // The first stop anchors the scale, so it is placed first, then the named values, the last stop
+  // and the other stops.
+  const number = (stop: number): SliderLabel => ({ at: at(stop), value: stop, text: String(stop) });
+  const unnamed = stops.filter((stop) => !references.has(stop));
+  const first = stops.length > 0 && unnamed.includes(stops[0]!) ? [stops[0]!] : [];
+  const last = stops.length > 1 && unnamed.includes(stops[stops.length - 1]!) ? [stops[stops.length - 1]!] : [];
+  const inner = stops.length <= LABELED_STOPS ? unnamed.filter((stop) => !first.includes(stop) && !last.includes(stop)) : [];
+  const candidates: SliderLabel[] = [
+    ...first.map(number),
+    ...[...references].map(([value, paths]) => ({ at: at(value), value, text: paths[0]!, reference: paths[0]! })),
+    ...last.map(number),
+    ...inner.map(number),
+  ];
+  const placed: { readonly from: number; readonly to: number }[] = [];
+  const labels: SliderLabel[] = [];
+  for (const label of candidates) {
+    const half = (label.text.length * LABEL_CHARACTER) / 2 + LABEL_GAP / 2;
+    const middle = label.at * width;
+    const span = { from: middle - half, to: middle + half };
+    if (placed.some((other) => span.from < other.to && other.from < span.to)) {
+      continue;
+    }
+    placed.push(span);
+    labels.push(label);
+  }
+  labels.sort((a, b) => a.at - b.at);
+  return { marks, labels };
+}
+
 /** Shows the named value `path` in place of what `span` draws, muted as waiting for the host. */
 export function showReference(span: HTMLElement, path: string): void {
   span.classList.add("pending");

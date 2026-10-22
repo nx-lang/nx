@@ -603,12 +603,41 @@ export const styles = `
 .menu-item { padding: 2px 8px; border-radius: 4px; cursor: pointer; outline: none; }
 .menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 /* A slider: its track, with its stops as ticks under it, then the number's field and its unit. */
-.popover.slider { min-width: 16rem; }
+.popover.slider { min-width: 20rem; }
 .popover .slider-row { display: flex; align-items: center; gap: 8px; }
 .popover .slider-track { position: relative; flex: 1; min-width: 8rem; padding-bottom: 4px; }
 .popover .popover-slider { display: block; width: 100%; margin: 0; accent-color: var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
 .popover .slider-ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 4px; pointer-events: none; }
 .popover .slider-tick { position: absolute; width: 1px; height: 4px; background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a)); }
+/* A named value's number ticks taller in the field's color, and lights while its row is hovered. */
+.popover .slider-tick.named { width: 2px; height: 6px; margin-left: -0.5px; background: var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); opacity: 0.7; }
+.popover .slider-tick.named.lit { opacity: 1; height: 8px; }
+/* The default is a small notch over the track. */
+.popover .slider-notches { position: absolute; left: 8px; right: 8px; top: 0; height: 0; pointer-events: none; }
+.popover .slider-notch {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border: 3.5px solid transparent;
+  border-top: 4px solid var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+}
+/* Labels under the ticks: the stops' numbers, and named values by name, which a click chooses. */
+.popover .slider-row:has(.slider-track.labeled) { padding-bottom: 14px; }
+.popover .slider-labels { position: absolute; left: 8px; right: 8px; top: 100%; height: 14px; pointer-events: none; }
+.popover .slider-label {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--nx-viewer-fold-summary-color, light-dark(#6e7781, #9a9a9a));
+}
+.popover .slider-label.named { color: var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); pointer-events: auto; cursor: pointer; }
+.popover .slider-label.named:hover, .popover .slider-label.lit { text-decoration: underline; }
+.popover .slider-label.at { color: var(--nx-viewer-foreground, CanvasText); }
+.popover .slider-label.named.at { font-weight: 600; }
 .popover input.popover-number { width: 7ch; flex: none; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
 .popover input.popover-number.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
 .popover .popover-unit { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); }

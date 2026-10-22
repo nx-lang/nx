@@ -31,12 +31,14 @@ import {
   defaultValue,
   isSlider,
   namedOptions,
+  nextStop,
   numberEntry,
   offsetAtPoint,
   pickerColor,
   rangeProblem,
   showReference,
   showValue,
+  sliderMarks,
   slidValue,
   stepNumber,
   valueHost
@@ -44,7 +46,7 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
-import { indexTree, nodeOf, type TreeIndex } from "./tree.js";
+import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
 export { keyAtRange, rangeOfKey } from "./selection.js";
@@ -216,8 +218,13 @@ interface EditSession {
   /** A case popover's options, and the one Enter chooses. */
   readonly options?: readonly HTMLElement[];
   active?: HTMLElement | undefined;
-  /** A slider's track, beside its number field. */
+  /** A slider's track, beside its number field, and what holds it and its marks. */
   readonly slider?: HTMLInputElement;
+  readonly track?: HTMLElement;
+  /** The source text of the default of the property a slider sets, which a notch marks. */
+  readonly fallback?: string | undefined;
+  /** The named values listed with a slider, which its track marks too. */
+  namedValues?: readonly NamedValue[];
   /** The named values listed with a field, a color or a slider, and the one Enter chooses. */
   named?: HTMLElement[];
   namedActive?: HTMLElement | undefined;
@@ -2004,12 +2011,19 @@ export class NxViewerElement extends ElementBase {
     if (!isRemovable(index, at)) {
       return false;
     }
-    this.#removed.add(key!);
-    row.classList.add("pending");
-    this.#fire(NX_EDIT_EVENT, { key: key!, edit: { kind: "remove" } });
+    this.#removeAttribute(at);
+    return true;
+  }
+
+  /** Leaves out the attribute at `at`, which may be, and selects the element it was on. */
+  #removeAttribute(at: number): void {
+    const index = this.#index!;
+    const key = index.tree.nodes[at]!.key;
+    this.#removed.add(key);
+    this.#rendered.get(key)?.classList.add("pending");
+    this.#fire(NX_EDIT_EVENT, { key, edit: { kind: "remove" } });
     const element = index.tree.nodes[at]!.parent;
     this.#select(element === undefined ? undefined : index.tree.nodes[element]!.key, true);
-    return true;
   }
 
   // ---- Popovers ---------------------------------------------------------------------------
@@ -2182,8 +2196,17 @@ export class NxViewerElement extends ElementBase {
     }
     if (session.slider !== undefined && (event.key === "ArrowDown" || event.key === "ArrowUp") && event.target === session.input) {
       event.preventDefault();
-      const steps = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
-      const stepped = stepNumber(numberEntry(session.input.value, target.hints), steps, target.signed !== false, target.hints);
+      // With stops, the arrows go from stop to stop; Alt, with no named values, and Shift go by steps.
+      const entry = numberEntry(session.input.value, target.hints);
+      const direction = event.key === "ArrowUp" ? 1 : -1;
+      const hints = target.hints ?? {};
+      let stepped: string | undefined;
+      if ((hints.stops?.length ?? 0) > 0 && !event.altKey && !event.shiftKey && isNumericLiteral(entry)) {
+        const stop = nextStop(Number(entry), direction, hints, Number(session.slider.min), Number(session.slider.max));
+        stepped = stop === undefined ? undefined : slidValue(stop, hints, entry, false);
+      } else {
+        stepped = stepNumber(entry, direction * (event.shiftKey ? 10 : 1), target.signed !== false, target.hints);
+      }
       if (stepped !== undefined) {
         this.#slideTo(session, stepped);
       }
@@ -2251,21 +2274,6 @@ export class NxViewerElement extends ElementBase {
     const track = document.createElement("div");
     track.className = "slider-track";
     track.append(slider);
-    if ((hints.stops?.length ?? 0) > 0 && max > min) {
-      const ticks = document.createElement("div");
-      ticks.className = "slider-ticks";
-      ticks.setAttribute("aria-hidden", "true");
-      for (const stop of hints.stops!) {
-        if (stop < min || stop > max) {
-          continue;
-        }
-        const tick = document.createElement("span");
-        tick.className = "slider-tick";
-        tick.style.left = `${((stop - min) / (max - min)) * 100}%`;
-        ticks.append(tick);
-      }
-      track.append(ticks);
-    }
     const input = document.createElement("input");
     input.className = "popover-number";
     input.value = text;
@@ -2284,8 +2292,13 @@ export class NxViewerElement extends ElementBase {
     this.#popover.replaceChildren(row);
     this.#popover.hidden = false;
     span.classList.add("editing");
-    const session: EditSession = { target, span, host, restore, input, slider, closed: false };
+    const fallback = this.#defaultOf(target);
+    const session: EditSession = { target, span, host, restore, input, slider, track, fallback, closed: false };
     this.#session = session;
+    this.#drawMarks(session);
+    if (fallback !== undefined && this.#resettable(target)) {
+      slider.title = `Double-click to reset to ${fallback}${hints.unit === undefined ? "" : ` ${hints.unit}`}`;
+    }
     // Alt held while dragging lets the thumb go between the stops.
     let free = false;
     const note = (event: PointerEvent | KeyboardEvent): void => {
@@ -2298,6 +2311,7 @@ export class NxViewerElement extends ElementBase {
       const value = slidValue(Number(slider.value), hints, text, free);
       input.value = value;
       showValue(span, target, this.#writtenOf(target), value);
+      this.#markAt(session, Number(value));
       this.#validate(session);
     });
     // Let go, the number is committed once; the slider stays open on it.
@@ -2309,12 +2323,37 @@ export class NxViewerElement extends ElementBase {
       }
       this.#validate(session);
     });
+    // With stops, the arrows go from stop to stop, with Alt by one step; Home and End go to the ends.
+    slider.addEventListener("keydown", (event) => {
+      const value = this.#keyedSlide(session, event, Number(slider.value), text, min, max);
+      if (value === undefined) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      slider.value = value;
+      input.value = value;
+      showValue(span, target, this.#writtenOf(target), value);
+      this.#markAt(session, Number(value));
+      if (this.#problemOf(target, value) === undefined) {
+        this.#commitValue(target, value);
+      }
+      this.#validate(session);
+    });
+    // A double-click goes back to the default, as the row's Reset to default does.
+    slider.addEventListener("dblclick", () => {
+      if (fallback !== undefined && this.#resettable(target)) {
+        this.#cancel(session, true);
+        this.#removeAttribute(this.#index!.tree.nodes[target.at]!.parent!);
+      }
+    });
     input.addEventListener("input", () => {
       session.typed = true;
       this.#validate(session);
       const entry = Number(numberEntry(input.value, hints));
       if (Number.isFinite(entry)) {
         slider.value = String(entry);
+        this.#markAt(session, entry);
       }
       this.#filterNamed(session, input.value);
     });
@@ -2332,8 +2371,126 @@ export class NxViewerElement extends ElementBase {
   #slideTo(session: EditSession, value: string): void {
     session.input!.value = value;
     session.slider!.value = value;
+    this.#markAt(session, Number(value));
     session.input!.select();
     this.#validate(session);
+  }
+
+  /**
+   * Where a key on a slider moves it from `current`, written as `from` is: with stops, an arrow goes
+   * to the next stop, or with Alt by one step; without, by one step; Shift moves ten steps, and Home
+   * and End go to `min` and `max`. Nothing for any other key, or past the last stop.
+   */
+  #keyedSlide(session: EditSession, event: KeyboardEvent, current: number, from: string, min: number, max: number): string | undefined {
+    const hints = session.target.hints ?? {};
+    if (event.key === "Home" || event.key === "End") {
+      return slidValue(event.key === "Home" ? min : max, hints, from, true);
+    }
+    const direction = event.key === "ArrowUp" || event.key === "ArrowRight" ? 1 : event.key === "ArrowDown" || event.key === "ArrowLeft" ? -1 : 0;
+    if (direction === 0) {
+      return undefined;
+    }
+    if ((hints.stops?.length ?? 0) > 0 && !event.altKey && !event.shiftKey) {
+      const stop = nextStop(current, direction, hints, min, max);
+      return stop === undefined ? undefined : slidValue(stop, hints, from, false);
+    }
+    const written = slidValue(current, hints, from, true);
+    return stepNumber(written, direction * (event.shiftKey ? 10 : 1), session.target.signed !== false, { ...hints, min, max });
+  }
+
+  /** Draws `session`'s slider's marks under its track: its stops, its named values and its default. */
+  #drawMarks(session: EditSession): void {
+    const slider = session.slider!;
+    const min = Number(slider.min);
+    const max = Number(slider.max);
+    const width = slider.getBoundingClientRect().width;
+    const { marks, labels } = sliderMarks(session.target.hints ?? {}, min, max, session.namedValues ?? [], session.fallback, width > 0 ? width - 16 : 240);
+    const document = this.ownerDocument;
+    session.track!.querySelectorAll(".slider-ticks, .slider-notches, .slider-labels").forEach((old) => old.remove());
+    // Stops and named values tick under the track; the default is a notch over it.
+    for (const [className, kinds] of [
+      ["slider-ticks", ["stop", "named"]],
+      ["slider-notches", ["default"]],
+    ] as const) {
+      const shown = marks.filter((mark) => (kinds as readonly string[]).includes(mark.kind));
+      if (shown.length === 0) {
+        continue;
+      }
+      const row = document.createElement("div");
+      row.className = className;
+      row.setAttribute("aria-hidden", "true");
+      for (const mark of shown) {
+        const tick = document.createElement("span");
+        tick.className = mark.kind === "stop" ? "slider-tick" : mark.kind === "named" ? "slider-tick named" : "slider-notch";
+        tick.style.left = `${mark.at * 100}%`;
+        tick.dataset["value"] = String(mark.value);
+        if (mark.references !== undefined) {
+          tick.dataset["references"] = mark.references.join(" ");
+        }
+        row.append(tick);
+      }
+      session.track!.append(row);
+    }
+    if (labels.length > 0) {
+      const row = document.createElement("div");
+      row.className = "slider-labels";
+      for (const label of labels) {
+        const text = document.createElement("span");
+        text.className = label.reference === undefined ? "slider-label" : "slider-label named";
+        text.style.left = `${label.at * 100}%`;
+        text.textContent = label.text;
+        text.dataset["value"] = String(label.value);
+        if (label.reference !== undefined) {
+          const reference = label.reference;
+          text.dataset["reference"] = reference;
+          text.title = `${reference} = ${label.value}`;
+          // The list is the way in from the keyboard; the label is a shortcut for the pointer.
+          text.setAttribute("aria-hidden", "true");
+          text.addEventListener("pointerdown", (event) => event.preventDefault());
+          text.addEventListener("click", () => this.#chooseReference(session, reference));
+        } else {
+          text.setAttribute("aria-hidden", "true");
+        }
+        row.append(text);
+      }
+      session.track!.append(row);
+      session.track!.classList.add("labeled");
+    } else {
+      session.track!.classList.remove("labeled");
+    }
+    this.#markAt(session, Number(session.slider!.value));
+  }
+
+  /** Marks the labels of `session`'s slider that stand for `value`, where its thumb is. */
+  #markAt(session: EditSession, value: number): void {
+    session.track?.querySelectorAll<HTMLElement>(".slider-label").forEach((label) => {
+      label.classList.toggle("at", Number(label.dataset["value"]) === value);
+    });
+  }
+
+  /** Lights the marks and labels of `session`'s slider that stand for the named value `path`. */
+  #lightMark(session: EditSession, path: string | undefined): void {
+    session.track?.querySelectorAll<HTMLElement>(".slider-tick.named, .slider-label.named").forEach((mark) => {
+      const paths = mark.dataset["references"]?.split(" ") ?? [mark.dataset["reference"]];
+      mark.classList.toggle("lit", path !== undefined && paths.includes(path));
+    });
+  }
+
+  /** The source text of the default of the property `target` sets, if it has one. */
+  #defaultOf(target: EditTarget): string | undefined {
+    const index = this.#index;
+    const element = target.property === undefined ? undefined : index?.byKey.get(target.property.element);
+    if (index === undefined || element === undefined) {
+      return undefined;
+    }
+    return elementProperties(index.tree, index.tree.nodes[element]!)?.find((property) => property.name === target.property!.name)?.default;
+  }
+
+  /** Whether `target` is a written attribute's value that leaving out resets to its default. */
+  #resettable(target: EditTarget): boolean {
+    const index = this.#index;
+    const attribute = index?.tree.nodes[target.at]?.parent;
+    return target.adding !== true && index !== undefined && attribute !== undefined && removalOf(index, attribute) === "reset" && !this.#removed.has(index.tree.nodes[attribute]!.key);
   }
 
   // ---- Named values -------------------------------------------------------------------------
@@ -2395,6 +2552,14 @@ export class NxViewerElement extends ElementBase {
     list.setAttribute("aria-label", "Named values");
     list.append(...options);
     session.named = options;
+    if (session.slider !== undefined) {
+      session.namedValues = values;
+      this.#drawMarks(session);
+      for (const option of options) {
+        option.addEventListener("pointerenter", () => this.#lightMark(session, option.dataset["reference"]));
+        option.addEventListener("pointerleave", () => this.#lightMark(session, session.namedActive?.dataset["reference"]));
+      }
+    }
     if (session.field !== undefined) {
       this.#popover.className = "popover named";
       this.#popover.replaceChildren(list);
@@ -2447,6 +2612,7 @@ export class NxViewerElement extends ElementBase {
     for (const candidate of session.named ?? []) {
       candidate.classList.toggle("active", candidate === option);
     }
+    this.#lightMark(session, option?.dataset["reference"]);
     const input = session.field ?? session.input;
     if (option === undefined) {
       input?.removeAttribute("aria-activedescendant");
