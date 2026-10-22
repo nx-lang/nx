@@ -358,7 +358,7 @@ Checks:
   - Redo brings the draft's edit back;
   - an invalid number entry shows "Not a number" beside the field after the pause.
 
-### 🟡 Fixed - RF16 Undo pressed while a field holds an entry it cannot take discards the entry and also undoes the step before
+### ✅ Verified - RF16 Undo pressed while a field holds an entry it cannot take discards the entry and also undoes the step before
 - **Severity:** Low (confidence: high, reproduced in Chromium)
 - **Evidence:** I committed a title edit, then typed `px` after a `minLength` number. Undo was enabled and the
   note said "Not a number". I clicked the title bar's Undo:
@@ -386,8 +386,13 @@ Checks:
   committed name edit survives Undo pressed on `3px` or on ` 3`, and a second Undo takes it back; a
   valid draft is committed and undone, and Redo restores it. The playground has no DOM test harness,
   so this is covered by those checks rather than an automated test.
+- **Verification:** Verified (commit 81143cb). `onVisualDraft` records when `nx-draft` goes false with no `nx-edit` after it, since `onEdit` resets the mark, and the Undo button records its pointerdown. A click whose press dropped a draft skips the editor's undo. A draft that commits to nothing (` 12`) also goes false with no edit, so it is covered too. I checked in Chromium after committing a title edit:
+  - Undo pressed with `1px` or with `1 ` in a number field left the title edit in place;
+  - Undo with a valid draft (`10`) committed it and took it back, and Redo restored `minLength=10`.
 
-### 🟡 Fixed - RF17 Decoding `\"` in the reading's code-styled strings makes the quotes around a string indistinguishable from quotes inside it
+  The playground has no DOM test for this. The automated suites that do run pass: viewer 116/116, playground `ownTexts` + `edits` 11/11.
+
+### ✅ Verified - RF17 Decoding `\"` in the reading's code-styled strings makes the quotes around a string indistinguishable from quotes inside it
 - **Severity:** Low (confidence: high)
 - **Evidence:** `writeReadable` (source.ts) now draws an element line's or a list item's string with its
   `\"` read as `"`, and `"…"` around it as plain text in the same color. The viewer test expects
@@ -406,8 +411,9 @@ Checks:
   The sentence moved into "One element shows a source tree in any host", with its scenario. The viewer
   test now expects `"say \"hi\""` for a list item, its field to hold `say "hi"`, and the pending value
   to read escaped.
+- **Verification:** Verified (commit 81143cb). `writeReadable` now writes only a string's words without quotes, and is used only for property-sheet values. UI text and ids decode through `readable` with their own quiet quotes, while an element line's or a list item's code string goes back to `writeNodes`, as written. `showValue` escapes a pending value in a code string (lead quote drawn, kind `text`), so the muted value reads as the reading would draw it. `valueHost` recognises both forms. The sentence and its scenario are now in the reading requirement. The viewer test expects `"say \"hi\""` for a list item. Viewer 116/116.
 
-### 🟡 Fixed - RF18 `NxEditor`'s `unseenChanges` bookkeeping, the fix for 7.3, has no test, and it keeps stale texts when changes end where they began
+### ✅ Verified - RF18 `NxEditor`'s `unseenChanges` bookkeeping, the fix for 7.3, has no test, and it keeps stale texts when changes end where they began
 - **Severity:** Low (confidence: medium)
 - **Evidence:** `NxEditor`'s value effect (editor/NxEditor.tsx) skips `setValue` for any `value` found in
   `unseenChanges`, and trims the list only when the effect runs, which is only when `value` changes. It
@@ -432,6 +438,34 @@ Checks:
   forgets every reported text when the editor reports that value again, so changes that end where
   they began leave nothing behind; it also forgets them whenever a render's `value` equals the
   editor's text.
+- **Verification:** Verified (commit 81143cb), with a caveat raised as RF19. The bookkeeping is now `createOwnTexts()` (editor/ownTexts.ts) with six unit tests: two changes before a render, an edit and its undo batched, an outside value equal to a forgotten text, an outside value, and no editor yet. Changes that end at the last rendered value now leave nothing behind, so the stale-text case I described is fixed.
+
+## New Findings Discovered During 2026-10-22 01:17 Verification
+
+### 🟡 Fixed - RF19 `createOwnTexts` forgets a reported text by comparing with the last effect's `value`, not the last render's, so a late effect can undo an undo
+- **Severity:** Low (confidence: medium; the window is narrow, from a render's commit to its passive effect)
+- **Evidence:** `ownTexts.reported(text)` clears every reported text when `text === rendered`. But `rendered`
+  is set only in `shouldSet`, which runs in NxEditor's passive `useEffect`, after the render is
+  committed. Take this sequence:
+  1. A Visual edit makes T1. React renders and commits `value=T1`, but its passive effect has not run
+     yet, so `rendered` is still T0.
+  2. The visitor presses Ctrl+Z in Source (a quick undo), so the editor reports T0. That equals
+     `rendered`, and the list, T1 included, is cleared.
+  3. The pending effect then calls `shouldSet(T1, T0)`. T1 is no longer known as the editor's own, so
+     NxEditor calls `setValue(T1)`. That takes back the undo and, because it is a `setValue`, clears
+     the undo history.
+
+  The previous version kept `[T1, T0]` here and skipped the stale `value`. The unit tests drive
+  `reported` and `shouldSet` in order and never model a render committed before its effect.
+- **Recommendation:** Compare against the value of the latest render rather than the latest effect.
+  NxEditor already sets `latestValue.current = value` during render, so pass it in, for example
+  `reported(text, latestValue.current)` or a `rendering(value)` call in the render body. Add a unit
+  test: rendered T0, value T1 passed but not yet effected, T0 reported, then `shouldSet(T1, T0)` must
+  be false.
+- **Fix:** `reported(text, rendered)` now takes the latest render's `value`, which NxEditor passes as
+  `latestValue.current` (set during render), and the helper keeps no `value` of its own. A new unit test
+  covers the ordering: rendered T0, T1 reported and rendered before its effect, T0 reported, then
+  `shouldSet(T1, T0)` is false and the next render agrees.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do

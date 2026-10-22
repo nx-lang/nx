@@ -200,7 +200,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
           const text = instance.getValue();
-          ownTexts.current.reported(text);
+          ownTexts.current.reported(text, latestValue.current);
           latestChange.current(text);
         }
         reportHistory();

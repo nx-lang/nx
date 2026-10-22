@@ -5,8 +5,11 @@
  * and setting it would take back the newer change and clear the undo history.
  */
 export interface OwnTexts {
-  /** Notes a text the editor reported as changed. */
-  reported(text: string): void;
+  /**
+   * Notes a text the editor reported as changed, with `rendered`, the `value` of the latest render,
+   * whose effect may not have run yet.
+   */
+  reported(text: string, rendered: string): void;
   /**
    * Whether a render's `value` should replace `current`, the editor's text, or null before there is
    * an editor: only a value from outside, never the editor's own, nor one it already holds.
@@ -16,10 +19,8 @@ export interface OwnTexts {
 
 export function createOwnTexts(): OwnTexts {
   let unseen: string[] = [];
-  // The last `value` a render passed.
-  let rendered: string | undefined;
   return {
-    reported(text) {
+    reported(text, rendered) {
       if (text === rendered) {
         // Back at what the last render passed, as after an edit and its undo batched into one render,
         // which then passes nothing new: whatever was reported before is behind it.
@@ -29,7 +30,6 @@ export function createOwnTexts(): OwnTexts {
       unseen.push(text);
     },
     shouldSet(value, current) {
-      rendered = value;
       if (current === null || value === current) {
         // The editor and the render agree: whatever it reported before is behind them both.
         unseen = [];
