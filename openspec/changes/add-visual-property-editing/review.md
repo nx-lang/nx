@@ -534,7 +534,7 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   as its value, `16`, which the finding called harmless) and a dropped fraction. `number_text` mirrors
   `number_value`, negation included. **Confidence: high.**
 
-### 🟡 Fixed - RF23 With unlabeled choices, the default's row stacks `Default` over its value
+### ✅ Verified - RF23 With unlabeled choices, the default's row stacks `Default` over its value
 - **Severity:** Low
 - **Evidence:** `choiceRows` (`packages/viewer/src/editors.ts:196-243`) always gives the default's row
   two spans: a `.choice-label` reading `Default`, and the value. But the list takes the `labeled` class,
@@ -573,6 +573,12 @@ complete: no code, CSS, docs or tests still name them, and a written reference o
   Check it in a browser or a screenshot of the playground's unlabeled choices with a default.
   **Confidence: high.**
 - **Fix:** (third round) The rule also sets `flex-direction: row; align-items: baseline`, overriding the base `.popover .option` column. Measured in headless Chromium with the built stylesheet: in an unlabeled list, `Default` and `0` share a top (15px) with a 16px gap, as in a labeled list.
+- **Verification:** (third round) Confirmed in headless Chromium, with the viewer's rebuilt stylesheet
+  and rows marked up as `choiceRows` draws them. In an unlabeled list, the default's row computes
+  `display: flex` and `flex-direction: row`. `Default` and `0` share a top, and the value starts 16px
+  past the label, as in a labeled list. A filtered-out (`hidden`) default's row still computes
+  `display: none` in both list kinds, and so does a hidden choice. jsdom cannot test the layout, so
+  this rests on the browser check. Viewer tests (161) pass. **Confidence: high.**
 
 ### ✅ Verified - RF24 The choices field's ARIA does not form a combobox
 - **Severity:** Low
@@ -784,3 +790,6 @@ Chromium.
   that in an unlabeled list the row still stacks `Default` over its value. The base `.popover .option`
   rule sets `flex-direction: column`, and the first verification missed this. Nothing new was found.
   Viewer tests (161), `nx-types` tests and clippy pass.
+- Verification of the third round (2026-10-22 23:52, commit `58a101e`): RF23 is verified. In headless
+  Chromium, the default's row in an unlabeled list is one line, and it is hidden when filtered out.
+  Nothing new was found. Every finding from RF1 to RF30 is now verified.
