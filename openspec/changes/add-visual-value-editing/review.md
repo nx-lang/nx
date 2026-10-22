@@ -634,7 +634,7 @@ Checks:
 
 ## New Findings Discovered During 2026-10-22 03:58 Verification
 
-### 🟡 Fixed - RF25 The as-written column now counts lines of nested items, so an `if` or `for` holding text that continues further left draws its body and closing brace too far right
+### ✅ Verified - RF25 The as-written column now counts lines of nested items, so an `if` or `for` holding text that continues further left draws its body and closing brace too far right
 - **Severity:** Low (confidence: high, reproduced in Chromium)
 - **Evidence:** `writeItems` takes the least indentation over all of the item's later lines, including lines that belong to an item nested inside it. A nested item is placed by its own `--column`. In this source:
 
@@ -652,6 +652,12 @@ Checks:
   Before 30fdf9b, only `of text` would have gone left. I found no regression in the shipped examples. Every as-written item in `settings-screen`, `orders-dashboard`, `typed-text`, `agent` and `visual-test-cases` draws no glyph left of its start. A wrapped multi-line tag (`<Note` / `>tagged`) also reads as before.
 - **Recommendation:** When taking the least indentation, skip the lines of a nested as-written item, such as a text node or an element written over several lines inside the block, since that item places them itself. One way is to take the indentation only of lines that start outside a nested multi-line node's range. Add this block to `textOnItsTag` or a sibling fixture, and assert that the `if`'s `--column` stays 4.
 - **Fix:** `writeItems` takes the later lines' least indentation only for an item that starts after other text on its line, as text on its element's tag does; an item starting its own line, such as an `if` or a `for`, is measured from its start as before. Test "measures a block on a line of its own from its start, whatever the lines inside it" (fixture `textOnItsTagInBlock`, an `if` holding such text) fails under the previous rule (column 2) and passes now (column 4).
+- **Verification:** Verified (commit dcd5df2). Viewer tests pass 118/118 after a rebuild.
+  - With `dist`'s rule set back to the minimum over every later line, the new test "measures a block on a line of its own from its start…" fails (1 of 118). I then rebuilt to restore it.
+  - In Chromium, the `if wide` block now has `--column: 4`: its `Note` is 4ch in, as in the `for` beside it, and its `}` lines up under its `if`. The nested text still reads `Two lines` / `of text` from its own start.
+  - `poem` keeps `--column: 2` with both lines at its start.
+  - The as-written items in `settings-screen`, `orders-dashboard`, `typed-text`, `agent` and `visual-test-cases` are unchanged, and none draws left of its start.
+  - One case remains, untested: a block that itself starts after other text on its line, such as a list `{ if a {` holding text that continues further left. It still takes the minimum over nested lines. Nothing in the repository writes that, so I have not opened a finding for it.
 
 ## Questions
 - Should Enter and F2 toggle a boolean when it is the first editable value of the selected unit? They do
