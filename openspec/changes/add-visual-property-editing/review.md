@@ -254,7 +254,7 @@ language snapshot and the built viewer under jsdom.
 
 ## New Findings Discovered During 2026-10-22 08:33 Verification
 
-### 🟡 Fixed - RF14 `namedValues` leaves out an optional member that a non-literal record value writes
+### ✅ Verified - RF14 `namedValues` leaves out an optional member that a non-literal record value writes
 - **Severity:** Low
 - **Evidence:** The new check in `named_values_in` (`named_values.rs:215-219`) skips an optional member when
   `member_value` finds no expression for it. `member_value` only reads an element or record literal. For any
@@ -277,6 +277,64 @@ language snapshot and the built viewer under jsdom.
 - **Fix:** `never_writes` leaves out a member only when the value is an element or record literal that writes no entry for it in any branch (`Element::property_entries`). A reference, a call or any other value keeps its optional members. The `field.default` test is gone. `an_optional_property_takes_optional_members_and_values` now covers `alias = {theme}` (offers `alias.muted`) and `sometimes = <Theme accent=... if flag { muted=... } />` (offers `sometimes.muted`). The rule is in the source-edits spec and the language-protocol README.
 
   The reviewer also noted that a declared record with a property-list condition lost its conditional properties when lowered: `<Theme accent="c" if flag { muted="d" } />` evaluated without `muted`, which the `sometimes` case also needed. `lower.rs` now keeps such an element an element, binding its entries as written, instead of a record literal of its direct properties. A regression test, `test_property_fragment_on_a_declared_record_is_kept`, in `nx-interpreter`'s conditionals tests fails without the change.
+- **Verification:** Confirmed. `never_writes` leaves out a member only for an element or record literal that
+  writes it in no branch, and keeps the members of any other value. Probed through wasm with a
+  `Theme` imported and local: `alias.muted` and a call's `.muted` (when the function declares its return
+  type) are offered; `muted` is left out of `<Theme accent=... if flag { size=3 } />` and of an imported
+  `let` that never writes it; it is offered when only a match arm or an `else` writes it, and for a `let`
+  whose value is an `if` of two records. Both test changes are meaningful: with the old `named_values.rs`
+  the test misses `alias.muted` and `sometimes.muted`, and with the old `lower.rs` it misses
+  `sometimes.muted` and the new interpreter test fails (`muted` is `None`).
+
+  The lowering change keeps the conditional properties in the interpreter, and nothing that matches
+  `Expr::RecordLiteral` breaks: such a record now takes the path an imported record or a component
+  already took. Checked with `nxlang run` and probes: missing required, unknown, wrongly typed and
+  duplicated properties are reported, inside and outside branches; defaults fill in; a generic record's
+  `T=int` is still consumed; abstract records are refused; `.Update`, `Comp.Props`, `State.Update` in a
+  handler and a same-module action with a condition all evaluate and dispatch with their conditional
+  fields; field order and JSON output are unchanged. Hover and the source tree read the same as for a
+  record without a condition. Executable codegen now refuses such a record (RF15), and a condition makes
+  the element checker repeat a direct property's type error (RF16). `cargo test --workspace` (3395
+  passed), the viewer (152 passed) and the wasm SDK's tests (all but the known `recursion-stack`) pass.
+  **Confidence: high.**
+
+## New Findings Discovered During 2026-10-22 08:50 Verification
+
+### 🟡 Fixed - RF15 NX IR and TypeScript codegen now refuse a declared record with a property-list condition, and the changelog does not say so
+- **Severity:** Low
+- **Evidence:** Before `3234c1c`, `<Theme accent="c" if flag { muted="d" } />`, with `Theme` declared in the
+  same module, lowered to a record literal, so codegen built it and silently dropped `muted`. It now lowers
+  to an element, and `build_element_expression` (`crates/nx-codegen/src/builder.rs:2221-2229`) refuses every
+  property-list condition: `nxlang codegen --target javascript` and the wasm `generateNxIr` both fail with
+  "conditional element property fragments are not supported by executable codegen yet", while
+  `evaluateNx` gives the right value. The playground's preview builds through `generateNxIr`
+  (`sites/playground/src/preview/workbench.ts:198`), so such a document now shows "programFailed" where it
+  used to preview. That matches how codegen already treats components and imported records, and failing
+  loudly is better than a wrong value. But the `src/vscode/CHANGELOG.md` entry says only that the record
+  "keeps the properties its active branch sets", and it sits under `## 0.8.0`, which is tagged `v0.8.0`,
+  not under `## Unreleased`.
+- **Recommendation:** Move the entry under `## Unreleased`, and say there that executable codegen (NX IR,
+  TypeScript and JavaScript) reports such a record as unsupported, as it does a component's property-list
+  condition, instead of dropping its conditional properties. Add a codegen test that pins the refusal for a
+  same-module record. **Confidence in fix: high.**
+- **Fix:** The changelog entry moved under `## Unreleased` in a `### Fixes` section. It now says the interpreter keeps the conditional properties, and that executable codegen (NX IR, TypeScript, JavaScript), and so the playground's preview, refuses such a record with `codegen-unsupported-construct`, as it does a component. New codegen test `a_record_with_a_property_list_condition_fails_before_emission` pins the refusal.
+
+### 🟡 Fixed - RF16 A condition makes a direct property's type error repeat once per branch path
+- **Severity:** Low
+- **Evidence:** `property_paths_for_entries` (`crates/nx-types/src/infer.rs:5851`) expands an element's
+  entries into one path per combination of branches, and each path checks its bindings, so a direct
+  property is checked once per path. In the language service's diagnostics,
+  `<Theme accent=5 if flag { muted="d" } if flag { size=1 } />` reports "Property 'accent' on 'Theme'
+  expects string, found int" four times at the same range, and with one `if`, twice. Without a condition,
+  `<Theme accent=5 />` reports it once. The repetition predates this change for components and imported
+  records, but the RF14 lowering change brings it to records declared in the same module, which reported
+  once before.
+- **Recommendation:** Report a binding's type mismatch once per value expression (for example, remember
+  the `value` ids already reported while checking the paths), and add a test asserting one diagnostic for
+  a mistyped direct property beside one and two conditions, for a record and for a component.
+  **Confidence in fix: medium.** The right place to deduplicate depends on how the element checker's
+  other per-path diagnostics are reported.
+- **Fix:** `InferenceContext::finish` drops a diagnostic that repeats an earlier one in every part (`without_repeats`, keyed by message, then compared in full). Any per-path diagnostic that comes out the same on several paths is one defect, so this covers the type mismatch and any other check that runs once per path. `test_a_property_mismatch_under_conditions_is_reported_once_per_element` checks a record with two conditions and a component with one: one mismatch each. It fails (4 and 2) without the change. The changelog's Fixes section says so.
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -315,3 +373,7 @@ language snapshot and the built viewer under jsdom.
 - Second verification (2026-10-22 08:33): RF8 and RF13 are verified. The answer to the
   "unwritten members" question works for record literals, but it also leaves out the written optional
   members of a `let` whose value is a reference or a call. That is RF14, which is open.
+- Third verification (2026-10-22 08:50): RF14 is verified, along with the lowering change that keeps a
+  declared record's conditional properties. Two Low findings are new: executable codegen now refuses
+  such a record, which the changelog does not say and files under a released version (RF15), and a
+  condition repeats a direct property's type error once per branch path (RF16).

@@ -40,12 +40,16 @@ All notable changes to this project will be documented in this file.
   chosen. The playground passes its worker's `namedValues`.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
 
-## 0.8.0
-
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,
-  keeps the properties its active branch sets. It used to drop them when the record was declared in the
-  same module.
+  keeps the properties its active branch sets in the interpreter. It used to drop them when the record
+  was declared in the same module. Executable codegen (NX IR, TypeScript, JavaScript), and so the
+  playground's preview, now refuses such a record with `codegen-unsupported-construct`, as it does a
+  component written that way, instead of emitting it without them.
+- A type error in an element with property-list conditions is reported once, not once per path through
+  its branches.
+
+## 0.8.0
 
 ### Component state and props
 - **Breaking.** A component with state has a derived state record, `T.State`, with its own

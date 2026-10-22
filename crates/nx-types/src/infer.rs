@@ -7234,7 +7234,7 @@ impl<'a> InferenceContext<'a> {
 
     /// Consumes the context and returns the environment and diagnostics.
     pub fn finish(self) -> (TypeEnvironment, Vec<Diagnostic>) {
-        (self.env, self.diagnostics)
+        (self.env, without_repeats(self.diagnostics))
     }
 
     fn register_type_definitions(&mut self) {
@@ -8520,6 +8520,25 @@ fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
         }
         ast::TypeRef::AnyFunction { return_type } => type_ref_mentions(return_type, name),
     }
+}
+
+/// `diagnostics` with each one reported again, the same in every part, left out. An element with a
+/// property-list condition checks its direct properties once per path through its branches, and a
+/// mismatch found on each path is one defect.
+fn without_repeats(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    let mut kept: Vec<Diagnostic> = Vec::with_capacity(diagnostics.len());
+    let mut by_message: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+    for diagnostic in diagnostics {
+        let same = by_message
+            .entry(diagnostic.message().to_string())
+            .or_default();
+        if same.iter().any(|&index| kept[index] == diagnostic) {
+            continue;
+        }
+        same.push(kept.len());
+        kept.push(diagnostic);
+    }
+    kept
 }
 
 #[cfg(test)]
