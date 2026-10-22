@@ -105,13 +105,7 @@ program means.
 - **Slider** (`editor=slider`, or a number with both `min` and `max` and no `editor`): a popover
   under the value with a slider and the number field beside it. Stops draw as ticks and the thumb snaps
   to them unless Alt is held; the field takes any number in range. Dragging shows the value in place
-  and commits once on release, like scrubbing. After Bret compared other products' sliders
-  (2026-10-22): stops are labeled with their numbers (only the ends past seven stops, and never
-  overlapping); named values whose literal is in range tick on the track and are labeled by path, so
-  the list and the scale read as one, and clicking a label chooses it; the arrows go stop to stop
-  (Alt+arrow by `step`, Home and End to the ends); the property's default is a notch over the track,
-  and a double-click resets to it as the row's Reset to default does. Dragging onto a named value's
-  mark still writes the number; only choosing it writes a reference.
+  and commits once on release, like scrubbing.
 - **Segmented** (`editor=segmented`): the case popover shows the cases as one row of buttons. With more
   than five cases, or names too long for the reading's width, it falls back to the list.
 - **Dropdown** (`editor=dropdown`): the phase 1 case popover, named so a library can say it.

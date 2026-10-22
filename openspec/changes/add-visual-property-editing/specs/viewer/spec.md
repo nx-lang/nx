@@ -111,19 +111,6 @@ values, say:
   under the value holding a slider and the number field beside it; the slider SHALL draw `stops` as
   ticks and snap to them unless Alt is held, show the value in place while dragged, and commit once on
   release;
-- the slider SHALL label its stops with their numbers under the ticks, all of them when there are
-  seven or fewer, else the first and the last, leaving out a label that would overlap one already
-  placed;
-- a named value listed with the slider whose literal is a number in range SHALL tick on the track,
-  more strongly than a stop, labeled with its path in place of the number; labels SHALL be placed
-  in the order the first stop, the named values, the last stop, the other stops; pointing at it or making it active in the list SHALL light its mark, and a click on its
-  label SHALL choose it as choosing it from the list does;
-- with stops, the arrows on the slider and in its field SHALL go to the next stop up or down, and
-  stay at the last; on the slider Alt+arrow SHALL step by `step`, and Home and End SHALL go to `min`
-  and `max`; each key on the slider SHALL commit, the field's on Enter;
-- a property's default that is a number in range SHALL show as a notch over the track; on a written
-  attribute whose property has a default, a double-click on the slider SHALL leave the attribute
-  out, as the row's Reset to default does;
 - a number with `editor=field` SHALL edit as a number field even with `min` and `max`;
 - a number's arrows, drag and slider SHALL stay within `min` and `max` and step by `step`, Shift by ten
   steps, and a typed number outside them SHALL stay in the field with a note saying the bound, such as
@@ -147,26 +134,6 @@ SHALL still fire `nx-open`.
   drags the slider's thumb from 8 to near 15
 - **THEN** the value SHALL read `16` while dragged and, on release, the element SHALL fire one
   `nx-edit` setting the number `16`
-
-#### Scenario: A slider's labels and default
-- **WHEN** the reader opens `padding=8`, hinted `editor=slider min=0 max=64 stops={ 0 4 8 16 24 }`,
-  where `padding` defaults to `8`
-- **THEN** the stops SHALL be labeled `0`, `4`, `8`, `16` and `24`, and a notch SHALL mark `8`
-
-#### Scenario: A named value on the track
-- **WHEN** the named values listed with that slider include `gutter`, whose literal is `16`, and the
-  reader clicks the `gutter` label under the track
-- **THEN** the `16` stop SHALL be labeled `gutter`, and the element SHALL fire `nx-edit` setting the
-  reference `gutter`
-
-#### Scenario: Stop to stop
-- **WHEN** the reader presses the right arrow on that slider at `8`
-- **THEN** the element SHALL fire `nx-edit` setting the number `16`; with Alt held, the number `9`
-
-#### Scenario: Back to the default
-- **WHEN** the reader double-clicks the slider of the written attribute `gap=4`, where `gap` defaults
-  to `4`
-- **THEN** the element SHALL fire `nx-edit` removing the attribute, and the popover SHALL close
 
 #### Scenario: Out of range
 - **WHEN** the reader types `80` in the field of a number hinted `max=64` and presses Enter

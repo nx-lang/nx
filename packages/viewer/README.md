@@ -270,7 +270,7 @@ Editor hints from the tree's visualizers shape the editors:
 
 | Hint                                         | Editor                                                     |
 | -------------------------------------------- | ---------------------------------------------------------- |
-| `editor=slider`, or `min` and `max` and no `editor` | A popover under the number with a slider, its `stops` as ticks it snaps to unless Alt is held, and the number's field beside it; dragging shows the value in place and commits once on release. Stops are labeled with their numbers (only the ends past seven), named values whose literal is in range are marked and labeled by path (a click chooses one), the arrows go stop to stop (Alt+arrow by `step`, Home and End to the ends), the default is a notch over the track, and a double-click on a written value resets it |
+| `editor=slider`, or `min` and `max` and no `editor` | A popover under the number with a slider, its `stops` as ticks it snaps to unless Alt is held, and the number's field beside it; dragging shows the value in place and commits once on release |
 | `editor=field`                               | A number field even with `min` and `max`                   |
 | `min`, `max`, `step`                         | Arrows, dragging and the slider stay in the range and step by `step`; a typed number outside it stays in the field with a note, as `At most 64` |
 | `unit`                                       | Read after the number, quieter (`8 px`), and after its field; typing it, as `12px`, is taken as the number |
