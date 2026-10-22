@@ -596,6 +596,10 @@ describe("editing in place", () => {
     hex.value = "#336699";
     press(hex, "Enter");
     assert.deepEqual(edits, [{ key: "latte.value.color.value", edit: { kind: "setValue", value: { kind: "string", value: "#336699" } } }]);
+    const popover = root(element).querySelector<HTMLElement>(".popover")!;
+    assert.equal(popover.hidden, true);
+    assert.equal(popover.className, "popover", "a closed popover keeps no kind");
+    assert.equal(window.getComputedStyle(popover).display, "none", "and nothing of it shows");
   });
 
   it("sets a run of text as written, and keeps what would not read back in the field", async () => {

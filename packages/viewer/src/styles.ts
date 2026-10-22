@@ -451,7 +451,6 @@ export const styles = `
   font-size: 13px;
   line-height: 1.45;
 }
-.popover[hidden] { display: none; }
 .popover input:not([type="color"]) {
   width: 100%;
   margin: 0;
@@ -464,6 +463,8 @@ export const styles = `
   background: light-dark(#0000000a, #ffffff0f);
 }
 .popover.colors { display: flex; gap: 6px; align-items: center; min-width: 0; }
+/* After every rule that sets a popover's display, so a closed one never shows. */
+.popover[hidden] { display: none; }
 .popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
 .popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
 .popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }

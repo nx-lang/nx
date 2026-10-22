@@ -1396,8 +1396,7 @@ export class NxViewerElement extends ElementBase {
     }
     session.span.classList.remove("editing");
     if (session.field === undefined) {
-      this.#popover.hidden = true;
-      this.#popover.replaceChildren();
+      this.#closePopover();
     }
     if (refocus) {
       this.#body.focus({ preventScroll: true });
@@ -1412,7 +1411,13 @@ export class NxViewerElement extends ElementBase {
       session.closed = true;
       this.#session = undefined;
     }
+    this.#closePopover();
+  }
+
+  /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
+  #closePopover(): void {
     this.#popover.hidden = true;
+    this.#popover.className = "popover";
     this.#popover.replaceChildren();
   }
 
