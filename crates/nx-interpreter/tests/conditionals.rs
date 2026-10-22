@@ -100,6 +100,23 @@ fn test_if_with_an_explicit_empty_else() {
 }
 
 #[test]
+fn test_property_fragment_on_a_declared_record_is_kept() {
+    let source = r#"
+        type Theme = { accent:string muted?:string }
+        let view(enabled:boolean) = {
+            <Theme accent="c" if enabled { muted="d" } />
+        }
+    "#;
+
+    let result = execute_nx_function(source, "view", vec![Value::Boolean(true)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    let Value::Record { fields, .. } = result else {
+        panic!("Expected record result");
+    };
+    assert_eq!(fields.get("muted"), Some(&Value::String(SmolStr::new("d"))));
+}
+
+#[test]
 fn test_property_fragment_simple_conditional_selects_then_and_else() {
     let source = r#"
         let view(enabled:boolean) = {

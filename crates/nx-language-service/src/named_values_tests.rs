@@ -104,6 +104,9 @@ type Card = { tint?:Color fill:Color = "#000000" }
 let theme = <Theme accent="#111111" muted="#222222" />
 let maybe:Color? = "#333333"
 let plain = <Theme accent="#444444" />
+let alias = {theme}
+let flag = true
+let sometimes = <Theme accent="#555555" if flag { muted="#666666" } />
 let card = <Card />
 "##;
     let snapshot = WorkspaceSnapshot::from_documents(
@@ -117,7 +120,16 @@ let card = <Card />
         .expect("named values");
     assert_eq!(
         paths(&optional),
-        ["theme.accent", "theme.muted", "maybe", "plain.accent"],
+        [
+            "theme.accent",
+            "theme.muted",
+            "maybe",
+            "plain.accent",
+            "alias.accent",
+            "alias.muted",
+            "sometimes.accent",
+            "sometimes.muted"
+        ],
         "{optional:#?}"
     );
     let required = snapshot
@@ -125,7 +137,12 @@ let card = <Card />
         .expect("named values");
     assert_eq!(
         paths(&required),
-        ["theme.accent", "plain.accent"],
+        [
+            "theme.accent",
+            "plain.accent",
+            "alias.accent",
+            "sometimes.accent"
+        ],
         "{required:#?}"
     );
 }

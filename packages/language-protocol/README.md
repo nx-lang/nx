@@ -241,7 +241,8 @@ The request names an element of the document's source tree by its `key` and one 
 written or not. The answer lists the named values in the document's scope that the type checker
 accepts for that property: each parameterless `let` the document declares or imports, and each
 member of such a `let` whose value is a record, one level deep, leaving out the declaration the
-element is in. Each carries its reference path as the document would write it, its type, its doc
+element is in. An optional property also takes optional members and `T?` values, but not an optional
+member that a record literal never writes, in any branch, since that one is always absent. Each carries its reference path as the document would write it, its type, its doc
 comment, and its value's source text when that is a literal. The document's own values come first,
 then each import's, each in declaration order. A key that names no element, or a property the
 element does not have, answers an empty list.

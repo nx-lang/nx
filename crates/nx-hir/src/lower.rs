@@ -1823,7 +1823,13 @@ impl LoweringContext {
                 let span = node.span();
                 let element = self.lower_element(node);
 
-                if element.content.is_empty() {
+                // A record written with a property-list condition or match stays an element, which
+                // binds its entries as written; a record literal holds only direct properties.
+                let conditional = element
+                    .property_entries
+                    .iter()
+                    .any(|entry| !matches!(entry, PropertyEntry::Value(_)));
+                if element.content.is_empty() && !conditional {
                     if let Some(record_def) = self
                         .module
                         .find_item(element.tag.as_str())

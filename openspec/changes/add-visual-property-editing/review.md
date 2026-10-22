@@ -134,7 +134,7 @@ language snapshot and the built viewer under jsdom.
 - **Fix:** Product call taken: a property written in any branch of a property-list condition or match counts as written. `attributeElement` (viewer `tree.ts`) and `attribute_element` (Rust) find an attribute's element through conditions. `unwrittenProperties` leaves such a property out, and `add_property` refuses it as `invalidValue` while still placing new attributes after the element's own ones. The corpus round-trip test uses the same rule. Tests in both layers, and source-edits and viewer spec wording plus a scenario.
 - **Verification:** Confirmed, and consistent across layers. `attribute_element` (Rust) and `attributeElement` (viewer) climb through `condition` and `match` nodes. Probed through wasm with `if flag { iced=true } else { tint={shade} }` and `if mode is { light => iced=true dark => shots=2 }`: `unwrittenProperties` leaves those properties out, and `addProperty` refuses them as `invalidValue`. A new property still goes after the element's own attributes, on the tag's line or on a line of its own. An element whose only attributes are conditional takes the new one on its tag's line. The source-edits and viewer specs, the README and the corpus round-trip test all use the same rule. The fix also routed `declaredType`, `hintsOf` and `propertyOf` through `attributeElement`, but not the format, hover-card and removal lookups (RF13). **Confidence: high.**
 
-### 🟡 Fixed - RF8 A union case's element never offers the properties it does not write
+### ✅ Verified - RF8 A union case's element never offers the properties it does not write
 - **Severity:** Low
 - **Evidence:** `unwrittenProperties` returns nothing for a declaration of kind `union` (`edit.ts:448`), and
   `add_property` finds no `properties` on the union's declaration, so it answers `invalidValue`.
@@ -152,6 +152,15 @@ language snapshot and the built viewer under jsdom.
 
   **Recommendation:** in `named_values_in`, find the property with `element_properties` and resolve a case property's written type from the union's case. In `list_property_types`, also list the types of a union's shared and case properties, and extend the source-tree requirement to cover case elements. Add a test for each. **Confidence in fix: high.**
 - **Fix (second round):** `named_values_in` finds the property with `element_properties`, matches a union's origin, and resolves a case property's written type from the element's case (test `a_union_cases_element_takes_named_values`). `list_property_types` also lists the types of a union's base and case properties (test `a_union_cases_property_types_are_listed`, with an imported `Extra` whose `strength:Strength` and `shots:Shots` nothing else names). The source-tree requirement now names union cases.
+- **Verification (second round):** Confirmed. `named_values_in` finds the property with `element_properties`, so
+  it sees the union's shared properties and then the case's, and it reads a case property's written type from
+  the union's own module. `list_property_types` treats a union as an element, so its base's property types
+  and every case's property types are listed, one level, as for a record. Probed through wasm with an
+  imported `type Extra extends ExtraBase = | none | syrup { flavor:string strength:Strength = mild shots:Shots = 1 }`
+  used only as `<Extra.syrup flavor="mocha" />`: the dimmed rows are `note` (text), `level` (number),
+  `strength` (case) and `shots` (number). `namedValues` answers `lucky` for `shots` and for the base's
+  `level`, `bold2` for `strength`, and the string values for `flavor`. Both new tests fail without the fix.
+  **Confidence: high.**
 
 ### ✅ Verified - RF9 A mismatched property hint hides the alias's valid hint of the same name
 - **Severity:** Low
@@ -215,7 +224,7 @@ language snapshot and the built viewer under jsdom.
 
 ## New Findings Discovered During 2026-10-22 08:20 Verification
 
-### 🟡 Fixed - RF13 A value under a property-list condition takes its property's hints, but not its format or hover card
+### ✅ Verified - RF13 A value under a property-list condition takes its property's hints, but not its format or hover card
 - **Severity:** Low
 - **Evidence:** The RF7 fix sends `declaredType`, `hintsOf` and `propertyOf` (`packages/viewer/src/edit.ts`)
   through `attributeElement`. So a value written under `if flag { ... }` now gets its property's type,
@@ -234,6 +243,40 @@ language snapshot and the built viewer under jsdom.
   element it passes to `elementProperties`. Add a test over the
   `bindings` fixture's `sometimes` element with a `format=color` property. **Confidence in fix: high.**
 - **Fix:** `formattedNodes`, `slotType` and the uitext marking in `source.ts`, and `propertyCard` in `card.ts`, now find the element through `attributeElement` and its properties through `elementProperties`. `removalOf` stays as it is, as recommended. Test "reads a value under a condition with its property's format and card" in the `bindings` fixture, with a `Tag` whose `tint` has `format=color`.
+- **Verification:** Confirmed. `formattedNodes`, `uiTextNodes`, the slot type in `renderSource` and
+  `propertyCard` all find the element through `attributeElement` and its properties through
+  `elementProperties`. The other direct-parent reads left in the viewer (the scrub mark on an attribute's
+  name, `#labelOf`, `removalOf`, the selection after a removal) need no change. Probed with the built viewer
+  on values under `if flag { ... }`: a `PropertyVisualizer` `format=color` and a `Swatch` alias both give a
+  `color` target and a format; `uitext` strings are marked; the hover card reads `(property) tint?: string`,
+  also on a union case's element (`(property) tint?: Swatch`) and in an `else` branch. The new test fails
+  without the fix. **Confidence: high.**
+
+## New Findings Discovered During 2026-10-22 08:33 Verification
+
+### 🟡 Fixed - RF14 `namedValues` leaves out an optional member that a non-literal record value writes
+- **Severity:** Low
+- **Evidence:** The new check in `named_values_in` (`named_values.rs:215-219`) skips an optional member when
+  `member_value` finds no expression for it. `member_value` only reads an element or record literal. For any
+  other value, such as a reference or a call, it answers `None`, so every optional member of that value is
+  treated as never written. Probed through wasm, with `type Theme = { accent:string muted?:string }`:
+  - `let base = <Theme accent="#a" muted="#b" />` offers `base.muted` to an optional `string` property.
+  - `let alias = {base}` and `let viaFn = {mk("#1")}`, where `mk` returns `<Theme ... muted="#2" />`, offer
+    only `alias.accent` and `viaFn.accent`.
+
+  `nxlang run` on `<Card tint={alias.muted} />` and `<Card tint={viaFn.muted} />` gives `tint="#b"` and
+  `tint="#2"`, so both members are always present. Before `c2fece1` they were offered. The spec leaves out
+  only "an optional member the record neither writes nor defaults", and for these values nothing shows that.
+  The `field.default.is_none()` test is also always true: the parser rejects `?` with a default.
+- **Recommendation:** Leave a member out only when the value is an element or record literal that writes no
+  entry for it, and count a write under a property-list condition or match (`Element::property_entries`) as
+  a write, as RF7 does. Keep offering the optional members of any other value. Drop the
+  `field.default.is_none()` test. Add `alias.muted` to `an_optional_property_takes_optional_members_and_values`.
+  Also add the rule to the `namedValues` paragraph in `packages/language-protocol/README.md`, which repeats
+  the spec's wording. **Confidence in fix: high.**
+- **Fix:** `never_writes` leaves out a member only when the value is an element or record literal that writes no entry for it in any branch (`Element::property_entries`). A reference, a call or any other value keeps its optional members. The `field.default` test is gone. `an_optional_property_takes_optional_members_and_values` now covers `alias = {theme}` (offers `alias.muted`) and `sometimes = <Theme accent=... if flag { muted=... } />` (offers `sometimes.muted`). The rule is in the source-edits spec and the language-protocol README.
+
+  The reviewer also noted that a declared record with a property-list condition lost its conditional properties when lowered: `<Theme accent="c" if flag { muted="d" } />` evaluated without `muted`, which the `sometimes` case also needed. `lower.rs` now keeps such an element an element, binding its entries as written, instead of a record literal of its direct properties. A regression test, `test_property_fragment_on_a_declared_record_is_kept`, in `nx-interpreter`'s conditionals tests fails without the change.
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -253,6 +296,8 @@ language snapshot and the built viewer under jsdom.
   - **Answer (fixer):** Yes. An optional member the record neither writes nor defaults is now left out,
     with the source-edits spec saying so and `an_optional_property_takes_optional_members_and_values`
     covering it (`plain.accent` is offered, `plain.muted` is not).
+  - **Verification:** The rule is right for a record literal, and `plain.muted` is left out as the test
+    says. But the check is syntactic, so it also leaves out members that are written. See RF14.
 - **Fixer's note on the merged-range question:** that question is left open as a design question. The
   tree leaves the merged range out, which is safe, and a warning on merged hints can come later.
 
@@ -267,3 +312,6 @@ language snapshot and the built viewer under jsdom.
   `namedValues` and the declaration table's property types still leave out a union case's properties.
   RF13 is new: values under a property-list condition take their property's hints but not its format
   or hover card.
+- Second verification (2026-10-22 08:33): RF8 and RF13 are verified. The answer to the
+  "unwritten members" question works for record literals, but it also leaves out the written optional
+  members of a `let` whose value is a reference or a call. That is RF14, which is open.

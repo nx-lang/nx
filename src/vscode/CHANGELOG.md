@@ -42,6 +42,11 @@ All notable changes to this project will be documented in this file.
 
 ## 0.8.0
 
+### Fixes
+- A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,
+  keeps the properties its active branch sets. It used to drop them when the record was declared in the
+  same module.
+
 ### Component state and props
 - **Breaking.** A component with state has a derived state record, `T.State`, with its own
   `T.State.Update` and `T.State.Property`. Inside a component body a bare `State` names it, so a

@@ -15,7 +15,7 @@ use crate::{
     WorkspaceSnapshot,
 };
 use nx_hir::ast::{Expr, Literal};
-use nx_hir::{Doc, ExprId, Item, LoweredModule};
+use nx_hir::{Doc, ExprId, Item, LoweredModule, PropertyEntry};
 use nx_types::{InferenceContext, Type};
 use serde::{Deserialize, Serialize};
 
@@ -212,12 +212,11 @@ fn named_values_in(
             if !context.satisfies(&field_ty, &expected) {
                 continue;
             }
-            let member = member_value(lowered, value.value, field.name.as_str());
-            // An optional member the value never writes, with no default, is always absent.
-            if field.optional && member.is_none() && field.default.is_none() {
+            // An optional member a literal never writes, even under a condition, is always absent.
+            if field.optional && never_writes(lowered, value.value, field.name.as_str()) {
                 continue;
             }
-            let written = member
+            let written = member_value(lowered, value.value, field.name.as_str())
                 .and_then(|expr| literal_text(workspace, &origin.0, lowered, expr))
                 .or_else(|| {
                     let default = field.default.as_ref()?;
@@ -273,6 +272,34 @@ fn member_value(module: &LoweredModule, expr: ExprId, name: &str) -> Option<Expr
             .find(|property| property.name.as_str() == name)
             .map(|property| property.value),
         _ => None,
+    }
+}
+
+/// Whether `expr` is an element or record literal that writes no entry for the member `name`, in
+/// any branch of a property-list condition or match. Any other value may hold it.
+fn never_writes(module: &LoweredModule, expr: ExprId, name: &str) -> bool {
+    fn writes(entries: &[PropertyEntry], name: &str) -> bool {
+        entries.iter().any(|entry| match entry {
+            PropertyEntry::Value(property) => property.key.as_str() == name,
+            PropertyEntry::If {
+                then_entries,
+                else_entries,
+                ..
+            } => writes(then_entries, name) || writes(else_entries, name),
+            PropertyEntry::ConditionList {
+                arms, else_entries, ..
+            } => arms.iter().any(|arm| writes(&arm.entries, name)) || writes(else_entries, name),
+            PropertyEntry::Match {
+                arms, else_entries, ..
+            } => arms.iter().any(|arm| writes(&arm.entries, name)) || writes(else_entries, name),
+        })
+    }
+    match module.expr(expr) {
+        Expr::Element { element, .. } => !writes(module.element(*element).property_entries(), name),
+        Expr::RecordLiteral { properties, .. } => !properties
+            .iter()
+            .any(|property| property.name.as_str() == name),
+        _ => false,
     }
 }
 
