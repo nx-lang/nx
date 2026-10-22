@@ -1852,3 +1852,109 @@ fn visualizers_round_trip_through_json() {
     let back: SourceTree = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, tree);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Editor hints
+// ---------------------------------------------------------------------------------------------
+
+/// A card library whose spacing alias is a slider, and a document that constructs a card.
+const CARDS: &str = r#"import "@nx/visualizer"
+
+export type Spacing = int
+export type Size = small | medium | large
+export type Card = { title:string padding:Spacing = 8 gap?:Spacing size:Size = medium body?:string }
+
+visualizer Spacing = <ValueVisualizer editor=slider min=0 max=64 stops={ 0 4 8 16 } unit="px" />
+visualizer Card = <ElementVisualizer>
+  <PropertyVisualizer property=gap max=32 />
+  <PropertyVisualizer property=title editor=slider placeholder="Title" />
+  <PropertyVisualizer property=size editor=segmented />
+  <PropertyVisualizer property=body multiline=true />
+</ElementVisualizer>
+"#;
+
+fn cards_tree() -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/cards.nx", CARDS).with_version(1),
+            DocumentInput::new(
+                URI,
+                "import \"./cards.nx\"\n\nlet card = <Card title=\"Hi\" />\n",
+            )
+            .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+fn editor_of<'t>(
+    visualizer: &'t SourceVisualizer,
+    property: &str,
+) -> Option<&'t SourceEditorHints> {
+    visualizer
+        .properties
+        .iter()
+        .find(|candidate| candidate.name == property)
+        .unwrap_or_else(|| panic!("no property {property}"))
+        .editor
+        .as_ref()
+}
+
+fn numbers(values: &[f64]) -> Vec<SourceNumber> {
+    values.iter().copied().map(SourceNumber).collect()
+}
+
+#[test]
+fn an_aliass_slider_reaches_every_property_it_types() {
+    let tree = cards_tree();
+    let card = visualizer(&tree, "Card");
+    let padding = editor_of(card, "padding").expect("padding's hints");
+    assert_eq!(padding.kind.as_deref(), Some("slider"));
+    assert_eq!(padding.min, Some(SourceNumber(0.0)));
+    assert_eq!(padding.max, Some(SourceNumber(64.0)));
+    assert_eq!(padding.stops, numbers(&[0.0, 4.0, 8.0, 16.0]));
+    assert_eq!(padding.unit.as_deref(), Some("px"));
+    // The alias carries its own hints.
+    let spacing = visualizer(&tree, "Spacing")
+        .editor
+        .as_ref()
+        .expect("Spacing's hints");
+    assert_eq!(spacing, padding);
+}
+
+#[test]
+fn a_property_visualizer_overrides_one_hint() {
+    let tree = cards_tree();
+    let gap = editor_of(visualizer(&tree, "Card"), "gap").expect("gap's hints");
+    assert_eq!(gap.kind.as_deref(), Some("slider"));
+    assert_eq!(gap.min, Some(SourceNumber(0.0)));
+    assert_eq!(gap.max, Some(SourceNumber(32.0)));
+}
+
+#[test]
+fn a_mismatched_hint_is_left_out() {
+    let tree = cards_tree();
+    let card = visualizer(&tree, "Card");
+    let title = editor_of(card, "title").expect("title's hints");
+    assert_eq!(title.kind, None);
+    assert_eq!(title.placeholder.as_deref(), Some("Title"));
+    assert_eq!(
+        editor_of(card, "size").and_then(|hints| hints.kind.as_deref()),
+        Some("segmented")
+    );
+    assert_eq!(
+        editor_of(card, "body").and_then(|hints| hints.multiline),
+        Some(true)
+    );
+}
+
+#[test]
+fn hints_round_trip_through_json() {
+    let tree = cards_tree();
+    let json = serde_json::to_string(&tree).expect("json");
+    assert!(json.contains(r#""editor":{"kind":"slider","min":0.0,"max":64.0,"stops":[0.0,4.0,8.0,16.0],"unit":"px"}"#), "{json}");
+    let back: SourceTree = serde_json::from_str(&json).expect("back");
+    assert_eq!(back, tree);
+}

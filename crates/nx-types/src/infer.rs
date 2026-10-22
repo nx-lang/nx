@@ -19,6 +19,21 @@ use nx_hir::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// What kind of value an editor hint edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HintValueKind {
+    /// An `int`, `float32`, `float64` or other number.
+    Number,
+    /// A string.
+    String,
+    /// A union of cases with no properties.
+    Cases,
+    /// Anything else.
+    Other,
+    /// A type analysis already reported, which no hint is checked against.
+    Unknown,
+}
+
 /// What the name `Range` means in the module being checked.
 enum PreludeRangeName {
     /// The prelude's declaration, which is what the range operators construct.
@@ -1553,9 +1568,10 @@ impl<'a> InferenceContext<'a> {
             ),
             None => Type::Error,
         };
-        let previous = self
-            .visualizer_target
-            .replace((target_ty, target.as_ref().map(|target| target.record)));
+        let previous = self.visualizer_target.replace((
+            target_ty.clone(),
+            target.as_ref().map(|target| target.record),
+        ));
         let actual = self.infer_expr(visualizer.value);
         self.visualizer_target = previous;
 
@@ -1614,6 +1630,192 @@ impl<'a> InferenceContext<'a> {
                 message,
                 self.module.raw_module().expr_span(visualizer.value),
             );
+            return;
+        }
+        self.check_editor_hints(visualizer.value, target.record, &target_ty);
+    }
+
+    /// Reports each editor hint of a visualizer declaration's value that does not fit the type it
+    /// resolves for: a `ValueVisualizer`'s against its target, and a `PropertyVisualizer`'s against
+    /// its property. A hint never changes what a program means, so these are warnings, and a viewer
+    /// ignores such a hint.
+    fn check_editor_hints(
+        &mut self,
+        value: ExprId,
+        record: nx_hir::VisualizerRecord,
+        target_ty: &Type,
+    ) {
+        let Some((properties, content)) = self.visualizer_element_parts(value) else {
+            return;
+        };
+        match record {
+            nx_hir::VisualizerRecord::Value => {
+                let kind = self.hint_value_kind(target_ty);
+                self.check_hint_attributes(&properties, kind, None);
+            }
+            nx_hir::VisualizerRecord::Element => {
+                let shape = match target_ty {
+                    Type::Named(named) => self.record_shape_of(named).ok().flatten(),
+                    _ => None,
+                };
+                for child in content {
+                    let Some((child_properties, _)) = self.visualizer_element_parts(child) else {
+                        continue;
+                    };
+                    let property = child_properties.iter().find_map(|property| {
+                        (property.key.as_str() == "property").then(|| {
+                            match self.module.raw_module().expr(property.value) {
+                                ast::Expr::Ident(name) => Some(name.clone()),
+                                ast::Expr::ContextualName { name, .. } => Some(name.clone()),
+                                ast::Expr::ResolvedUnionCase { case, .. } => Some(case.clone()),
+                                _ => None,
+                            }
+                        })?
+                    });
+                    let field = property.as_ref().and_then(|name| {
+                        shape
+                            .as_ref()?
+                            .fields
+                            .iter()
+                            .find(|field| &field.name == name)
+                            .cloned()
+                    });
+                    let Some(field) = field else {
+                        continue;
+                    };
+                    let field_ty =
+                        self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty);
+                    let kind = self.hint_value_kind(&field_ty);
+                    self.check_hint_attributes(&child_properties, kind, Some(&field.name));
+                }
+            }
+        }
+    }
+
+    /// The attributes and content of an element in a visualizer declaration's value.
+    fn visualizer_element_parts(
+        &self,
+        expr: ExprId,
+    ) -> Option<(Vec<nx_hir::Property>, Vec<ExprId>)> {
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Element { element, .. } => {
+                let element = self.module.raw_module().element(*element);
+                Some((element.properties.clone(), element.content.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// What kind of value an editor hint edits, for a value of type `ty`.
+    fn hint_value_kind(&self, ty: &Type) -> HintValueKind {
+        match ty.item() {
+            Type::Primitive(
+                Primitive::Int
+                | Primitive::Int32
+                | Primitive::Int64
+                | Primitive::Float32
+                | Primitive::Float64,
+            ) => HintValueKind::Number,
+            Type::Primitive(Primitive::String) => HintValueKind::String,
+            Type::Union(union) => {
+                let constant = nx_hir::resolve_union_definition(self.module, &union.name)
+                    .is_none_or(|definition| {
+                        definition.cases.iter().all(UnionCaseDef::is_fieldless)
+                    });
+                if constant {
+                    HintValueKind::Cases
+                } else {
+                    HintValueKind::Other
+                }
+            }
+            Type::Error | Type::Unknown => HintValueKind::Unknown,
+            _ => HintValueKind::Other,
+        }
+    }
+
+    /// Checks the hints among `attributes` against a value of `kind`, the value of the property
+    /// `property` when there is one.
+    fn check_hint_attributes(
+        &mut self,
+        attributes: &[nx_hir::Property],
+        kind: HintValueKind,
+        property: Option<&Name>,
+    ) {
+        if kind == HintValueKind::Unknown {
+            return;
+        }
+        let subject = match property {
+            Some(name) => format!("'{name}'"),
+            None => "this type".to_string(),
+        };
+        let mut min = None;
+        let mut max = None;
+        for attribute in attributes {
+            let name = attribute.key.as_str();
+            let needs = match name {
+                "editor" => match self.module.raw_module().expr(attribute.value) {
+                    ast::Expr::Ident(case)
+                    | ast::Expr::ContextualName { name: case, .. }
+                    | ast::Expr::ResolvedUnionCase { case, .. } => match case.as_str() {
+                        "field" | "slider" => HintValueKind::Number,
+                        "dropdown" | "segmented" => HintValueKind::Cases,
+                        _ => continue,
+                    },
+                    _ => continue,
+                },
+                "min" | "max" | "step" | "stops" | "unit" => HintValueKind::Number,
+                "multiline" | "placeholder" => HintValueKind::String,
+                _ => continue,
+            };
+            if name == "min" {
+                min = self
+                    .hint_number(attribute.value)
+                    .map(|value| (value, attribute.span));
+            } else if name == "max" {
+                max = self.hint_number(attribute.value);
+            }
+            if needs != kind {
+                let what = match needs {
+                    HintValueKind::Number => "a number",
+                    HintValueKind::String => "a string",
+                    _ => "a union of cases with no properties",
+                };
+                self.warn(
+                    "editor-hint-mismatch",
+                    format!(
+                        "The editor hint '{name}' applies to {what}, and {subject} is not one; a viewer ignores it"
+                    ),
+                    attribute.span,
+                );
+            }
+        }
+        if let (Some((min, span)), Some(max)) = (min, max) {
+            if min > max {
+                self.warn(
+                    "editor-hint-range",
+                    format!(
+                        "The editor hint 'min' ({min}) is greater than 'max' ({max}), so the range is empty"
+                    ),
+                    span,
+                );
+            }
+        }
+    }
+
+    /// A number literal written as a hint, signed or not.
+    fn hint_number(&self, expr: ExprId) -> Option<f64> {
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Literal(ast::Literal::Int(value)) => Some(*value as f64),
+            ast::Expr::Literal(ast::Literal::Int32(value)) => Some(f64::from(*value)),
+            ast::Expr::Literal(ast::Literal::Float(value) | ast::Literal::Float32(value)) => {
+                Some(value.0)
+            }
+            ast::Expr::UnaryOp {
+                op: ast::UnOp::Neg,
+                expr,
+                ..
+            } => self.hint_number(*expr).map(|value| -value),
+            _ => None,
         }
     }
 
@@ -6947,6 +7149,22 @@ impl<'a> InferenceContext<'a> {
             index = indexed_loop.index,
             item_ty = indexed_loop.item_ty,
         ))
+    }
+
+    /// Resolves a type as `declaring_module` writes it, or as this module does when it is `None`,
+    /// without reporting anything: a tool's question about a type, not a check of the program.
+    pub fn resolve_written_type(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        self.type_from_type_ref_in_quietly(declaring_module, type_ref)
+    }
+
+    /// Whether a value of type `actual` satisfies a site of type `expected`, by the rules the checker
+    /// applies to a binding: aliases, subtypes, union cases and occurrences included.
+    pub fn satisfies(&self, actual: &Type, expected: &Type) -> bool {
+        self.type_satisfies_expected(actual, expected)
     }
 
     /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.

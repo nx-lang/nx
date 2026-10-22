@@ -2350,10 +2350,10 @@ impl LoweringContext {
 
     /// Reports every part of a visualizer declaration's value that is not written out.
     ///
-    /// <para>A visualizer's value is built only from element constructions, string and boolean
-    /// literals, and bare names, which name properties or cases. Anything computed — a braced
-    /// expression, a conditional, a loop, a number, text or an embed in an element's body — is
-    /// reported, so every visualizer declaration can be read without evaluating it. The rule is
+    /// <para>A visualizer's value is built only from element constructions, string, boolean and
+    /// number literals, braced lists of numbers, and bare names, which name properties or cases.
+    /// Anything computed — any other braced expression, a conditional, a loop, text or an embed in
+    /// an element's body — is reported, so every visualizer declaration can be read without evaluating it. The rule is
     /// checked on the syntax, because a braced literal and a bare one lower alike.</para>
     fn check_visualizer_value_is_written_out(&mut self, node: SyntaxNode) {
         match node.kind() {
@@ -2378,14 +2378,24 @@ impl LoweringContext {
                 let written_out = node.children().all(|child| {
                     matches!(
                         child.kind(),
-                        SyntaxKind::STRING_LITERAL | SyntaxKind::BOOL_LITERAL
+                        SyntaxKind::STRING_LITERAL
+                            | SyntaxKind::BOOL_LITERAL
+                            | SyntaxKind::INT_LITERAL
+                            | SyntaxKind::REAL_LITERAL
+                            | SyntaxKind::HEX_LITERAL
                     )
                 });
                 if !written_out {
                     self.report_visualizer_value_not_written_out(node);
                 }
             }
-            SyntaxKind::CONTEXTUAL_NAME => {}
+            SyntaxKind::SIGNED_NUMERIC_LITERAL | SyntaxKind::CONTEXTUAL_NAME => {}
+            // A braced list of numbers, as an editor hint's `stops`.
+            SyntaxKind::VALUES_BRACED_EXPRESSION => {
+                if !is_number_list(node) {
+                    self.report_visualizer_value_not_written_out(node);
+                }
+            }
             kind if kind.is_comment() => {}
             _ => self.report_visualizer_value_not_written_out(node),
         }
@@ -2394,7 +2404,7 @@ impl LoweringContext {
     fn report_visualizer_value_not_written_out(&mut self, node: SyntaxNode) {
         self.add_diagnostic(
             format!(
-                "A visualizer's values must be written out: use a visualizer record, a string or boolean literal, or a bare property or case name, not '{}'",
+                "A visualizer's values must be written out: use a visualizer record, a string, boolean or number literal, a braced list of numbers, or a bare property or case name, not '{}'",
                 node.text().trim()
             ),
             node.span(),
@@ -3166,6 +3176,23 @@ pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
     ctx.docs = nx_syntax::doc_comments(&root);
     ctx.lower_module(root);
     ctx.finish()
+}
+
+/// Whether a braced expression is a list of unsigned number literals, as `{ 0 4 8 }` or `{2}`.
+fn is_number_list(node: SyntaxNode) -> bool {
+    fn items(node: SyntaxNode) -> bool {
+        node.children().all(|child| match child.kind() {
+            SyntaxKind::VALUE_LIST_ITEM_EXPRESSION | SyntaxKind::VALUE_EXPRESSION => items(child),
+            SyntaxKind::LITERAL => child.children().all(|token| {
+                matches!(
+                    token.kind(),
+                    SyntaxKind::INT_LITERAL | SyntaxKind::REAL_LITERAL | SyntaxKind::HEX_LITERAL
+                )
+            }),
+            kind => kind.is_comment(),
+        })
+    }
+    node.children().next().is_some() && items(node)
 }
 
 #[cfg(test)]

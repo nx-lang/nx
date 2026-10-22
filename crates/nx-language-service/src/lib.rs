@@ -1,6 +1,9 @@
 //! Protocol-independent editor language service for NX.
 
 mod hover;
+mod named_values;
+#[cfg(test)]
+mod named_values_tests;
 mod positions;
 mod source_edit;
 #[cfg(test)]
@@ -10,11 +13,12 @@ mod source_tree;
 mod source_tree_tests;
 mod visualizers;
 
+pub use named_values::NamedValue;
 pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
-    SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
-    SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
-    SourceVisualizer,
+    SourceCase, SourceDeclaration, SourceDeclarationKind, SourceEditorHints, SourceFlag,
+    SourceNode, SourceNumber, SourceProperty, SourcePropertyVisualizer, SourceRole, SourceTree,
+    SourceTreeOptions, SourceTreeVisualizers, SourceVisualizer,
 };
 
 use nx_api::{

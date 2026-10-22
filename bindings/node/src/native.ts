@@ -81,6 +81,7 @@ export interface NativeNxLanguageSnapshot {
   documentSymbols(uri: string): string;
   sourceTree(uri: string, optionsJson?: string | null): string;
   sourceEdit(uri: string, key: string, editJson: string): string;
+  namedValues(uri: string, key: string, property: string): string;
   dispose(): void;
 }
 

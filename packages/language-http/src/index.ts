@@ -21,6 +21,7 @@ import {
   type LanguageServiceErrorBody,
   type LanguageServiceErrorCode,
   type SourceEdit,
+  type SourceEditValue,
   type SourceTreeVisualizersOption,
   type TextPosition,
 } from "@nx-lang/language-protocol";
@@ -125,7 +126,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     if ("problem" in validated) {
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
-    const { documents, uri, position, visualizers, key, edit } = validated;
+    const { documents, uri, position, visualizers, key, edit, property } = validated;
     const collision = contextCollision(documents, context);
     if (collision !== undefined) {
       return errorResponse(
@@ -137,7 +138,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position, visualizers, key, edit }, context, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position, visualizers, key, edit, property }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);
@@ -220,6 +221,7 @@ type ValidatedQuery =
       visualizers?: SourceTreeVisualizersOption;
       key?: string;
       edit?: SourceEdit;
+      property?: string;
     }
   | { problem: string };
 
@@ -309,10 +311,18 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
     if (edit === undefined) {
       return {
         problem:
-          "The 'sourceEdit' query needs 'edit': { kind: 'setValue', value }, { kind: 'setText', text } or { kind: 'remove' }.",
+          "The 'sourceEdit' query needs 'edit': { kind: 'setValue', value }, { kind: 'setText', text }, { kind: 'remove' } or { kind: 'addProperty', name, value }.",
       };
     }
     return { documents, uri, position, key: record.key, edit };
+  }
+  if (query === "namedValues") {
+    if (typeof record.key !== "string" || typeof record.property !== "string") {
+      return {
+        problem: "The 'namedValues' query needs 'key', the key of the element, and 'property', the name of one of its properties.",
+      };
+    }
+    return { documents, uri, position, key: record.key, property: record.property };
   }
   return { documents, uri, position };
 }
@@ -329,27 +339,42 @@ function sourceEditOf(candidate: unknown): SourceEdit | undefined {
     case "setText":
       return typeof edit.text === "string" ? { kind: "setText", text: edit.text } : undefined;
     case "setValue": {
-      const value = edit.value as Record<string, unknown> | null | undefined;
-      if (typeof value !== "object" || value === null) {
-        return undefined;
-      }
-      if (value.kind === "string" && typeof value.value === "string") {
-        return { kind: "setValue", value: { kind: "string", value: value.value } };
-      }
-      if (value.kind === "number" && typeof value.text === "string") {
-        return { kind: "setValue", value: { kind: "number", text: value.text } };
-      }
-      if (value.kind === "boolean" && typeof value.value === "boolean") {
-        return { kind: "setValue", value: { kind: "boolean", value: value.value } };
-      }
-      if (value.kind === "case" && typeof value.name === "string") {
-        return { kind: "setValue", value: { kind: "case", name: value.name } };
-      }
-      return undefined;
+      const value = sourceEditValueOf(edit.value);
+      return value === undefined ? undefined : { kind: "setValue", value };
+    }
+    case "addProperty": {
+      const value = sourceEditValueOf(edit.value);
+      return value === undefined || typeof edit.name !== "string"
+        ? undefined
+        : { kind: "addProperty", name: edit.name, value };
     }
     default:
       return undefined;
   }
+}
+
+/** The value an edit carries, when it has the shape of a {@link SourceEditValue}. */
+function sourceEditValueOf(candidate: unknown): SourceEditValue | undefined {
+  if (typeof candidate !== "object" || candidate === null) {
+    return undefined;
+  }
+  const value = candidate as Record<string, unknown>;
+  if (value.kind === "string" && typeof value.value === "string") {
+    return { kind: "string", value: value.value };
+  }
+  if (value.kind === "number" && typeof value.text === "string") {
+    return { kind: "number", text: value.text };
+  }
+  if (value.kind === "boolean" && typeof value.value === "boolean") {
+    return { kind: "boolean", value: value.value };
+  }
+  if (value.kind === "case" && typeof value.name === "string") {
+    return { kind: "case", name: value.name };
+  }
+  if (value.kind === "reference" && typeof value.path === "string") {
+    return { kind: "reference", path: value.path };
+  }
+  return undefined;
 }
 
 /** The SDK reports bad snapshot input (an unparseable URI, a duplicate identity) as an evaluation error. */

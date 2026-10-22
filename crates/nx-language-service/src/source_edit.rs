@@ -31,6 +31,13 @@ pub enum SourceEdit {
     },
     /// Remove an attribute.
     Remove,
+    /// Add a property an element does not write, as an attribute in the element's layout.
+    AddProperty {
+        /// The property's name.
+        name: String,
+        /// Its value.
+        value: SourceEditValue,
+    },
 }
 
 /// A value to write, by kind; the service decides its spelling.
@@ -56,6 +63,12 @@ pub enum SourceEditValue {
     Case {
         /// The case's name.
         name: String,
+    },
+    /// A reference to a named value, written as its path: in braces as an attribute's value, and
+    /// bare elsewhere.
+    Reference {
+        /// The path, identifiers joined by dots, such as `theme.accent`.
+        path: String,
     },
 }
 
@@ -131,6 +144,7 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
         SourceEdit::SetValue { value } => set_value(source, tree, at, value),
         SourceEdit::SetText { text } => set_text(source, tree, at, text),
         SourceEdit::Remove => remove(source, tree, at),
+        SourceEdit::AddProperty { name, value } => add_property(source, tree, at, name, value),
     };
     match result {
         Ok(Some((start, end, new_text))) => {
@@ -197,36 +211,75 @@ pub(crate) fn is_whole_value(tree: &SourceTree, at: usize) -> bool {
 
 fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue) -> Replacement {
     let node = &tree.nodes[at];
-    if !matches!(node.role, SourceRole::Literal | SourceRole::Case) || !is_whole_value(tree, at) {
-        return Err(SourceEditRefusal::NotEditable);
-    }
     let (start, end) = byte_span(node);
-    // A literal's range is its own token; braces written around it stay where they are. A string
-    // literal's span is checked so that nothing but the token is replaced.
-    if source.get(start..end).is_none() {
+    let Some(written) = source.get(start..end) else {
+        return Err(SourceEditRefusal::NotEditable);
+    };
+    let is_reference = matches!(node.role, SourceRole::Reference | SourceRole::Member)
+        && is_reference_path(written);
+    if !(matches!(node.role, SourceRole::Literal | SourceRole::Case) || is_reference)
+        || !is_whole_value(tree, at)
+    {
         return Err(SourceEditRefusal::NotEditable);
     }
     let text = spell_value(value)?;
+    let owner = parent(tree, node).map(|owner| owner.role);
+    let braced = node.flags.contains(&SourceFlag::Braced);
     // A case written qualified, `{ Status.open }`, keeps its qualifier.
     if node.role == SourceRole::Case {
-        if let Some(dot) = source[start..end].rfind('.') {
+        if let Some(dot) = written.rfind('.') {
             if !matches!(value, SourceEditValue::Case { .. }) {
                 return Err(SourceEditRefusal::InvalidValue);
             }
             return Ok(Some((start + dot + 1, end, text)));
         }
     }
+    if let SourceEditValue::Reference { .. } = value {
+        // An attribute's value needs braces around a reference; braces already written stay.
+        let text = if owner == Some(SourceRole::Attribute) && !braced {
+            format!("{{{text}}}")
+        } else {
+            text
+        };
+        return Ok(Some((start, end, text)));
+    }
+    // A literal or a case over a braced reference at an attribute is written as the attribute
+    // usually spells it, its braces dropped.
+    if is_reference && braced && owner == Some(SourceRole::Attribute) {
+        if let Some((open, close)) = enclosing_braces(source, start, end) {
+            return Ok(Some((open, close, text)));
+        }
+    }
     // Only a value written unbraced after `=` takes a minus sign or a bare case name: in braces or
     // in a list, `-3` is an operator and `large` a reference to a name.
-    let unbraced = matches!(
-        parent(tree, node).map(|owner| owner.role),
-        Some(SourceRole::Attribute | SourceRole::Declaration)
-    ) && !node.flags.contains(&SourceFlag::Braced);
+    let unbraced =
+        matches!(owner, Some(SourceRole::Attribute | SourceRole::Declaration)) && !braced;
     let signed = matches!(value, SourceEditValue::Number { text } if text.starts_with('-'));
     if !unbraced && (signed || matches!(value, SourceEditValue::Case { .. })) {
         return Err(SourceEditRefusal::InvalidValue);
     }
     Ok(Some((start, end, text)))
+}
+
+/// The bytes from the `{` before `start` to just past the `}` after `end`, when only blanks lie
+/// between them and the value.
+fn enclosing_braces(source: &str, start: usize, end: usize) -> Option<(usize, usize)> {
+    let before = source[..start].trim_end();
+    let after = source[end..].trim_start();
+    if !before.ends_with('{') || !after.starts_with('}') {
+        return None;
+    }
+    let open = before.len() - 1;
+    let close = source.len() - after.len() + 1;
+    Some((open, close))
+}
+
+/// Whether `text` is a reference path: identifiers joined by dots, with nothing between them.
+pub(crate) fn is_reference_path(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .split('.')
+            .all(|part| is_identifier(part) && part != "true" && part != "false")
 }
 
 /// Spells a value as NX source, or refuses one that cannot be spelled.
@@ -244,6 +297,13 @@ pub(crate) fn spell_value(value: &SourceEditValue) -> Result<String, SourceEditR
         SourceEditValue::Case { name } => {
             if is_identifier(name) && name != "true" && name != "false" {
                 Ok(name.clone())
+            } else {
+                Err(SourceEditRefusal::InvalidValue)
+            }
+        }
+        SourceEditValue::Reference { path } => {
+            if is_reference_path(path) {
+                Ok(path.clone())
             } else {
                 Err(SourceEditRefusal::InvalidValue)
             }
@@ -413,4 +473,121 @@ fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacement {
         if commented { after } else { end },
         String::new(),
     )))
+}
+
+/// Adds the attribute `name=value` to an element, after its last attribute and in its layout: on
+/// the tag's line when it writes its attributes there or has none, and on a line of its own at
+/// their indentation when it writes them a line each.
+fn add_property(
+    source: &str,
+    tree: &SourceTree,
+    at: usize,
+    name: &str,
+    value: &SourceEditValue,
+) -> Replacement {
+    let node = &tree.nodes[at];
+    if node.role != SourceRole::Element {
+        return Err(SourceEditRefusal::NotEditable);
+    }
+    // The property must be one the element's declaration has, other than its content, and one it
+    // does not write yet.
+    let declared = node
+        .declaration
+        .and_then(|index| tree.declarations.get(index as usize))
+        .and_then(|declaration| {
+            declaration
+                .properties
+                .iter()
+                .find(|property| property.name == name)
+        });
+    let Some(declared) = declared else {
+        return Err(SourceEditRefusal::InvalidValue);
+    };
+    if declared.flags.contains(&SourceFlag::Content) {
+        return Err(SourceEditRefusal::InvalidValue);
+    }
+    let attributes = tree
+        .nodes
+        .iter()
+        .filter(|candidate| {
+            candidate.parent == Some(at as u32)
+                && candidate.role == SourceRole::Attribute
+                && !candidate.flags.contains(&SourceFlag::Content)
+        })
+        .collect::<Vec<_>>();
+    if attributes
+        .iter()
+        .any(|attribute| attribute.name.as_deref() == Some(name))
+    {
+        return Err(SourceEditRefusal::InvalidValue);
+    }
+    // An attribute's value is spelled as `setValue` spells it there: unbraced, with braces around a
+    // reference.
+    let spelled = spell_value(value)?;
+    let spelled = match value {
+        SourceEditValue::Reference { .. } => format!("{{{spelled}}}"),
+        _ => spelled,
+    };
+    let attribute = format!("{name}={spelled}");
+    let (element_start, _) = byte_span(node);
+    let bytes = source.as_bytes();
+    let line_start = |at: usize| source[..at].rfind('\n').map_or(0, |line| line + 1);
+
+    let Some(last) = attributes
+        .iter()
+        .max_by_key(|attribute| attribute.range.end_byte)
+    else {
+        // No attributes: after the tag's name.
+        let after_name =
+            tag_name_end(source, element_start).ok_or(SourceEditRefusal::NotEditable)?;
+        return Ok(Some((after_name, after_name, format!(" {attribute}"))));
+    };
+    let (last_start, last_end) = byte_span(last);
+    let own_line = source[line_start(last_start)..last_start].trim().is_empty();
+    if !own_line {
+        return Ok(Some((last_end, last_end, format!(" {attribute}"))));
+    }
+    // A line each: a new line at the last attribute's indentation, after that line's comment when
+    // nothing else follows it there, and otherwise right after the attribute.
+    let indent = &source[line_start(last_start)..last_start];
+    let line_end = source[last_end..]
+        .find(['\r', '\n'])
+        .map_or(source.len(), |offset| last_end + offset);
+    let rest = source[last_end..line_end].trim();
+    let insert_at = if rest.is_empty() || rest.starts_with("//") {
+        line_end
+    } else {
+        last_end
+    };
+    let newline = if source[..line_end].ends_with('\r') || bytes.get(line_end) == Some(&b'\r') {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    Ok(Some((
+        insert_at,
+        insert_at,
+        format!("{newline}{indent}{attribute}"),
+    )))
+}
+
+/// The byte just past an element's tag name, read from the syntax tree.
+fn tag_name_end(source: &str, element_start: usize) -> Option<usize> {
+    let parsed = parse_str(source, "edit.nx");
+    let syntax = parsed.tree?;
+    fn find(node: SyntaxNode<'_>, start: usize) -> Option<usize> {
+        if node.kind() == SyntaxKind::ELEMENT && usize::from(node.span().start()) == start {
+            return node
+                .children()
+                .find(|child| child.kind() == SyntaxKind::ELEMENT_NAME)
+                .map(|name| usize::from(name.span().end()));
+        }
+        node.children()
+            .filter(|child| {
+                let span = child.span();
+                usize::from(span.start()) <= start && start < usize::from(span.end())
+            })
+            .find_map(|child| find(child, start))
+    }
+    find(syntax.root(), element_start)
 }

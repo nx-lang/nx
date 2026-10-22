@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 9;
+pub const ABI_VERSION: u32 = 10;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -158,6 +158,13 @@ struct SourceEditRequest {
     uri: String,
     key: String,
     edit: SourceEdit,
+}
+
+#[derive(Deserialize)]
+struct NamedValuesRequest {
+    uri: String,
+    key: String,
+    property: String,
 }
 
 /// The ABI version this module implements.
@@ -511,6 +518,19 @@ pub unsafe extern "C" fn nx_wasm_snapshot_source_edit(
     into_result(snapshot_source_edit(&*handle, argument(ptr, len)))
 }
 
+/// The named values a `{ uri, key, property }` argument's property can take, as JSON. Unstable.
+///
+/// # Safety
+/// `handle` must be a live snapshot handle; `ptr` and `len` must describe UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_snapshot_named_values(
+    handle: *mut WorkspaceSnapshot,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(snapshot_named_values(&*handle, argument(ptr, len)))
+}
+
 /// Releases the snapshot `handle` names.
 ///
 /// # Safety
@@ -834,6 +854,21 @@ fn snapshot_source_edit(
         .source_edit(&DocumentUri::new(request.uri), &request.key, &request.edit)
         .map_err(snapshot_error)?;
     result_json(&answer)
+}
+
+fn snapshot_named_values(
+    snapshot: &WorkspaceSnapshot,
+    argument: Result<&str, OperationError>,
+) -> Operation {
+    let request: NamedValuesRequest = parse_request(argument?)?;
+    let values = snapshot
+        .named_values(
+            &DocumentUri::new(request.uri),
+            &request.key,
+            &request.property,
+        )
+        .map_err(snapshot_error)?;
+    result_json(&values)
 }
 
 /// Reads the loader's argument buffer as UTF-8.

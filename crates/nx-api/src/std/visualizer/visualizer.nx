@@ -43,6 +43,23 @@ export type PropertyVisualizer = {
   property: Target.Property
   /// How the property's string value is shown.
   format?: ValueFormat
+  /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
+  editor?: ValueEditor
+  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  min?: float64
+  /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  max?: float64
+  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  step?: float64
+  /// The numbers a slider snaps to, in order.
+  stops?: float64+
+  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
+  unit?: string
+  /// Whether the property's string field takes line breaks: Enter starts a new line, and the
+  /// value is written over several lines.
+  multiline: boolean = false
+  /// Text shown in the property's empty field, quieter than a value, and never written.
+  placeholder?: string
 }
 
 /// How a viewer presents values of a scalar type.
@@ -50,7 +67,19 @@ export type ValueVisualizer = {
   // The type this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
   /// How a string value of the type is shown.
-  format: ValueFormat
+  format?: ValueFormat
+  /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
+  editor?: ValueEditor
+  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  min?: float64
+  /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  max?: float64
+  /// How far one step of the editor moves a number, as an arrow key or a slider's notch does.
+  step?: float64
+  /// The numbers a slider snaps to, in order.
+  stops?: float64+
+  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
+  unit?: string
 }
 
 /// How a string value is shown. A format changes how the value looks, never what it is.
@@ -59,3 +88,14 @@ export type ValueFormat =
   | id
   /// With a small square of the color it names.
   | color
+
+/// The editor a viewer offers for a value. A hint changes how a value is edited, never what it is.
+export type ValueEditor =
+  /// A number field, with arrow-key steps, even when the number has a range.
+  | field
+  /// A slider with a number field beside it, for a number with `min` and `max`.
+  | slider
+  /// A list of a union's cases.
+  | dropdown
+  /// A union's cases as one row of buttons.
+  | segmented

@@ -12,6 +12,8 @@ import type {
   Hover,
   LanguageDocument,
   LanguageServiceErrorBody,
+  NamedValue,
+  SourceEditAnswer,
   SourceTree,
 } from "@nx-lang/language-protocol";
 import { NxLibraryRegistry } from "@nx-lang/sdk-node";
@@ -233,6 +235,7 @@ test("an evicted snapshot is disposed and the cache never exceeds its size", asy
         documentSymbols: () => [],
         sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
         sourceEdit: () => ({ edits: [] }),
+        namedValues: () => [],
         dispose: () => disposed.push(source),
       };
     },
@@ -393,6 +396,39 @@ test("a source tree asked with visualizers carries resolved visualizers and the 
   assert.match((await json<LanguageServiceErrorBody>(refused)).error.message, /'visualizers'/);
 });
 
+test("an added property and named values answer through HTTP, and a malformed one is refused", async () => {
+  const handler = createNxLanguageHandler();
+  const source = [
+    "type Color = string",
+    'let accent:Color = "#c8a27a"',
+    "type Drink = { name:string color?:Color }",
+    'let latte = <Drink name="Latte" />',
+    "",
+  ].join("\n");
+  const documents = [{ uri: FORM, source }];
+
+  const added = await json<SourceEditAnswer>(
+    await handler(
+      post("sourceEdit", {
+        documents,
+        uri: FORM,
+        key: "latte.value",
+        edit: { kind: "addProperty", name: "color", value: { kind: "reference", path: "accent" } },
+      }),
+    ),
+  );
+  assert.deepEqual(added.edits.map((edit) => edit.newText), [" color={accent}"]);
+
+  const values = await json<NamedValue[]>(
+    await handler(post("namedValues", { documents, uri: FORM, key: "latte.value", property: "color" })),
+  );
+  assert.deepEqual(values.map((value) => value.path), ["accent"]);
+
+  const missing = await handler(post("namedValues", { documents, uri: FORM, key: "latte.value" }));
+  assert.equal(missing.status, 400);
+  assert.match((await json<LanguageServiceErrorBody>(missing)).error.message, /'property'/);
+});
+
 test("a request cannot replace a context document, and says what collided", async () => {
   const response = await contextHandler(
     post("diagnostics", { documents: [{ uri: CATALOG, source: "let mine = 1\n" }], uri: CATALOG }),
@@ -457,6 +493,7 @@ test("a sibling's related location keeps the coordinates the analysis gave it", 
       documentSymbols: () => [],
       sourceTree: () => ({ uri: FORM, identity: "tenant/form.nx", version: null, nodes: [], declarations: [] }),
       sourceEdit: () => ({ edits: [] }),
+      namedValues: () => [],
       dispose: () => undefined,
     }),
   });

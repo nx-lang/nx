@@ -146,9 +146,24 @@ pub(crate) struct ResolvedVisualizer {
     pub id_position: Option<String>,
     pub icon: Option<String>,
     pub format: Option<String>,
+    /// A `ValueVisualizer`'s editor hints, by name, as text.
+    pub hints: Vec<(String, String)>,
     /// The property visualizers, in their resolved order.
     pub properties: Vec<ResolvedChild>,
 }
+
+/// The editor hints a `PropertyVisualizer` or a `ValueVisualizer` may set, `multiline` and
+/// `placeholder` on a `PropertyVisualizer` only.
+pub(crate) const EDITOR_HINTS: [&str; 8] = [
+    "editor",
+    "min",
+    "max",
+    "step",
+    "stops",
+    "unit",
+    "multiline",
+    "placeholder",
+];
 
 /// One merged `PropertyVisualizer`: the property it describes and the attributes it sets.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -233,7 +248,16 @@ impl ResolvedVisualizer {
                 }
                 self.properties.extend(earlier);
             }
-            VisualizerRecord::Value => {}
+            VisualizerRecord::Value => {
+                for name in EDITOR_HINTS {
+                    if let Some(value) = text(name) {
+                        match self.hints.iter_mut().find(|(key, _)| key == name) {
+                            Some((_, existing)) => *existing = value,
+                            None => self.hints.push((name.to_string(), value)),
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -258,6 +282,7 @@ fn is_known_value(name: &str, text: &str) -> bool {
     match name {
         "idPosition" => matches!(text, "start" | "end"),
         "format" => matches!(text, "id" | "color"),
+        "editor" => matches!(text, "field" | "slider" | "dropdown" | "segmented"),
         _ => true,
     }
 }

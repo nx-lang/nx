@@ -1,5 +1,5 @@
 use super::*;
-use crate::source_edit::{is_numeric_literal, is_whole_value, spell_value};
+use crate::source_edit::{is_numeric_literal, is_reference_path, is_whole_value, spell_value};
 use std::path::{Path, PathBuf};
 
 const URI: &str = "nx://tenant/edit.nx";
@@ -513,4 +513,320 @@ fn round_trips_over_the_repository() {
         }
     }
     assert!(checked > 100, "checked {checked}");
+}
+
+/// Over every `.nx` file in the repository: adding an unwritten property of an element, with its
+/// default, yields a document with no new parse errors whose keys are the old ones and the new
+/// attribute's.
+#[test]
+fn adding_defaults_over_the_repository() {
+    let mut files = Vec::new();
+    nx_files(&repository(), &mut files);
+    files.sort();
+    let mut checked = 0;
+    for file in files {
+        let source = std::fs::read_to_string(&file).expect("source");
+        let snapshot = snapshot_for(&source);
+        let uri = DocumentUri::from(URI);
+        let tree = snapshot.source_tree(&uri).expect("tree");
+        let errors = parse_errors(&source);
+        let mut per_file = 0;
+        for (at, node) in tree.nodes.iter().enumerate() {
+            if per_file == 6 {
+                break;
+            }
+            if node.role != SourceRole::Element {
+                continue;
+            }
+            let Some(declaration) = node
+                .declaration
+                .and_then(|entry| tree.declarations.get(entry as usize))
+            else {
+                continue;
+            };
+            let written = tree
+                .nodes
+                .iter()
+                .filter(|child| {
+                    child.parent == Some(at as u32) && child.role == SourceRole::Attribute
+                })
+                .filter_map(|child| child.name.clone())
+                .collect::<Vec<_>>();
+            let Some((property, value)) = declaration.properties.iter().find_map(|property| {
+                if written.contains(&property.name) || property.flags.contains(&SourceFlag::Content)
+                {
+                    return None;
+                }
+                let default = property.default.as_deref()?;
+                let value = if default == "true" || default == "false" {
+                    SourceEditValue::Boolean {
+                        value: default == "true",
+                    }
+                } else if default.starts_with('"')
+                    && default.ends_with('"')
+                    && !default.contains('\\')
+                    && default.len() >= 2
+                {
+                    SourceEditValue::String {
+                        value: default[1..default.len() - 1].to_string(),
+                    }
+                } else if is_numeric_literal(default) {
+                    SourceEditValue::Number {
+                        text: default.to_string(),
+                    }
+                } else if is_reference_path(default) && !default.contains('.') {
+                    SourceEditValue::Case {
+                        name: default.to_string(),
+                    }
+                } else {
+                    return None;
+                };
+                Some((property.name.clone(), value))
+            }) else {
+                continue;
+            };
+            let answer = snapshot
+                .source_edit(&uri, &node.key, &add(&property, value))
+                .expect("edit");
+            assert_eq!(
+                answer.refused,
+                None,
+                "{} {} {property}",
+                file.display(),
+                node.key
+            );
+            let after = apply(&source, &answer);
+            assert!(
+                parse_errors(&after) <= errors,
+                "{} {} {property}: {after}",
+                file.display(),
+                node.key
+            );
+            let after_tree = snapshot_for(&after).source_tree(&uri).expect("tree");
+            let added = format!("{}.{property}", node.key);
+            let after_keys = after_tree
+                .nodes
+                .iter()
+                .map(|node| node.key.as_str())
+                .filter(|key| *key != added && !key.starts_with(&format!("{added}.")))
+                .collect::<Vec<_>>();
+            let keys = tree
+                .nodes
+                .iter()
+                .map(|node| node.key.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                after_keys,
+                keys,
+                "{} {} {property}: {after}",
+                file.display(),
+                node.key
+            );
+            assert!(
+                after_tree.nodes.iter().any(|node| node.key == added),
+                "{} {added}: {after}",
+                file.display()
+            );
+            checked += 1;
+            per_file += 1;
+        }
+    }
+    assert!(checked > 20, "checked {checked}");
+}
+
+// --- Adding a property --------------------------------------------------------------------------
+
+fn add(name: &str, value: SourceEditValue) -> SourceEdit {
+    SourceEdit::AddProperty {
+        name: name.to_string(),
+        value,
+    }
+}
+
+fn reference(path: &str) -> SourceEditValue {
+    SourceEditValue::Reference {
+        path: path.to_string(),
+    }
+}
+
+const ADDING: &str = r##"type Color = string
+type Drink = {
+  code:string
+  name:string
+  iced:boolean = false
+  price?:float64
+  color?:Color
+}
+type Label = { tone?:string content text:string }
+let accent:Color = "#c8a27a"
+let theme = <Drink code="T" name="Theme" color="#5a3a22" />
+let one = <Drink code="LAT" name="Latte" />
+let lines = <Drink
+    code="CBR"
+    name="Cold brew" // the name
+  />
+let closing = <Drink
+    code="CBR"
+    name="Cold brew" />
+let bare = <Label>Hi</Label>
+"##;
+
+#[test]
+fn adding_on_one_line() {
+    assert!(edited(
+        ADDING,
+        "one.value",
+        add("iced", SourceEditValue::Boolean { value: true })
+    )
+    .contains(r#"let one = <Drink code="LAT" name="Latte" iced=true />"#));
+}
+
+#[test]
+fn adding_a_property_per_line() {
+    let after = edited(
+        ADDING,
+        "lines.value",
+        add(
+            "price",
+            SourceEditValue::Number {
+                text: "5.25".to_string(),
+            },
+        ),
+    );
+    assert!(
+        after.contains("    name=\"Cold brew\" // the name\n    price=5.25\n  />"),
+        "{after}"
+    );
+    let after = edited(
+        ADDING,
+        "closing.value",
+        add(
+            "price",
+            SourceEditValue::Number {
+                text: "-1".to_string(),
+            },
+        ),
+    );
+    assert!(
+        after.contains("    name=\"Cold brew\"\n    price=-1 />"),
+        "{after}"
+    );
+}
+
+#[test]
+fn adding_to_an_element_with_no_attributes() {
+    let after = edited(
+        ADDING,
+        "bare.value",
+        add(
+            "tone",
+            SourceEditValue::String {
+                value: "warm".to_string(),
+            },
+        ),
+    );
+    assert!(
+        after.contains(r#"let bare = <Label tone="warm">Hi</Label>"#),
+        "{after}"
+    );
+}
+
+#[test]
+fn adding_what_cannot_be_added_is_refused() {
+    for (key, name) in [
+        ("one.value", "name"),
+        ("one.value", "nope"),
+        ("bare.value", "text"),
+    ] {
+        let answer = edit(
+            ADDING,
+            key,
+            add(name, SourceEditValue::Boolean { value: true }),
+        );
+        assert_eq!(
+            answer.refused,
+            Some(SourceEditRefusal::InvalidValue),
+            "{key} {name}"
+        );
+        assert!(answer.edits.is_empty());
+    }
+    let answer = edit(
+        ADDING,
+        "one.value.code.value",
+        add("iced", SourceEditValue::Boolean { value: true }),
+    );
+    assert_eq!(answer.refused, Some(SourceEditRefusal::NotEditable));
+}
+
+#[test]
+fn adding_a_named_value() {
+    assert!(
+        edited(ADDING, "one.value", add("color", reference("accent")))
+            .contains(r#"let one = <Drink code="LAT" name="Latte" color={accent} />"#)
+    );
+}
+
+// --- References ------------------------------------------------------------------------------------
+
+#[test]
+fn setting_a_reference_and_a_literal_over_one() {
+    let after = edited(
+        ADDING,
+        "theme.value.color.value",
+        SourceEdit::SetValue {
+            value: reference("theme.color"),
+        },
+    );
+    assert!(after.contains(r#"color={theme.color}"#), "{after}");
+    let source = ADDING.replace(r##"color="#5a3a22""##, "color={accent}");
+    let after = edited(&source, "theme.value.color.value", string("#5a3a22"));
+    assert!(after.contains(r##"color="#5a3a22""##), "{after}");
+    // A reference replaced by a reference stays braced once.
+    let after = edited(
+        &source,
+        "theme.value.color.value",
+        SourceEdit::SetValue {
+            value: reference("x.y"),
+        },
+    );
+    assert!(after.contains("color={x.y}"), "{after}");
+}
+
+#[test]
+fn a_reference_is_bare_in_a_sequence_and_a_let() {
+    let source = "let total = 4\nlet primes:int+ = { 2 3 5 }\nlet n = 1\n";
+    assert!(edited(
+        source,
+        "primes.value[1]",
+        SourceEdit::SetValue {
+            value: reference("total")
+        }
+    )
+    .contains("{ 2 total 5 }"));
+    assert!(edited(
+        source,
+        "n.value",
+        SourceEdit::SetValue {
+            value: reference("total")
+        }
+    )
+    .contains("let n = total"));
+}
+
+#[test]
+fn a_bad_path_is_refused() {
+    for path in ["", "a..b", "a.1", "true", "a b"] {
+        let answer = edit(
+            ADDING,
+            "one.value.code.value",
+            SourceEdit::SetValue {
+                value: reference(path),
+            },
+        );
+        assert_eq!(
+            answer.refused,
+            Some(SourceEditRefusal::InvalidValue),
+            "{path:?}"
+        );
+    }
 }

@@ -8,7 +8,7 @@
 
 use crate::artifacts::{workspace_import_target_identity, LibraryArtifact, ProgramBuildContext};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
-use nx_hir::ast::{Expr, Literal};
+use nx_hir::ast::{Expr, Literal, OrderedFloat, UnOp};
 use nx_hir::{DeclaringOrigin, ExprId, LoweredModule, VisualizerRecord, VisualizerTarget};
 use nx_types::ModuleArtifact;
 use rustc_hash::FxHashSet;
@@ -316,14 +316,44 @@ pub enum VisualizerAttribute {
     Boolean(bool),
     /// A bare name: a property or a case.
     Name(String),
+    /// A number literal, signed or not.
+    Number(OrderedFloat),
+    /// A braced list of number literals.
+    Numbers(Vec<OrderedFloat>),
 }
 
 impl VisualizerAttribute {
-    /// The value as text: a string's text, a name, or `true`/`false`.
+    /// The value as text: a string's text, a name, `true`/`false`, a number, or numbers
+    /// separated by spaces.
     pub fn text(&self) -> String {
         match self {
             VisualizerAttribute::Text(text) | VisualizerAttribute::Name(text) => text.clone(),
             VisualizerAttribute::Boolean(value) => value.to_string(),
+            VisualizerAttribute::Number(value) => value.0.to_string(),
+            VisualizerAttribute::Numbers(values) => values
+                .iter()
+                .map(|value| value.0.to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    /// The value as a number, when it is one.
+    pub fn number(&self) -> Option<f64> {
+        match self {
+            VisualizerAttribute::Number(value) => Some(value.0),
+            _ => None,
+        }
+    }
+
+    /// The value as numbers, when it is a number or a list of them.
+    pub fn numbers(&self) -> Option<Vec<f64>> {
+        match self {
+            VisualizerAttribute::Number(value) => Some(vec![value.0]),
+            VisualizerAttribute::Numbers(values) => {
+                Some(values.iter().map(|value| value.0).collect())
+            }
+            _ => None,
         }
     }
 }
@@ -402,6 +432,26 @@ fn attribute_value(module: &LoweredModule, expr: ExprId) -> Option<VisualizerAtt
         Expr::ResolvedUnionCase { case, .. } => {
             Some(VisualizerAttribute::Name(case.as_str().to_string()))
         }
+        Expr::Array { elements, .. } => elements
+            .iter()
+            .map(|element| number_value(module, *element))
+            .collect::<Option<Vec<_>>>()
+            .map(VisualizerAttribute::Numbers),
+        _ => number_value(module, expr).map(VisualizerAttribute::Number),
+    }
+}
+
+/// A number literal, or a negated one.
+fn number_value(module: &LoweredModule, expr: ExprId) -> Option<OrderedFloat> {
+    match module.expr(expr) {
+        Expr::Literal(Literal::Int(value)) => Some(OrderedFloat(*value as f64)),
+        Expr::Literal(Literal::Int32(value)) => Some(OrderedFloat(f64::from(*value))),
+        Expr::Literal(Literal::Float(value) | Literal::Float32(value)) => Some(*value),
+        Expr::UnaryOp {
+            op: UnOp::Neg,
+            expr,
+            ..
+        } => number_value(module, *expr).map(|value| OrderedFloat(-value.0)),
         _ => None,
     }
 }

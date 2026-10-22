@@ -18,6 +18,8 @@ import {
   type LanguageQueryAnswers,
   type LanguageQueryName,
   type LanguageQueryRequests,
+  type NamedValue,
+  type NamedValuesRequest,
   type NxLanguageService,
   type SourceTree,
   type SourceEditAnswer,
@@ -151,6 +153,8 @@ export function createHttpLanguageService(options: HttpLanguageServiceOptions): 
       query("sourceTree", request, signal),
     sourceEdit: (request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer> =>
       query("sourceEdit", request, signal),
+    namedValues: (request: NamedValuesRequest, signal?: AbortSignal): Promise<NamedValue[]> =>
+      query("namedValues", request, signal),
   };
 }
 

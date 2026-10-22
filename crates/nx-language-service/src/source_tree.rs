@@ -16,7 +16,7 @@
 //! <para>The shape is unstable: it is published for the visualizer and the change view to build on,
 //! and a later change commits to it.</para>
 
-use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer};
+use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer, EDITOR_HINTS};
 use crate::{
     is_unresolved_type, type_ref_display, DeclarationOrigin, DocumentScope, DocumentUri,
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
@@ -282,6 +282,9 @@ pub struct SourceVisualizer {
     /// How an alias's string values are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// How an alias's values are edited: its resolved editor hints that fit its type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<SourceEditorHints>,
 }
 
 /// How one property of a declaration reads.
@@ -294,7 +297,55 @@ pub struct SourcePropertyVisualizer {
     /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// How the property's value is edited: its resolved editor hints that fit its type, each from
+    /// its property visualizer, or else from the visualizer of the alias its type names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<SourceEditorHints>,
 }
+
+/// The editor hints that apply to a value, each present only when set. A hint changes how a viewer
+/// edits the value, never what the value is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceEditorHints {
+    /// The editor asked for: `field`, `slider`, `dropdown` or `segmented`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The smallest number the editor offers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<SourceNumber>,
+    /// The largest number the editor offers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<SourceNumber>,
+    /// How far one step moves a number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<SourceNumber>,
+    /// The numbers a slider snaps to, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<SourceNumber>,
+    /// The unit shown after a number, never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Whether a string's field takes line breaks; present only when it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiline: Option<bool>,
+    /// Text shown in an empty field, never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
+/// A number in the source tree's JSON, compared by its bits so the tree stays `Eq`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SourceNumber(pub f64);
+
+impl PartialEq for SourceNumber {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for SourceNumber {}
 
 /// The kinds of declaration the table describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1901,7 +1952,7 @@ impl<'a> TreeBuilder<'a> {
                 let types = property_types(&workspace, &origin, &chain);
                 // A property typed by an alias with a visualizer brings that alias into the
                 // table, so a reader can read the property's format.
-                for (_, _, typed) in &types {
+                for (_, _, typed, _) in &types {
                     if let Some(typed) = typed {
                         let chain = base_chain(&workspace, typed);
                         if visualizers.resolve(typed, &chain).is_some() {
@@ -1911,9 +1962,21 @@ impl<'a> TreeBuilder<'a> {
                 }
                 self.element_visualizer(index, resolved, &types, visualizers)
             } else if kind == SourceDeclarationKind::Alias {
-                resolved.map(|resolved| SourceVisualizer {
-                    format: resolved.format,
-                    ..SourceVisualizer::default()
+                resolved.map(|resolved| {
+                    let value_kind = match item_at(&workspace, &origin) {
+                        Some(Item::TypeAlias(alias)) => {
+                            hint_value_kind(&workspace, &origin.0, &alias.ty, 0)
+                        }
+                        _ => HintValueKind::Unknown,
+                    };
+                    SourceVisualizer {
+                        format: resolved.format,
+                        editor: editor_hints(
+                            &alias_hints(&workspace, &origin, visualizers),
+                            value_kind,
+                        ),
+                        ..SourceVisualizer::default()
+                    }
                 })
             } else {
                 None
@@ -1931,23 +1994,57 @@ impl<'a> TreeBuilder<'a> {
         &self,
         index: usize,
         resolved: Option<ResolvedVisualizer>,
-        types: &[(String, String, Option<DeclarationOrigin>)],
+        types: &[PropertyType],
         visualizers: &ProgramVisualizers,
     ) -> Option<SourceVisualizer> {
         let workspace = &self.scope.workspace;
+        let typed = |name: &str| types.iter().find(|(property, _, _, _)| property == name);
         let type_format = |name: &str| {
-            let (_, _, typed) = types.iter().find(|(property, _, _)| property == name)?;
+            let (_, _, typed, _) = typed(name)?;
             alias_format(workspace, typed.as_ref()?, visualizers)
+        };
+        let type_hints = |name: &str| {
+            typed(name)
+                .and_then(|(_, _, typed, _)| typed.as_ref())
+                .map(|typed| alias_hints(workspace, typed, visualizers))
+                .unwrap_or_default()
+        };
+        let value_kind = |name: &str| match typed(name) {
+            Some((_, module, _, ty)) => hint_value_kind(workspace, module, ty, 0),
+            None => HintValueKind::Unknown,
         };
         let names = self.table[index]
             .properties
             .iter()
             .map(|property| property.name.clone())
             .collect::<Vec<_>>();
-        if resolved.is_none() && !names.iter().any(|name| type_format(name).is_some()) {
+        if resolved.is_none()
+            && !names
+                .iter()
+                .any(|name| type_format(name).is_some() || !type_hints(name).is_empty())
+        {
             return None;
         }
         let resolved = resolved.unwrap_or_default();
+        // A property's own hints win one by one over those of the alias its type names.
+        let editor = |name: &str, child: Option<&crate::visualizers::ResolvedChild>| {
+            let mut hints = child
+                .map(|child| {
+                    child
+                        .attributes
+                        .iter()
+                        .filter(|(key, _)| EDITOR_HINTS.contains(&key.as_str()))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for (key, value) in type_hints(name) {
+                if !hints.iter().any(|(existing, _)| *existing == key) {
+                    hints.push((key, value));
+                }
+            }
+            editor_hints(&hints, value_kind(name))
+        };
         let mut properties = resolved
             .properties
             .iter()
@@ -1958,12 +2055,14 @@ impl<'a> TreeBuilder<'a> {
                     .get("format")
                     .map(str::to_string)
                     .or_else(|| type_format(&merged.property)),
+                editor: editor(&merged.property, Some(merged)),
             })
             .collect::<Vec<_>>();
         for name in names {
             if !properties.iter().any(|property| property.name == name) {
                 properties.push(SourcePropertyVisualizer {
                     format: type_format(&name),
+                    editor: editor(&name, None),
                     name,
                 });
             }
@@ -2024,14 +2123,24 @@ impl<'a> TreeBuilder<'a> {
     }
 }
 
+/// A property's name, the module that declared it, the declaration its type names as written
+/// (through occurrence suffixes), and its type as written.
+pub(crate) type PropertyType = (
+    String,
+    String,
+    Option<DeclarationOrigin>,
+    nx_hir::ast::TypeRef,
+);
+
 /// Each property of the declaration at `origin`, whose bases are `chain`, with the module that
-/// declared it and the declaration its type names as written, through occurrence suffixes.
-fn property_types(
+/// declared it, the declaration its type names as written, through occurrence suffixes, and its
+/// type as written.
+pub(crate) fn property_types(
     workspace: &WorkspaceDeclarations,
     origin: &DeclarationOrigin,
     chain: &[DeclarationOrigin],
-) -> Vec<(String, String, Option<DeclarationOrigin>)> {
-    let mut types: Vec<(String, String, Option<DeclarationOrigin>)> = Vec::new();
+) -> Vec<PropertyType> {
+    let mut types: Vec<PropertyType> = Vec::new();
     for declaring in chain.iter().rev().chain(std::iter::once(origin)) {
         let fields: Vec<(&nx_hir::Name, &nx_hir::ast::TypeRef)> =
             match item_at(workspace, declaring) {
@@ -2061,7 +2170,12 @@ fn property_types(
                     .get(type_name.as_str())
                     .cloned()
             });
-            let property = (name.as_str().to_string(), module.to_string(), typed);
+            let property = (
+                name.as_str().to_string(),
+                module.to_string(),
+                typed,
+                ty.clone(),
+            );
             match types.iter_mut().find(|existing| existing.0 == property.0) {
                 Some(existing) => *existing = property,
                 None => types.push(property),
@@ -2112,6 +2226,148 @@ fn alias_format(
         }
         current = next;
     }
+}
+
+/// The editor hints of the alias at `origin`: each from its own visualizer, or else from that of
+/// the alias it names, as written.
+fn alias_hints(
+    workspace: &WorkspaceDeclarations,
+    origin: &DeclarationOrigin,
+    visualizers: &ProgramVisualizers,
+) -> Vec<(String, String)> {
+    let mut hints: Vec<(String, String)> = Vec::new();
+    let mut current = origin.clone();
+    let mut seen = Vec::new();
+    loop {
+        let Some(Item::TypeAlias(alias)) = item_at(workspace, &current) else {
+            return hints;
+        };
+        if let Some(resolved) = visualizers.resolve(&current, &[]) {
+            for (key, value) in resolved.hints {
+                if !hints.iter().any(|(existing, _)| *existing == key) {
+                    hints.push((key, value));
+                }
+            }
+        }
+        seen.push(current.clone());
+        let Some(next) = written_type_name(&alias.ty).and_then(|name| {
+            workspace
+                .type_namespaces
+                .get(&current.0)?
+                .get(name.as_str())
+                .cloned()
+        }) else {
+            return hints;
+        };
+        if seen.contains(&next) {
+            return hints;
+        }
+        current = next;
+    }
+}
+
+/// What kind of value an editor hint edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HintValueKind {
+    /// A number of any width.
+    Number,
+    /// A string.
+    String,
+    /// A union of cases with no properties.
+    Cases,
+    /// Anything else.
+    Other,
+    /// A type that did not resolve, which every hint is kept for.
+    Unknown,
+}
+
+/// What kind of value `ty`, written in `module`, is to an editor hint: through occurrence suffixes
+/// and aliases.
+fn hint_value_kind(
+    workspace: &WorkspaceDeclarations,
+    module: &str,
+    ty: &nx_hir::ast::TypeRef,
+    depth: usize,
+) -> HintValueKind {
+    let Some(name) = written_type_name(ty) else {
+        return HintValueKind::Other;
+    };
+    match name.as_str() {
+        "int" | "int32" | "int64" | "float32" | "float64" => return HintValueKind::Number,
+        "string" => return HintValueKind::String,
+        "boolean" => return HintValueKind::Other,
+        _ => {}
+    }
+    let Some(origin) = workspace
+        .type_namespaces
+        .get(module)
+        .and_then(|namespace| namespace.get(name.as_str()))
+    else {
+        return HintValueKind::Unknown;
+    };
+    match item_at(workspace, origin) {
+        Some(Item::TypeAlias(alias)) if depth < 16 => {
+            hint_value_kind(workspace, &origin.0, &alias.ty, depth + 1)
+        }
+        Some(Item::Union(union_def)) => {
+            if union_def.cases.iter().all(|case| case.is_fieldless()) {
+                HintValueKind::Cases
+            } else {
+                HintValueKind::Other
+            }
+        }
+        Some(_) => HintValueKind::Other,
+        None => HintValueKind::Unknown,
+    }
+}
+
+/// The editor hints among `hints` that fit a value of `kind`, or `None` when none does. Analysis
+/// reports a hint that does not fit as `editor-hint-mismatch`, and a reader never sees it.
+fn editor_hints(hints: &[(String, String)], kind: HintValueKind) -> Option<SourceEditorHints> {
+    let fits = |needs: HintValueKind| kind == HintValueKind::Unknown || kind == needs;
+    let get = |name: &str| {
+        hints
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    };
+    let number = |name: &str| {
+        get(name)
+            .filter(|_| fits(HintValueKind::Number))
+            .and_then(|text| text.parse::<f64>().ok())
+            .map(SourceNumber)
+    };
+    let editor = SourceEditorHints {
+        kind: get("editor")
+            .filter(|kind| match *kind {
+                "field" | "slider" => fits(HintValueKind::Number),
+                "dropdown" | "segmented" => fits(HintValueKind::Cases),
+                _ => false,
+            })
+            .map(str::to_string),
+        min: number("min"),
+        max: number("max"),
+        step: number("step"),
+        stops: get("stops")
+            .filter(|_| fits(HintValueKind::Number))
+            .map(|text| {
+                text.split_whitespace()
+                    .filter_map(|stop| stop.parse::<f64>().ok())
+                    .map(SourceNumber)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        unit: get("unit")
+            .filter(|_| fits(HintValueKind::Number))
+            .map(str::to_string),
+        multiline: get("multiline")
+            .filter(|value| *value == "true" && fits(HintValueKind::String))
+            .map(|_| true),
+        placeholder: get("placeholder")
+            .filter(|_| fits(HintValueKind::String))
+            .map(str::to_string),
+    };
+    (editor != SourceEditorHints::default()).then_some(editor)
 }
 
 /// What a property is made of, whichever kind of declaration wrote it.
@@ -2186,7 +2442,7 @@ fn default_text(
         .map(str::to_string)
 }
 
-fn item_at<'w>(
+pub(crate) fn item_at<'w>(
     workspace: &'w WorkspaceDeclarations,
     origin: &DeclarationOrigin,
 ) -> Option<&'w Item> {
@@ -2199,7 +2455,7 @@ fn item_at<'w>(
 
 /// The bases of the declaration at `origin`, nearest first, each resolved in the module of the
 /// declaration that names it.
-fn base_chain(
+pub(crate) fn base_chain(
     workspace: &WorkspaceDeclarations,
     origin: &DeclarationOrigin,
 ) -> Vec<DeclarationOrigin> {

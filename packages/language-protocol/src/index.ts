@@ -125,7 +125,9 @@ export type SourceEdit =
   /** Set a run of text content written on one line. */
   | { kind: "setText"; text: string }
   /** Remove an attribute: Reset for a property with a default, Clear for an optional one. */
-  | { kind: "remove" };
+  | { kind: "remove" }
+  /** Add a property an element does not write, as an attribute in the element's layout. */
+  | { kind: "addProperty"; name: string; value: SourceEditValue };
 
 /** A value to write, by kind; the service decides its spelling. */
 export type SourceEditValue =
@@ -135,7 +137,26 @@ export type SourceEditValue =
   | { kind: "number"; text: string }
   | { kind: "boolean"; value: boolean }
   /** A union case, by name. */
-  | { kind: "case"; name: string };
+  | { kind: "case"; name: string }
+  /**
+   * A reference to a named value, by its path (identifiers joined by dots, such as `theme.accent`):
+   * written in braces as an attribute's value, and bare elsewhere.
+   */
+  | { kind: "reference"; path: string };
+
+/**
+ * The named values one property of an element can take: the `let`s in the document's scope, and
+ * one level of their record members, whose type the property accepts.
+ *
+ * Unstable: the request's and the answer's shapes may change until a later release commits to
+ * them.
+ */
+export interface NamedValuesRequest extends LanguageQuery {
+  /** The key of the element, as the document's source tree gives it. */
+  key: string;
+  /** The name of one of the element's properties, written or not. */
+  property: string;
+}
 
 /** The queries this protocol defines. */
 export const LANGUAGE_QUERIES = [
@@ -145,6 +166,7 @@ export const LANGUAGE_QUERIES = [
   "documentSymbols",
   "sourceTree",
   "sourceEdit",
+  "namedValues",
 ] as const;
 
 /** A query name this protocol defines. */
@@ -176,6 +198,7 @@ export interface LanguageQueryRequests {
   documentSymbols: DocumentSymbolsRequest;
   sourceTree: SourceTreeRequest;
   sourceEdit: SourceEditRequest;
+  namedValues: NamedValuesRequest;
 }
 
 /** The answer shape of each defined query. */
@@ -186,6 +209,7 @@ export interface LanguageQueryAnswers {
   documentSymbols: DocumentSymbol[];
   sourceTree: SourceTree;
   sourceEdit: SourceEditAnswer;
+  namedValues: NamedValue[];
 }
 
 /** Returns whether `name` is a query this protocol defines. */
@@ -235,6 +259,21 @@ export type SourceEditRefusal = "unknownNode" | "notEditable" | "invalidValue";
 export interface SourceEditAnswer {
   edits: TextEdit[];
   refused?: SourceEditRefusal;
+}
+
+/**
+ * One named value a property can take. The answer to a named values query is a list of these: the
+ * document's own values first, then each import's, each in declaration order.
+ */
+export interface NamedValue {
+  /** The reference as the document would write it, such as `accent` or `theme.accent`. */
+  path: string;
+  /** The value's declared or inferred type, spelled in NX. */
+  type: string;
+  /** The doc comment, rendered as hover renders it. */
+  doc?: string;
+  /** The value's source text, when it is a literal, such as `"#c8a27a"`. */
+  value?: string;
 }
 
 /** The kinds of completion item the language service produces. */
@@ -497,7 +536,38 @@ export interface SourceVisualizer {
   properties?: SourcePropertyVisualizer[];
   /** How an alias's string values are shown. */
   format?: SourceValueFormat;
+  /** How an alias's values are edited: its resolved editor hints that fit its type. */
+  editor?: SourceEditorHints;
 }
+
+/**
+ * The editor hints that apply to a value, each present only when set. A hint changes how a viewer
+ * edits the value, never what the value is.
+ */
+export interface SourceEditorHints {
+  /** The editor asked for. */
+  kind?: SourceValueEditor;
+  /** The smallest number the editor offers. */
+  min?: number;
+  /** The largest number the editor offers. */
+  max?: number;
+  /** How far one step moves a number. */
+  step?: number;
+  /** The numbers a slider snaps to, in order. */
+  stops?: number[];
+  /** The unit shown after a number, never written. */
+  unit?: string;
+  /** Present, and `true`, when a string's field takes line breaks. */
+  multiline?: boolean;
+  /** Text shown in an empty field, never written. */
+  placeholder?: string;
+}
+
+/**
+ * The editor a hint asks for: a number field, a slider with a number field, a list of a union's
+ * cases, or the cases as one row of buttons.
+ */
+export type SourceValueEditor = "field" | "slider" | "dropdown" | "segmented";
 
 /** How a string value is shown. A format changes how the value looks, never what it is. */
 export type SourceValueFormat = "id" | "color";
@@ -510,6 +580,11 @@ export interface SourcePropertyVisualizer {
    * visualizer of the alias its type names.
    */
   format?: SourceValueFormat;
+  /**
+   * How the property's value is edited: its resolved editor hints that fit its type, each from its
+   * property visualizer, or else from the visualizer of the alias its type names.
+   */
+  editor?: SourceEditorHints;
 }
 
 /**
@@ -548,6 +623,8 @@ export interface NxLanguageService {
   sourceTree(request: SourceTreeRequest, signal?: AbortSignal): Promise<SourceTree>;
   /** Unstable: the request's and the answer's shapes may change until a later release commits to them. */
   sourceEdit(request: SourceEditRequest, signal?: AbortSignal): Promise<SourceEditAnswer>;
+  /** Unstable: the request's and the answer's shapes may change until a later release commits to them. */
+  namedValues(request: NamedValuesRequest, signal?: AbortSignal): Promise<NamedValue[]>;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import type {
   SourceTree,
   SourceEdit,
   SourceEditAnswer,
+  NamedValue,
 } from "@nx-lang/language-protocol";
 import { isAbortError } from "@nx-lang/language-protocol";
 
@@ -128,6 +129,10 @@ function fakeSnapshot(
         ? { edits: [{ range: range(panelLine, 12, 17, queried.indexOf("light")), newText: "dark" }] }
         : { edits: [], refused: "unknownNode" };
     },
+    namedValues: (uri, key, property): NamedValue[] => {
+      record.namedValues.push({ uri, key, property });
+      return key === "root" ? [{ path: "accent", type: "Color", value: '"#c8a27a"' }] : [];
+    },
     dispose: () => {},
   };
 }
@@ -138,10 +143,11 @@ type Record_ = {
   implicitImports: string[][];
   treeOptions: ({ visualizers?: { modules?: string[] } } | undefined)[];
   edits: { uri: string; key: string; edit: SourceEdit }[];
+  namedValues: { uri: string; key: string; property: string }[];
 };
 
 function newRecord(): Record_ {
-  return { analyses: 0, sources: [], implicitImports: [], treeOptions: [], edits: [] };
+  return { analyses: 0, sources: [], implicitImports: [], treeOptions: [], edits: [], namedValues: [] };
 }
 
 function serviceOver(record: Record_) {
@@ -327,6 +333,16 @@ test("a source edit passes its key and edit to the snapshot, and a refusal is an
     { uri: FORM, key: "root.mode.value", edit },
     { uri: FORM, key: "nowhere", edit },
   ]);
+});
+
+test("a named values query passes its key and property to the snapshot", async () => {
+  const record = newRecord();
+  const service = serviceOver(record);
+
+  const values = await service.namedValues({ documents: [{ uri: FORM, source: SOURCE }], uri: FORM, key: "root", property: "color" });
+
+  assert.deepEqual(values, [{ path: "accent", type: "Color", value: '"#c8a27a"' }]);
+  assert.deepEqual(record.namedValues, [{ uri: FORM, key: "root", property: "color" }]);
 });
 
 test("repeated queries over unchanged text analyze once, and each answer carries its own version", async () => {

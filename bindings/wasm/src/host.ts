@@ -3,6 +3,7 @@ import type {
   DiagnosticReport,
   DocumentSymbol,
   Hover,
+  NamedValue,
   SourceEdit,
   SourceEditAnswer,
   SourceTree,
@@ -362,6 +363,15 @@ export interface NxLanguageSnapshot {
    * commits to them.
    */
   sourceEdit(uri: string, key: string, edit: SourceEdit): SourceEditAnswer;
+
+  /**
+   * The named values the property `property` of the element `key` of the document at `uri` can
+   * take.
+   *
+   * Unstable: the request's and the answer's shapes may change in any release until a later one
+   * commits to them.
+   */
+  namedValues(uri: string, key: string, property: string): NamedValue[];
 
   /**
    * Releases the snapshot inside the module. Calling `dispose` more than once is allowed.
@@ -966,6 +976,15 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
       "nx_wasm_snapshot_source_edit",
       (exports, pointer, length) => exports.nx_wasm_snapshot_source_edit(handle, pointer, length),
       { uri, key, edit }
+    );
+  }
+
+  namedValues(uri: string, key: string, property: string): NamedValue[] {
+    const handle = this.#live();
+    return this.#host.callWithArgument<NamedValue[]>(
+      "nx_wasm_snapshot_named_values",
+      (exports, pointer, length) => exports.nx_wasm_snapshot_named_values(handle, pointer, length),
+      { uri, key, property }
     );
   }
 
