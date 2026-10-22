@@ -1981,6 +1981,34 @@ fn the_types_of_unwritten_properties_are_listed() {
 }
 
 #[test]
+fn a_union_cases_property_types_are_listed() {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(
+                "nx://tenant/extras.nx",
+                "export type Strength = mild | bold\nexport type Shots = int\nexport type Extra = none | syrup { flavor:string strength:Strength = mild shots:Shots = 1 }\n",
+            )
+            .with_version(1),
+            DocumentInput::new(
+                URI,
+                "import \"./extras.nx\"\n\nlet promo = <Extra.syrup flavor=\"mocha\" />\n",
+            )
+            .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_visualizers(&snapshot, &[]);
+    let names: Vec<&str> = tree
+        .declarations
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(names.contains(&"Strength"), "{names:?}");
+    assert!(names.contains(&"Shots"), "{names:?}");
+}
+
+#[test]
 fn an_aliass_chain_is_listed_to_its_end() {
     let snapshot = WorkspaceSnapshot::from_documents(
         Option::<PathBuf>::None,

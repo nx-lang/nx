@@ -4,7 +4,7 @@
  */
 import type { SourceDeclaration, SourceNode, SourceProperty } from "@nx-lang/language-protocol";
 
-import { elementProperties, type TreeIndex } from "./tree.js";
+import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
 
 /** A hover card's content. */
 export interface Card {
@@ -43,7 +43,7 @@ export function cardOf(index: TreeIndex, at: number): Card | undefined {
       return declarationCard(index, node.declaration, isElementFunction(index, at), returns);
     }
     case "attribute":
-      return propertyCard(index, node);
+      return propertyCard(index, at);
     case "case":
       return caseCard(index, node.declaration, node.name ?? "", node.type);
     case "reference":
@@ -128,12 +128,16 @@ function declarationSignature(
   }
 }
 
-/** `(property) name?: Type = default` and its doc, from the declaration of the element it is on. */
-function propertyCard(index: TreeIndex, node: SourceNode): Card | undefined {
+/**
+ * `(property) name?: Type = default` and its doc, from the declaration of the element it is on, under
+ * a property-list condition too.
+ */
+function propertyCard(index: TreeIndex, at: number): Card | undefined {
   const { tree } = index;
-  const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
+  const node = tree.nodes[at]!;
+  const element = attributeElement(tree, at);
   const property =
-    owner?.role === "element" ? elementProperties(tree, owner)?.find((candidate) => candidate.name === node.name) : undefined;
+    element === undefined ? undefined : elementProperties(tree, tree.nodes[element]!)?.find((candidate) => candidate.name === node.name);
   return property === undefined ? undefined : propertyCardOf(property);
 }
 

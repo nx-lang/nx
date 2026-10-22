@@ -9,7 +9,7 @@
 import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
 import { isElementFunction, VALUE_ROLES } from "./card.js";
-import type { TreeIndex } from "./tree.js";
+import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
 
 /** One colored range of the text, in UTF-16 offsets. Ranges are in text order and do not overlap. */
 export interface NxViewerColor {
@@ -1096,9 +1096,11 @@ export function renderSource(
     const holder = tree.nodes[place]!;
     let spelled: string | undefined;
     if (holder.role === "attribute") {
-      const owner = holder.parent === undefined ? undefined : tree.nodes[holder.parent];
-      const declared = owner?.declaration === undefined ? undefined : tree.declarations[owner.declaration];
-      spelled = declared?.properties?.find((property) => property.name === holder.name)?.type;
+      const owner = attributeElement(tree, place);
+      spelled =
+        owner === undefined
+          ? undefined
+          : elementProperties(tree, tree.nodes[owner]!)?.find((property) => property.name === holder.name)?.type;
     } else if (holder.role === "declaration") {
       const typed = (index.children[place] ?? []).find(
         (child) => tree.nodes[child]!.role === "typeReference" && index.slots[child] !== "extends"
@@ -1391,9 +1393,11 @@ export function uiTextNodes(index: TreeIndex): Set<number> {
 
   tree.nodes.forEach((node, at) => {
     if (node.role === "attribute") {
-      const element = node.parent === undefined ? undefined : tree.nodes[node.parent];
-      const declared = element?.declaration === undefined ? undefined : declarations[element.declaration];
-      const property = declared?.properties?.find((candidate) => candidate.name === node.name);
+      const element = attributeElement(tree, at);
+      const property =
+        element === undefined
+          ? undefined
+          : elementProperties(tree, tree.nodes[element]!)?.find((candidate) => candidate.name === node.name);
       if (isUIText(property?.type)) {
         mark(at);
       }
@@ -1425,8 +1429,9 @@ export function formattedNodes(index: TreeIndex): Map<number, SourceValueFormat>
       return;
     }
     const attribute = tree.nodes[node.parent]!;
-    const element = attribute.parent === undefined ? undefined : tree.nodes[attribute.parent];
-    if (attribute.role !== "attribute" || element?.declaration === undefined) {
+    const elementAt = attribute.role === "attribute" ? attributeElement(tree, node.parent) : undefined;
+    const element = elementAt === undefined ? undefined : tree.nodes[elementAt];
+    if (element?.declaration === undefined) {
       return;
     }
     const visualizer = tree.declarations[element.declaration]?.visualizer;

@@ -1996,19 +1996,40 @@ impl<'a> TreeBuilder<'a> {
             .filter_map(|index| self.origin_of(index))
             .collect();
         for origin in &listed {
-            let element = match item_at(workspace, origin) {
-                Some(Item::Record(_) | Item::Component(_)) => true,
+            let item = item_at(workspace, origin);
+            let element = match item {
+                Some(Item::Record(_) | Item::Component(_) | Item::Union(_)) => true,
                 Some(Item::Function(function)) => function.form == FunctionForm::Element,
                 _ => false,
             };
             if !element {
                 continue;
             }
+            // A union's case is written as an element too: its base's properties, then the case's.
+            let case_types: Vec<DeclarationOrigin> = match item {
+                Some(Item::Union(union_def)) => union_def
+                    .cases
+                    .iter()
+                    .flat_map(|case| case.fields.iter())
+                    .filter_map(|field| {
+                        let name = written_type_name(&field.ty)?;
+                        workspace
+                            .type_namespaces
+                            .get(origin.0.as_str())?
+                            .get(name.as_str())
+                            .cloned()
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             let chain = base_chain(workspace, origin);
             for (_, _, typed, _) in property_types(workspace, origin, &chain) {
                 if let Some(typed) = typed {
                     self.entry(&typed);
                 }
+            }
+            for typed in &case_types {
+                self.entry(typed);
             }
         }
         let mut index = 0;

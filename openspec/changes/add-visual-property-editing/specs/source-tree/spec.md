@@ -30,7 +30,7 @@ value as one with a format does. The values SHALL round-trip through JSON withou
 
 ### Requirement: The types of unwritten properties are listed
 When a `sourceTree` request asks for `visualizers`, the declaration table SHALL also list the
-declaration that types each property of every record, component or element function the document's
+declaration that types each property of every record, component, element function or union case the document's
 nodes refer to, written or not, and the declaration each listed alias names, through its chain, so a
 reader can edit a property an element does not write with its type's editor. A declaration listed only
 this way SHALL NOT bring the types of its own properties.

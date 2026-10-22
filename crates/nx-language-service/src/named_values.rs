@@ -72,9 +72,8 @@ fn named_values_in(
         return None;
     }
     let declaration = tree.declarations.get(node.declaration? as usize)?;
-    let declared = declaration
-        .properties
-        .iter()
+    let declared = crate::source_edit::element_properties(tree, node)?
+        .into_iter()
         .find(|candidate| candidate.name == property)?;
     if declared.flags.contains(&SourceFlag::Content) {
         return None;
@@ -87,15 +86,31 @@ fn named_values_in(
         .find(|origin| {
             matches!(
                 item_at(workspace, origin),
-                Some(item @ (Item::Record(_) | Item::Component(_) | Item::Function(_)))
+                Some(item @ (Item::Record(_) | Item::Component(_) | Item::Function(_) | Item::Union(_)))
                     if item.name().as_str() == declaration.name
             )
         })?
         .clone();
     let chain = base_chain(workspace, &origin);
-    let (_, declaring_module, _, written) = property_types(workspace, &origin, &chain)
+    // A property of the declaration or its base, or else one of the union case the element writes.
+    let (declaring_module, written) = property_types(workspace, &origin, &chain)
         .into_iter()
-        .find(|(name, _, _, _)| name == property)?;
+        .find(|(name, _, _, _)| name == property)
+        .map(|(_, module, _, written)| (module, written))
+        .or_else(|| {
+            let Some(Item::Union(union_def)) = item_at(workspace, &origin) else {
+                return None;
+            };
+            let case = node.name.as_deref()?.rsplit('.').next()?;
+            let field = union_def
+                .cases
+                .iter()
+                .find(|candidate| candidate.name.as_str() == case)?
+                .fields
+                .iter()
+                .find(|field| field.name.as_str() == property)?;
+            Some((origin.0.to_string(), field.ty.clone()))
+        })?;
 
     let prepared = workspace.artifact(identity)?.prepared_module.clone()?;
     let mut context = InferenceContext::new(&prepared);
@@ -197,7 +212,12 @@ fn named_values_in(
             if !context.satisfies(&field_ty, &expected) {
                 continue;
             }
-            let written = member_value(lowered, value.value, field.name.as_str())
+            let member = member_value(lowered, value.value, field.name.as_str());
+            // An optional member the value never writes, with no default, is always absent.
+            if field.optional && member.is_none() && field.default.is_none() {
+                continue;
+            }
+            let written = member
                 .and_then(|expr| literal_text(workspace, &origin.0, lowered, expr))
                 .or_else(|| {
                     let default = field.default.as_ref()?;

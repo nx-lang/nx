@@ -18,7 +18,7 @@ language snapshot and the built viewer under jsdom.
 
 ## Findings
 
-### 🟡 Fixed - RF1 Visual edits any reference, so a parameter or a loop variable is replaced by a literal
+### ✅ Verified - RF1 Visual edits any reference, so a parameter or a loop variable is replaced by a literal
 - **Severity:** High
 - **Evidence:** `packages/viewer/src/edit.ts:207-218` makes every whole-value `reference` or `member` node
   whose path is a dotted name an edit target. It does not check that the name is a named value (a
@@ -37,8 +37,9 @@ language snapshot and the built viewer under jsdom.
   through to `nx-open`. Add viewer tests over the test-cases fixture: `{name}` in `Special` and `{size}` in
   the `for` fire `nx-open` and are not `.editable-value`. **Confidence in fix: high.**
 - **Fix:** In `edit.ts`, `namesValue` accepts a reference only when its name, or a member's innermost object, has a `declaration` of kind `value`; anything else falls through to `nx-open`. New `bindings` fixture and tests: `{name}` in `Special` and `{size}` in a `for` are not targets and open Source, while `{accent}` and `palette.accent` still edit. Viewer spec scenario "A parameter is not a named value" and README row added.
+- **Verification:** Confirmed. `namesValue` accepts a reference only when its name, or a member's innermost object, has a `declaration` of kind `value`. Probed through the wasm tree: an imported `let` (`name={brand}`) and an imported `let`'s member (`tint={theme.accent}`) still edit, and a component parameter's member (`tint={t.accent}`) does not. The `bindings` tests check both the targets and `nx-open` on a double-click. **Confidence: high.**
 
-### 🟡 Fixed - RF2 An empty range (`min` above `max`) reaches the viewer and makes every number unenterable
+### ✅ Verified - RF2 An empty range (`min` above `max`) reaches the viewer and makes every number unenterable
 - **Severity:** Medium
 - **Evidence:** `editor-hint-range` is only a warning (`crates/nx-types/src/infer.rs:1792`).
   `editor_hints` (`crates/nx-language-service/src/source_tree.rs:2381-2403`) still passes both bounds to the
@@ -54,8 +55,9 @@ language snapshot and the built viewer under jsdom.
   `min > max`, leave them out of `SourceEditorHints`, with a source-tree test. Also guard `rangeProblem` and
   `isSlider` with `min <= max`. **Confidence in fix: high.**
 - **Fix:** `editor_hints` now leaves out both `min` and `max` when `min > max` (source-tree test `an_empty_range_is_left_out`, spec scenario added). `rangeProblem` and `isSlider` also treat an empty range as no range (viewer test).
+- **Verification:** Confirmed. `editor_hints` leaves out both bounds when `min > max` (`an_empty_range_is_left_out`, which also checks that `step` stays), and `rangeProblem` and `isSlider` treat an empty range as no range (viewer test). One gap remains, listed under Questions: when merging makes the range empty (a property's `min=100` over an alias's `max=64`), the range is now left out with no warning, because analysis only checks the hints each visualizer element writes itself. **Confidence: high.**
 
-### 🟡 Fixed - RF3 `namedValues` ignores an optional property's `?`, so optional members and `T?` lets are never offered
+### ✅ Verified - RF3 `namedValues` ignores an optional property's `?`, so optional members and `T?` lets are never offered
 - **Severity:** Medium
 - **Evidence:** `crates/nx-language-service/src/named_values.rs:102` resolves `expected` from the
   property's written type. For `tint?:Color` that is just `Color`, because the `?` is the property's flag and
@@ -70,8 +72,9 @@ language snapshot and the built viewer under jsdom.
   optional property is offered an optional member and a `T?` let, and a required one is offered neither.
   **Confidence in fix: high.**
 - **Fix:** `named_values_in` reads the expected type with `nx_types::read_type(&expected, optional)` for an optional property. Test `an_optional_property_takes_optional_members_and_values` covers an optional member and a `T?` let offered to `tint?:Color`, and neither offered to a required property.
+- **Verification:** Confirmed. `read_type(&expected, optional)` reads `p?:T` the way the checker does. The new test offers an optional member and a `T?` let to `tint?:Color`, and offers neither to a required property. A side effect is listed under Questions. **Confidence: high.**
 
-### 🟡 Fixed - RF4 A case or a negative number over a braced reference in a `let` is refused, against the spec
+### ✅ Verified - RF4 A case or a negative number over a braced reference in a `let` is refused, against the spec
 - **Severity:** Low
 - **Evidence:** `source_edit.rs:248` drops a braced reference's braces only when its owner is an
   `Attribute`. At a `let` value the braces stay, so `unbraced` (`:255`) is false and a case or signed number
@@ -84,8 +87,9 @@ language snapshot and the built viewer under jsdom.
 - **Recommendation:** Accept `Some(SourceRole::Declaration)` as well as `Attribute` at `source_edit.rs:248`,
   and add both probes as tests. **Confidence in fix: high.**
 - **Fix:** `set_value` drops a braced reference's braces at a `let` value as at an attribute. Test `a_literal_or_case_over_a_braced_reference_in_a_let_drops_the_braces` covers a case and `-4`.
+- **Verification:** Confirmed. `set_value` now drops the braces at a `Declaration` owner as well as at an `Attribute` owner. The test covers a case (`let x:S = large`) and `-4`. A reference that is a sequence item keeps a `Sequence` owner, so it still refuses a sign or a bare case. **Confidence: high.**
 
-### 🟡 Fixed - RF5 The viewer's type sets miss `int32` and `int64`, and accept `bool` and `float`, which NX does not have
+### ✅ Verified - RF5 The viewer's type sets miss `int32` and `int64`, and accept `bool` and `float`, which NX does not have
 - **Severity:** Low
 - **Evidence:** `edit.ts:61` sets `NUMBER_TYPES = {int, float, float32, float64}`, and `edit.ts:353` sets
   `BOOLEAN_TYPES = {boolean, bool}`. NX's primitives are `string int int32 int64 float32 float64 boolean object`
@@ -98,8 +102,9 @@ language snapshot and the built viewer under jsdom.
 - **Recommendation:** Use `{int, int32, int64, float32, float64}` and `{boolean}`, change the fixture to
   `iced:boolean`, and add an `int64` case to the unwritten-properties test. **Confidence in fix: high.**
 - **Fix:** `NUMBER_TYPES` is `{int, int32, int64, float32, float64}` and `BOOLEAN_TYPES` is `{boolean}`. All viewer fixtures now write `boolean`. The `bindings` fixture has `big:int64` and `few?:int32`, with a test of their targets and unwritten editors.
+- **Verification:** Confirmed. Both sets now match `PRIMITIVE_TYPE_NAMES`. No `bool` is left in the fixtures. The `bindings` test checks that `big:int64` is a number target and that `few?:int32` lists with a number editor. **Confidence: high.**
 
-### 🟡 Fixed - RF6 Clicking a row's `⋯` again does not close its menu
+### ✅ Verified - RF6 Clicking a row's `⋯` again does not close its menu
 - **Severity:** Low
 - **Evidence:** `#onDocumentPointerDown` (`index.ts:369-373`, a capture listener on the document) closes the
   menu on any press outside `#menu`, including a press on the row's own `.row-menu` mark. The click that
@@ -112,8 +117,9 @@ language snapshot and the built viewer under jsdom.
   open row's `.row-menu`, or remember the press as `#closedOnPress` does for popovers. Add a test that sends
   pointerdown before each click. Skip `.row-menu` in the words walk. **Confidence in fix: high.**
 - **Fix:** The document pointerdown handler leaves the menu open when the press is on the open row's own `.row-menu`, so the click that follows closes it. `spoken` skips `.row-menu`. A test sends pointerdown, pointerup and click twice and checks the announcement; it fails without either change.
+- **Verification:** Confirmed. A press on the open row's own `.row-menu` no longer closes the menu, so the click toggles it shut. A press on another row's mark still closes the menu, and that click opens the other row's. `spoken` skips the mark. The new test sends pointerdown, pointerup and click twice, then checks the label and the live region. **Confidence: high.**
 
-### 🟡 Fixed - RF7 A property written only inside a property-list `if` counts as unwritten, and adding it is overridden
+### ✅ Verified - RF7 A property written only inside a property-list `if` counts as unwritten, and adding it is overridden
 - **Severity:** Low
 - **Evidence:** Attributes under a property-list condition hang under a `condition` or `match` node, not
   the element. `unwrittenProperties` (`edit.ts`, direct `attribute` children) and `add_property`
@@ -126,6 +132,7 @@ language snapshot and the built viewer under jsdom.
   element already writes"). Add a test for each. **Confidence in fix: medium.** It is a product call whether
   the property should instead be offered as the unconditional value.
 - **Fix:** Product call taken: a property written in any branch of a property-list condition or match counts as written. `attributeElement` (viewer `tree.ts`) and `attribute_element` (Rust) find an attribute's element through conditions. `unwrittenProperties` leaves such a property out, and `add_property` refuses it as `invalidValue` while still placing new attributes after the element's own ones. The corpus round-trip test uses the same rule. Tests in both layers, and source-edits and viewer spec wording plus a scenario.
+- **Verification:** Confirmed, and consistent across layers. `attribute_element` (Rust) and `attributeElement` (viewer) climb through `condition` and `match` nodes. Probed through wasm with `if flag { iced=true } else { tint={shade} }` and `if mode is { light => iced=true dark => shots=2 }`: `unwrittenProperties` leaves those properties out, and `addProperty` refuses them as `invalidValue`. A new property still goes after the element's own attributes, on the tag's line or on a line of its own. An element whose only attributes are conditional takes the new one on its tag's line. The source-edits and viewer specs, the README and the corpus round-trip test all use the same rule. The fix also routed `declaredType`, `hintsOf` and `propertyOf` through `attributeElement`, but not the format, hover-card and removal lookups (RF13). **Confidence: high.**
 
 ### 🟡 Fixed - RF8 A union case's element never offers the properties it does not write
 - **Severity:** Low
@@ -139,8 +146,14 @@ language snapshot and the built viewer under jsdom.
   elements and say so in the README. **Confidence in fix: medium**, because which way to go is a product
   call.
 - **Fix:** Product call taken: case elements are supported. `elementProperties` (viewer) and `element_properties` (Rust) give the union's shared properties and then the case's. They are used by `unwrittenProperties`, `declaredType`, `removalOf`, the property card and `add_property`. Tests: Rust `adding_to_a_union_cases_element`, and the viewer's `+ 1 more` on `<Extra.syrup>` adding `pumps`. Spec wording and a scenario added. `namedValues` still answers nothing for a case element's property, which leaves its editors reading as with no host function.
+- **Verification:** Only partly fixed. `addProperty`, `unwrittenProperties`, `declaredType`, `removalOf` and the property card now take the union's shared properties and then the case's, the same way in Rust and the viewer, and the source-edits and viewer specs say so. Two places still ignore the case's properties:
+  - `namedValues` (`named_values.rs:74-93`) still looks only in `declaration.properties`, and only searches records, components and functions for the declaration's origin. Probed through wasm: for `<Extra.syrup flavor="x" />` with `let mocha = "mocha"` in scope, it answers `[]` for `flavor`, while a record's `name:string` gets `mocha`. The source-edits spec says a property the element does not have answers an empty list. Under RF8 the element now has `flavor`, and the viewer requirement "Editors offer the named values the host gives" makes no exception for case elements.
+  - `list_property_types` (`source_tree.rs:1994-2013`) lists property types only for records, components and element functions, as the source-tree requirement "The types of unwritten properties are listed" says. So a case's property typed by an alias or a union that no node refers to is not in the declaration table. Probed with an imported `type Extra = none | syrup { flavor:string strength:Strength = mild shots:Shots = 1 }` used only as `<Extra.syrup flavor="mocha" />`: the dimmed rows `strength` and `shots` get no editor and open Source. The same properties on a record get a case popover and a number field.
 
-### 🟡 Fixed - RF9 A mismatched property hint hides the alias's valid hint of the same name
+  **Recommendation:** in `named_values_in`, find the property with `element_properties` and resolve a case property's written type from the union's case. In `list_property_types`, also list the types of a union's shared and case properties, and extend the source-tree requirement to cover case elements. Add a test for each. **Confidence in fix: high.**
+- **Fix (second round):** `named_values_in` finds the property with `element_properties`, matches a union's origin, and resolves a case property's written type from the element's case (test `a_union_cases_element_takes_named_values`). `list_property_types` also lists the types of a union's base and case properties (test `a_union_cases_property_types_are_listed`, with an imported `Extra` whose `strength:Strength` and `shots:Shots` nothing else names). The source-tree requirement now names union cases.
+
+### ✅ Verified - RF9 A mismatched property hint hides the alias's valid hint of the same name
 - **Severity:** Low
 - **Evidence:** In `element_visualizer`'s `editor` closure (`source_tree.rs`), the property's own hints are
   merged with the alias's, keyed by name, before `editor_hints` drops the ones that do not fit. So
@@ -152,8 +165,9 @@ language snapshot and the built viewer under jsdom.
   fitting property hints shadow the alias's. Add a test with a mismatched `editor` over an alias's `editor`.
   **Confidence in fix: high.**
 - **Fix:** Each source's hints are filtered by `hint_fits` before merging, so only fitting property hints shadow the alias's. Test `a_mismatched_property_hint_leaves_the_aliass_in_force`, with spec wording added.
+- **Verification:** Confirmed. `hint_fits` filters the property's hints before the alias's are merged in, and `editor_hints` filters again when it reads them. The test has a mismatched `editor=dropdown` over an alias's `editor=field min=0 max=10`, and checks that the result is `field` with max 10. **Confidence: high.**
 
-### 🟡 Fixed - RF10 Units are drawn after the reading is measured, so a line that fit can overflow
+### ✅ Verified - RF10 Units are drawn after the reading is measured, so a line that fit can overflow
 - **Severity:** Low
 - **Evidence:** In `#render`, the width-fitting passes (`index.ts:852-866`, `#wrapped()`) measure lines
   without units. `#markUnits(targets)` then appends ` px` after each hinted number (`index.ts:874`). A
@@ -162,8 +176,9 @@ language snapshot and the built viewer under jsdom.
 - **Recommendation:** Add the unit marks inside `draw` (or in `renderSource`), before measuring, so the
   fitting passes see them. **Confidence in fix: medium.**
 - **Fix:** `#markUnits` now runs inside `draw`, after each `renderSource` and before the fitting passes measure. It finds its spans in the freshly drawn body.
+- **Verification:** Confirmed by reading the code. `#markUnits` runs inside `draw` after every `renderSource`, so the `#wrapped()` passes measure lines with their units. It reads spans from the freshly drawn body and keeps the last one for each key, as `#rendered` does. No other path redraws the body. jsdom cannot measure widths, so this has no test, but the existing unit tests pass. **Confidence: medium-high.**
 
-### 🟡 Fixed - RF11 Risky paths have no tests
+### ✅ Verified - RF11 Risky paths have no tests
 - **Severity:** Low
 - **Evidence and Recommendation:** Add tests for:
   - (a) Task 3.2's "Nothing moves": no test sets a newer tree after an `addProperty`. "keeps open across a
@@ -185,8 +200,9 @@ language snapshot and the built viewer under jsdom.
   - (d) The playground worker answering `namedValues` for the test-cases example, and picking `theme.muted` writing `tint={theme.muted}` through the edit queue.
   - (e) Rust `adding_after_a_value_over_several_lines` (on the tag's line and a line each) and the property-list condition case (RF7).
   - (f) The empty range (RF2).
+- **Verification:** Confirmed. Each of (a) to (f) has a test that exercises the path: (a) sets a real newer tree that writes `iced` and checks `+ 3 more` and the selection; (d) runs the worker's `namedValues` on the test-cases example and applies the reference through the edit queue. All pass: `cargo test -p nx-language-service` 279, viewer 151, playground `edits.test.mjs` 6. **Confidence: high.**
 
-### 🟡 Fixed - RF12 A new test writes a one-line union with a leading bar, against AGENTS.md
+### ✅ Verified - RF12 A new test writes a one-line union with a leading bar, against AGENTS.md
 - **Severity:** Low
 - **Evidence:** `crates/nx-api/src/visualizer_declarations_tests.rs:215` writes
   `type Extra = | none | syrup { flavor:string }`. AGENTS.md says to omit the leading `|` when the cases are
@@ -195,6 +211,29 @@ language snapshot and the built viewer under jsdom.
 - **Recommendation:** Write `type Extra = none | syrup { flavor:string }` in the test and, while there, in
   the example. **Confidence in fix: high.**
 - **Fix:** Both spellings are now `type Extra = none | syrup { ... }`.
+- **Verification:** Confirmed. Both spellings are fixed. No other line added since `a6259e1` writes a one-line union with a leading bar. **Confidence: high.**
+
+## New Findings Discovered During 2026-10-22 08:20 Verification
+
+### 🟡 Fixed - RF13 A value under a property-list condition takes its property's hints, but not its format or hover card
+- **Severity:** Low
+- **Evidence:** The RF7 fix sends `declaredType`, `hintsOf` and `propertyOf` (`packages/viewer/src/edit.ts`)
+  through `attributeElement`. So a value written under `if flag { ... }` now gets its property's type,
+  its `PropertyVisualizer` hints and its named values. Three lookups still read only the attribute's
+  direct parent, which there is the `condition` node: `formattedNodes` (`source.ts:1421-1440`),
+  `propertyCard` (`card.ts:132-138`) and `removalOf` (`edit.ts:168-183`). Probed with
+  `<PropertyVisualizer property=tint format=color />` and `<PropertyVisualizer property=size unit="px" min=0 max=9 />`
+  on `<Drink code="B" if flag { tint="#ffffff" size=2 } />`:
+  - `size` takes its hints (`{min:0,max:9,unit:"px"}`).
+  - `tint` edits as `text`, though `<Drink tint="#ffffff" />` edits it as `color`.
+  - The conditional `tint` attribute has no hover card.
+
+  Before the fix such a value took none of these, so it was consistent. Now it takes half. Without
+  Reset or Remove, a conditional row stays safe, so `removalOf` can stay as it is.
+- **Recommendation:** Use `attributeElement` in `formattedNodes`, and in `propertyCard` to find the
+  element it passes to `elementProperties`. Add a test over the
+  `bindings` fixture's `sometimes` element with a `format=color` property. **Confidence in fix: high.**
+- **Fix:** `formattedNodes`, `slotType` and the uitext marking in `source.ts`, and `propertyCard` in `card.ts`, now find the element through `attributeElement` and its properties through `elementProperties`. `removalOf` stays as it is, as recommended. Test "reads a value under a condition with its property's format and card" in the `bindings` fixture, with a `Tag` whose `tint` has `format=color`.
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -204,6 +243,18 @@ language snapshot and the built viewer under jsdom.
   that what "then each import's" means?
 - `namedValues` leaves out only the `let` the element is in. A pair of lets can still be made to refer to
   each other (`a.tint={b.tint}` and `b.tint={a.tint}`). Is that acceptable for now?
+- A range that only merging makes empty (a `PropertyVisualizer`'s `min=100` over an alias's `max=64`)
+  is now left out of the tree with no warning, because `editor-hint-range` only checks the hints one
+  visualizer element writes. Should analysis also check the merged hints?
+- Since RF3, an optional property is also offered the optional members of every record `let` in
+  scope, including members the record never writes. For `tint?:string`, `<Drink code="C" />` as
+  `only` offers `only.tint`, which is always absent. That is type-correct but of little use. Should
+  unwritten members be left out?
+  - **Answer (fixer):** Yes. An optional member the record neither writes nor defaults is now left out,
+    with the source-edits spec saying so and `an_optional_property_takes_optional_members_and_values`
+    covering it (`plain.accent` is offered, `plain.muted` is not).
+- **Fixer's note on the merged-range question:** that question is left open as a design question. The
+  tree leaves the merged range out, which is safe, and a warning on merged hints can come later.
 
 ## Summary
 - The change is largely complete and well tested at the unit level, and the Rust, TypeScript and playground
@@ -212,3 +263,7 @@ language snapshot and the built viewer under jsdom.
   click and a typed value can rewrite a component's or a loop's binding into a literal.
 - RF2 and RF3 are smaller correctness gaps in hint ranges and in named values for optional properties.
 - The rest are edge cases, a convention nit and missing tests.
+- Verification (2026-10-22): RF1-RF7 and RF9-RF12 are verified. RF8 is reopened, because
+  `namedValues` and the declaration table's property types still leave out a union case's properties.
+  RF13 is new: values under a property-list condition take their property's hints but not its format
+  or hover card.

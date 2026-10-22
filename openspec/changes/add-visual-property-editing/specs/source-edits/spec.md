@@ -159,7 +159,8 @@ document, the key of an element in that document's source tree and the name of o
 properties, written or not. Its answer SHALL list the named values in the document's scope whose type
 the type checker accepts for the property: each `let` without parameters declared in the document or
 visible through its imports, and each member of such a `let` whose value is a record, one level deep,
-leaving out the `let` the element is written in, so a value never offers itself or its own members.
+leaving out the `let` the element is written in, so a value never offers itself or its own members,
+and leaving out an optional member the record neither writes nor defaults, which is always absent.
 Each item SHALL carry its reference path as it would be written (`accent`, `theme.accent`), its
 declared or inferred type spelled in NX, its doc comment when it has one, and its value's source text
 when that is a literal. Items SHALL be ordered by the document's own values first, then each import's,

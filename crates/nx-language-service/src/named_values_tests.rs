@@ -103,6 +103,7 @@ type Theme = { accent:Color muted?:Color }
 type Card = { tint?:Color fill:Color = "#000000" }
 let theme = <Theme accent="#111111" muted="#222222" />
 let maybe:Color? = "#333333"
+let plain = <Theme accent="#444444" />
 let card = <Card />
 "##;
     let snapshot = WorkspaceSnapshot::from_documents(
@@ -116,11 +117,33 @@ let card = <Card />
         .expect("named values");
     assert_eq!(
         paths(&optional),
-        ["theme.accent", "theme.muted", "maybe"],
+        ["theme.accent", "theme.muted", "maybe", "plain.accent"],
         "{optional:#?}"
     );
     let required = snapshot
         .named_values(&uri, "card.value", "fill")
         .expect("named values");
-    assert_eq!(paths(&required), ["theme.accent"], "{required:#?}");
+    assert_eq!(
+        paths(&required),
+        ["theme.accent", "plain.accent"],
+        "{required:#?}"
+    );
+}
+
+#[test]
+fn a_union_cases_element_takes_named_values() {
+    let source = r##"type Shots = int
+type Extra = none | syrup { flavor:string shots:Shots = 1 }
+let double:Shots = 2
+let promo = <Extra.syrup flavor="mocha" />
+"##;
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![DocumentInput::new(URI, source).with_version(1)],
+    )
+    .expect("snapshot");
+    let values = snapshot
+        .named_values(&DocumentUri::from(URI), "promo.value", "shots")
+        .expect("named values");
+    assert_eq!(paths(&values), ["double"], "{values:#?}");
 }

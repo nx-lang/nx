@@ -5,6 +5,7 @@ import { after, describe, it, type TestContext } from "node:test";
 
 import { fixture, nxHost, treeOf, type Fixture } from "./fixtures.js";
 import { editTargets, isRemovable, unwrittenProperties } from "../src/edit.js";
+import { cardOf } from "../src/card.js";
 import { isSlider, offsetAtPoint, rangeProblem } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
@@ -1229,6 +1230,15 @@ describe("bindings and other elements", () => {
     const index = indexTree(tree, text);
     const names = unwrittenProperties(index, index.byKey.get("sometimes.value")!).map((entry) => entry.property.name);
     assert.ok(!names.includes("iced"), names.join(" "));
+  });
+
+  it("reads a value under a condition with its property's format and card", async () => {
+    const { tree, text } = await fixture("bindings");
+    const index = indexTree(tree, text);
+    assert.equal(editTargets(index).get("tagged.value.if[0].then.tint.value")?.kind, "color");
+    assert.equal(editTargets(index).get("tagged.value.if[0].then.label.value")?.kind, "text");
+    const card = cardOf(index, index.byKey.get("tagged.value.if[0].then.tint")!);
+    assert.equal(card?.signature, "(property) tint?: string");
   });
 
   it("offers a union case's element the properties it does not write", async () => {
