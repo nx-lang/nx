@@ -34,26 +34,50 @@ touch on the grip.
 ### Requirement: An item of a list moves up and down
 With the reading focused, no editor open and an item that moves selected, Alt+Up and Alt+Down SHALL
 fire `nx-edit` with the item's key and `move` to the position before or after its own, and SHALL do
-nothing at the list's start or end. The selected item SHALL show a quiet `⋯` at the end of its first
-line, as a written row does, whose menu lists Move up when an item stands before it, Move down when
-one stands after it, and Show in Source, which fires `nx-open` with the item's key; the menu SHALL
-open from the context-menu key and Shift+F10 too, and look and close as a row's menu does. These
-SHALL work where the reading draws the list on one line as well.
+nothing at the list's start or end. These SHALL work where the reading draws the list on one line as
+well, where there is no grip.
 
 #### Scenario: Alt+Down
 - **WHEN** the reader selects the second of three choices and presses Alt+Down
 - **THEN** the element SHALL fire `nx-edit` with that choice's key and `move` to `2`
 
+### Requirement: An item of a list can be deleted
+When the host has set `editable`, the element SHALL let the reader delete an item that can be
+deleted: an element that is an item of a sequence or of element content, not inside a condition's
+branch or a loop's body, in a list that holds no text, unless it is the only item of a list whose type
+needs one or more (`FlowStep+`). With such an item selected, the reading focused and no editor open,
+Delete, or Cmd+Backspace, SHALL fire `nx-edit` with the item's key and `remove`; Backspace alone
+SHALL NOT. The element SHALL ask for no confirmation, since the host's undo takes the edit back.
+
+#### Scenario: Deleting a choice
+- **WHEN** the reader selects the second of three choices and presses Delete
+- **THEN** the element SHALL fire `nx-edit` with that choice's key and `remove`
+
+#### Scenario: The only step
+- **WHEN** the only step of a `QuestionFlow`, whose `steps` is `FlowStep+`, is selected and the reader
+  presses Delete
+- **THEN** no `nx-edit` SHALL fire
+
+### Requirement: A selected item has a menu
+A selected item that moves or can be deleted SHALL show a quiet `⋯` at the end of its first line, as
+a written row does, whose menu lists Move up when the item moves and an item stands before it, Move
+down when it moves and one stands after it, Delete when it can be deleted, and Show in Source, which
+fires `nx-open` with the item's key; the first three SHALL fire the same `nx-edit` as Alt+Up, Alt+Down
+and Delete. The menu SHALL open from the context-menu key and Shift+F10 too, and look and close as a
+row's menu does.
+
 #### Scenario: The first item's menu
 - **WHEN** the reader opens the `⋯` menu of the first of three steps
-- **THEN** it SHALL list Move down and Show in Source, and no Move up
+- **THEN** it SHALL list Move down, Delete and Show in Source, and no Move up
 
-### Requirement: A moved item keeps its selection and folds
+### Requirement: The selection and folds follow a moved or deleted item
 After the element fires a `move`, it SHALL read the host's newer tree with the item at its new
-position selected, and with each fold on an item of that list kept on the item it was on, firing
-`nx-fold` with the folded keys as the newer tree gives them. A polite live region SHALL say where the
-item went, as `Moved to 3 of 8`. When the host's newer tree holds the list unchanged, as after a
-refusal, the selection and folds SHALL stay as they were.
+position selected, and after it fires an item's `remove`, with the item that took its place selected,
+else the one before it, else the element or row that holds the list. Each fold on an item of that list
+SHALL stay on the item it was on, the element firing `nx-fold` with the folded keys as the newer tree
+gives them. A polite live region SHALL say what happened, as `Moved to 3 of 8` or `Deleted`. When the
+host's newer tree holds the list unchanged, as after a refusal, the selection and folds SHALL stay as
+they were.
 
 #### Scenario: The selection follows
 - **WHEN** the reader moves the selected first step to `2` and the host sets the newer tree
@@ -63,3 +87,7 @@ refusal, the selection and folds SHALL stay as they were.
 - **WHEN** the second step is folded and the reader moves the first step to `2`
 - **THEN** in the newer tree the step now first, which was second, SHALL be folded, and the element
   SHALL fire `nx-fold` with its key
+
+#### Scenario: Deleting the last item
+- **WHEN** the reader deletes the last of three choices and the host sets the newer tree
+- **THEN** the choice now last, which was second, SHALL be selected

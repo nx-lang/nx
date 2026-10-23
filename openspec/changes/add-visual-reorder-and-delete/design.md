@@ -8,7 +8,8 @@ Items of a sequence, of element content and of a branch are keyed by their posit
 
 Phase 5 of the design doc was structure editing: add, delete, duplicate and move elements, with an
 insert menu. Bret narrowed it to reordering (2026-10-23), with dragging where it works best and Move
-up and Move down as the second way, and asked that the UI stay simple.
+up and Move down as the second way, and asked that the UI stay simple. He then added deleting
+(2026-10-23), which shares the item rules and the line handling with moving.
 
 ## Goals / Non-Goals
 
@@ -20,7 +21,7 @@ up and Move down as the second way, and asked that the UI stay simple.
 - Keep the source's layout and comments.
 
 **Non-Goals:**
-- Adding, inserting, duplicating, deleting, cut, copy and paste.
+- Adding, inserting, duplicating, cut, copy and paste.
 - Moving between lists or levels, or in or out of an `if` or a `for`.
 - Dragging several items, a touch long-press, drag between documents.
 - Reordering literal items, such as the numbers of `{ 4 2 5 }`.
@@ -80,20 +81,33 @@ the end" case and says nothing more.
 
 The answer holds the edits that remove the item and insert it, which never overlap.
 
-### 6. The selection, folds and announcements follow the item
+### 6. Delete reuses `remove` and the row's keys
 
-Since keys are positions, a move changes the keys of the item and of every item between its old and
+`remove` already removes an attribute; it now takes an item too, the same items `move` takes, and
+removes its lines and the comments directly above it, as a move does at its source. Delete and
+Cmd+Backspace, which remove a selected row, remove a selected item, and the item's menu lists Delete.
+There is no confirmation: undo is one keystroke and a title-bar button away. The viewer does not offer
+to delete the only item of a list typed `+`, so the reading never offers an edit that breaks the type;
+the language service, as for properties, does not check, so a host that sends it gets the type
+error. Nothing checks references by id string, such as a survey condition naming a question's id: the
+type checker cannot see them, so deleting a question others name is not stopped. Typed id references
+would be a later change.
+
+### 7. The selection, folds and announcements follow the item
+
+Since keys are positions, a move or a delete changes the keys of the item and of every item between its old and
 new places. The viewer remembers the move it fired, and on the host's newer tree selects the item
-at `to` and maps each fold on that list's items to its item's new key, firing `nx-fold` with the
-keys as they are now. A polite live region says "Moved to 3 of 8". If the host refuses, the tree
+at `to` (after a delete, the item that took its place, else the one before it, else what holds
+the list) and maps each fold on that list's items to its item's new key, firing `nx-fold` with the
+keys as they are now. A polite live region says "Moved to 3 of 8" or "Deleted". If the host refuses, the tree
 comes back unchanged and nothing moves.
 
-### 7. The item menu
+### 8. The item menu
 
-A selected item that moves gets the quiet `⋯` a written row has, at the end of its first line (a
+A selected item that moves or can be deleted gets the quiet `⋯` a written row has, at the end of its first line (a
 group's header, or the line of a one-line element): Move up, Move down (each only where the item has
-a neighbour that way) and Show in Source. It is the row menu's look and keyboard (the context-menu
-key, Shift+F10); deferred actions such as Delete would join it later.
+a neighbour that way), Delete and Show in Source. It is the row menu's look and keyboard (the context-menu
+key, Shift+F10); deferred actions such as Duplicate would join it later.
 
 ## Risks / Trade-offs
 
