@@ -305,7 +305,9 @@ commits, they show again on the redrawn reading, so the next click steps again.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does: a field opens with the
-caret where the click fell, a boolean toggles, and a case or a color opens its popover. A click on
+caret where the click fell, a boolean toggles, and a case or a color opens its popover. A case shows a
+chevron past it under the pointer, which stays as the pointer moves onto it, and a click on it opens
+the popover too. A click on
 anything else, as a property's name, selects. Enter or F2 opens the selected unit's first value
 with its text selected. Enter or leaving the field commits, Escape cancels, and Tab and Shift+Tab
 commit and open the next or previous value. An entry an editor cannot take, such as `12px` in a

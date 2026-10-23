@@ -395,19 +395,18 @@ export const styles = `
   border-radius: 3px;
 }
 /* The chevron stands past the value's end, over the gap after it, so nothing moves, and nearer the
-   value than what follows the gap. */
+   value than what follows the gap. It is part of the value under the pointer, from the value's end
+   on, so the pointer can move onto it and click it as a dropdown's chevron is clicked. */
 .body.editable .edit-case { position: relative; }
 .body.editable .edit-case:is(:hover, .editing)::after {
   content: "";
   position: absolute;
-  top: 50%;
+  top: 0;
+  bottom: 0;
   right: -10px;
-  width: 8px;
-  height: 8px;
-  transform: translateY(-50%);
+  width: 10px;
   background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
-  pointer-events: none;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") right center / 8px 8px no-repeat;
 }
 /* A boolean toggles on a second click, which would otherwise select the mark as a word. */
 .body.editable .edit-boolean { user-select: none; }

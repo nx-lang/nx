@@ -117,7 +117,9 @@ rested on the value for a moment, so a line does not jump as the pointer passes 
 Shift+click by ten steps, within `min` and `max`: into the field while it is open, else committed at
 once. Pressing a stepper and dragging up or down SHALL change the number by a step for every few
 pixels and show it in place: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow
-keys, Shift and dragging. Dragging the property's name sideways SHALL still change the number.
+keys, Shift and dragging. Dragging the property's name sideways SHALL still change the number. A
+case's chevron, past the value under the pointer, SHALL stay while the pointer moves onto it, and a
+click on it SHALL open the case's popover, as a click on the value does.
 
 In any string field, Shift+Enter SHALL make a line break. A string literal written over several lines
 SHALL edit in a field that holds line breaks; one written with an escape other than `\"` and `\\`
@@ -153,6 +155,11 @@ SHALL still fire `nx-open`.
   line, with `titleSize` and `badge` hinted with choices, and points at `titleSize`, then at `badge`
 - **THEN** the steppers and chevron past `titleSize` SHALL sit in the line, before `align`, and the
   chevron past `badge` SHALL sit before the closing `/>`, covering neither
+
+#### Scenario: A case's chevron
+- **WHEN** the reader points at `size=small` and moves the pointer onto the chevron past it, and
+  clicks it
+- **THEN** the chevron SHALL stay shown, and the popover of `Size`'s cases SHALL open
 
 #### Scenario: Resting before making room
 - **WHEN** the reader, with nothing selected, moves the pointer across `titleSize` on that line
