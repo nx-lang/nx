@@ -36,10 +36,12 @@ property it resolves for, and a viewer SHALL ignore that hint: `editor=field`, `
 `value` is not a number literal, signed or not, where the type is a number, or not a string literal
 where it is a string, and any choice where the type is neither. A `ValueVisualizer`'s hint
 SHALL be checked against its target. `min` greater than `max` SHALL be reported as an
-`editor-hint-range` warning, and so SHALL a range that only merging empties: where a visualizer's
-own `min` and `max` leave a range but the resolved ones, with its base's, an earlier visualizer's or
-its alias's, do not, the warning SHALL be at the `min` or `max` it writes that is in force. These
-SHALL be warnings, not errors, since a hint never changes what a program means.
+`editor-hint-range` warning. The language service SHALL also report `editor-hint-range` for a range
+that only merging empties, since that depends on the declarations a document merges with rather than
+on one visualizer: where a visualizer's own `min` and `max` leave a range but the resolved ones, with
+its base's, an earlier visualizer's or its alias's, do not, the warning SHALL be at the `min` or `max`
+it writes that is in force. These SHALL be warnings, not errors, since a hint never changes what a
+program means.
 
 #### Scenario: A field on a string
 - **WHEN** `Card`'s visualizer has `<PropertyVisualizer property=title editor=field />` and `title` is a `string`
@@ -55,4 +57,4 @@ SHALL be warnings, not errors, since a hint never changes what a program means.
 
 #### Scenario: A range that merging empties
 - **WHEN** `Spacing` is hinted `min=0 max=64` and `Card`'s visualizer has `<PropertyVisualizer property=padding min=100 />`, where `padding` is typed `Spacing`
-- **THEN** analysis SHALL report `editor-hint-range` at `min=100`, and the resolved `padding` SHALL have neither a minimum nor a maximum
+- **THEN** the language service's diagnostics SHALL include `editor-hint-range` at `min=100`, and the resolved `padding` SHALL have neither a minimum nor a maximum

@@ -849,7 +849,7 @@ the source tree, the protocol, the viewer and the docs.
 Bret asked for the two open questions worth acting on to be done now and verified by an independent
 reviewer: the merged-range warning and a derived visualizer over its base.
 
-### 🟡 Fixed - RF36 A derived visualizer's mismatched hint or choices hide its base's
+### ✅ Verified - RF36 A derived visualizer's mismatched hint or choices hide its base's
 - **Severity:** Low
 - **Evidence:** `merge_child` (`crates/nx-language-service/src/visualizers.rs`) replaced a base's hint
   and choices with the derived visualizer's before they were checked against the property's type. A
@@ -864,8 +864,9 @@ reviewer: the merged-range warning and a derived visualizer over its base.
   `a_derived_visualizers_mismatched_hints_leave_its_bases_in_force` (fails before the fix). Spec:
   `visualizer-declarations` "A property's editor hints come from its visualizer or its type" (new
   scenario) and `source-tree`; design, website doc and changelog say so. Task 5.10.
+- **Verification:** Verified at `ee9293d`. Resolution now keeps every layer, latest first (`ResolvedVisualizer.hints`/`choices`, `ResolvedChild.hints`/`choices`, `merge_child`, `visualizers.rs`), and `editor_hints` takes the first hint of each name that fits and the first set of choices with any that fit (`source_tree.rs:2480-2512`). A throwaway snapshot probe, kept outside the repository, confirms the edge cases. When a base's and a derived visualizer's choices both fail to fit an `int` (`"a"`, then `"b"` and `1.5`), the alias `Spacing`'s choice `4` reaches both `Base.width` and `Box.width`. A derived `editor=dropdown` over an alias's `min=0 max=10` keeps the alias's range under the derived `max=5`. Spec, design, website and changelog agree.
 
-### 🟡 Fixed - RF37 A range that only merging empties gives no warning
+### ✅ Verified - RF37 A range that only merging empties gives no warning
 - **Severity:** Low
 - **Evidence:** `editor-hint-range` was checked per visualizer element in analysis. A
   `PropertyVisualizer`'s `min=100` over its alias's `max=64` was left out of the tree with no warning
@@ -881,6 +882,32 @@ reviewer: the merged-range warning and a derived visualizer over its base.
   `a_derived_range_over_its_bases_warns_on_the_derived_one` and
   `an_elements_own_empty_range_warns_once`. Spec: `visualizer-declarations` (new scenario "A range
   that merging empties"); design, website doc and changelog. Task 5.10.
+- **Verification:** Verified at `ee9293d`, with a spec-wording follow-up in RF38. `merged_range_warnings` (`source_tree.rs:2521`) and `merged_hint_diagnostics` (`lib.rs:349`) warn once, at the `min` or `max` in force that the declaration writes. The throwaway probe found the following. A later `ValueVisualizer` in another module (`ext.nx` adding `min=100` to `lib.nx`'s `Spacing` `max=64`) warns only in `ext.nx`, and `lib.nx` gets nothing. An element visualizer in another module also warns at its own `min=100`. Properties typed `Spacing+` and `Spacing` through `?` both warn. With `max=10` written and `min=50` inherited from the alias, the warning is at `max=10`. A derived visualizer that writes only `step` over a base whose `min=100` empties the range adds no second warning. Base and derived each writing `min=100` warn once each, correctly, since both properties are empty. An element's own `min=20 max=10` warns once. Two sibling modules each giving `Spacing` half a range cannot happen, since that is already the "neither applies" error. Every span covers exactly `min=…` or `max=…`. One nit: these spans' columns are UTF-16 (`LineIndex::byte_offset_to_position`), while the compiler's diagnostics count chars (`nx-api` `byte_offset_to_line_col`). On a line with an emoji before `min=`, the two disagree by one, and the new one is the one that matches LSP. Tests, clippy and fmt pass.
+
+## New Findings Discovered During 2026-10-23 15:42 Verification
+
+### 🟡 Fixed - RF38 The new scenario says analysis reports the merged-range warning, but only the language service does
+- **Severity:** Low
+- **Evidence:** The `visualizer-declarations` delta's new scenario "A range that merging empties" says
+  "analysis SHALL report `editor-hint-range` at `min=100`"
+  (`specs/visualizer-declarations/spec.md:58`), and its requirement text says the same. But the
+  check runs only in `WorkspaceSnapshot::diagnostic_report` (`crates/nx-language-service/src/lib.rs:342`,
+  `merged_hint_diagnostics`), as the design says. `validate_workspace` in `nx-api`, which hosts and
+  the SDKs' validation call, still leaves it out. So the editor's diagnostics no longer match the
+  compiler's. The `editor-language-service` spec says they SHALL
+  (`openspec/specs/editor-language-service/spec.md:554`, "Diagnostics SHALL match those the
+  compiler reports for the same documents"). No test pins the difference either way.
+- **Recommendation:** Either reword the scenario and requirement so the language service's
+  diagnostics report it ("an editor's diagnostics SHALL report"), and add a MODIFIED clause to
+  `editor-language-service` naming this warning as an editor-only addition, or move the merged check
+  into analysis (`nx-types`/`nx-api`) so the compiler reports it too. The first is the smaller
+  change and matches the design's reasoning.
+- **Fix:** Took the smaller option. The `visualizer-declarations` requirement and scenario now say
+  the language service reports a range that only merging empties ("the language service's
+  diagnostics SHALL include"), since it depends on the declarations a document merges with. A new
+  `editor-language-service` delta modifies "Language service resolves standard library declarations"
+  so diagnostics match the compiler's besides this editor-only warning.
+
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -974,3 +1001,10 @@ reviewer: the merged-range warning and a derived visualizer over its base.
   still take room before the quiet `default`. That is now specified, and it is acceptable. Checked in headless
   Chromium against the rebuilt viewer. Viewer tests (169) and `openspec validate --strict` pass. Every
   finding from RF1 to RF35 is now verified.
+- Verification of the follow-ups from the Questions (2026-10-23 15:42, commit `ee9293d`): RF36 and RF37 are
+  verified. Edge cases were checked with a throwaway language-service probe: a later declaration in
+  another module, an alias through `?` and `+`, `max` written with `min` inherited, choice layers none
+  of which fit, base and derived ranges, and an element's own empty range. One Low finding is new.
+  RF38: the spec says analysis reports the merged-range warning, but only the language service does,
+  so editor and compiler diagnostics now differ. `cargo test -p nx-language-service -p nx-types -p
+  nx-api` (278 language-service tests), clippy and `cargo fmt --all --check` pass.
