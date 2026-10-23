@@ -103,10 +103,11 @@ let accent:Color = "#c8a27a"
 
 // Hints: padding reads "px" and refuses 80 with "At most 64"; select its row and hover its value for
 // steppers (click, Shift+click for 10, or drag up and down), and gap's stay within 0 to 24. titleSize
-// has choices: open it and press Alt+Down, click the chevron, or type (try "lg" or 2) to list them,
-// with Default 16 on top; pick one, or type 17, which is no choice and still commits. align is a row
-// of buttons. tint is a reference to a named value: it opens Source. intro was written over two lines
-// and edits with Shift+Enter for a line break. Select the banner and open "Show 3 unset properties":
+// has choices: select its row and hover it for steppers and a chevron, or open it and press Alt+Down,
+// click the chevron, or type (try "lg" or 2) to list them, with Default 16 on top; pick one, or type
+// 17, which is no choice and still commits. align is a row of buttons. tint is a reference to a named
+// value: it opens Source. intro was written over two lines and edits with Shift+Enter for a line
+// break. Select the banner and open "Show 3 unset properties":
 // badge lists its choices in one column, body is multi-line with a placeholder (Enter breaks a line,
 // Ctrl or Cmd+Enter commits), and cup has no editor, so it opens Source.
 let banner =
@@ -120,6 +121,11 @@ Ask what came in this morning."
     align=start
     tint={accent}
   />
+
+// On one line: select it and hover badge, last on the line, for its chevron, which opens the list.
+// Hovering titleSize shows nothing, since its tools would cover align; open it (click it) and the
+// line makes room for its steppers and chevron, pushing align right while the field is open.
+let strip = <Banner title="Fresh" titleSize=20 align=start badge="New" />
 
 // Values: an untyped int and float; a string with escapes, which opens without them; and one with \n,
 // which Enter or a double-click opens in Source

@@ -34,6 +34,8 @@
 - [x] 5.5 Steppers on numbers: an overlay past the value, shown while its field is open and on hover in the selected row; click, Shift+click, and a vertical drag committed once on release; a tooltip; verify each `viewer` scenario
 - [x] 5.6 The "Visual test cases" example: choices for a number and a string, steppers, a reference opening Source; screenshots light and dark
 
+- [x] 5.7 Room on a line (Bret, 2026-10-23): a hover chevron for values with choices; on a one-line element or a header, where more of the line follows, no hover tools, and an open field's tools take room in the line; verify the `viewer` scenario and in the browser
+
 ## 6. The playground and docs
 
 - [x] 6.1 Extend the "Visual test cases" example with the cases in the `playground` scenario, each with a comment saying what to try

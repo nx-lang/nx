@@ -2450,7 +2450,9 @@ export class NxViewerElement extends ElementBase {
   #showTools(span: HTMLElement, target: EditTarget): void {
     const session = this.#session?.target.key === target.key ? this.#session : undefined;
     const steppers = target.kind === "number";
-    const chevron = session?.field !== undefined && (session.choices?.length ?? 0) > 0;
+    // The chevron says a list is there: past an open field with choices, and past a value with
+    // choices under the pointer.
+    const chevron = session === undefined ? this.#hasChoices(target) : session.field !== undefined && (session.choices?.length ?? 0) > 0;
     if (!steppers && !chevron) {
       this.#hideTools();
       return;
@@ -2458,15 +2460,56 @@ export class NxViewerElement extends ElementBase {
     this.#tools.classList.toggle("with-steppers", steppers);
     this.#tools.classList.toggle("with-choices", chevron);
     this.#tools.classList.toggle("open", session?.choicesOpen === true);
+    // With more of the line after it, an open field's tools take room in the line, as the field does
+    // as it grows, rather than cover what follows.
+    const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
+    const inLine = session?.field !== undefined && this.#followedOnItsLine(span);
+    this.#tools.classList.toggle("in-line", inLine);
     this.#tools.dataset["toolsFor"] = target.key;
     const unit = span.nextElementSibling;
     (unit?.classList.contains("unit") === true ? unit : span).after(this.#tools);
     this.#toolsHover = undefined;
+    if (inLine || wasInLine) {
+      // The line grew or shrank, so its highlight is redrawn to fit it.
+      queueMicrotask(() => this.#paintHighlights());
+    }
+  }
+
+  /** Whether `target` offers choices its editor lists. */
+  #hasChoices(target: EditTarget): boolean {
+    return (target.kind === "number" || target.kind === "text") && choicesOf(target.hints, target.kind).length > 0;
+  }
+
+  /**
+   * Whether more of its line follows the value `span` draws, within its one-line element: another
+   * property or item, and not just its unit and the element's closing mark.
+   */
+  #followedOnItsLine(span: HTMLElement): boolean {
+    for (let at: Element | null = span; at !== null && !at.matches(".line-element, .sheet-head, .sheet-value, .source"); at = at.parentElement) {
+      for (let next = at.nextSibling; next !== null; next = next.nextSibling) {
+        if (next.nodeType === 3) {
+          const text = next.textContent ?? "";
+          if (text.includes("\n")) {
+            return false;
+          }
+          if (text.trim() !== "") {
+            return true;
+          }
+        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools, .line-close, .unit")) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   #hideTools(): void {
+    const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
     this.#tools.remove();
-    this.#tools.classList.remove("open");
+    this.#tools.classList.remove("open", "in-line");
+    if (wasInLine) {
+      queueMicrotask(() => this.#paintHighlights());
+    }
     delete this.#tools.dataset["toolsFor"];
     this.#toolsHover = undefined;
   }
@@ -2488,7 +2531,7 @@ export class NxViewerElement extends ElementBase {
     if (shown !== undefined && element !== null && this.#onTheWay(shown, element)) {
       return;
     }
-    const value = element?.closest?.(".editable-value.edit-number") as HTMLElement | null | undefined;
+    const value = element?.closest?.(".editable-value:is(.edit-number, .edit-text)") as HTMLElement | null | undefined;
     const key = value === null || value === undefined ? undefined : keyOf(value);
     const target = key === undefined ? undefined : this.#targets.get(key);
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
@@ -2498,7 +2541,9 @@ export class NxViewerElement extends ElementBase {
       value !== undefined &&
       selected?.contains(value) === true &&
       (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS));
-    if (!onSelected || target === undefined || this.#rendered.get(key!) !== value) {
+    // Under the pointer the tools only lie over the reading, so they show where they cover nothing.
+    const offered = target !== undefined && (target.kind === "number" || this.#hasChoices(target));
+    if (!onSelected || target === undefined || !offered || this.#rendered.get(key!) !== value || this.#followedOnItsLine(value!)) {
       if (this.#tools.isConnected) {
         this.#hideTools();
       }
@@ -2539,6 +2584,13 @@ export class NxViewerElement extends ElementBase {
     if (part.classList.contains("choices-toggle")) {
       if (session !== undefined) {
         this.#toggleChoices(session, session.choicesOpen !== true);
+        return;
+      }
+      // From the pointer's rest: the value's field opens with its list.
+      this.#openEditor(key!);
+      const opened = this.#session;
+      if (opened !== undefined && opened.target.key === key) {
+        this.#toggleChoices(opened, true);
       }
       return;
     }

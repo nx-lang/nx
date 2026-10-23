@@ -127,11 +127,16 @@ changes what a program means.
   and on hover of a value in the selected row, not everywhere, so the reading does not flicker under
   a passing pointer. A click steps once (Shift ten steps), into the open field or committed at once;
   pressing one and dragging up or down scrubs, into the open field on release, else committed once.
-  Their tooltip names the keys. Dragging a number's name sideways stays, as before. On a one-line
-  element the steppers, and the chevron while a field with choices is open, are wider than the one
-  space past the value, so they cover the start of the next property while they show. That is the
-  trade for nothing moving: they show only on the selected row and while the field is open, and
-  drawing them above or below the line would cover a neighboring line instead.
+  Their tooltip names the keys. Dragging a number's name sideways stays, as before. A value with
+  choices shows a chevron the same way, past the value on hover in the selected row, and a click on
+  it opens the field with its list.
+- **Room on a line** (Bret, 2026-10-23): on a one-line element, or a group's header, the steppers and
+  the chevron are wider than the one space past the value, so where more of the line follows they
+  would cover the next property. There, hover shows neither, and an open field's tools take room in
+  the line, pushing the rest right while it is open, as a growing field does. In a sheet's row, or at
+  the end of a line, they stay drawn over the gap, and nothing moves. Covering the next property was
+  tried first; hiding the tools broke the chevron Bret expected on hover, and drawing them above or
+  below the line would cover a neighboring line.
 - **Segmented** (`editor=segmented`): the case popover shows the cases as one row of buttons. With more
   than five cases, or names too long for the reading's width, it falls back to the list.
 - **Dropdown** (`editor=dropdown`): the phase 1 case popover, named so a library can say it.

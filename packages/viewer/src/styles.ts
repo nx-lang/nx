@@ -546,7 +546,8 @@ export const styles = `
    the property takes, quieter. */
 .source .more-value:empty, .source .more-value > .field:empty {
   display: inline-block;
-  width: min(24ch, 100%);
+  min-width: min(24ch, 100%);
+  white-space: nowrap;
   min-height: 1lh;
   vertical-align: top;
 }
@@ -711,6 +712,8 @@ export const styles = `
   user-select: none;
   white-space: nowrap;
 }
+/* Taking room in the line, past an open field with more of its line after it. */
+.source .value-tools.in-line { position: static; vertical-align: top; }
 .source .value-tools .steppers, .source .value-tools .choices-toggle { display: none; }
 .source .value-tools.with-steppers .steppers {
   display: inline-flex;

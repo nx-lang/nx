@@ -1176,6 +1176,35 @@ describe("choices", () => {
     assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
   });
 
+  it("shows its chevron under the pointer in the selected row, which opens the field and its list", async () => {
+    const element = show(await fixture("adding"));
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    element.selection = "base.value.tone";
+    over(rendered(element, "base.value.tone.value"));
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-choices"), "a string's choices");
+    assert.ok(!shown.classList.contains("with-steppers"));
+    element.selection = "base.value.size";
+    over(rendered(element, "base.value.size.value"));
+    assert.equal(tools(element), null, "none where they would cover tone, which follows on the line");
+    element.selection = "big.value.size";
+    over(rendered(element, "big.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("with-choices"), "a number's choices");
+    assert.ok(tools(element)!.classList.contains("with-steppers"), "and its steppers");
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.ok(field(element), "the field opens");
+    assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16", "lg 20"], "with its list");
+  });
+
+  it("makes room in the line for an open field's tools when more of the line follows", async () => {
+    const element = show(await fixture("adding"));
+    rendered(element, "card.value.count.value").click();
+    assert.ok(tools(element)!.classList.contains("in-line"), "mode follows count on the card's line");
+    press(field(element)!, "Escape");
+    rendered(element, "big.value.size.value").click();
+    assert.ok(!tools(element)!.classList.contains("in-line"), "nothing follows on its line: drawn over the gap");
+  });
+
   it("opens from its chevron, and picks with the pointer", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
@@ -1275,7 +1304,9 @@ describe("choices", () => {
 });
 
 describe("steppers", () => {
-  it("steps the selected row's number on a click, and ten steps on Shift+click, committed at once", async () => {
+  it("steps the selected row's number on a click, and ten steps on Shift+click, committed at once", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     const value = rendered(element, "card.value.padding.value");
@@ -1302,7 +1333,9 @@ describe("steppers", () => {
     assert.equal(tools(element), null, "gone once the pointer leaves");
   });
 
-  it("takes a press that wanders a few pixels as a click, not a drag", async () => {
+  it("takes a press that wanders a few pixels as a click, not a drag", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     element.selection = "card.value.gap";
@@ -1312,7 +1345,9 @@ describe("steppers", () => {
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
   });
 
-  it("steps into an open field, which commits", async () => {
+  it("steps into an open field, which commits", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     rendered(element, "card.value.count.value").click();
@@ -1326,7 +1361,9 @@ describe("steppers", () => {
     assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "0" } } }]);
   });
 
-  it("scrubs as a stepper is dragged up or down, shown in place and committed once on release", async () => {
+  it("scrubs as a stepper is dragged up or down, shown in place and committed once on release", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     element.selection = "card.value.gap";
@@ -1344,7 +1381,9 @@ describe("steppers", () => {
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
     assert.equal(element.selection, "card.value.gap", "the selection stays");
   });
-  it("keeps the steppers as the pointer crosses the value's unit and the gap to reach them", async () => {
+  it("keeps the steppers as the pointer crosses the value's unit and the gap to reach them", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     element.selection = "card.value.padding";
@@ -1354,16 +1393,16 @@ describe("steppers", () => {
     const shown = tools(element)!;
     over(shown.previousElementSibling!);
     assert.equal(tools(element), shown, "over the unit");
-    over(value.closest(".line-property")!);
+    over(value.closest(".sheet-row")!);
     assert.equal(tools(element), shown, "over the gap in the value's row");
     over(shown);
     pressTool(shown.querySelector(".stepper.up")!);
     assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } }]);
-    over(rendered(element, "card.value.gap.value").closest(".line-property")!);
+    over(rendered(element, "card.value.gap.value").closest(".sheet-row")!);
     assert.equal(tools(element), null, "gone over another property");
   });
 
-  it("keeps a let's steppers over its unit, and moves them to the next number in a row", async () => {
+  it("keeps a let's steppers over its unit, and shows none where they would cover the line", async () => {
     const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     element.selection = "pad";
@@ -1375,13 +1414,15 @@ describe("steppers", () => {
 
     const edges = show(await fixture("editingEdges"));
     edges.selection = "box";
+    over(rendered(edges, "box.value.depth.value"));
+    assert.equal(tools(edges), null, "none over the rest of a one-line element's line");
     over(rendered(edges, "box.value.items.value[0]"));
-    assert.equal(tools(edges)!.dataset["toolsFor"], "box.value.items.value[0]");
-    over(rendered(edges, "box.value.items.value[1]"));
-    assert.equal(tools(edges)!.dataset["toolsFor"], "box.value.items.value[1]", "on the number under the pointer");
+    assert.equal(tools(edges), null, "nor over the next item");
   });
 
-  it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async () => {
+  it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     element.selection = "card.value.gap";
@@ -1409,7 +1450,9 @@ describe("steppers", () => {
     assert.ok(!body(element).classList.contains("stepping"), "nothing is left resizing");
   });
 
-  it("shows the value as before when a drag ends where it began", async () => {
+  it("shows the value as before when a drag ends where it began", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     element.selection = "card.value.gap";
@@ -1421,7 +1464,9 @@ describe("steppers", () => {
     assert.ok(!value.classList.contains("pending"), "nothing is waiting");
   });
 
-  it("fills an open field from a drag, which commits", async () => {
+  it("fills an open field from a drag, which commits", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     rendered(element, "card.value.count.value").click();
