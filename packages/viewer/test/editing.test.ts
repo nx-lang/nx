@@ -352,7 +352,7 @@ describe("editing in place", () => {
     rendered(element, "latte.value.name.value").click();
     const open = field(element);
     assert.ok(open, "a click on a value opens its field");
-    assert.equal(element.selection, "latte.value.name", "and selects its row");
+    assert.equal(element.selection, undefined, "and leaves the selection as it was");
     const range = selection.getRangeAt(0);
     assert.ok(open.contains(range.startContainer), "the caret is in the field");
     assert.equal(range.collapsed, true, "where the click fell, with nothing selected");
@@ -386,10 +386,10 @@ describe("editing in place", () => {
     field(element)!.textContent = "Mocha";
     press(field(element)!, "Tab");
     assert.equal(edits.length, 1, "Tab commits");
-    assert.equal(element.selection, "latte.value.size", "and selects the next value's unit");
-    assert.equal(root(element).querySelector<HTMLElement>(".popover")!.hidden, false, "opening its editor");
+    assert.equal(root(element).querySelector<HTMLElement>(".popover")!.hidden, false, "opening the next value's editor");
+    assert.equal(element.selection, "latte.value.name", "and leaving the selection as it was");
     press(root(element).querySelector(".popover-filter")!, "Tab", { shiftKey: true });
-    assert.equal(element.selection, "latte.value.name", "Shift+Tab goes back");
+    assert.ok(field(element) !== null, "Shift+Tab goes back");
     assert.equal(field(element)?.textContent, "Mocha", "to the value as the reader left it");
   });
 
@@ -590,7 +590,7 @@ describe("editing in place", () => {
     element.selection = undefined;
     rendered(element, "latte.value.iced.value").click();
     assert.equal(edits.length, 3, "a click toggles it with nothing selected first");
-    assert.equal(element.selection, "latte.value.iced", "and selects its row");
+    assert.equal(element.selection, undefined, "and leaves the selection as it was");
   });
 
   it("steps a number with the arrows and keeps an entry it cannot take in the field, marked", async (t) => {

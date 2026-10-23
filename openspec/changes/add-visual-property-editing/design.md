@@ -132,6 +132,11 @@ changes what a program means.
   Their tooltip names the keys. Dragging a number's name sideways stays, as before. A value with
   choices shows a chevron the same way, past the value on hover, and a click on
   it opens the field with its list.
+- **A click on a value leaves the selection** (Bret, 2026-10-23): a click on a value, as on its
+  steppers or chevron, opens its editor and selects nothing, and so do Tab and Shift+Tab. Phase 1
+  selected the value's unit too, but on a one-line element that is the element, whose unset-properties
+  row then appeared and pushed the reading down. Selecting stays explicit: a name, a header, a row's
+  room, or the arrow keys.
 - **Room on a line** (Bret, 2026-10-23): on a one-line element, or a group's header, the steppers and
   the chevron are wider than the one space past the value, so where more of the line follows, its
   closing `/>` included, they would cover it. There they take room in the line instead, on hover and

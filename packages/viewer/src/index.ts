@@ -1892,8 +1892,6 @@ export class NxViewerElement extends ElementBase {
     if (next === undefined) {
       return;
     }
-    const unit = this.#unitOf(next);
-    this.#select(keyOf(unit ?? next), true);
     this.#openEditor(keyOf(next)!);
   }
 
@@ -1954,7 +1952,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * A double-click on an editable value opens its editor, selecting its unit; on a value the reading
+   * A double-click on an editable value opens its editor, as a click does; on a value the reading
    * cannot edit, it asks the host to open it in the source.
    */
   #onDoubleClick(event: MouseEvent): void {
@@ -1981,10 +1979,6 @@ export class NxViewerElement extends ElementBase {
       // A boolean toggled on the double-click's second click; an editor open is already open.
       if (this.#targets.get(key)?.kind === "boolean" || this.#session?.target.key === key) {
         return;
-      }
-      const unit = this.#unitOf(value);
-      if (keyOf(unit ?? value) !== this.#selection) {
-        this.#select(keyOf(unit ?? value), true);
       }
       this.#openEditor(key);
       return;
@@ -3337,8 +3331,9 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     // A click on an editable value edits it, as a form's field does: a field opens with the caret
-    // where the click fell, a boolean toggles, and a case or a color opens its popover. Its unit is
-    // selected with it. A click anywhere else in a unit, as on a property's name, selects the unit.
+    // where the click fell, a boolean toggles, and a case or a color opens its popover, as a click on
+    // its tools does: the selection stays as it was, so nothing else moves. A click anywhere else in
+    // a unit, as on a property's name, selects the unit.
     const value = this.#editable ? (target.closest?.(".editable-value") as HTMLElement | null | undefined) : undefined;
     if (value !== null && value !== undefined && this.#body.contains(value)) {
       const key = keyOf(value)!;
@@ -3347,10 +3342,6 @@ export class NxViewerElement extends ElementBase {
       this.#closedOnPress = undefined;
       if (closed || (event.detail > 1 && this.#targets.get(key)?.kind === "boolean") || this.#session?.target.key === key) {
         return;
-      }
-      const unit = keyOf(this.#unitOf(value) ?? value);
-      if (unit !== this.#selection) {
-        this.#select(unit, true, false);
       }
       this.#openEditor(key);
       const field = this.#session?.target.key === key ? this.#session.field : undefined;

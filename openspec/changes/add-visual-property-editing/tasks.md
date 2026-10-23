@@ -38,6 +38,8 @@
 
 - [x] 5.8 Remove `unit` (Bret, 2026-10-23), until units are part of the language: the library, analysis, the source tree, the protocol, the viewer, tests, the example and docs
 
+- [x] 5.9 A click on a value, and Tab, open its editor and leave the selection as it was (Bret, 2026-10-23); verify the modified `viewer` requirement
+
 ## 6. The playground and docs
 
 - [x] 6.1 Extend the "Visual test cases" example with the cases in the `playground` scenario, each with a comment saying what to try

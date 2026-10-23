@@ -1,5 +1,84 @@
 ## MODIFIED Requirements
 
+### Requirement: Values edit in place when the host allows it
+When the host sets `editable`, the element SHALL let the reader edit a value where it reads; otherwise
+it SHALL offer no editing and read as it does without this property. A value SHALL be editable when it
+is a literal or a bare union case that is a whole value (an attribute's value, an item of a braced
+sequence, or a parameterless `let`'s value), or a run of plain text content written on one line, and
+an editor fits it:
+
+- a string, a `uitext` string or an id: a text field holding the value without quotes or escapes;
+- a number, typed `int`, `float32` or `float64` or by an alias of one, or a numeric literal where no
+  type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and whose
+  property name, dragged sideways, changes the value as the pointer moves;
+- a boolean: a toggle, with no field;
+- a bare case of a union: a popover listing the union's cases that hold no properties, each with its
+  doc, the current one marked, filtered as the reader types;
+- a string a visualizer formats as `color`: a popover with a hex field and the browser's color picker;
+- a run of text: a text field that takes one line.
+
+The element SHALL find a value's type through its element's declaration and the aliases it names, in
+the tree's declaration table. An editor SHALL take the value's own place in the reading, and a popover
+SHALL open over the reading, so that opening an editor moves nothing else. A popover SHALL be placed
+by its value before anything in it is brought into view, and SHALL scroll only its own list, never the
+reading. A click on an editable value SHALL edit it and SHALL leave the selection as it was: a field SHALL open with a
+collapsed caret where the click fell, a click on a check or cross SHALL toggle the boolean, and a
+case or a color SHALL open its popover; a click anywhere else in a unit, as on a property's name,
+SHALL select the unit and open nothing. The second click of a double-click SHALL NOT toggle a boolean
+again, and a click on a value whose popover is open SHALL close it, as a dropdown's does. Enter or F2 with a unit selected SHALL open the editor of its value, or of its first value
+when it holds several, with the field's text selected; Space SHALL toggle a boolean. Under the
+pointer, an editable value SHALL show a faint mark and a text cursor, or a hand for one that toggles
+or opens a popover, and a case SHALL show a chevron after it. An open field SHALL read as an input,
+with a ring of its own apart from the selection's color. Enter or leaving the field SHALL commit, Escape
+SHALL cancel and keep the selection, and Tab and Shift+Tab SHALL commit and open the next and previous
+editable value, the selection again left as it was. A text field SHALL grow with its text and wrap within the reading's width. A number
+SHALL be committed once when a drag ends, and an entry an editor cannot take, such as a number field
+holding `12px`, SHALL stay in the field marked as invalid and SHALL NOT be committed; once typing
+pauses, or at once when the reader tries to commit it, a note beside the field, or under it where the
+reading has no room beside it, SHALL say why, and SHALL go when the entry can be taken or the editor
+closes. Opening an editor SHALL close any hover card.
+
+#### Scenario: Editing a string
+- **WHEN** the host has set `editable`, the reader selects the row `name` of a `Drink` whose name is
+  `"Latte"`, presses Enter, types `Flat white` over it and presses Enter
+- **THEN** the element SHALL fire `nx-edit` setting the string value of the row's literal to
+  `Flat white`, and SHALL read `Flat white` until the host sets a newer tree
+
+#### Scenario: Picking a case
+- **WHEN** the reader opens the editor of `size=medium`, typed `Size = small | medium | large`
+- **THEN** a popover SHALL list `small`, `medium` and `large`, `medium` marked, and choosing `large`
+  SHALL fire `nx-edit` setting the case `large`
+
+#### Scenario: A click edits where it falls
+- **WHEN** the host has set `editable` and the reader clicks in the middle of the value `"Latte"`,
+  with nothing selected
+- **THEN** a field SHALL open on `Latte` with the caret between the characters the click fell
+  between and no text selected, and nothing SHALL be selected
+
+#### Scenario: A click on a name selects
+- **WHEN** the reader clicks the name of the row `name`
+- **THEN** the row SHALL be selected and no editor SHALL open
+
+#### Scenario: Toggling
+- **WHEN** a row `iced` reading a cross is selected and the reader presses Space, or clicks the cross
+- **THEN** the element SHALL fire `nx-edit` setting the boolean `true`
+
+#### Scenario: Cancelling
+- **WHEN** the reader opens a text field, types, and presses Escape
+- **THEN** no `nx-edit` SHALL fire, the value SHALL read as before and the unit SHALL stay selected
+
+#### Scenario: Not editable by default
+- **WHEN** the host has not set `editable` and the reader double-clicks a value
+- **THEN** no editor SHALL open and no `nx-edit` SHALL fire
+
+#### Scenario: Saying why
+- **WHEN** the reader types `12px` in a number field and presses Enter
+- **THEN** no `nx-edit` SHALL fire and a note beside the field SHALL read `Not a number`
+
+#### Scenario: Nothing moves
+- **WHEN** the reader opens the editor of a value on a one-line element
+- **THEN** every other part of the reading SHALL stay where it was drawn
+
 ### Requirement: A property with a default, or an optional one, can be left out
 The element SHALL let the reader leave out a property that has a default or is optional: when the
 host has set `editable` and such a property's row is selected, Delete, or Cmd+Backspace (a Mac

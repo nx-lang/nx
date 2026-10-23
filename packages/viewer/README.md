@@ -304,13 +304,14 @@ row, or at the end of a line, they are drawn over the gap and nothing moves. Aft
 commits, they show again on the redrawn reading, so the next click steps again.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
-with no parameters. A click on a value edits it, as a form's field does: a field opens with the
+with no parameters. A click on a value edits it, as a form's field does, and leaves the selection as
+it was, as a click on its steppers or chevron does: a field opens with the
 caret where the click fell, a boolean toggles, and a case or a color opens its popover. A case shows a
 chevron past it under the pointer, drawn and placed as a value's choices chevron is, room on a line
 included; it stays as the pointer moves onto it, and a click on it opens the popover, or closes it. A click on
 anything else, as a property's name, selects. Enter or F2 opens the selected unit's first value
 with its text selected. Enter or leaving the field commits, Escape cancels, and Tab and Shift+Tab
-commit and open the next or previous value. An entry an editor cannot take, such as `12px` in a
+commit and open the next or previous value, again leaving the selection as it was. An entry an editor cannot take, such as `12px` in a
 number field, stays in the field, marked, and once typing pauses, or at once on Enter, a note beside
 it says why. Fields take the value's own place and popovers open over the reading, so nothing else
 moves. A string's field holds its value without quotes or escapes; a string with an escape other
