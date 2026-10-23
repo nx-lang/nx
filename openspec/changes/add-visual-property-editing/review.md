@@ -912,7 +912,7 @@ reviewer: the merged-range warning and a derived visualizer over its base.
 
 ## New Findings Discovered During 2026-10-23 15:44 Verification
 
-### 🟡 Fixed - RF39 The proposal does not list `editor-language-service` among the modified capabilities
+### ✅ Verified - RF39 The proposal does not list `editor-language-service` among the modified capabilities
 - **Severity:** Low
 - **Evidence:** RF38's fix adds `specs/editor-language-service/spec.md`, a MODIFIED requirement. But
   `proposal.md`'s "Modified Capabilities" still lists only `source-edits`, `visualizer-library`,
@@ -922,6 +922,7 @@ reviewer: the merged-range warning and a derived visualizer over its base.
   compiler's besides the editor-only `editor-hint-range` for a range that only merging empties."
 - **Fix:** `proposal.md` lists `editor-language-service` under Modified Capabilities, and Impact names
   the merged-range warning in the language service's diagnostics.
+- **Verification:** Verified at `8b56432`. `proposal.md` lists `editor-language-service` under Modified Capabilities, with the editor-only `editor-hint-range` exception. The `crates/nx-language-service` bullet under Impact names the merged-range warning in its diagnostics. `openspec validate add-visual-property-editing --strict` passes.
 
 
 ## Questions
@@ -1026,3 +1027,5 @@ reviewer: the merged-range warning and a derived visualizer over its base.
 - Verification of RF38 (2026-10-23 15:44, commit `a7547eb`): RF38 is verified. The new
   `editor-language-service` delta matches the main spec except for the editor-only clause. One Low
   finding is new: the proposal does not list that capability (RF39). `openspec validate --strict` passes.
+- Verification of RF39 (2026-10-23 15:45, commit `8b56432`): RF39 is verified, and nothing new was found.
+  Every finding from RF1 to RF39 is now verified.
