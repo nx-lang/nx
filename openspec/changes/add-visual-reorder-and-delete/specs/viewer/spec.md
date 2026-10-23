@@ -1,23 +1,26 @@
 ## ADDED Requirements
 
-### Requirement: An item of a list moves by its grip
+### Requirement: An item of a list is dragged by its icon
 When the host has set `editable`, the element SHALL let the reader move an item that moves: an
 element that is an item of a sequence or of element content, not inside a condition's branch or a
-loop's body, in a list of two or more items that holds no text. Where the reading draws such a list an item to a line, the element SHALL show a
-grip in the gutter left of the item's first line, left of its fold chevron when it folds, while the
-pointer is over the item and while it is selected, as quiet as the fold chevron. Pressing the grip
-and moving the pointer 4 pixels or more SHALL start a drag; a click on the grip SHALL select the
-item. While dragging, the item SHALL be drawn muted where it stands, a copy of one line holding its
-icon and its title, or its name, SHALL follow the pointer, and a line in the selection colour SHALL
+loop's body, in a list of two or more items that holds no text. Where the reading draws such a list
+an item to a line, the item's handle SHALL be its icon, with the element's name beside it where the
+reading shows one, or its name alone where the host draws no icons; the element SHALL add no mark of
+its own for it. Over the handle the pointer SHALL show a grab cursor, and the hover card the icon or
+name shows SHALL end with a quiet `Drag to reorder`. A click on the handle SHALL select the item, as
+today; pressing it and moving the pointer 4 pixels or more SHALL instead start a drag and close any
+hover card. While dragging, the item SHALL be drawn muted where it stands, a copy of one line holding
+its icon and its title, or its name, SHALL follow the pointer, and a line in the selection colour SHALL
 mark the gap between items of the item's own list nearest the pointer; nothing else in the reading
-SHALL move. Releasing over the list at a gap that does not leave the item where it is SHALL fire `nx-edit` with the
-item's key and `move` to the position that gap gives it. Releasing anywhere else, or Escape, SHALL
-cancel the drag and fire nothing. While the pointer is near the top or bottom edge of the reading's
-scrolling area, the reading SHALL scroll toward it. The drag SHALL work with a mouse, a pen and a
-touch on the grip.
+SHALL move. Releasing over the list at a gap that does not leave the item where it is SHALL fire
+`nx-edit` with the item's key and `move` to the position that gap gives it. Releasing anywhere else,
+or Escape, SHALL cancel the drag and fire nothing. While the pointer is near the top or bottom edge of
+the reading's scrolling area, the reading SHALL scroll toward it. The drag SHALL work with a mouse, a
+pen and a touch on the handle. An item that shows neither an icon nor a name moves only as the next
+requirement says.
 
 #### Scenario: Dragging a step down
-- **WHEN** the reader drags the grip of the first of four steps and releases it with the line marking
+- **WHEN** the reader drags the icon of the first of four steps and releases it with the line marking
   the gap between the third and the fourth
 - **THEN** the element SHALL fire `nx-edit` with the first step's key and `move` to `2`, and nothing
   else in the reading SHALL have moved during the drag
@@ -26,16 +29,20 @@ touch on the grip.
 - **WHEN** the reader presses Escape during a drag
 - **THEN** the drag SHALL end, the item SHALL read as before, and no event SHALL fire
 
-#### Scenario: No grip
-- **WHEN** the pointer is over the only choice of a question, or over an element inside an `if`
-  block
-- **THEN** no grip SHALL show
+#### Scenario: A click on the icon
+- **WHEN** the reader clicks the icon of a step without moving the pointer
+- **THEN** the step SHALL be selected and no drag SHALL start
+
+#### Scenario: Nothing to drag
+- **WHEN** the pointer is over the icon of the only choice of a question, or of an element inside an
+  `if` block
+- **THEN** the cursor SHALL not show a grab hand, and pressing and moving SHALL start no drag
 
 ### Requirement: An item of a list moves up and down
 With the reading focused, no editor open and an item that moves selected, Alt+Up and Alt+Down SHALL
 fire `nx-edit` with the item's key and `move` to the position before or after its own, and SHALL do
 nothing at the list's start or end. These SHALL work where the reading draws the list on one line as
-well, where there is no grip.
+well, where there is no handle to drag.
 
 #### Scenario: Alt+Down
 - **WHEN** the reader selects the second of three choices and presses Alt+Down

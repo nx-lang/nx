@@ -20,14 +20,15 @@ second way.
   list's layout: whole lines in a list written an item to a line, in place in a list written on one
   line. It refuses an item inside an `if` or a `for`, a list that holds text, and a position outside
   the list.
-- **Dragging in Visual.** With `editable` set, an item that can move shows a grip in the gutter left
-  of its first line, on hover and while selected. Only the grip starts a drag, so values, steppers,
-  the name scrub and text selection keep working. While dragging, the item dims in place, a
+- **Dragging in Visual, by the icon.** With `editable` set, an item that can move is dragged by the
+  icon it already starts with (and its name beside it): no new mark. Over it the cursor becomes a
+  grab hand and the hover card says `Drag to reorder`; a click still selects. Values, steppers, the
+  name scrub and text selection keep working, since none of them is on the icon. While dragging, the item dims in place, a
   one-line copy follows the pointer, and a line marks the gap where it will land, only between
   items of its own list. Nothing else moves until the drop, which fires one `nx-edit`. Escape or a
   drop outside the list cancels, and the reading scrolls near its edges.
 - **Move up and Move down.** Alt+Up and Alt+Down move the selected item. These work in a list the
-  reading draws on one line too, where there is no grip.
+  reading draws on one line too, where there is nothing to drag.
 - **Delete.** `remove` takes an item too, with the comments right above it. Delete or Cmd+Backspace on
   a selected item fires it, with no confirmation since undo takes it back; the only item of a list
   typed `+` cannot be deleted.
@@ -48,7 +49,7 @@ None.
 ### Modified Capabilities
 
 - `source-edits`: the `move` edit, `remove` for an item, and their refusals.
-- `viewer`: dragging an item by its grip, Move up and Move down and Delete from the keyboard and an
+- `viewer`: dragging an item by its icon, Move up and Move down and Delete from the keyboard and an
   item's menu, and the selection and folds following a moved or deleted item.
 - `playground`: the test-cases example covers reordering and deleting.
 
@@ -57,6 +58,6 @@ None.
 - `crates/nx-language-service`: `source_edit` (`move`, `remove` of an item) and tests, including a round trip over the
   repository's `.nx` files.
 - `packages/language-protocol`: the `move` edit; `packages/language-http`: its validation.
-- `packages/viewer`: the grip, the drag, the keys, the item menu, styles, tests and README.
+- `packages/viewer`: dragging by the icon, the keys, the item menu, styles, tests and README.
 - `sites/playground`: the test-cases example.
 - `src/vscode/CHANGELOG.md` and the package changelogs.

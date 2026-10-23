@@ -28,15 +28,20 @@ up and Move down as the second way, and asked that the UI stay simple. He then a
 
 ## Decisions
 
-### 1. Only a grip starts a drag
+### 1. The icon is the handle (Bret, 2026-10-23)
 
 A row is full of click targets: a value opens its editor, steppers step, a property's name scrubs,
-and text can be selected. Dragging from anywhere on the row would compete with each of them. A grip
-(`⠿`) in the gutter, as in Notion, Linear and Figma's layer list, does not. It shows while the
-pointer is over the item and while the item is selected, as quietly as the fold chevron, and left of
-the chevron when the item folds, so the gutter's existing mark keeps its place.
+and text can be selected. Dragging from anywhere on the row would compete with each of them. Every
+element on a line of its own already starts with its icon, and, where the reading shows it, its name;
+neither opens a field, a stepper or a scrub, and a click there selects the item. So they are the
+handle: a grab cursor over them, `Drag to reorder` at the end of the hover card they already show,
+and a press that moves 4 px starts the drag, while a click still selects. Nothing new is drawn, and
+no selection is needed first. Without the host's `icons`, the name alone is the handle.
 
-Alternative considered: drag by the icon. Not every element has an icon, and an icon is small.
+Alternatives considered: a grip (`⠿`) in the gutter on hover, as in Notion and Linear, the more
+familiar cue but a new mark beside the fold chevron; and dragging a selected item from anywhere,
+which loses text selection there and shows no cue. Bret chose the icon. The icon is a small target
+(about 14 px), which the name beside it widens where it shows.
 
 ### 2. A line marks the landing, and nothing else moves
 
@@ -48,18 +53,18 @@ the host's newer tree. A drop on the gap the item already fills, outside the lis
 cancels with no event. Near the top or bottom of the reading's scrolling area, the reading scrolls,
 faster the nearer the edge.
 
-The drag uses pointer events with the pointer captured on the grip, which also makes a touch drag on
-the grip work; it starts once the pointer has moved 4 px, so a click on the grip selects the item.
+The drag uses pointer events with the pointer captured on the handle, which also makes a touch drag
+on it work; it starts once the pointer has moved 4 px, so a click on the handle selects the item.
 
 ### 3. Where items move
 
 An item moves when it is an element that is an item of a sequence (`choices={ … }`, a `let`'s
 `{ … }`) or of element content (`steps`, a menu's drinks), its list has two or more items, and the
-list holds no text. Items an `if` or a `for` makes are code: they have no grip, and nothing drops
+list holds no text. Items an `if` or a `for` makes are code: they do not drag, and nothing drops
 among them, but an item can move past an `if` or `for` block, which is an item of the list. Literal
 items (`{ 4 2 5 }`) are not selectable units in Visual, so they do not move in this change.
 
-The grip shows where the reading draws the list an item to a line, which is how a group draws what
+Dragging works where the reading draws the list an item to a line, which is how a group draws what
 it holds and how a list property's row draws its elements. Move up and Move down work wherever the
 item moves.
 
@@ -111,8 +116,8 @@ key, Shift+F10); deferred actions such as Duplicate would join it later.
 
 ## Risks / Trade-offs
 
-- [The grip is small and hidden at rest] → it shows on hover and on the selected item, and Move up
-  and Move down are in the menu and on Alt+Up and Alt+Down.
+- [The handle is small and has no mark of its own] → the grab cursor and the hover card's `Drag to
+  reorder` say it, and Move up and Move down are in the menu and on Alt+Up and Alt+Down.
 - [Alt+Up and Alt+Down on macOS scroll by a page in some browsers] → only while the reading has
   focus and a movable item is selected, where the viewer prevents the default.
 - [Comments that belong to an item but stand apart from it with a blank line stay behind] → only
