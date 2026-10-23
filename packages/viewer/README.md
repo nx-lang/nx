@@ -291,8 +291,10 @@ field.
 A number shows steppers, an up and a down button drawn just past the value and its unit so nothing
 moves, while its field is open and while the pointer rests on its value in the selected row. A click
 steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
-Pressing a stepper and dragging up or down scrubs the number, a step every two pixels, shown in place:
-on release it goes into the open field, or is committed once. Their tooltip names the keys that do the same.
+A press that moves less than six pixels is still a click. Pressing a stepper and dragging further up
+or down scrubs the number, a step every four pixels, shown in place: on release it goes into the open
+field, or is committed once. A stepper keeps the usual cursor until it is dragged. Their tooltip names
+the keys that do the same.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does: a field opens with the

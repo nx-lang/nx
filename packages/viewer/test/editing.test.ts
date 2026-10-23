@@ -1281,6 +1281,16 @@ describe("steppers", () => {
     assert.equal(tools(element), null, "gone once the pointer leaves");
   });
 
+  it("takes a press that wanders a few pixels as a click, not a drag", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [102, 97] });
+    assert.ok(!body(element).classList.contains("stepping"));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+  });
+
   it("steps into an open field, which commits", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
@@ -1303,12 +1313,13 @@ describe("steppers", () => {
     value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
     up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 90 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 74 }));
     assert.equal(rendered(element, "card.value.gap.value").textContent, "9", "shown as it moves");
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 60 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 30 }));
     assert.equal(rendered(element, "card.value.gap.value").textContent, "16", "kept within the range");
     assert.deepEqual(edits, []);
-    up.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 60 }));
+    up.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 30 }));
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
     assert.equal(element.selection, "card.value.gap", "the selection stays");
   });
@@ -1356,14 +1367,15 @@ describe("steppers", () => {
     rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
     up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 80 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 54 }));
     assert.equal(rendered(element, "card.value.gap.value").textContent, "14");
     element.tree = element.tree;
     assert.equal(rendered(element, "card.value.gap.value").textContent, "14", "still shown");
     assert.ok(body(element).classList.contains("stepping"));
     const again = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
-    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 76 }));
-    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 76 }));
+    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 46 }));
+    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 46 }));
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
     assert.ok(!body(element).classList.contains("stepping"));
 
@@ -1381,7 +1393,7 @@ describe("steppers", () => {
     const { edits } = events(element);
     element.selection = "card.value.gap";
     rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [90, 100] });
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 84, 94] });
     assert.deepEqual(edits, []);
     const value = rendered(element, "card.value.gap.value");
     assert.equal(value.textContent, "4");
@@ -1393,7 +1405,7 @@ describe("steppers", () => {
     const { edits } = events(element);
     rendered(element, "card.value.count.value").click();
     const open = field(element)!;
-    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94] });
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 82] });
     assert.equal(open.textContent, "5");
     assert.equal(field(element), open);
     assert.deepEqual(edits, []);

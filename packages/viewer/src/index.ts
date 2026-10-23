@@ -129,6 +129,16 @@ const SCRUB_STEP = 2;
 /** How far the pointer moves before a press on a number's name becomes a drag, in pixels. */
 const SCRUB_SLOP = 3;
 
+/**
+ * How far the pointer moves before a press on a stepper becomes a drag, in pixels: more than a name's,
+ * since a stepper is clicked far more often than dragged, and a hand rarely keeps still on so small a
+ * target.
+ */
+const STEPPER_SLOP = 6;
+
+/** How far the pointer moves up or down, in pixels, for a stepper dragged to step its number once. */
+const STEPPER_STEP = 4;
+
 /** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
 const CARD_DELAY = 500;
 
@@ -247,7 +257,8 @@ interface Scrub {
 interface Stepping {
   target: EditTarget;
   readonly pointer: number;
-  readonly y: number;
+  /** Where the press began, and, once it became a drag, where the drag began. */
+  y: number;
   /** Which stepper: up, `1`, or down, `-1`. */
   readonly direction: 1 | -1;
   /** The number when the press began. */
@@ -2532,11 +2543,15 @@ export class NxViewerElement extends ElementBase {
     event.stopPropagation();
     // Up is more, as the steppers point.
     const moved = stepping.y - event.clientY;
-    if (stepping.value === undefined && Math.abs(moved) < SCRUB_SLOP) {
-      return;
+    if (stepping.value === undefined) {
+      if (Math.abs(moved) < STEPPER_SLOP) {
+        return;
+      }
+      // The drag counts from here, so it starts at the number pressed rather than a few steps on.
+      stepping.y = event.clientY;
     }
     const target = stepping.target;
-    const steps = Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
+    const steps = Math.trunc((stepping.y - event.clientY) / STEPPER_STEP) * (event.shiftKey ? 10 : 1);
     const value = stepNumber(stepping.from, steps, target.signed !== false, target.hints) ?? stepping.from;
     if (stepping.value === undefined) {
       this.#body.classList.add("stepping");

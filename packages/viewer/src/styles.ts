@@ -674,20 +674,26 @@ export const styles = `
 .source .value-tools.with-steppers .steppers {
   display: inline-flex;
   flex-direction: column;
-  width: 14px;
-  border-radius: 3px;
+  align-self: center;
+  /* A little taller than the line, so each half is a target a pointer can hit. */
+  width: 18px;
+  height: calc(1lh + 6px);
+  border-radius: 4px;
   overflow: hidden;
   background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
   box-shadow: inset 0 0 0 1px var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
 }
-.source .value-tools .stepper { position: relative; flex: 1; cursor: ns-resize; }
+/* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
+.source .value-tools .stepper { position: relative; flex: 1; cursor: default; }
+.source .value-tools .stepper.up { box-shadow: inset 0 -1px 0 var(--nx-viewer-card-border, light-dark(#d0d7de, #454545)); }
 .source .value-tools .stepper:hover { background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
+.source .value-tools .stepper:active { background: var(--nx-viewer-edit-active, light-dark(#0000001f, #ffffff29)); }
 .source .value-tools .stepper::after, .source .value-tools .choices-toggle::after {
   content: "";
   position: absolute;
   inset: 0;
   background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 8px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 10px no-repeat;
 }
 .source .value-tools .stepper.up::after { transform: rotate(180deg); }
 .source .value-tools .stepper:hover::after, .source .value-tools .choices-toggle:hover::after {
