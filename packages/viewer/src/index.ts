@@ -2986,18 +2986,29 @@ export class NxViewerElement extends ElementBase {
     }
     const document = this.ownerDocument;
     const items: HTMLElement[] = [];
-    const item = (action: string, words: string): void => {
+    const item = (action: string, words: string, value: Node[] = []): void => {
       const button = document.createElement("div");
       button.className = "menu-item";
       button.tabIndex = -1;
       button.dataset["action"] = action;
       button.setAttribute("role", "menuitem");
-      button.textContent = words;
+      const label = document.createElement("span");
+      label.className = "menu-label";
+      label.textContent = words;
+      button.append(label);
+      if (value.length > 0) {
+        // What the item leads to, quieter, past its words, as a choice's value is.
+        const shown = document.createElement("span");
+        shown.className = "menu-value";
+        shown.append(...value);
+        button.append(shown);
+        button.setAttribute("aria-label", `${words}, ${shown.textContent?.trim() ?? ""}`);
+      }
       items.push(button);
     };
     const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
     if (removal === "reset") {
-      item("remove", "Reset to default");
+      item("remove", "Reset to default", this.#defaultShownFor(at));
     } else if (removal === "remove") {
       item("remove", "Remove");
     }
@@ -3008,6 +3019,26 @@ export class NxViewerElement extends ElementBase {
     this.#menuKey = key;
     this.#placeCard(anchor, this.#menu);
     items[0]!.focus({ preventScroll: true });
+  }
+
+  /**
+   * The default of the property the attribute at `at` sets, drawn as the reading draws its value, or
+   * nothing when it is not a short literal, such as an element or a record.
+   */
+  #defaultShownFor(at: number): Node[] {
+    const index = this.#index!;
+    const attribute = index.tree.nodes[at]!;
+    const element = attribute.parent === undefined ? undefined : index.tree.nodes[attribute.parent];
+    const declared = element === undefined ? undefined : elementProperties(index.tree, element)?.find((candidate) => candidate.name === attribute.name);
+    const written = declared?.default?.trim();
+    if (written === undefined || written.length > 24 || /^[<{]/.test(written)) {
+      return [];
+    }
+    const target = this.#targets.get(`${attribute.key}.value`);
+    const editor = target === undefined || target.kind === "run" ? undefined : { kind: target.kind };
+    const shown = defaultShown(this.ownerDocument, written, editor, target?.kind === "color" ? "color" : undefined);
+    const unit = target?.kind === "number" ? target.hints?.unit : undefined;
+    return unit === undefined ? shown : [...shown, this.#unitMark(unit)];
   }
 
   /** Closes the row's menu; with `refocus`, the reading takes the keys again. */

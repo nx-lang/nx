@@ -151,8 +151,8 @@ changes what a program means.
 
 ### The row menu
 
-A selected row shows `⋯` at its end on hover and when selected. Its menu offers Reset to default or
-Remove (as Delete), and Show in Source (as `nx-open`). It takes two clicks, which answers the phase 1
+A selected row shows `⋯` at its end on hover and when selected. Its menu offers Reset to default (with the
+default beside it, quieter, as the reading draws it; Bret, 2026-10-23) or Remove (as Delete), and Show in Source (as `nx-open`). It takes two clicks, which answers the phase 1
 worry that a button beside each row makes destructive changes too easy. Dimmed rows have no menu.
 
 ## Risks / Trade-offs

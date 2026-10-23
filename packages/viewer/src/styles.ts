@@ -613,7 +613,33 @@ export const styles = `
   line-height: 1.45;
 }
 .menu[hidden] { display: none; }
-.menu-item { padding: 2px 8px; border-radius: 4px; cursor: pointer; outline: none; }
+.menu-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+/* A default the item resets to, quieter, as the reading draws it. */
+.menu-value {
+  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  white-space: nowrap;
+}
+.menu-value .unit { color: inherit; }
+.menu-value .swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
 .menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
 /* Segmented, a few cases read as one row of buttons; the filter takes the keys out of sight. */
 .popover.segmented { min-width: 0; }

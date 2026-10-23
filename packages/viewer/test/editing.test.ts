@@ -964,10 +964,10 @@ describe("a row's menu", () => {
     const { edits, opens } = events(element);
     const menuOf = (key: string): string[] => {
       rendered(element, key).querySelector<HTMLElement>(":scope > .row-menu")!.click();
-      return Array.from(root(element).querySelectorAll(".menu-item")).map((item) => item.textContent ?? "");
+      return Array.from(root(element).querySelectorAll(".menu-item")).map(reads);
     };
     assert.ok(rendered(element, "latte.value.size").matches(".sheet-row"), "the drink reads as a group");
-    assert.deepEqual(menuOf("latte.value.size"), ["Reset to default", "Show in Source"]);
+    assert.deepEqual(menuOf("latte.value.size"), ["Reset to default medium", "Show in Source"], "the default it resets to");
     assert.equal(element.selection, "latte.value.size", "opening the menu selects its row");
     root(element).querySelector<HTMLElement>(".menu-item")!.click();
     assert.deepEqual(edits, [{ key: "latte.value.size", edit: { kind: "remove" } }]);
@@ -977,6 +977,12 @@ describe("a row's menu", () => {
     assert.ok(root(element).querySelector<HTMLElement>(".menu")!.hidden, "Escape closes it");
     assert.equal(edits.length, 1);
     assert.deepEqual(menuOf("latte.value.name"), ["Show in Source"], "a required property is not left out");
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    assert.deepEqual(menuOf("card.value.padding"), ["Reset to default 8 px", "Show in Source"], "with its unit");
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    assert.deepEqual(menuOf("card.value.gap"), ["Reset to default 4", "Show in Source"]);
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    menuOf("latte.value.name");
     root(element).querySelector<HTMLElement>(".menu-item")!.click();
     assert.deepEqual(opens.map((open) => open.key), ["latte.value.name.value"]);
   });

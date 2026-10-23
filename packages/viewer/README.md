@@ -314,7 +314,7 @@ laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribut
 was on is selected. Backspace alone does not, since a reader who meant to change the text would
 press it. A written row shows a quiet `⋯` at its end under the pointer and when selected; it opens a
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
-default, Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
+default (with the default, quieter, as `Reset to default  8 px`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 
 A selected element ends with a quiet row, `Show N unset properties` (`Hide unset properties` while
 open), N being the properties it does not write; one
