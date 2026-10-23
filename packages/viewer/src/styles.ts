@@ -372,6 +372,8 @@ export const styles = `
 }
 .card-doc > :first-child { margin-top: 0; }
 .card-doc > :last-child { margin-bottom: 0; }
+/* What a handle does, after what the item is, quieter. */
+.card-hint { margin-top: 4px; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); font-family: var(--nx-viewer-prose-font-family, inherit); }
 .card-doc :is(p, ul, ol, pre) { margin: 0 0 0.5em; }
 .card-doc :is(ul, ol) { padding-left: 1.4em; }
 .card-doc code {
@@ -591,6 +593,65 @@ export const styles = `
 }
 .source .sheet-row[data-key]:hover > .row-menu, .source .sheet-row.selected > .row-menu { opacity: 1; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
+/* An item's menu hangs past the end of its first line from a point that takes no room. */
+.source .item-menu { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
+.source .item-menu > .row-menu { left: 0; }
+.source .sheet.selected > .sheet-head > .item-menu > .row-menu,
+.source .sheet-head:hover > .item-menu > .row-menu,
+.source .line-element.selected > .item-menu > .row-menu,
+.source .line-element:hover > .item-menu > .row-menu { opacity: 1; }
+/* An item that moves is dragged by its icon and its name: a hand to grab, and no text selection
+   or panning to compete with it. */
+.body.editable .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* A touch on a handle's icon may be taken as one on the fold chevron beside it, which then must not
+   pan either. */
+.body.editable .sheet-head:has(> .drag-handle) > .fold { touch-action: none; }
+/* A name is one word: as a box of its own it takes a touch-action, which an inline span does not. */
+.body.editable :is(.sheet-kind, .line-kind).drag-handle { display: inline-block; text-indent: 0; }
+.body.dragging, .body.dragging * { cursor: grabbing !important; }
+/* While dragged, the item stays where it is, muted, and a copy of one line follows the pointer. */
+.source .drag-source { opacity: 0.4; }
+.drag-ghost {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.6ch;
+  max-width: 24rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0.92;
+}
+.drag-ghost > .element-icon {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--nx-viewer-icon-color, light-dark(#6e7781, #8b949e));
+}
+.drag-ghost > .element-icon > svg { display: block; width: 100%; height: 100%; stroke-width: 1.75; }
+.drag-ghost > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+/* Where the dragged item would land: a line in the selection's color between two items. */
+.drop-line {
+  position: absolute;
+  z-index: 2;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--nx-viewer-drop-line, var(--nx-viewer-selection-guide, light-dark(#0969da, #4daafc)));
+  pointer-events: none;
+}
+.drop-line[hidden] { display: none; }
 /* A row's menu opens over the reading, as a popover does. */
 .menu {
   position: absolute;

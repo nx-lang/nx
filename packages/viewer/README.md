@@ -329,6 +329,39 @@ press it. A written row shows a quiet `⋯` at its end under the pointer and whe
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default (with the default, quieter, as `Reset to default  8`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 
+### Moving and deleting items
+
+An element that is an item of a list (a braced sequence, as `choices={ … }`, or what an element
+holds, as a flow's steps) moves within that list and can be deleted, when the list holds no text and
+the item is not inside an `if` branch or a `for` body. An `if` or a `for` that is itself an item stays
+where it is unless moved past, and items it makes do not move.
+
+- **Drag.** Where the reading draws the list an item to a line, an item of two or more is dragged by
+  its icon and its name: the pointer shows a grab hand there, and the hover card ends with `Drag to
+  reorder`. A press that moves 4 pixels starts the drag; a click still selects. The item is muted
+  where it stands, a copy of one line follows the pointer, and a line in the selection's color marks
+  the gap it would land in, above the comments directly over the item there; nothing else moves.
+  Releasing on that line fires `nx-edit` with `{ kind: "move", to }`, the position the item takes;
+  releasing elsewhere, beside the item, or Escape fires nothing. Near the top or bottom of what
+  scrolls the reading, the drag scrolls it. A mouse, a pen and a touch all drag.
+- **Keys.** With an item selected, Alt+Up and Alt+Down move it one place, in a list drawn on one line
+  too; nothing happens at the ends. Delete, or Cmd+Backspace, deletes it with `{ kind: "remove" }`,
+  without asking, since the host's undo takes it back, except the only item of a list whose type
+  needs one or more (`Step+`).
+- **Menu.** A movable or deletable item shows a quiet `⋯` at the end of its first line under the
+  pointer and when selected; it opens a menu, as do the context menu key and Shift+F10, with Move up,
+  Move down (each where the item has a neighbour that way), Delete and Show in Source, which fires
+  `nx-open` with the item's key.
+
+Items are keyed by their position (`steps[2]`), so a move changes keys. The element remembers the
+moves and deletes it fired and reads the host's next tree with them: the moved item is selected,
+or after a delete the item that took its place, else the one before it, else what held the list;
+each fold on the list's items stays on its item, firing `nx-fold` with the new keys; and the live
+region says `Moved to 3 of 8` or `Deleted`. A host sets `text` before `tree`, as it does after any
+edit; a tree of the same text, as after a refusal, moves nothing. Keys pressed again before the next
+tree, as Alt+Down held, fire edits keyed as the text will be once the ones before are made, so a host
+that applies edits in order makes them all.
+
 A selected element ends with a quiet row, `Show N unset properties` (`Hide unset properties` while
 open), N being the properties it does not write; one
 written under a property-list `if` or match counts as written, and an element of a union's case

@@ -235,8 +235,15 @@ const refused: SourceEditAnswer = { edits: [], refused: "notEditable" };
 The request names a node of the document's source tree by its `key` and one change: `setValue`
 with a typed value (`string`, `number` as typed, `boolean`, or `case` by name) for a literal or a
 bare union case that is a whole value, `setText` with one line of text for a run of text content,
-`remove` for an attribute, or `addProperty` with a property's name and a typed value for an element,
-which writes the attribute after the element's last one, in its layout. The answer's `edits` make
+`remove` for an attribute or for an element that is an item of a list, `addProperty` with a
+property's name and a typed value for an element, which writes the attribute after the element's
+last one, in its layout, or `move` with a position `to` for an element that is an item of a list. An
+item of a list is an element in a braced sequence or in an element's content, not in an `if` branch
+or a `for` body, in a list that holds no text; `to` is the position it takes once moved, counted as
+the list's keys count its items. In a list written an item to a line, an item moves or goes with its
+whole lines, the comments directly above it, and the blank lines that separate it from the next item
+(or the one before, for the last); in a list on one line, with the space beside it. Other layouts are
+refused `notEditable`, and a `to` outside the list `invalidValue`. The answer's `edits` make
 the change: every range is in the document as sent and no two overlap, so a host applies them together; the service writes the spelling (quotes, escapes, kept braces, an
 attribute's whole line). A change it cannot make answers no edits and `refused`: `unknownNode`,
 `notEditable` or `invalidValue`. A change that would leave the text as it is answers no edits and no

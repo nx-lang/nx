@@ -858,3 +858,413 @@ fn a_reference_is_not_editable() {
     );
     assert!(answer.edits.is_empty());
 }
+
+const FLOW: &str = r#"type Step = { id:string label?:string }
+type Choice = { value:string }
+type QuestionFlow = { content steps:Step* }
+type Select = { choices:Choice+ }
+let wide = true
+let flow = <QuestionFlow>
+  <Step id="A" />
+  <Step
+    id="B"
+    label="Bee"
+  />
+  // Ask this first
+  <Step id="C" /> // see C
+</QuestionFlow>
+let spaced = <QuestionFlow>
+  <Step id="A" />
+
+  <Step id="B" />
+
+  <Step id="C" />
+</QuestionFlow>
+let branches = <QuestionFlow>
+  <Step id="A" />
+  if wide {
+    <Step id="B" />
+  }
+  <Step id="C" />
+</QuestionFlow>
+let inline = <Select choices={ <Choice value="a" /> <Choice value="b" /> } />
+let listed = <Select choices={
+  <Choice value="a" />
+  /// The second
+  <Choice value="b" />
+  <Choice value="c" />
+} />
+let mixed = <Select choices={ <Choice value="a" />
+  <Choice value="b" /> } />
+"#;
+
+fn move_to(to: usize) -> SourceEdit {
+    SourceEdit::Move { to }
+}
+
+/// The text between `from` and `to` in `source`, the first of each.
+fn between<'s>(source: &'s str, from: &str, to: &str) -> &'s str {
+    let start = source.find(from).expect("from") + from.len();
+    let end = start + source[start..].find(to).expect("to");
+    &source[start..end]
+}
+
+#[test]
+fn a_step_moves_down() {
+    let after = edited(FLOW, "flow.value.steps[0]", move_to(1));
+    assert_eq!(
+        between(&after, "let flow = <QuestionFlow>\n", "</QuestionFlow>"),
+        "  <Step\n    id=\"B\"\n    label=\"Bee\"\n  />\n  <Step id=\"A\" />\n  // Ask this first\n  <Step id=\"C\" /> // see C\n"
+    );
+    // Nothing outside the list changes.
+    assert_eq!(after.len(), FLOW.len());
+    assert_eq!(
+        between(&after, "let spaced", "let inline"),
+        between(FLOW, "let spaced", "let inline")
+    );
+}
+
+#[test]
+fn its_comment_goes_with_it() {
+    let after = edited(FLOW, "flow.value.steps[2]", move_to(0));
+    assert_eq!(
+        between(&after, "let flow = <QuestionFlow>\n", "</QuestionFlow>"),
+        "  // Ask this first\n  <Step id=\"C\" /> // see C\n  <Step id=\"A\" />\n  <Step\n    id=\"B\"\n    label=\"Bee\"\n  />\n"
+    );
+}
+
+#[test]
+fn a_doc_comment_goes_with_it() {
+    let after = edited(FLOW, "listed.value.choices.value[1]", move_to(2));
+    assert_eq!(
+        between(&after, "let listed = <Select choices={\n", "} />"),
+        "  <Choice value=\"a\" />\n  <Choice value=\"c\" />\n  /// The second\n  <Choice value=\"b\" />\n"
+    );
+}
+
+#[test]
+fn moving_on_one_line() {
+    let after = edited(FLOW, "inline.value.choices.value[0]", move_to(1));
+    assert!(after.contains(
+        "let inline = <Select choices={ <Choice value=\"b\" /> <Choice value=\"a\" /> } />"
+    ));
+    let after = edited(FLOW, "inline.value.choices.value[1]", move_to(0));
+    assert!(after.contains(
+        "let inline = <Select choices={ <Choice value=\"b\" /> <Choice value=\"a\" /> } />"
+    ));
+}
+
+#[test]
+fn moving_past_a_condition() {
+    let after = edited(FLOW, "branches.value.steps[2]", move_to(1));
+    assert_eq!(
+        between(&after, "let branches = <QuestionFlow>\n", "</QuestionFlow>"),
+        "  <Step id=\"A\" />\n  <Step id=\"C\" />\n  if wide {\n    <Step id=\"B\" />\n  }\n"
+    );
+}
+
+#[test]
+fn blank_lines_between_items_stay() {
+    let body = |source: &str| {
+        between(source, "let spaced = <QuestionFlow>\n", "</QuestionFlow>").to_string()
+    };
+    let down = edited(FLOW, "spaced.value.steps[0]", move_to(1));
+    assert_eq!(
+        body(&down),
+        "  <Step id=\"B\" />\n\n  <Step id=\"A\" />\n\n  <Step id=\"C\" />\n"
+    );
+    let to_end = edited(FLOW, "spaced.value.steps[0]", move_to(2));
+    assert_eq!(
+        body(&to_end),
+        "  <Step id=\"B\" />\n\n  <Step id=\"C\" />\n\n  <Step id=\"A\" />\n"
+    );
+    let up = edited(FLOW, "spaced.value.steps[2]", move_to(0));
+    assert_eq!(
+        body(&up),
+        "  <Step id=\"C\" />\n\n  <Step id=\"A\" />\n\n  <Step id=\"B\" />\n"
+    );
+}
+
+#[test]
+fn moving_to_where_it_is() {
+    let answer = edit(FLOW, "flow.value.steps[1]", move_to(1));
+    assert_eq!(answer.refused, None);
+    assert!(answer.edits.is_empty());
+}
+
+#[test]
+fn moving_what_cannot_move_is_refused() {
+    let refused = |key: &str, to: usize| edit(FLOW, key, move_to(to)).refused;
+    // An item an `if` makes.
+    assert_eq!(
+        refused("branches.value.steps[1].then[0]", 0),
+        Some(SourceEditRefusal::NotEditable)
+    );
+    // Not an element, though an item.
+    assert_eq!(
+        refused("branches.value.steps[1]", 0),
+        Some(SourceEditRefusal::NotEditable)
+    );
+    // Not an item.
+    assert_eq!(
+        refused("flow.value", 0),
+        Some(SourceEditRefusal::NotEditable)
+    );
+    assert_eq!(
+        refused("flow.value.steps[0].id", 0),
+        Some(SourceEditRefusal::NotEditable)
+    );
+    // Past the end.
+    assert_eq!(
+        refused("flow.value.steps[0]", 3),
+        Some(SourceEditRefusal::InvalidValue)
+    );
+    // Neither an item to a line nor on one line.
+    assert_eq!(
+        refused("mixed.value.choices.value[0]", 1),
+        Some(SourceEditRefusal::NotEditable)
+    );
+    // A list that holds text.
+    let text = "type T = { content items:string* }\ntype I = {}\nlet t = <T>Hi <I /> <I /></T>\n";
+    let answer = edit(text, "t.value.items[1]", move_to(2));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::NotEditable));
+}
+
+#[test]
+fn removing_a_step_and_its_comment() {
+    let after = edited(FLOW, "flow.value.steps[2]", SourceEdit::Remove);
+    assert_eq!(
+        between(&after, "let flow = <QuestionFlow>\n", "</QuestionFlow>"),
+        "  <Step id=\"A\" />\n  <Step\n    id=\"B\"\n    label=\"Bee\"\n  />\n"
+    );
+    let after = edited(FLOW, "flow.value.steps[1]", SourceEdit::Remove);
+    assert_eq!(
+        between(&after, "let flow = <QuestionFlow>\n", "</QuestionFlow>"),
+        "  <Step id=\"A\" />\n  // Ask this first\n  <Step id=\"C\" /> // see C\n"
+    );
+}
+
+#[test]
+fn removing_leaves_no_doubled_blank_line() {
+    let body = |source: &str| {
+        between(source, "let spaced = <QuestionFlow>\n", "</QuestionFlow>").to_string()
+    };
+    let first = edited(FLOW, "spaced.value.steps[0]", SourceEdit::Remove);
+    assert_eq!(body(&first), "  <Step id=\"B\" />\n\n  <Step id=\"C\" />\n");
+    let middle = edited(FLOW, "spaced.value.steps[1]", SourceEdit::Remove);
+    assert_eq!(
+        body(&middle),
+        "  <Step id=\"A\" />\n\n  <Step id=\"C\" />\n"
+    );
+    let last = edited(FLOW, "spaced.value.steps[2]", SourceEdit::Remove);
+    assert_eq!(body(&last), "  <Step id=\"A\" />\n\n  <Step id=\"B\" />\n");
+}
+
+#[test]
+fn removing_an_item_on_one_line() {
+    let after = edited(FLOW, "inline.value.choices.value[0]", SourceEdit::Remove);
+    assert!(after.contains("let inline = <Select choices={ <Choice value=\"b\" /> } />"));
+    let after = edited(FLOW, "inline.value.choices.value[1]", SourceEdit::Remove);
+    assert!(after.contains("let inline = <Select choices={ <Choice value=\"a\" /> } />"));
+}
+
+#[test]
+fn removing_an_item_with_crlf_line_breaks() {
+    let source = FLOW.replace('\n', "\r\n");
+    let after = edited(&source, "flow.value.steps[2]", SourceEdit::Remove);
+    assert!(after.contains("  />\r\n</QuestionFlow>"));
+    let after = edited(&source, "flow.value.steps[2]", move_to(0));
+    assert!(after.contains(
+        "<QuestionFlow>\r\n  // Ask this first\r\n  <Step id=\"C\" /> // see C\r\n  <Step id=\"A\" />"
+    ));
+}
+
+#[test]
+fn moving_the_only_item() {
+    let source = "type S = {}\ntype F = { content steps:S* }\nlet f = <F>\n  <S />\n</F>\n";
+    assert!(edit(source, "f.value.steps[0]", move_to(0))
+        .edits
+        .is_empty());
+    assert_eq!(
+        edit(source, "f.value.steps[0]", move_to(1)).refused,
+        Some(SourceEditRefusal::InvalidValue)
+    );
+    assert_eq!(
+        edited(source, "f.value.steps[0]", SourceEdit::Remove),
+        "type S = {}\ntype F = { content steps:S* }\nlet f = <F>\n</F>\n"
+    );
+}
+
+/// The keys of a tree outside the list keyed `list`, without comments, which are keyed by what
+/// follows them.
+fn keys_outside(tree: &crate::SourceTree, list: &str) -> Vec<String> {
+    tree.nodes
+        .iter()
+        .filter(|node| !matches!(node.role, SourceRole::Comment | SourceRole::DocComment))
+        .map(|node| node.key.clone())
+        .filter(|key| {
+            key != list
+                && !key.starts_with(&format!("{list}["))
+                && !key.starts_with(&format!("{list}."))
+        })
+        .collect()
+}
+
+/// The text of each item of the list keyed `list`, in order.
+fn item_texts(source: &str, tree: &crate::SourceTree, list: &str) -> Vec<String> {
+    let mut items = tree
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let position = node
+                .key
+                .strip_prefix(list)?
+                .strip_prefix('[')?
+                .strip_suffix(']')?
+                .parse::<usize>()
+                .ok()?;
+            Some((position, node))
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|(position, _)| *position);
+    items
+        .into_iter()
+        .map(|(_, node)| {
+            source[node.range.start_byte as usize..node.range.end_byte as usize].to_string()
+        })
+        .collect()
+}
+
+/// Over every `.nx` file in the repository: every item that moves, moved to each position, yields a
+/// document with no new parse errors, its list's items in the new order and every key outside the
+/// list unchanged; removing it yields one without it.
+#[test]
+fn moving_and_removing_items_over_the_repository() {
+    let mut files = Vec::new();
+    nx_files(&repository(), &mut files);
+    files.sort();
+    let uri = DocumentUri::from(URI);
+    let mut moved = 0;
+    let mut removed = 0;
+    for file in files {
+        let source = std::fs::read_to_string(&file).expect("source");
+        let snapshot = snapshot_for(&source);
+        let tree = snapshot.source_tree(&uri).expect("tree");
+        let errors = parse_errors(&source);
+        // A few lists per file keep the test quick.
+        let mut lists: Vec<String> = Vec::new();
+        for node in &tree.nodes {
+            if node.role != SourceRole::Element {
+                continue;
+            }
+            let Some(owner) = node.parent.map(|owner| &tree.nodes[owner as usize]) else {
+                continue;
+            };
+            if lists.contains(&owner.key) {
+                continue;
+            }
+            let answer = snapshot
+                .source_edit(&uri, &node.key, &move_to(0))
+                .expect("edit");
+            if answer.refused.is_some() {
+                assert_eq!(
+                    answer.refused,
+                    Some(SourceEditRefusal::NotEditable),
+                    "{} {}",
+                    file.display(),
+                    node.key
+                );
+                continue;
+            }
+            if lists.len() == 2 {
+                break;
+            }
+            lists.push(owner.key.clone());
+        }
+        for list in lists {
+            let items = item_texts(&source, &tree, &list);
+            let count = items.len();
+            let outside = keys_outside(&tree, &list);
+            for from in 0..count.min(4) {
+                let key = format!("{list}[{from}]");
+                if tree
+                    .nodes
+                    .iter()
+                    .all(|node| node.key != key || node.role != SourceRole::Element)
+                {
+                    continue;
+                }
+                // To each end and a step either way.
+                let mut targets = vec![
+                    0,
+                    count - 1,
+                    from.saturating_sub(1),
+                    (from + 1).min(count - 1),
+                ];
+                targets.sort_unstable();
+                targets.dedup();
+                for to in targets {
+                    let answer = snapshot
+                        .source_edit(&uri, &key, &move_to(to))
+                        .expect("edit");
+                    assert_eq!(answer.refused, None, "{} {key} to {to}", file.display());
+                    let after = apply(&source, &answer);
+                    assert!(
+                        parse_errors(&after) <= errors,
+                        "{} {key} to {to}: {after}",
+                        file.display()
+                    );
+                    let after_tree = snapshot_for(&after).source_tree(&uri).expect("tree");
+                    let mut expected = items.clone();
+                    let item = expected.remove(from);
+                    expected.insert(to, item);
+                    assert_eq!(
+                        item_texts(&after, &after_tree, &list),
+                        expected,
+                        "{} {key} to {to}: {after}",
+                        file.display()
+                    );
+                    assert_eq!(
+                        keys_outside(&after_tree, &list),
+                        outside,
+                        "{} {key} to {to}",
+                        file.display()
+                    );
+                    moved += 1;
+                }
+                let answer = snapshot
+                    .source_edit(&uri, &key, &SourceEdit::Remove)
+                    .expect("edit");
+                assert_eq!(answer.refused, None, "{} {key}", file.display());
+                let after = apply(&source, &answer);
+                assert!(
+                    parse_errors(&after) <= errors,
+                    "{} {key}: {after}",
+                    file.display()
+                );
+                let after_tree = snapshot_for(&after).source_tree(&uri).expect("tree");
+                assert_eq!(
+                    keys_outside(&after_tree, &list),
+                    outside,
+                    "{} {key} removed",
+                    file.display()
+                );
+                if count > 2 {
+                    let mut expected = items.clone();
+                    expected.remove(from);
+                    assert_eq!(
+                        item_texts(&after, &after_tree, &list),
+                        expected,
+                        "{} {key}: {after}",
+                        file.display()
+                    );
+                }
+                removed += 1;
+            }
+        }
+    }
+    assert!(
+        moved > 100 && removed > 20,
+        "moved {moved}, removed {removed}"
+    );
+}

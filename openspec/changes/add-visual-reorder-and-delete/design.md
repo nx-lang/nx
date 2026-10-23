@@ -49,12 +49,14 @@ During a drag the item dims in place, a one-line copy (its icon and title, or na
 pointer, and a 2 px line in the selection colour marks the gap nearest the pointer, only between
 items of the item's own list. Items do not slide apart to show the gap: Visual's rule is that nothing
 moves under the reader, and with tall open groups a sliding list jumps. The reading changes once, on
-the host's newer tree. A drop on the gap the item already fills, outside the list, or Escape
-cancels with no event. Near the top or bottom of the reading's scrolling area, the reading scrolls,
+the host's newer tree. The line is not drawn at the two gaps beside the item, where a drop
+would not move it; a drop there, outside the list, or Escape cancels with no event. Near the top or bottom of the reading's scrolling area, the reading scrolls,
 faster the nearer the edge.
 
 The drag uses pointer events with the pointer captured on the handle, which also makes a touch drag
-on it work; it starts once the pointer has moved 4 px, so a click on the handle selects the item.
+on it work; it starts once the pointer has moved 4 px, so a click on the handle selects the item. On touch, the browser can aim a press near the icon at the fold chevron beside it, so a
+press there that lands within the handle starts the drag too, and the handle and that chevron take
+no touch panning.
 
 ### 3. Where items move
 
@@ -79,9 +81,12 @@ the end" case and says nothing more.
 
 - **A list written an item to a line** (each item, with its own lines, shares no line with another):
   the item's whole lines move, with the comments and doc comments directly above it (no blank line
-  between), to stand before the item now at `to`, or after the last item. Blank lines between other
-  items stay where they are, and the item keeps its indentation, which its siblings share.
-- **A list written on one line**: the item moves within the line, one space from its neighbours.
+  between), to stand before the item now at `to`, or after the last item. The blank lines between
+  the item and the next one (or the one before, when it is last) go with it, so a list that spaces
+  its items a blank line apart keeps that spacing; other blank lines stay where they are. The item
+  keeps its indentation, which its siblings share.
+- **A list written on one line**: the item moves within the line, with the space that separated it
+  from its neighbour.
 - **Any other layout** is refused `notEditable`; Visual then leaves the reading as it was.
 
 The answer holds the edits that remove the item and insert it, which never overlap.

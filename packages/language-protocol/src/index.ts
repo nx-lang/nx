@@ -124,10 +124,18 @@ export type SourceEdit =
   | { kind: "setValue"; value: SourceEditValue }
   /** Set a run of text content written on one line. */
   | { kind: "setText"; text: string }
-  /** Remove an attribute: Reset for a property with a default, Clear for an optional one. */
+  /**
+   * Remove an attribute: Reset for a property with a default, Clear for an optional one. Or remove
+   * an element that is an item of a list, with the comments directly above it.
+   */
   | { kind: "remove" }
   /** Add a property an element does not write, as an attribute in the element's layout. */
-  | { kind: "addProperty"; name: string; value: SourceEditValue };
+  | { kind: "addProperty"; name: string; value: SourceEditValue }
+  /**
+   * Move an element that is an item of a list to another position in that list. `to` is the
+   * position it takes once moved, counted as the list's keys count its items.
+   */
+  | { kind: "move"; to: number };
 
 /** A value to write, by kind; the service decides its spelling. */
 export type SourceEditValue =

@@ -6,7 +6,8 @@ import "@nx/visualizer"
 // or is optional, and so does Reset to default or Remove in a row's menu (the ⋯ at its end, or Shift+F10).
 // Select an element to see "Show N unset properties", the properties it does not write: open it and
 // set one; an optional one reads its type until set. Ctrl or Cmd+Z and Shift+Z, or the title bar's
-// buttons, undo and redo. After each edit, check Source.
+// buttons, undo and redo. After each edit, check Source. The survey further down has lists to
+// reorder and delete from.
 
 type uitext = string
 type Color = string
@@ -152,6 +153,59 @@ let priceOf(size:Size): float64 = { if size == Size.large { 5.5 } else { 4.5 } }
 let <Special name:uitext /> = <Drink code="SPC" name={name} size=large />
 // A qualified case edits as a case and keeps its Size.
 let sizes:Size+ = { Size.small Size.large }
+
+// Lists to reorder and delete from. Drag a step by its icon or its name: a line shows where it
+// lands, Escape cancels, and the reading scrolls near its top and bottom. Or select a step and press
+// Alt+Up or Alt+Down, or use Move up and Move down in its ⋯ menu (Shift+F10). Delete or
+// Cmd+Backspace deletes the selected step. Fold the welcome, then move a step past it: the fold
+// stays on the welcome. The comment above "drink" moves with it; the step inside the if does not
+// move, but the if does. Undo takes each back; check Source after each.
+type Option = { value:Code label:uitext }
+abstract type Step = { id:Code }
+type Statement extends Step = { headline:uitext body?:uitext }
+type Choose extends Step = { label:uitext options:Option+ }
+type Ask extends Step = { label:uitext placeholder?:uitext }
+type Flow = { title:uitext content steps:Step+ }
+
+visualizer Statement = <ElementVisualizer title=headline id=id icon="message-square" />
+visualizer Choose = <ElementVisualizer title=label id=id icon="circle-dot" />
+visualizer Ask = <ElementVisualizer title=label id=id icon="text-cursor-input" />
+visualizer Option = <ElementVisualizer title=label id=value icon="circle" />
+
+let wantsMilk = true
+
+// drink's options are written an option to a line, and drag too; size's are on one line, so they
+// move by Alt+Up and Alt+Down and the menu only.
+let survey =
+  <Flow title="Morning survey">
+    <Statement
+      id="welcome"
+      headline="Good morning"
+      body="Three quick questions about your coffee."
+    />
+    // Ask this first
+    <Choose
+      id="drink"
+      label="What do you drink?"
+      options={
+        <Option value="latte" label="Latte" />
+        <Option value="mocha" label="Mocha" />
+        <Option value="tea" label="Tea" />
+      }
+    />
+    <Ask id="name" label="Your name?" />
+    if wantsMilk {
+      <Ask id="milk" label="Which milk?" />
+    }
+    <Choose id="size" label="Which size?" options={ <Option value="s" label="Small" /> <Option value="l" label="Large" /> } />
+  </Flow>
+
+// A list of one step: it has nothing to drag past, and as the only step of a Flow, whose steps are
+// Step+, it cannot be deleted.
+let short =
+  <Flow title="One question">
+    <Ask id="else" label="Anything else?" />
+  </Flow>
 
 let root(): Menu = {
   // No visualizer: the box icon, and folded (its chevron, or Left) it counts its children

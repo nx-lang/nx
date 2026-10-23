@@ -7,8 +7,10 @@ position the item takes in its list once moved, counted as the list's keys count
 service SHALL move the item in the list's layout. In a list written an item to a line, where no item
 shares a line with another, it SHALL move the item's whole lines, with the comments and doc comments
 directly above it, to stand before the item that will follow it, or after the last item, keeping
-the item's indentation; blank lines between other items SHALL stay where they are. In a list written
-on one line, it SHALL move the item within the line, one space from its neighbours. An item MAY move
+the item's indentation. The blank lines between the item and the item after it, or the item before
+it when it is the last, SHALL go with it, so a list that spaces its items keeps its spacing; other
+blank lines SHALL stay where they are. In a list written on one line, it SHALL move the item within
+the line, with the space that separated it from its neighbour. An item MAY move
 past a condition or a loop that is an item of the list. A `to` equal to the item's position SHALL
 answer no edits.
 
@@ -40,8 +42,9 @@ answer no edits.
 ### Requirement: An item is removed with its lines
 The service SHALL also take for `remove` an item that `move` takes, whatever the list's length. In
 a list written an item to a line, it SHALL remove the item's whole lines with the comments and
-doc comments directly above it, and, where two blank lines would then stand together, one of them;
-in a list written on one line, it SHALL remove the item and the space that separates it from the item
+doc comments directly above it, and the blank lines between it and the item after it, or the item
+before it when it is the last; where more than blank lines stand there, it SHALL remove instead, of
+two blank lines that would then stand together, one. In a list written on one line, it SHALL remove the item and the space that separates it from the item
 before it, or after it when it is the first. The service SHALL NOT check that the list may lose the
 item.
 
@@ -50,6 +53,10 @@ item.
   `A`, `B` and `C`, each written over its own lines, and a client removes `B`
 - **THEN** the content SHALL read `A` and `C` as written, and the comment and every line of `B`
   SHALL be gone
+
+#### Scenario: Items a blank line apart
+- **WHEN** the steps `A`, `B` and `C` stand a blank line apart and a client removes `A`
+- **THEN** the content SHALL read `B`, a blank line, then `C`, with no blank line before `B`
 
 #### Scenario: On one line
 - **WHEN** a client removes the first item of `choices={ <Choice value="a" /> <Choice value="b" /> }`
