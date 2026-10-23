@@ -96,10 +96,11 @@ label reads its value alone, in one column when none has a label. When the prope
 row of its own above the choices, set off by a rule, SHALL read `Default` and the default. The choice
 equal to the current value SHALL be marked. While the field is open, a chevron past it SHALL show
 that the list is there, and so SHALL one past the value while the pointer is over it on the selected
-row, under the same terms as the steppers below; a click on it, or Alt+Down, SHALL open the list (a
+row, as the steppers below do; a click on it, or Alt+Down, SHALL open the list (a
 click on the hover chevron opening the field with it), and so SHALL typing, the list
 then holding the choices whose label or value holds what was typed. While the list is closed, Up and
-Down SHALL step a number; while it is open, they SHALL move through it, Enter SHALL choose the active
+Down SHALL step a number; while it is open, they SHALL move through it, from the current value's row
+when no row is active yet, Enter SHALL choose the active
 row, and Escape SHALL close the list before the field. Choosing a choice SHALL commit its value as
 the field would: a value the field would refuse SHALL stay in the field, the list closed, with the
 field's note. Choosing the default's row SHALL leave the attribute out, as the row's Reset to
@@ -109,9 +110,9 @@ and never restrict, and any entry the field takes SHALL commit.
 A number SHALL show steppers, an up and a down button drawn over the space just past the value so
 that nothing moves, while its field is open and while the pointer is over its value on the selected
 row, when the host has set `editable`. On a one-line element, or a group's header, where more of the
-line follows the value, the steppers and the chevron SHALL NOT cover it: they SHALL NOT show under
-the pointer there, and while the field is open they SHALL take room in the line, moving what follows
-along, as the field does when it grows. A click SHALL step the number once by `step`, or by one, and
+line follows the value, its closing `/>` included, the steppers and the chevron SHALL NOT cover it:
+they SHALL take room in the line, moving what follows along, as a field does when it grows, and
+SHALL give it back when they go. A click SHALL step the number once by `step`, or by one, and
 Shift+click by ten steps, within `min` and `max`: into the field while it is open, else committed at
 once. Pressing a stepper and dragging up or down SHALL change the number by a step for every few
 pixels and show it in place: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow
@@ -148,10 +149,9 @@ SHALL still fire `nx-open`.
 
 #### Scenario: Room on a line
 - **WHEN** the reader selects `<Banner title="Fresh" titleSize=20 align=start badge="New" />`, on one
-  line, with `titleSize` hinted with choices and `badge` with choices, and points at `titleSize`, then
-  at `badge`, then opens `titleSize`
-- **THEN** no steppers or chevron SHALL show past `titleSize` under the pointer, a chevron SHALL show
-  past `badge`, and the open field's steppers and chevron SHALL sit in the line, before `align`
+  line, with `titleSize` and `badge` hinted with choices, and points at `titleSize`, then at `badge`
+- **THEN** the steppers and chevron past `titleSize` SHALL sit in the line, before `align`, and the
+  chevron past `badge` SHALL sit before the closing `/>`, covering neither
 
 #### Scenario: A refused choice
 - **WHEN** the reader opens a number hinted `max=10` with the choices `5` and `99`, and chooses `99`

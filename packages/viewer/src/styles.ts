@@ -430,6 +430,10 @@ export const styles = `
   caret-color: var(--nx-viewer-foreground, CanvasText);
   font-weight: 400;
 }
+/* A number's field never breaks inside the number. */
+.source .field.field-number { white-space: nowrap; overflow-wrap: normal; }
+/* Over several lines, a field is one box, as wide as its longest line. */
+.source .field.field-lines { display: inline-block; vertical-align: top; }
 .source .field::selection {
   background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78));
 }
@@ -548,6 +552,13 @@ export const styles = `
   white-space: nowrap;
   min-height: 1lh;
   vertical-align: top;
+}
+/* A field opened in an unset property's place keeps the place's width as it fills. */
+.source .more-value > .field { display: inline-block; min-width: min(24ch, 100%); vertical-align: top; }
+/* An unset uitext property's field types in the prose font its value reads in once written. */
+.source .more-value.more-prose > .field:not(:empty) {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
 }
 .source .more-value:empty::before {
   content: attr(data-placeholder);

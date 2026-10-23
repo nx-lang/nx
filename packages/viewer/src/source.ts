@@ -1350,14 +1350,10 @@ function nameEnd(text: string, node: SourceNode, start: number): number {
 const UI_TEXT = "uitext";
 
 /**
- * The nodes that are text shown to people: the string literals and element text that a property,
- * a field, a parameter or a declaration typed `uitext` holds, where `uitext` is the type itself
- * or any alias that leads to it. Which strings these are comes from the declarations, never from
- * how a string looks.
+ * Whether a type, as spelled, is `uitext` itself or an alias that leads to it, among the tree's
+ * declarations.
  */
-export function uiTextNodes(index: TreeIndex): Set<number> {
-  const { tree } = index;
-  const declarations = tree.declarations;
+export function uiTextType(tree: TreeIndex["tree"]): (spelled: string | undefined) => boolean {
   const known = new Map<string, boolean>();
   const isUIText = (spelled: string | undefined, depth = 0): boolean => {
     const name = (spelled ?? "").replace(/[?+*]$/, "").trim();
@@ -1371,11 +1367,23 @@ export function uiTextNodes(index: TreeIndex): Set<number> {
     if (cached !== undefined) {
       return cached;
     }
-    const alias = declarations.find((entry) => entry.kind === "alias" && entry.name === name);
+    const alias = tree.declarations.find((entry) => entry.kind === "alias" && entry.name === name);
     const result = alias !== undefined && isUIText(alias.type, depth + 1);
     known.set(name, result);
     return result;
   };
+  return (spelled) => isUIText(spelled);
+}
+
+/**
+ * The nodes that are text shown to people: the string literals and element text that a property,
+ * a field, a parameter or a declaration typed `uitext` holds, where `uitext` is the type itself
+ * or any alias that leads to it. Which strings these are comes from the declarations, never from
+ * how a string looks.
+ */
+export function uiTextNodes(index: TreeIndex): Set<number> {
+  const { tree } = index;
+  const isUIText = uiTextType(tree);
 
   const found = new Set<number>();
   // The strings and text under `at`, through any expression, but not inside an element it holds:

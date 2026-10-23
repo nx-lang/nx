@@ -133,12 +133,13 @@ changes what a program means.
   choices shows a chevron the same way, past the value on hover in the selected row, and a click on
   it opens the field with its list.
 - **Room on a line** (Bret, 2026-10-23): on a one-line element, or a group's header, the steppers and
-  the chevron are wider than the one space past the value, so where more of the line follows they
-  would cover the next property. There, hover shows neither, and an open field's tools take room in
-  the line, pushing the rest right while it is open, as a growing field does. In a sheet's row, or at
-  the end of a line, they stay drawn over the gap, and nothing moves. Covering the next property was
-  tried first; hiding the tools broke the chevron Bret expected on hover, and drawing them above or
-  below the line would cover a neighboring line.
+  the chevron are wider than the one space past the value, so where more of the line follows, its
+  closing `/>` included, they would cover it. There they take room in the line instead, on hover and
+  while a field is open, pushing the rest right as a growing field does, and give it back when they
+  go. In a sheet's row, or at the end of a line, they stay drawn over the gap, and nothing moves.
+  Covering the next property was tried first; drawing the tools above or below the line would cover a
+  neighboring line. After a stepper click commits, the redrawn reading shows the steppers again under
+  the pointer, so the next click steps again rather than selecting the row beneath.
 - **Segmented** (`editor=segmented`): the case popover shows the cases as one row of buttons. With more
   than five cases, or names too long for the reading's width, it falls back to the list.
 - **Dropdown** (`editor=dropdown`): the phase 1 case popover, named so a library can say it.

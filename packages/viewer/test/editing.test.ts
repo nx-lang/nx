@@ -1076,6 +1076,7 @@ describe("editor hints", () => {
     rendered(element, "card.value.body.value").click();
     open = field(element)!;
     assert.equal(open.dataset["placeholder"], "Say more", "an empty field shows its placeholder");
+    assert.ok(open.classList.contains("field-lines"), "one box over several lines");
     open.textContent = "One";
     const end = document.createRange();
     end.setStart(open.firstChild!, 3);
@@ -1084,9 +1085,10 @@ describe("editor hints", () => {
     document.getSelection()!.addRange(end);
     press(open, "Enter");
     assert.equal(edits.length, 1, "Enter breaks the line where the hint says several lines");
-    assert.equal(open.textContent, "One\n");
+    assert.equal(open.textContent, "One\n\n", "with the line break a browser keeps after a last one");
     press(open, "Enter", { ctrlKey: true });
     assert.equal(edits.length, 2, "Ctrl+Enter commits");
+    assert.deepEqual(edits[1]!.edit, { kind: "setValue", value: { kind: "string", value: "One\n" } }, "without the browser's line break");
   });
 });
 
@@ -1134,10 +1136,13 @@ describe("choices", () => {
       "the current value's choice is marked, not the default's"
     );
     assert.equal(open.getAttribute("aria-expanded"), "true");
+    press(open, "ArrowDown");
+    assert.equal(open.getAttribute("aria-activedescendant"), choices(element)[3]!.id, "Down starts from the current value's row");
     press(open, "ArrowUp");
-    assert.equal(open.getAttribute("aria-activedescendant"), choices(element)[3]!.id, "Up from the field reaches the last");
+    press(open, "ArrowUp");
+    assert.equal(open.getAttribute("aria-activedescendant"), choices(element)[1]!.id);
     press(open, "Enter");
-    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "20" } } }]);
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
     assert.equal(field(element), null);
   });
 
@@ -1179,7 +1184,7 @@ describe("choices", () => {
     assert.ok(!shown.classList.contains("with-steppers"));
     element.selection = "base.value.size";
     over(rendered(element, "base.value.size.value"));
-    assert.equal(tools(element), null, "none where they would cover tone, which follows on the line");
+    assert.ok(tools(element)!.classList.contains("in-line"), "taking room in the line, so tone, which follows, moves along");
     element.selection = "big.value.size";
     over(rendered(element, "big.value.size.value"));
     assert.ok(tools(element)!.classList.contains("with-choices"), "a number's choices");
@@ -1189,13 +1194,19 @@ describe("choices", () => {
     assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16", "lg 20"], "with its list");
   });
 
-  it("makes room in the line for an open field's tools when more of the line follows", async () => {
+  it("makes room in the line for an open field's tools when more of the line follows", async (t) => {
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     rendered(element, "card.value.count.value").click();
     assert.ok(tools(element)!.classList.contains("in-line"), "mode follows count on the card's line");
     press(field(element)!, "Escape");
-    rendered(element, "big.value.size.value").click();
-    assert.ok(!tools(element)!.classList.contains("in-line"), "nothing follows on its line: drawn over the gap");
+    element.selection = "big.value";
+    over(rendered(element, "big.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("in-line"), "before the line's closing mark alone, even under the pointer");
+    narrow(t, 30);
+    const sheet = show(await fixture("adding"));
+    rendered(sheet, "card.value.count.value").click();
+    assert.ok(!tools(sheet)!.classList.contains("in-line"), "nothing follows in a sheet's row: drawn over the gap");
   });
 
   it("opens from its chevron, and picks with the pointer", async () => {
@@ -1395,7 +1406,7 @@ describe("steppers", () => {
     assert.equal(tools(element), null, "gone over another property");
   });
 
-  it("shows a let's steppers, and none where they would cover the line", async () => {
+  it("shows a let's steppers, and takes room for them where more of the line follows", async () => {
     const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     element.selection = "pad";
@@ -1408,9 +1419,27 @@ describe("steppers", () => {
     const edges = show(await fixture("editingEdges"));
     edges.selection = "box";
     over(rendered(edges, "box.value.depth.value"));
-    assert.equal(tools(edges), null, "none over the rest of a one-line element's line");
+    assert.ok(tools(edges)!.classList.contains("in-line"), "in the line, before the rest of a one-line element's line");
     over(rendered(edges, "box.value.items.value[0]"));
-    assert.equal(tools(edges), null, "nor over the next item");
+    assert.ok(tools(edges)!.classList.contains("in-line"), "and before the next item");
+  });
+
+  it("keeps the steppers under the pointer through the tree a click brings, and through a cleared one", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(edits.length, 1);
+    const tree = element.tree;
+    element.tree = undefined;
+    element.tree = tree;
+    assert.ok(tools(element), "still there for the next click, not the row under them");
+    assert.equal(element.selection, "card.value.gap");
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(edits.length, 2, "the next click steps again");
   });
 
   it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async (t) => {

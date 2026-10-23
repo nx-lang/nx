@@ -280,7 +280,7 @@ In any string's field Shift+Enter breaks the line, and a string written over sev
 A field with choices shows a chevron just past it, and so does the value while the pointer rests on
 it in the selected row; a click on that chevron opens the field with its list. A click on the
 chevron, Alt+Down, or typing lists them, typing keeping those whose label or value holds what was
-typed; the current value's row is marked. While the list is closed, Up and Down step a number; while it is open, they move through it,
+typed; the current value's row is marked. While the list is closed, Up and Down step a number; while it is open, they move through it, from the current value's row,
 Enter picks the active row, and Escape closes the list before the field. Picking a choice commits its
 value, never its label; picking the default's row fires `{ kind: "remove" }` for the attribute, as
 Reset to default does, or, on a dimmed row, adds nothing. The field stays typeable: a choice is a
@@ -296,9 +296,10 @@ field, or is committed once. A stepper keeps the usual cursor until it is dragge
 the keys that do the same.
 
 On a one-line element, or a group's header, the steppers and the chevron would cover the next
-property, so where more of the line follows the value, hover shows neither, and an open field's
-tools take room in the line, pushing the rest right until it closes. In a sheet's row, or at the end
-of a line, they are drawn over the gap and nothing moves.
+property, so where more of the line follows the value, its closing `/>` included, they take room in
+the line, on hover and while a field is open, pushing the rest right until they go. In a sheet's
+row, or at the end of a line, they are drawn over the gap and nothing moves. After a stepper click
+commits, they show again on the redrawn reading, so the next click steps again.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does: a field opens with the

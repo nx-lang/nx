@@ -39,7 +39,7 @@ import {
   valueHost
 } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
-import { defaultFolded, readingRuns, renderSource, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
+import { defaultFolded, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
@@ -302,6 +302,11 @@ export class NxViewerElement extends ElementBase {
   #selection: string | undefined;
   /** Each key's rendering. */
   #rendered = new Map<string, HTMLElement>();
+  /**
+   * The value whose steppers showed under the pointer when the reading was drawn again, as after a
+   * click on one commits: they show again on the new reading, so the next click finds them.
+   */
+  #rehover: string | undefined;
   /** The unit under the pointer, highlighted as a row. */
   #hoveredUnit: HTMLElement | undefined;
   /** The body's width the reading was last measured at, for what fits on a line. */
@@ -841,6 +846,11 @@ export class NxViewerElement extends ElementBase {
     }
     // A press on a stepper goes on with the next tree, on the same number.
     const stepping = this.#stepping;
+    // So do steppers shown under the pointer, as after a click on one commits, so the next click
+    // finds them rather than what lies under them.
+    if (this.#session === undefined && stepping === undefined && this.#tools.isConnected && this.#toolsHover !== undefined) {
+      this.#rehover = this.#toolsHover;
+    }
     this.#dropSession();
     this.#pointedKey = undefined;
     this.#rendered.clear();
@@ -946,7 +956,17 @@ export class NxViewerElement extends ElementBase {
     }
     if (stepping !== undefined) {
       this.#resumeStepping(stepping);
+    } else if (this.#rehover !== undefined && this.#session === undefined) {
+      const hovered = this.#rehover;
+      const span = this.#rendered.get(hovered);
+      const target = this.#targets.get(hovered);
+      const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+      if (span !== undefined && target !== undefined && selected?.contains(span) === true) {
+        this.#showTools(span, target);
+        this.#toolsHover = hovered;
+      }
     }
+    this.#rehover = undefined;
     // Fonts that arrive later change where the rows fall, and what fits on a line.
     const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
     void this.ownerDocument.fonts?.ready.then(() => (remeasure ? this.#remeasure() : this.#paintHighlights()));
@@ -1502,7 +1522,7 @@ export class NxViewerElement extends ElementBase {
 
   /** What an open editor holds now, to open it again with. */
   #draftOf(session: EditSession): string | undefined {
-    return session.field !== undefined ? (session.field.textContent ?? "") : session.input?.value;
+    return session.field !== undefined ? fieldText(session.field) : session.input?.value;
   }
 
   /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
@@ -1515,7 +1535,7 @@ export class NxViewerElement extends ElementBase {
     field.setAttribute("role", "textbox");
     field.setAttribute("aria-label", this.#labelOf(target));
     field.spellcheck = target.kind === "run";
-    field.textContent = text;
+    field.textContent = withEndOfLines(text);
     // A placeholder reads, quieter, while the field is empty, and is never written.
     // An unset property's field keeps reading the type its place showed until something is typed.
     const placeholder =
@@ -1528,15 +1548,25 @@ export class NxViewerElement extends ElementBase {
       field.classList.add("field-multiline");
       field.setAttribute("aria-multiline", "true");
     }
+    // Text over several lines is edited in one box, not a box to each line.
+    const lines = (): void => {
+      field.classList.toggle("field-lines", field.classList.contains("field-multiline") || (field.textContent ?? "").includes("\n"));
+    };
+    lines();
     host.replaceChildren(...keep, ...(lead === undefined ? [] : [lead]), field, ...(trail === undefined ? [] : [trail]));
     span.classList.add("editing");
     const session: EditSession = { target, span, host, restore, field, closed: false };
     this.#session = session;
     field.addEventListener("keydown", (event) => this.#onFieldKey(event, session));
     field.addEventListener("input", () => {
+      lines();
       this.#validate(session);
       // Typing lists the choices that hold what is typed.
       this.#filterChoices(session, field.textContent ?? "", true);
+      // On a line, a growing field moves what follows, so the line's highlight is redrawn to fit.
+      if (field.closest(".line-element, .sheet-head, .tag-line") !== null) {
+        this.#paintHighlights();
+      }
     });
     field.addEventListener("blur", () => {
       if (!session.closed) {
@@ -1735,7 +1765,7 @@ export class NxViewerElement extends ElementBase {
    */
   #finishField(session: EditSession, how: "key" | "blur"): boolean {
     const target = session.target;
-    let value = session.field!.textContent ?? "";
+    let value = fieldText(session.field!);
     if (target.kind === "number") {
       value = value.trim();
     }
@@ -2319,13 +2349,17 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /** Moves the active choice one up or down among those shown; past either end, none is active. */
+  /**
+   * Moves the active choice one up or down among those shown, from the current value's row when none
+   * is active yet, as a select list does; past either end, none is active.
+   */
   #stepChoice(session: EditSession, direction: 1 | -1): void {
     const shown = (session.choices ?? []).filter((row) => !row.hidden);
     if (shown.length === 0) {
       return;
     }
-    const at = session.choiceActive === undefined ? -1 : shown.indexOf(session.choiceActive);
+    const from = session.choiceActive ?? shown.find((row) => row.classList.contains("current"));
+    const at = from === undefined ? -1 : shown.indexOf(from);
     const next = at < 0 ? (direction === 1 ? 0 : shown.length - 1) : at + direction;
     this.#setChoiceActive(session, next < 0 || next >= shown.length ? undefined : shown[next]);
   }
@@ -2423,10 +2457,10 @@ export class NxViewerElement extends ElementBase {
     this.#tools.classList.toggle("with-steppers", steppers);
     this.#tools.classList.toggle("with-choices", chevron);
     this.#tools.classList.toggle("open", session?.choicesOpen === true);
-    // With more of the line after it, an open field's tools take room in the line, as the field does
-    // as it grows, rather than cover what follows.
+    // With more of the line after it, even just its closing `/>`, the tools take room in the line, as
+    // a field does as it grows, rather than cover what follows.
     const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
-    const inLine = session?.field !== undefined && this.#followedOnItsLine(span);
+    const inLine = this.#followedOnItsLine(span);
     this.#tools.classList.toggle("in-line", inLine);
     this.#tools.dataset["toolsFor"] = target.key;
     span.after(this.#tools);
@@ -2444,7 +2478,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Whether more of its line follows the value `span` draws, within its one-line element: another
-   * property or item, and not just the element's closing mark.
+   * property or item, or the element's closing `/>`.
    */
   #followedOnItsLine(span: HTMLElement): boolean {
     for (let at: Element | null = span; at !== null && !at.matches(".line-element, .sheet-head, .sheet-value, .source"); at = at.parentElement) {
@@ -2457,7 +2491,7 @@ export class NxViewerElement extends ElementBase {
           if (text.trim() !== "") {
             return true;
           }
-        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools, .line-close")) {
+        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools")) {
           return true;
         }
       }
@@ -2503,9 +2537,8 @@ export class NxViewerElement extends ElementBase {
       value !== undefined &&
       selected?.contains(value) === true &&
       (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS));
-    // Under the pointer the tools only lie over the reading, so they show where they cover nothing.
     const offered = target !== undefined && (target.kind === "number" || this.#hasChoices(target));
-    if (!onSelected || target === undefined || !offered || this.#rendered.get(key!) !== value || this.#followedOnItsLine(value!)) {
+    if (!onSelected || target === undefined || !offered || this.#rendered.get(key!) !== value) {
       if (this.#tools.isConnected) {
         this.#hideTools();
       }
@@ -2693,8 +2726,9 @@ export class NxViewerElement extends ElementBase {
       inserted = false;
     }
     if (!inserted) {
-      const caret = this.#caretOf(session) ?? { start: before.length, end: before.length };
-      field.textContent = `${before.slice(0, caret.start)}\n${before.slice(caret.end)}`;
+      const held = fieldText(field);
+      const caret = this.#caretOf(session) ?? { start: held.length, end: held.length };
+      field.textContent = withEndOfLines(`${held.slice(0, caret.start)}\n${held.slice(caret.end)}`);
       this.#placeCaret(field, { start: caret.start + 1, end: caret.start + 1 });
     }
     this.#validate(session);
@@ -2847,6 +2881,10 @@ export class NxViewerElement extends ElementBase {
     cell.className = "sheet-value";
     const value = document.createElement("span");
     value.className = "more-value";
+    // Text shown to people is typed in the prose font it reads in once written.
+    if (editor?.kind === "text" && uiTextType(index.tree)(property.type)) {
+      value.classList.add("more-prose");
+    }
     // With no default to show, the value's place reads the type it takes, quieter.
     if (property.default === undefined) {
       value.dataset["placeholder"] = hints?.placeholder ?? property.type;
@@ -3488,7 +3526,9 @@ export class NxViewerElement extends ElementBase {
       y = target.top - CARD_GAP - size.height;
     }
     y = Math.max(top, Math.min(y, bottom - size.height));
-    const x = Math.max(box.left, Math.min(target.left, box.right - size.width));
+    // An anchor wrapped over two lines starts where its first line does, not at the line's start.
+    const start = anchor.getClientRects()[0]?.left ?? target.left;
+    const x = Math.max(box.left, Math.min(start, box.right - size.width));
     card.style.left = `${x - frame.left}px`;
     card.style.top = `${y - frame.top}px`;
   }
@@ -3539,4 +3579,19 @@ declare global {
   interface HTMLElementTagNameMap {
     "nx-viewer": NxViewerElement;
   }
+}
+
+/**
+ * The text a field holds. A browser keeps a line break after a field's last line break so the empty
+ * line it starts can hold the caret, so a field's text ending in a line break has one more than the
+ * value: that one is not part of it.
+ */
+function fieldText(field: HTMLElement): string {
+  const text = field.textContent ?? "";
+  return text.endsWith("\n") ? text.slice(0, -1) : text;
+}
+
+/** `text` as a field holds it: with the line break a browser keeps after a last line break. */
+function withEndOfLines(text: string): string {
+  return text.endsWith("\n") ? `${text}\n` : text;
 }
