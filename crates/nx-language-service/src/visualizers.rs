@@ -103,6 +103,20 @@ impl ProgramVisualizers {
         gathered
     }
 
+    /// The program's visualizer declarations that apply and that `module` holds, each with its
+    /// target, in no set order.
+    pub fn declared_in<'a>(
+        &'a self,
+        module: &'a str,
+    ) -> impl Iterator<Item = (&'a DeclarationOrigin, &'a ProgramVisualizer)> + 'a {
+        self.program.iter().flat_map(move |(origin, visualizers)| {
+            visualizers
+                .iter()
+                .filter(move |visualizer| visualizer.module == module)
+                .map(move |visualizer| (origin, visualizer))
+        })
+    }
+
     /// The visualizer declarations of `origin`, in the order they apply.
     fn of(&self, origin: &DeclarationOrigin) -> impl Iterator<Item = &ProgramVisualizer> {
         self.program
@@ -147,10 +161,13 @@ pub(crate) struct ResolvedVisualizer {
     pub id_position: Option<String>,
     pub icon: Option<String>,
     pub format: Option<String>,
-    /// A `ValueVisualizer`'s editor hints, by name, as text.
+    /// Every editor hint the `ValueVisualizer`s write, by name, as text, the latest first: a reader
+    /// takes the first of a name that fits the value, so a later hint that does not fit leaves an
+    /// earlier one in force.
     pub hints: Vec<(String, String)>,
-    /// A `ValueVisualizer`'s choices, when one gives any: the last such one's, whole.
-    pub choices: Option<Vec<VisualizerChoice>>,
+    /// The choices of each `ValueVisualizer` that gives any, the latest first: a reader takes the
+    /// first set any of whose choices fit, whole.
+    pub choices: Vec<Vec<VisualizerChoice>>,
     /// The property visualizers, in their resolved order.
     pub properties: Vec<ResolvedChild>,
 }
@@ -160,13 +177,15 @@ pub(crate) struct ResolvedVisualizer {
 pub(crate) const EDITOR_HINTS: [&str; 6] =
     ["editor", "min", "max", "step", "multiline", "placeholder"];
 
-/// One merged `PropertyVisualizer`: the property it describes, the attributes it sets, and its
-/// choices when one of those merged gives any (the last such one's, whole).
+/// One merged `PropertyVisualizer`: the property it describes, the attributes it sets (the latest
+/// of each name), every editor hint and set of choices those merged write, the latest first, as for
+/// a `ValueVisualizer`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedChild {
     pub property: String,
     pub attributes: Vec<(String, String)>,
-    pub choices: Option<Vec<VisualizerChoice>>,
+    pub hints: Vec<(String, String)>,
+    pub choices: Vec<Vec<VisualizerChoice>>,
 }
 
 impl ResolvedChild {
@@ -247,14 +266,11 @@ impl ResolvedVisualizer {
             }
             VisualizerRecord::Value => {
                 if !value.choices.is_empty() {
-                    self.choices = Some(value.choices.clone());
+                    self.choices.insert(0, value.choices.clone());
                 }
                 for name in EDITOR_HINTS {
                     if let Some(value) = text(name) {
-                        match self.hints.iter_mut().find(|(key, _)| key == name) {
-                            Some((_, existing)) => *existing = value,
-                            None => self.hints.push((name.to_string(), value)),
-                        }
+                        self.hints.insert(0, (name.to_string(), value));
                     }
                 }
             }
@@ -268,11 +284,14 @@ fn property_of(child: &VisualizerChild) -> Option<String> {
 
 fn merge_child(merged: &mut ResolvedChild, child: &VisualizerChild) {
     if !child.choices.is_empty() {
-        merged.choices = Some(child.choices.clone());
+        merged.choices.insert(0, child.choices.clone());
     }
     for (name, value) in &child.attributes {
         let text = value.text();
         if name != "property" && is_known_value(name, &text) {
+            if EDITOR_HINTS.contains(&name.as_str()) {
+                merged.hints.insert(0, (name.clone(), text.clone()));
+            }
             merged.set(name, text);
         }
     }

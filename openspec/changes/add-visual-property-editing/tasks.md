@@ -40,6 +40,8 @@
 
 - [x] 5.9 A click on a value, and Tab, open its editor and leave the selection as it was (Bret, 2026-10-23); verify the modified `viewer` requirement
 
+- [x] 5.10 Follow-ups from the review's questions (Bret, 2026-10-23): a derived or later visualizer's mismatched hint or choices leave its base's, the earlier one's or the alias's in force; a range that only merging empties warns `editor-hint-range` at the `min` or `max` in force; verify with language-service tests for both `visualizer-declarations` scenarios
+
 ## 6. The playground and docs
 
 - [x] 6.1 Extend the "Visual test cases" example with the cases in the `playground` scenario, each with a comment saying what to try

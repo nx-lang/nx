@@ -25,7 +25,9 @@ All notable changes to this project will be documented in this file.
   and `step`, and `ValueChoice` content (`choices`, each a value and an optional label), on
   `PropertyVisualizer` and `ValueVisualizer`, and `multiline` and `placeholder` on
   `PropertyVisualizer`; `ValueVisualizer.format` is optional. A hint or a choice that does not fit its
-  property's type warns `editor-hint-mismatch`, and a `min` above its `max` warns `editor-hint-range`.
+  property's type warns `editor-hint-mismatch` and leaves the hint it would have replaced (its base
+  visualizer's or its type's) in force; a `min` above its `max`, or a range that only merging
+  empties, warns `editor-hint-range`.
   A visualizer declaration's value may hold number literals. With `visualizers`, the source tree
   carries each property's resolved hints, its choices typed as `setValue` values, and lists the types
   of the properties an element does not write.

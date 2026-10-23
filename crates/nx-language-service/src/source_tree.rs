@@ -17,7 +17,7 @@
 //! and a later change commits to it.</para>
 
 use crate::source_edit::SourceEditValue;
-use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer, EDITOR_HINTS};
+use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer};
 use crate::{
     is_unresolved_type, type_ref_display, DeclarationOrigin, DocumentScope, DocumentUri,
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
@@ -2109,7 +2109,7 @@ impl<'a> TreeBuilder<'a> {
                 let hints = type_hints(name);
                 type_format(name).is_some()
                     || !hints.attributes.is_empty()
-                    || hints.choices.is_some()
+                    || !hints.choices.is_empty()
             })
         {
             return None;
@@ -2117,41 +2117,17 @@ impl<'a> TreeBuilder<'a> {
         let resolved = resolved.unwrap_or_default();
         // A property's own hints win one by one over those of the alias its type names.
         let editor = |name: &str, child: Option<&crate::visualizers::ResolvedChild>| {
-            // The property's own hints win one by one over its type's, but only those that fit:
-            // a mismatched one is left out, and the type's hint of that name stays in force.
-            let kind = value_kind(name);
+            // The property's own hints, the latest first, come before its type's. A reader takes
+            // the first of each name that fits, so a mismatched hint, a derived visualizer's over
+            // its base's or a property's over its type's, leaves the one beneath it in force.
             let mut hints = Hints {
-                attributes: child
-                    .map(|child| {
-                        child
-                            .attributes
-                            .iter()
-                            .filter(|(key, value)| {
-                                EDITOR_HINTS.contains(&key.as_str()) && hint_fits(key, value, kind)
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
-                // The property's own choices, when any of them fit, replace its type's whole.
-                choices: child
-                    .and_then(|child| child.choices.clone())
-                    .filter(|choices| !fitting_choices(choices, kind).is_empty()),
+                attributes: child.map(|child| child.hints.clone()).unwrap_or_default(),
+                choices: child.map(|child| child.choices.clone()).unwrap_or_default(),
             };
             let type_hints = type_hints(name);
-            for (key, value) in type_hints.attributes {
-                if !hints
-                    .attributes
-                    .iter()
-                    .any(|(existing, _)| *existing == key)
-                {
-                    hints.attributes.push((key, value));
-                }
-            }
-            if hints.choices.is_none() {
-                hints.choices = type_hints.choices;
-            }
-            editor_hints(&hints, kind)
+            hints.attributes.extend(type_hints.attributes);
+            hints.choices.extend(type_hints.choices);
+            editor_hints(&hints, value_kind(name))
         };
         let mut properties = resolved
             .properties
@@ -2351,18 +2327,8 @@ fn alias_hints(
             return hints;
         };
         if let Some(resolved) = visualizers.resolve(&current, &[]) {
-            for (key, value) in resolved.hints {
-                if !hints
-                    .attributes
-                    .iter()
-                    .any(|(existing, _)| *existing == key)
-                {
-                    hints.attributes.push((key, value));
-                }
-            }
-            if hints.choices.is_none() {
-                hints.choices = resolved.choices;
-            }
+            hints.attributes.extend(resolved.hints);
+            hints.choices.extend(resolved.choices);
         }
         seen.push(current.clone());
         let Some(next) = written_type_name(&alias.ty).and_then(|name| {
@@ -2381,12 +2347,14 @@ fn alias_hints(
     }
 }
 
-/// A visualizer's editor hints as written: its hint attributes by name, as text, and its choices
-/// when it gives any.
+/// The editor hints that may apply to a value, as written, the first in force first: hint
+/// attributes by name, as text, a name perhaps more than once, and each set of choices given. A
+/// reader takes the first hint of a name that fits the value, and the first set of choices any of
+/// whose choices fit.
 #[derive(Debug, Clone, Default)]
 struct Hints {
     attributes: Vec<(String, String)>,
-    choices: Option<Vec<VisualizerChoice>>,
+    choices: Vec<Vec<VisualizerChoice>>,
 }
 
 /// What kind of value an editor hint edits.
@@ -2517,11 +2485,7 @@ fn editor_hints(hints: &Hints, kind: HintValueKind) -> Option<SourceEditorHints>
             .find(|(key, value)| key == name && hint_fits(key, value, kind))
             .map(|(_, value)| value.as_str())
     };
-    let number = |name: &str| {
-        get(name)
-            .and_then(|text| text.parse::<f64>().ok())
-            .map(SourceNumber)
-    };
+    let number = |name: &str| hint_number(hints, name, kind).map(SourceNumber);
     let (mut min, mut max) = (number("min"), number("max"));
     if let (Some(low), Some(high)) = (&min, &max) {
         if low.0 > high.0 {
@@ -2539,11 +2503,164 @@ fn editor_hints(hints: &Hints, kind: HintValueKind) -> Option<SourceEditorHints>
         placeholder: get("placeholder").map(str::to_string),
         choices: hints
             .choices
-            .as_deref()
+            .iter()
             .map(|choices| fitting_choices(choices, kind))
+            .find(|fitting| !fitting.is_empty())
             .unwrap_or_default(),
     };
     (editor != SourceEditorHints::default()).then_some(editor)
+}
+
+/// The `editor-hint-range` warnings of the visualizer declarations `module` holds: each where the
+/// range a property or an alias reads is empty only once the hints it merges with are in, as a
+/// `PropertyVisualizer`'s `min=100` over its type's `max=64`, or a derived visualizer's over its
+/// base's. Each is at the declaration's `min` or `max` that takes part, with its message.
+///
+/// <para>One visualizer element's own empty range is analysis's to report, and so is a hint that
+/// does not fit; neither is reported again here.</para>
+pub(crate) fn merged_range_warnings(
+    workspace: &WorkspaceDeclarations,
+    visualizers: &ProgramVisualizers,
+    module: &str,
+) -> Vec<(ByteTextRange, String)> {
+    let Some(lowered) = workspace
+        .artifact(module)
+        .and_then(|artifact| artifact.lowered_module.as_deref())
+    else {
+        return Vec::new();
+    };
+    let parts = |expr: ExprId| match lowered.expr(expr) {
+        Expr::Element { element, .. } => {
+            let element = lowered.element(*element);
+            Some((element.properties.clone(), element.content.clone()))
+        }
+        _ => None,
+    };
+    let mut warnings = Vec::new();
+    for (origin, visualizer) in visualizers.declared_in(module) {
+        let Some(declaration) = lowered.visualizers().get(visualizer.index) else {
+            continue;
+        };
+        let Some((properties, content)) = parts(declaration.value) else {
+            continue;
+        };
+        match visualizer.value.record {
+            nx_hir::VisualizerRecord::Value => {
+                let Some(Item::TypeAlias(alias)) = item_at(workspace, origin) else {
+                    continue;
+                };
+                let kind = hint_value_kind(workspace, &origin.0, &alias.ty, 0);
+                let hints = alias_hints(workspace, origin, visualizers);
+                warnings.extend(merged_range_warning(
+                    &properties,
+                    &visualizer.value.attributes,
+                    &hints,
+                    kind,
+                    "this type",
+                ));
+            }
+            nx_hir::VisualizerRecord::Element => {
+                let chain = base_chain(workspace, origin);
+                let types = property_types(workspace, origin, &chain);
+                let resolved = visualizers.resolve(origin, &chain).unwrap_or_default();
+                for (child, written) in content.iter().zip(&visualizer.value.children) {
+                    let Some((child_properties, _)) = parts(*child) else {
+                        continue;
+                    };
+                    let Some(name) = written.attribute("property").map(VisualizerAttribute::text)
+                    else {
+                        continue;
+                    };
+                    let Some((_, type_module, typed, ty)) =
+                        types.iter().find(|(property, _, _, _)| *property == name)
+                    else {
+                        continue;
+                    };
+                    let mut hints = Hints {
+                        attributes: resolved
+                            .properties
+                            .iter()
+                            .find(|merged| merged.property == name)
+                            .map(|merged| merged.hints.clone())
+                            .unwrap_or_default(),
+                        choices: Vec::new(),
+                    };
+                    if let Some(typed) = typed {
+                        hints
+                            .attributes
+                            .extend(alias_hints(workspace, typed, visualizers).attributes);
+                    }
+                    warnings.extend(merged_range_warning(
+                        &child_properties,
+                        &written.attributes,
+                        &hints,
+                        hint_value_kind(workspace, type_module, ty, 0),
+                        &format!("'{name}'"),
+                    ));
+                }
+            }
+        }
+    }
+    warnings.sort_by_key(|(range, _)| (range.start(), range.end()));
+    warnings
+}
+
+/// The warning for one visualizer element whose `min` or `max`, written as `properties` and read
+/// as `written`, makes the range of `hints` empty, where its own range is not.
+fn merged_range_warning(
+    properties: &[nx_hir::Property],
+    written: &[(String, VisualizerAttribute)],
+    hints: &Hints,
+    kind: HintValueKind,
+    subject: &str,
+) -> Option<(ByteTextRange, String)> {
+    let own = |name: &str| {
+        written
+            .iter()
+            .find(|(key, value)| key == name && hint_fits(key, &value.text(), kind))
+            .and_then(|(_, value)| value.text().parse::<f64>().ok())
+    };
+    let (own_min, own_max) = (own("min"), own("max"));
+    if let (Some(low), Some(high)) = (own_min, own_max) {
+        if low > high {
+            return None;
+        }
+    }
+    let (Some(min), Some(max)) = (
+        hint_number(hints, "min", kind),
+        hint_number(hints, "max", kind),
+    ) else {
+        return None;
+    };
+    if min <= max {
+        return None;
+    }
+    let at = if own_min == Some(min) {
+        "min"
+    } else if own_max == Some(max) {
+        "max"
+    } else {
+        return None;
+    };
+    let span = properties
+        .iter()
+        .find(|property| property.key.as_str() == at)?
+        .span;
+    Some((
+        ByteTextRange::new(span.start(), span.end()),
+        format!(
+            "With the hints it merges with, {subject} reads 'min' ({min}) above 'max' ({max}), so the range is empty and a viewer ignores both"
+        ),
+    ))
+}
+
+/// The number the first hint `name` among `hints` that fits a value of `kind` gives.
+fn hint_number(hints: &Hints, name: &str, kind: HintValueKind) -> Option<f64> {
+    hints
+        .attributes
+        .iter()
+        .find(|(key, value)| key == name && hint_fits(key, value, kind))
+        .and_then(|(_, value)| value.parse::<f64>().ok())
 }
 
 /// What a property is made of, whichever kind of declaration wrote it.

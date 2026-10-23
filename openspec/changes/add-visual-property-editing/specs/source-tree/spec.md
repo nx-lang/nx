@@ -7,8 +7,9 @@ editor hints that fit its type, as the visualizer-declarations capability resolv
 (`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `multiline`, `placeholder` and `choices`, each only when set. `choices` SHALL list the choices that fit, in order, each with its
 `value` typed as a `setValue` value is (`{ kind: "number", text }` or `{ kind: "string", value }`)
 and its `label` when it has one. A hint or choice reported as `editor-hint-mismatch` SHALL be left
-out, and a property's own mismatched hint SHALL NOT hide its type's hint of the same name. A `min` above
-the `max`, reported as `editor-hint-range`, SHALL leave out both.
+out, and a mismatched hint SHALL NOT hide the hint of the same name it would have replaced: its
+base visualizer's, an earlier visualizer's or its type's. A resolved `min` above the resolved `max`,
+reported as `editor-hint-range`, SHALL leave out both.
 An alias's `visualizer` value SHALL carry its own hints the same way. A property with no hints SHALL
 carry no `editor` value, and an entry whose only resolved values are hints SHALL carry a `visualizer`
 value as one with a format does. The values SHALL round-trip through JSON without loss.

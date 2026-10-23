@@ -6,8 +6,10 @@ Each editor hint of a property SHALL resolve on its own (`editor`, `min`, `max`,
 otherwise, for the hints `ValueVisualizer` has, to the value set by the `ValueVisualizer` of the alias
 the property's declared type names, read through occurrence suffixes as `format` is; otherwise to
 none. A `PropertyVisualizer` that sets some hints SHALL leave the others to the alias. The choices
-are one hint: a visualizer that gives any SHALL replace all of an earlier or an alias's, in its
-order.
+are one hint: a visualizer that gives any that fit SHALL replace all of an earlier or an alias's, in
+its order. A hint, or a set of choices none of which fit, reported as `editor-hint-mismatch` SHALL
+leave in force the one it would have replaced: a derived or later visualizer's leaves its base's or
+the earlier one's, and a property's leaves its alias's.
 
 #### Scenario: An alias's hints reach every property it types
 - **WHEN** a module declares `type Spacing = int` with `visualizer Spacing = <ValueVisualizer min=0 max=64><ValueChoice value=8 label="md" /></ValueVisualizer>`, and `type Card = { padding:Spacing = 8 gap?:Spacing }`
@@ -16,6 +18,10 @@ order.
 #### Scenario: A property visualizer overrides one hint
 - **WHEN** `Spacing` is hinted as above and `Card`'s visualizer has `<PropertyVisualizer property=padding max=32 step=2 />`
 - **THEN** the resolved hints of `Card.padding` SHALL be the minimum `0`, the maximum `32`, the step `2` and the choice `8` labeled `md`
+
+#### Scenario: A derived visualizer's mismatched hints leave its base's in force
+- **WHEN** a base element's visualizer has `<PropertyVisualizer property=width editor=field max=10>` with the choices `4` and `8`, `width` is an `int`, and a derived element's visualizer has `<PropertyVisualizer property=width editor=dropdown placeholder="Wide">` with the choice `"x"`
+- **THEN** the resolved hints of the derived element's `width` SHALL be the kind `field`, the maximum `10`, and the choices `4` and `8`, with no placeholder
 
 #### Scenario: A property's choices replace its type's
 - **WHEN** `Spacing` is hinted as above and `Card`'s visualizer has `<PropertyVisualizer property=gap><ValueChoice value=2 /><ValueChoice value=4 /></PropertyVisualizer>`
@@ -30,8 +36,10 @@ property it resolves for, and a viewer SHALL ignore that hint: `editor=field`, `
 `value` is not a number literal, signed or not, where the type is a number, or not a string literal
 where it is a string, and any choice where the type is neither. A `ValueVisualizer`'s hint
 SHALL be checked against its target. `min` greater than `max` SHALL be reported as an
-`editor-hint-range` warning. These SHALL be warnings, not errors, since a hint never changes what a
-program means.
+`editor-hint-range` warning, and so SHALL a range that only merging empties: where a visualizer's
+own `min` and `max` leave a range but the resolved ones, with its base's, an earlier visualizer's or
+its alias's, do not, the warning SHALL be at the `min` or `max` it writes that is in force. These
+SHALL be warnings, not errors, since a hint never changes what a program means.
 
 #### Scenario: A field on a string
 - **WHEN** `Card`'s visualizer has `<PropertyVisualizer property=title editor=field />` and `title` is a `string`
@@ -44,3 +52,7 @@ program means.
 #### Scenario: An empty range
 - **WHEN** a `ValueVisualizer` sets `min=10 max=0`
 - **THEN** analysis SHALL report `editor-hint-range`
+
+#### Scenario: A range that merging empties
+- **WHEN** `Spacing` is hinted `min=0 max=64` and `Card`'s visualizer has `<PropertyVisualizer property=padding min=100 />`, where `padding` is typed `Spacing`
+- **THEN** analysis SHALL report `editor-hint-range` at `min=100`, and the resolved `padding` SHALL have neither a minimum nor a maximum

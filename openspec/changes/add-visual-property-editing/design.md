@@ -113,6 +113,14 @@ choice whose value is not a number literal for a number, or not a string literal
 any choice on anything else. `min` above `max` is a warning too. Warnings, because a hint never
 changes what a program means.
 
+A mismatched hint does not hide the one it would have replaced (Bret, 2026-10-23, from the review's
+questions): resolution keeps every layer, latest first, and a reader takes the first hint of each
+name that fits, and the first set of choices with any that fit. So a derived visualizer's bad hint
+leaves its base's in force, as a property's bad hint already left its alias's. A range that only
+merging empties (`Spacing` says `max=64`, a property says `min=100`) warns `editor-hint-range` at the
+`min` or `max` in force that the visualizer writes; analysis checks each visualizer on its own, so
+this check runs over the merged result in the language service's diagnostics.
+
 ### The hinted editors
 
 - **Choices**, Paper-style (Bret, 2026-10-22): a list under a number's or a string's field, each

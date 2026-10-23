@@ -2200,6 +2200,43 @@ visualizer Box = <ElementVisualizer>
 }
 
 #[test]
+fn a_derived_visualizers_mismatched_hints_leave_its_bases_in_force() {
+    let tree = hinted_tree(
+        r#"import "@nx/visualizer"
+
+export abstract type Base = { width:int = 1 }
+export type Box extends Base = { tag?:string }
+
+visualizer Base = <ElementVisualizer>
+  <PropertyVisualizer property=width editor=field max=10>
+    <ValueChoice value=4 />
+    <ValueChoice value=8 />
+  </PropertyVisualizer>
+</ElementVisualizer>
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width editor=dropdown placeholder="Wide">
+    <ValueChoice value="x" />
+  </PropertyVisualizer>
+</ElementVisualizer>
+"#,
+    );
+    let box_ = visualizer(&tree, "Box");
+    let width = editor_of(box_, "width").expect("width's hints");
+    assert_eq!(
+        width.kind.as_deref(),
+        Some("field"),
+        "Base's editor, not dropdown"
+    );
+    assert_eq!(width.max, Some(SourceNumber(10.0)));
+    assert_eq!(width.placeholder, None, "a string's hint fits no int");
+    assert_eq!(
+        choice_texts(box_, "width"),
+        vec!["4", "8"],
+        "Base's choices, not \"x\""
+    );
+}
+
+#[test]
 fn an_empty_range_is_left_out() {
     let tree = hinted_tree(
         r#"import "@nx/visualizer"
@@ -2213,4 +2250,89 @@ visualizer Width = <ValueVisualizer min=10 max=0 step=2 />
     let width = editor_of(visualizer(&tree, "Box"), "width").expect("width's hints");
     assert_eq!((width.min, width.max), (None, None));
     assert_eq!(width.step, Some(SourceNumber(2.0)));
+}
+
+/// The `editor-hint-range` warnings of the library `hinted_tree` loads, each with the text it
+/// marks.
+fn merged_range_warnings_of(library: &str) -> Vec<(String, String)> {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/hinted.nx", library).with_version(1),
+            DocumentInput::new(URI, "import \"./hinted.nx\"\n\nlet box = <Box />\n")
+                .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let report = snapshot.diagnostic_report().expect("diagnostics");
+    report
+        .documents
+        .iter()
+        .flat_map(|document| document.diagnostics.iter())
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some("editor-hint-range"))
+        .map(|diagnostic| {
+            let range = diagnostic.range;
+            (
+                library[range.start_byte as usize..range.end_byte as usize].to_string(),
+                diagnostic.message.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_range_only_merging_empties_warns_where_it_is_written() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export type Spacing = int
+export type Box = { padding:Spacing = 8 gap:Spacing = 4 }
+
+visualizer Spacing = <ValueVisualizer min=0 max=64 />
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=padding min=100 />
+  <PropertyVisualizer property=gap min=10 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0].0, "min=100");
+    assert!(warnings[0].1.contains("'padding'"), "{}", warnings[0].1);
+    assert!(warnings[0].1.contains("(100)") && warnings[0].1.contains("(64)"));
+}
+
+#[test]
+fn a_derived_range_over_its_bases_warns_on_the_derived_one() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export abstract type Base = { width:int = 1 }
+export type Box extends Base = { tag?:string }
+
+visualizer Base = <ElementVisualizer>
+  <PropertyVisualizer property=width max=10 />
+</ElementVisualizer>
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width min=20 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0].0, "min=20");
+}
+
+#[test]
+fn an_elements_own_empty_range_warns_once() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export type Box = { width:int = 1 }
+
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width min=20 max=10 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "analysis's alone: {warnings:?}");
+    assert_eq!(warnings[0].0, "min=20");
 }

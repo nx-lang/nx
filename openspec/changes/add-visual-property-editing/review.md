@@ -844,17 +844,58 @@ the source tree, the protocol, the viewer and the docs.
 - **Fix:** `TOOLS_REST_MS` moved below `DRAWN_UNITS` with its own comment; the ternary is `raw.trim()`; `#showTools` and `#openNext` docs updated; `CHOICES_TITLE` has a doc comment.
 - **Verification:** Verified at `26df6a8`. `DRAWN_UNITS` has its own doc comment again, and so does `TOOLS_REST_MS` below it (`index.ts:175-179`). The ternary is `raw.trim()`. The `#showTools` and `#openNext` doc comments describe the current behavior, and `CHOICES_TITLE` has a doc comment.
 
+## Follow-ups From the Questions (2026-10-23)
+
+Bret asked for the two open questions worth acting on to be done now and verified by an independent
+reviewer: the merged-range warning and a derived visualizer over its base.
+
+### 🟡 Fixed - RF36 A derived visualizer's mismatched hint or choices hide its base's
+- **Severity:** Low
+- **Evidence:** `merge_child` (`crates/nx-language-service/src/visualizers.rs`) replaced a base's hint
+  and choices with the derived visualizer's before they were checked against the property's type. A
+  derived `<ValueChoice value="x" />` or `editor=dropdown` on an `int` left the property with no
+  choices or no kind, though the base's fit. RF9's rule covered only a property over its alias.
+- **Recommendation:** Keep every layer and let the reader take the first that fits, for attributes
+  and choices alike.
+- **Fix:** `ResolvedVisualizer` and `ResolvedChild` keep every hint and every set of choices, latest
+  first (`hints: Vec<(String, String)>`, `choices: Vec<Vec<VisualizerChoice>>`). `Hints` in
+  `source_tree.rs` holds the property's own layers followed by the alias's; `editor_hints` takes the
+  first hint of each name that fits and the first set of choices with any that fit. Test
+  `a_derived_visualizers_mismatched_hints_leave_its_bases_in_force` (fails before the fix). Spec:
+  `visualizer-declarations` "A property's editor hints come from its visualizer or its type" (new
+  scenario) and `source-tree`; design, website doc and changelog say so. Task 5.10.
+
+### 🟡 Fixed - RF37 A range that only merging empties gives no warning
+- **Severity:** Low
+- **Evidence:** `editor-hint-range` was checked per visualizer element in analysis. A
+  `PropertyVisualizer`'s `min=100` over its alias's `max=64` was left out of the tree with no warning
+  (the merged-range question above).
+- **Recommendation:** Check the merged hints and warn where the author can fix it.
+- **Fix:** `merged_range_warnings` (`source_tree.rs`) walks each `ValueVisualizer` alias and each
+  `ElementVisualizer` child a document declares, with the hints it merges with (its alias's, its
+  base's, an earlier declaration's). Where the visualizer's own `min` and `max` leave a range but the
+  resolved ones do not, it warns at the written `min` or `max` that is in force. An element's own empty
+  range is left to analysis, so it warns once. `NxLanguageService::diagnostic_report` adds these as
+  `editor-hint-range` warnings (`merged_hint_diagnostics`, `lib.rs`). Tests
+  `a_range_only_merging_empties_warns_where_it_is_written`,
+  `a_derived_range_over_its_bases_warns_on_the_derived_one` and
+  `an_elements_own_empty_range_warns_once`. Spec: `visualizer-declarations` (new scenario "A range
+  that merging empties"); design, website doc and changelog. Task 5.10.
+
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
   counts as written, and case elements are supported. Should a property written only under a condition count as written? Should
   union-case elements list their unwritten properties, or should the spec exclude them?
+  - **Answer (2026-10-23):** Kept as implemented; Bret's go-ahead on the change accepted both.
 - `namedValues` orders imports by module identity, not by import order (`named_values.rs` sort key). Is
   that what "then each import's" means?
 - `namedValues` leaves out only the `let` the element is in. A pair of lets can still be made to refer to
   each other (`a.tint={b.tint}` and `b.tint={a.tint}`). Is that acceptable for now?
+  - **Answer (2026-10-23):** Both `namedValues` questions are moot: named values were removed (task 5.2).
 - A range that only merging makes empty (a `PropertyVisualizer`'s `min=100` over an alias's `max=64`)
   is now left out of the tree with no warning, because `editor-hint-range` only checks the hints one
   visualizer element writes. Should analysis also check the merged hints?
+  - **Answer (2026-10-23):** Yes, see RF37.
 - Since RF3, an optional property is also offered the optional members of every record `let` in
   scope, including members the record never writes. For `tint?:string`, `<Drink code="C" />` as
   `only` offers `only.tint`, which is always absent. That is type-correct but of little use. Should
@@ -872,6 +913,7 @@ the source tree, the protocol, the viewer and the docs.
   though the base's `4` fits. Attributes merge the same way, so this matches today's rule. RF9's
   "a mismatched hint does not hide a valid one" covers only a property over its type. Should it also
   cover a derived visualizer over its base, for choices and attributes alike?
+  - **Answer (2026-10-23):** Yes, see RF36.
 
 ## Summary
 - The change is largely complete and well tested at the unit level, and the Rust, TypeScript and playground

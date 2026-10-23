@@ -170,8 +170,10 @@ visualizer Card =
 ```
 
 A hint that does not fit its property's type, such as `field` on a string or a string choice for a
-number, is reported as the warning `editor-hint-mismatch` and ignored, and a `min` above its `max` as
-`editor-hint-range`.
+number, is reported as the warning `editor-hint-mismatch` and ignored, so the hint it would have
+replaced (its base visualizer's, or its type's) stays in force. A `min` above its `max` is reported
+as `editor-hint-range`, and so is a range that only merging empties: with `Spacing` at `max=64`
+above, `<PropertyVisualizer property=gap min=100 />` warns at `min=100`.
 Warnings, because a hint never changes what a program means.
 
 ## The library source
