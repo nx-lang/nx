@@ -1227,6 +1227,25 @@ describe("choices", () => {
     assert.ok(tools(element)!.classList.contains("in-line"), "at once on the selected element");
   });
 
+  it("shows a case's chevron as the tools, taking room before />, which opens and closes its popover", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    const size = rendered(element, "latte.value.size.value");
+    over(size);
+    assert.equal(tools(element), null, "unselected, it waits for the pointer to rest");
+    t.mock.timers.tick(400);
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-choices") && !shown.classList.contains("with-steppers"));
+    assert.ok(shown.classList.contains("in-line"), "room before the closing />");
+    assert.equal(shown.previousElementSibling, size);
+    pressTool(shown.querySelector(".choices-toggle")!);
+    assert.ok(!popover(element).hidden, "the chevron opens the cases");
+    assert.ok(tools(element)!.classList.contains("open"));
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.ok(popover(element).hidden, "and closes them");
+  });
+
   it("opens from its chevron, and picks with the pointer", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);

@@ -138,6 +138,7 @@ const STEPPER_SLOP = 6;
 /** How far the pointer moves up or down, in pixels, for a stepper dragged to step its number once. */
 const STEPPER_STEP = 4;
 
+const CHOICES_TITLE = "Choices (Alt+\u2193)";
 /** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
 const CARD_DELAY = 500;
 
@@ -519,7 +520,7 @@ export class NxViewerElement extends ElementBase {
     }
     const toggle = document.createElement("span");
     toggle.className = "choices-toggle";
-    toggle.title = "Choices (Alt+\u2193)";
+    toggle.title = CHOICES_TITLE;
     this.#tools.append(steppers, toggle);
     this.#tools.addEventListener("pointerdown", (event) => this.#onToolsPointerDown(event));
     this.#tools.addEventListener("pointermove", (event) => this.#onToolsPointerMove(event));
@@ -2452,16 +2453,20 @@ export class NxViewerElement extends ElementBase {
   #showTools(span: HTMLElement, target: EditTarget): void {
     const session = this.#session?.target.key === target.key ? this.#session : undefined;
     const steppers = target.kind === "number";
-    // The chevron says a list is there: past an open field with choices, and past a value with
-    // choices under the pointer.
-    const chevron = session === undefined ? this.#hasChoices(target) : session.field !== undefined && (session.choices?.length ?? 0) > 0;
+    const isCase = target.kind === "case";
+    // The chevron says a list is there: past a case, past an open field with choices, and past a
+    // value with choices under the pointer.
+    const chevron =
+      isCase || (session === undefined ? this.#hasChoices(target) : session.field !== undefined && (session.choices?.length ?? 0) > 0);
     if (!steppers && !chevron) {
       this.#hideTools();
       return;
     }
     this.#tools.classList.toggle("with-steppers", steppers);
     this.#tools.classList.toggle("with-choices", chevron);
-    this.#tools.classList.toggle("open", session?.choicesOpen === true);
+    // A case's popover open is its list open.
+    this.#tools.classList.toggle("open", session?.choicesOpen === true || (isCase && session !== undefined));
+    this.#tools.querySelector<HTMLElement>(".choices-toggle")!.title = isCase ? "Cases" : CHOICES_TITLE;
     // With more of the line after it, even just its closing `/>`, the tools take room in the line, as
     // a field does as it grows, rather than cover what follows.
     const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
@@ -2534,11 +2539,11 @@ export class NxViewerElement extends ElementBase {
     if (shown !== undefined && element !== null && this.#onTheWay(shown, element)) {
       return;
     }
-    const value = element?.closest?.(".editable-value:is(.edit-number, .edit-text)") as HTMLElement | null | undefined;
+    const value = element?.closest?.(".editable-value:is(.edit-number, .edit-text, .edit-case)") as HTMLElement | null | undefined;
     const key = value === null || value === undefined ? undefined : keyOf(value);
     const target = key === undefined ? undefined : this.#targets.get(key);
     // Any value the pointer rests on, selected or not, as a case's chevron shows.
-    const offered = target !== undefined && (target.kind === "number" || this.#hasChoices(target));
+    const offered = target !== undefined && (target.kind === "number" || target.kind === "case" || this.#hasChoices(target));
     if (value === null || value === undefined || target === undefined || !offered || this.#rendered.get(key!) !== value) {
       this.#stopToolsWait();
       if (this.#tools.isConnected) {
@@ -2604,6 +2609,15 @@ export class NxViewerElement extends ElementBase {
     }
     const session = this.#session?.target.key === key ? this.#session : undefined;
     if (part.classList.contains("choices-toggle")) {
+      if (target.kind === "case") {
+        // A case's chevron opens its popover, and closes it as a dropdown's does.
+        if (session !== undefined) {
+          this.#cancel(session, true);
+        } else {
+          this.#openEditor(key!);
+        }
+        return;
+      }
       if (session !== undefined) {
         this.#toggleChoices(session, session.choicesOpen !== true);
         return;
