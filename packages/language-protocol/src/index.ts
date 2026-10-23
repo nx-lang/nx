@@ -516,8 +516,6 @@ export interface SourceEditorHints {
   max?: number;
   /** How far one step moves a number. */
   step?: number;
-  /** The unit shown after a number, never written. */
-  unit?: string;
   /** Present, and `true`, when a string's field takes line breaks. */
   multiline?: boolean;
   /** Text shown in an empty field, never written. */

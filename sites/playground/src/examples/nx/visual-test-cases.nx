@@ -80,8 +80,8 @@ visualizer Item = <ElementVisualizer title=name id=code icon="coffee" />
 visualizer Pastry = <ElementVisualizer idPosition=end icon="croissant" />
 visualizer Water = <ElementVisualizer icon="no-such-icon" />
 visualizer Cup = <ElementVisualizer><PropertyVisualizer property=sleeve format=color /></ElementVisualizer>
-visualizer Spacing = <ValueVisualizer min=0 max=64 unit="px" />
-visualizer FontSize = <ValueVisualizer min=8 max=96 unit="px">
+visualizer Spacing = <ValueVisualizer min=0 max=64 />
+visualizer FontSize = <ValueVisualizer min=8 max=96>
   <ValueChoice value=12 label="sm" />
   <ValueChoice value=16 label="base" />
   <ValueChoice value=20 label="lg" />
@@ -101,7 +101,7 @@ visualizer Banner = <ElementVisualizer icon="panel-top">
 /// The brand's warm accent.
 let accent:Color = "#c8a27a"
 
-// Hints: padding reads "px" and refuses 80 with "At most 64"; select its row and hover its value for
+// Hints: padding refuses 80 with "At most 64"; select its row and hover its value for
 // steppers (click, Shift+click for 10, or drag up and down), and gap's stay within 0 to 24. titleSize
 // has choices: select its row and hover it for steppers and a chevron, or open it and press Alt+Down,
 // click the chevron, or type (try "lg" or 2) to list them, with Default 16 on top; pick one, or type

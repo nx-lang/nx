@@ -198,7 +198,7 @@ A request with `visualizers: {}` (or `visualizers: { modules: [...] }`, naming f
 modules the host supplies) also resolves visualizer declarations: each declaration that has one
 carries a `visualizer`, with its title, id and icon, its properties in the order to show them, and,
 for each property or alias, a `format` and an `editor`. `editor` holds the editor hints that fit the
-type: `kind` (`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `unit`, `multiline`,
+type: `kind` (`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `multiline`,
 `placeholder` and `choices`. Each choice's `value` is typed as a `sourceEdit` `setValue` value, so a
 client passes it on as it is to write the choice:
 
@@ -206,7 +206,7 @@ client passes it on as it is to write the choice:
 const sizeProperty: SourcePropertyVisualizer = {
   name: "size",
   editor: {
-    unit: "px",
+    max: 96,
     choices: [
       { value: { kind: "number", text: "12" }, label: "sm" },
       { value: { kind: "number", text: "16" }, label: "base" },

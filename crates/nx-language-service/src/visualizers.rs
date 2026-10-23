@@ -157,12 +157,11 @@ pub(crate) struct ResolvedVisualizer {
 
 /// The editor hints a `PropertyVisualizer` or a `ValueVisualizer` may set as attributes,
 /// `multiline` and `placeholder` on a `PropertyVisualizer` only. Choices are their content.
-pub(crate) const EDITOR_HINTS: [&str; 7] = [
+pub(crate) const EDITOR_HINTS: [&str; 6] = [
     "editor",
     "min",
     "max",
     "step",
-    "unit",
     "multiline",
     "placeholder",
 ];

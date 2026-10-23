@@ -30,7 +30,7 @@ Penpot's typed tokens), so named values wait for design-system support.
 
 **Goals:**
 - A reader sees, on any element, what else it could set, and sets it where it reads.
-- A library says once how a type or a property edits (a range and a unit, the choices to pick from,
+- A library says once how a type or a property edits (a range, the choices to pick from,
   a segmented control, a multi-line field) and every place that uses it gets that editor.
 - Nothing moves when an editor opens, as in phase 1, and undo stays the host's.
 
@@ -46,6 +46,8 @@ Penpot's typed tokens), so named values wait for design-system support.
 - A spacing editor, property groups, `readonly`: later hints, when something uses them.
 - Text content over several lines and expressions edited as code (phases 4 and 7).
 - Enforcing `min` and `max` in the language: they are hints to an editor, not type constraints.
+- Units (`unit="px"`, read after a number): dropped (Bret, 2026-10-23) until units are part of the NX
+  language itself, when how a visualizer shows them can be designed against them.
 
 ## Decisions
 
@@ -80,12 +82,12 @@ service knows the layout and the spelling, so the viewer stays out of text.
 ### Editor hints are visualizer attributes, resolved like formats
 
 On both `PropertyVisualizer` and `ValueVisualizer`: `editor: ValueEditor?` (`field | dropdown |
-segmented`), `min`, `max`, `step: float64?`, `unit: string?`, and the content `choices: ValueChoice+?`.
+segmented`), `min`, `max`, `step: float64?`, and the content `choices: ValueChoice+?`.
 On `PropertyVisualizer` only: `multiline: boolean = false`, `placeholder: string?`.
 `ValueVisualizer.format` becomes optional, so a type can be described by its hints alone:
 
 ```nx
-visualizer FontSize = <ValueVisualizer min=8 max=128 unit="px">
+visualizer FontSize = <ValueVisualizer min=8 max=128>
   <ValueChoice value=12 label="sm" />
   <ValueChoice value=16 label="base" />
   <ValueChoice value=20 label="lg" />
@@ -105,7 +107,7 @@ type (the survey example has one). `value` is `object` because a `PropertyVisual
 record, so the library cannot name the property's type; analysis checks each choice instead.
 
 A hint that does not fit its property's type is a warning (`editor-hint-mismatch`), not an error, and
-the viewer ignores it: `field`, `min`, `max`, `step` and `unit` on a non-number; `dropdown` and
+the viewer ignores it: `field`, `min`, `max` and `step` on a non-number; `dropdown` and
 `segmented` on anything but a union of bare cases; `multiline` and `placeholder` on a non-string; a
 choice whose value is not a number literal for a number, or not a string literal for a string, and
 any choice on anything else. `min` above `max` is a warning too. Warnings, because a hint never
@@ -144,8 +146,6 @@ changes what a program means.
 - **Range**: arrows, steppers and scrubbing stay within `min` and `max`, and step by `step` (Shift
   by ten steps). A typed number outside the range stays in the field with a note (`At most 64`),
   as `12px` does today.
-- **Unit**: read after the number, quieter (`16 px`), and shown after the field while editing; never
-  written, and typing it (`16px`) is accepted and dropped.
 - **Multi-line** (`multiline`): the text field wraps, Enter makes a new line and Ctrl or Cmd+Enter
   commits. Any string field takes Shift+Enter as a line break, so a long string can gain one without
   the hint (Bret, 2026-10-22). Line breaks are written as line breaks, as `sourceEdit` already spells

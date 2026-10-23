@@ -125,32 +125,21 @@ function clamp(value: number, hints: SourceEditorHints | undefined): number {
   return low > high ? value : Math.min(high, Math.max(low, value));
 }
 
-/**
- * What a number's field holds, as the number to write: trimmed, and without the unit its hints
- * give, which a reader may type after it, as `16px`.
- */
-export function numberEntry(text: string, hints: SourceEditorHints | undefined): string {
-  const trimmed = text.trim();
-  const unit = hints?.unit?.trim();
-  return unit !== undefined && unit !== "" && trimmed.endsWith(unit) ? trimmed.slice(0, -unit.length).trim() : trimmed;
-}
-
 /** Why the number `entry` is outside the range its hints give, as `At most 64`, or nothing. */
 export function rangeProblem(entry: string, hints: SourceEditorHints | undefined): string | undefined {
   const value = Number(entry);
   if (hints === undefined || !Number.isFinite(value)) {
     return undefined;
   }
-  const unit = hints.unit === undefined ? "" : ` ${hints.unit}`;
   if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
     // An empty range bounds nothing.
     return undefined;
   }
   if (hints.min !== undefined && value < hints.min) {
-    return `At least ${hints.min}${unit}`;
+    return `At least ${hints.min}`;
   }
   if (hints.max !== undefined && value > hints.max) {
-    return `At most ${hints.max}${unit}`;
+    return `At most ${hints.max}`;
   }
   return undefined;
 }
@@ -200,7 +189,6 @@ export function choiceRows(
   current: string | undefined,
   fallback: string | undefined
 ): HTMLElement[] {
-  const unit = target.kind === "number" ? target.hints?.unit : undefined;
   const labeled = choices.some((choice) => choice.label !== undefined);
   const row = (value: string, label: string | undefined, marked: boolean): HTMLElement => {
     const option = document.createElement("div");
@@ -228,7 +216,7 @@ export function choiceRows(
         shown.append(swatch);
       }
     }
-    shown.append(unit === undefined ? value : `${value} ${unit}`);
+    shown.append(value);
     option.append(shown);
     return option;
   };
@@ -245,19 +233,14 @@ export function choiceRows(
 }
 
 /** Whether the choice `option` holds `typed`: in its label or its value, ignoring case. */
-export function choiceMatches(option: HTMLElement, typed: string, kind: EditTarget["kind"]): boolean {
+export function choiceMatches(option: HTMLElement, typed: string): boolean {
   const query = typed.trim().toLowerCase();
   if (query === "") {
     return true;
   }
   const label = (option.dataset["label"] ?? "").toLowerCase();
   const value = (option.dataset["value"] ?? "").toLowerCase();
-  if (label.includes(query) || value.includes(query)) {
-    return true;
-  }
-  // A number typed with its unit, as `16px`, matches the number.
-  const number = kind === "number" ? query.replace(/[^\d.+-]+$/, "") : query;
-  return number !== "" && number !== query && value.includes(number);
+  return label.includes(query) || value.includes(query);
 }
 
 /**

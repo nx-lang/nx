@@ -3,8 +3,8 @@
 Visual edits the values a document already writes (`add-visual-value-editing`). What it cannot do yet
 is the part of editing that makes Visual worth having beside a text box: show the choices. A reader
 can't see which properties an element could also set, can't pick from the values a library offers,
-and every number is the same plain field, whether it is a font size with a unit and a scale of
-sizes or a count. This change combines phases 2 and 3 of the
+and every number is the same plain field, whether it is a font size on a scale of sizes or a
+count. This change combines phases 2 and 3 of the
 design "Editing in Visual: design and plan" (https://claude.ai/artifact/66bGJxr9DjiS9GY5jk86Xu):
 discovering properties, and the editor hints that pick a property's editor. Bret asked for the two
 together so the property editing can be tried as one experience.
@@ -23,7 +23,7 @@ from `let`s guessed at intent from types alone, so they wait for design-system s
 - **A row menu.** A selected row gets a quiet `⋯` menu: Reset to default or Remove (what Delete does
   today), and Show in Source. Delete stays as the keyboard path.
 - **Editor hints in `@nx/visualizer`.** `PropertyVisualizer` and `ValueVisualizer` gain `editor`
-  (`field | dropdown | segmented`), `min`, `max`, `step`, `unit`, and `choices`: `ValueChoice`
+  (`field | dropdown | segmented`), `min`, `max`, `step`, and `choices`: `ValueChoice`
   children, each a `value` and an optional `label`, the values a viewer offers to pick, in order.
   `PropertyVisualizer` also gains `multiline` and `placeholder`. `ValueVisualizer.format` becomes
   optional. Analysis warns when a hint or a choice does not fit the property's type. The source tree
@@ -34,7 +34,7 @@ from `let`s guessed at intent from types alone, so they wait for design-system s
   The field stays typeable, so choices suggest and never restrict. Steppers on numbers, Framer-style:
   up and down buttons just past the value, while its field is open or on a selected row; a click
   steps once, Shift ten steps, and a vertical drag scrubs. A segmented control for a union's cases;
-  units shown after a number and never written; numbers kept in range, with a note when a typed
+  numbers kept in range, with a note when a typed
   number is outside it; a multi-line text field for `multiline` strings; a placeholder in an empty
   field. Any string field takes Shift+Enter as a line break.
 - **The playground**'s "Visual test cases" example gains the new cases.

@@ -25,8 +25,8 @@ optional field `icon:string` naming an icon from the Lucide set, and an optional
 `properties` holding one or more `<PropertyVisualizer Target=Target/>`. `IdPosition` SHALL be the
 constant union `start | end`. `PropertyVisualizer` SHALL be a record with the type parameter
 `Target`, a required field `property:Target.Property`, an optional field `format:ValueFormat`, the
-editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float64`, `step:float64`
-and `unit:string`, a field `multiline:boolean` defaulting to `false`, an optional field
+editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float64` and
+`step:float64`, a field `multiline:boolean` defaulting to `false`, an optional field
 `placeholder:string`, and an optional content field `choices` holding one or more `ValueChoice`.
 
 #### Scenario: An element visualizer with property visualizers
@@ -38,13 +38,13 @@ and `unit:string`, a field `multiline:boolean` defaulting to `false`, an optiona
 - **THEN** analysis SHALL reject `property=value` because `value` is not a case of `Choice.Property`
 
 #### Scenario: A property with editor hints
-- **WHEN** a module declares `type Card = { title:string padding:int = 8 body?:string }` and `visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding min=0 max=48 unit="px"><ValueChoice value=8 label="md" /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder="What it says" /></ElementVisualizer>`
+- **WHEN** a module declares `type Card = { title:string padding:int = 8 body?:string }` and `visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding min=0 max=48><ValueChoice value=8 label="md" /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder="What it says" /></ElementVisualizer>`
 - **THEN** analysis SHALL accept the visualizer
 
 ### Requirement: `ValueVisualizer` formats a scalar type
 `ValueVisualizer` SHALL be a record with the type parameter `Target`, an optional field
 `format:ValueFormat`, the editor hints as optional fields `editor:ValueEditor`, `min:float64`,
-`max:float64`, `step:float64` and `unit:string`, and an optional content field `choices` holding one
+`max:float64` and `step:float64`, and an optional content field `choices` holding one
 or more `ValueChoice`. `ValueFormat` SHALL be the constant union `id | color`.
 
 #### Scenario: A color alias
@@ -52,7 +52,7 @@ or more `ValueChoice`. `ValueFormat` SHALL be the constant union `id | color`.
 - **THEN** analysis SHALL accept the visualizer
 
 #### Scenario: A font size alias with choices and no format
-- **WHEN** a module declares `type FontSize = int` and `visualizer FontSize = <ValueVisualizer min=8 max=128 unit="px"><ValueChoice value=12 label="xs" /><ValueChoice value=16 label="base" /><ValueChoice value=20 label="xl" /></ValueVisualizer>`
+- **WHEN** a module declares `type FontSize = int` and `visualizer FontSize = <ValueVisualizer min=8 max=128><ValueChoice value=12 label="xs" /><ValueChoice value=16 label="base" /><ValueChoice value=20 label="xl" /></ValueVisualizer>`
 - **THEN** analysis SHALL accept the visualizer
 
 ## ADDED Requirements
@@ -62,8 +62,7 @@ or more `ValueChoice`. `ValueFormat` SHALL be the constant union `id | color`.
 comment saying the editor it asks for: a number field, a list of a union's cases, and a union's cases
 as one row of buttons. `ValueChoice` SHALL be a record with a required field `value:object`, the
 value a choice writes, and an optional field `label:string`, the name shown beside it. The doc
-comments SHALL say that `min`, `max` and `step` bound and step a number, that `unit` is shown after a
-number and never written, that `multiline` lets a string's field hold line breaks, that `placeholder`
+comments SHALL say that `min`, `max` and `step` bound and step a number, that `multiline` lets a string's field hold line breaks, that `placeholder`
 is shown in an empty field and never written, and that `choices` are values a viewer offers to pick,
 in order, which suggest and never restrict. A hint SHALL change how a
 viewer edits a value, never what the value is.

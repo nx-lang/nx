@@ -131,7 +131,6 @@ document may still write a number outside them.
 | `editor: ValueEditor` | A number: `field`. A union of cases with no properties: `dropdown`, `segmented` | Which editor to offer. |
 | `min`, `max: float64` | A number | The range the editor's arrows, steppers and dragging keep to. |
 | `step: float64` | A number | How far one step moves the number, as an arrow key or a stepper does. |
-| `unit: string` | A number | The unit shown after the number, such as `"px"`; never written. |
 | `multiline: boolean` | A string, on a `PropertyVisualizer` only | The field takes line breaks: Enter starts a new line. |
 | `placeholder: string` | A string, on a `PropertyVisualizer` only | Text shown in the empty field; never written. |
 | content `choices: ValueChoice+` | A number or a string | The values offered to pick, in order: a number literal for a number, a string literal for a string. They suggest and never restrict. |
@@ -156,8 +155,8 @@ export type Card = {
   body?:string
 }
 
-visualizer Spacing = <ValueVisualizer min=0 max=64 unit="px" />
-visualizer FontSize = <ValueVisualizer min=8 max=96 unit="px">
+visualizer Spacing = <ValueVisualizer min=0 max=64 />
+visualizer FontSize = <ValueVisualizer min=8 max=96>
   <ValueChoice value=12 label="sm" />
   <ValueChoice value=16 label="base" />
   <ValueChoice value=20 label="lg" />
@@ -231,8 +230,6 @@ export type PropertyVisualizer = {
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
-  unit?: string
   /// Whether the property's string field takes line breaks: Enter starts a new line, and the
   /// value is written over several lines.
   multiline: boolean = false
@@ -257,8 +254,6 @@ export type ValueVisualizer = {
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
-  unit?: string
   /// The values a viewer offers to pick for a value of the type, in order. They suggest and never
   /// restrict: any value of the type may still be written.
   content choices?: ValueChoice+

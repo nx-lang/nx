@@ -1768,7 +1768,7 @@ impl<'a> InferenceContext<'a> {
                     },
                     _ => continue,
                 },
-                "min" | "max" | "step" | "unit" => HintValueKind::Number,
+                "min" | "max" | "step" => HintValueKind::Number,
                 "multiline" | "placeholder" => HintValueKind::String,
                 _ => continue,
             };

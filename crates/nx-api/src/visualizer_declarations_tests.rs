@@ -151,7 +151,7 @@ fn a_color_alias() {
 fn a_property_with_editor_hints() {
     assert_clean(
         "type Card = { title:string padding:int = 8 body?:string }\n\
-         visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding editor=field min=0 max=48 unit=\"px\"><ValueChoice value=8 label=\"sm\" /><ValueChoice value=16 /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder=\"What it says\" /></ElementVisualizer>",
+         visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding editor=field min=0 max=48><ValueChoice value=8 label=\"sm\" /><ValueChoice value=16 /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder=\"What it says\" /></ElementVisualizer>",
     );
 }
 
@@ -159,7 +159,7 @@ fn a_property_with_editor_hints() {
 fn a_spacing_alias_with_no_format() {
     assert_clean(
         "type Spacing = int\n\
-         visualizer Spacing = <ValueVisualizer min=0 max=64 unit=\"px\">\n\
+         visualizer Spacing = <ValueVisualizer min=0 max=64>\n\
            <ValueChoice value=4 label=\"xs\" />\n\
            <ValueChoice value=8 label=\"sm\" />\n\
          </ValueVisualizer>",
@@ -210,7 +210,7 @@ fn a_field_on_a_string_is_a_warning() {
 fn each_hint_is_checked_against_its_type() {
     for (body, count) in [
         // Number hints on a string alias.
-        ("type Name = string\nvisualizer Name = <ValueVisualizer min=0 unit=\"px\" />", 2),
+        ("type Name = string\nvisualizer Name = <ValueVisualizer min=0 max=9 />", 2),
         // A dropdown on a number.
         ("type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=dropdown /></ElementVisualizer>", 1),
         // Multi-line on a number.
@@ -224,7 +224,7 @@ fn each_hint_is_checked_against_its_type() {
         // Choices on an alias of neither, one warning a choice.
         ("type Flag = boolean\nvisualizer Flag = <ValueVisualizer><ValueChoice value=true /><ValueChoice value=\"yes\" /></ValueVisualizer>", 2),
         // Every hint that fits.
-        ("type Card = { size?:float64 label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=field min=0 max=1 step=0.1 unit=\"em\" /><PropertyVisualizer property=label multiline=true><ValueChoice value=\"Hi\" label=\"greeting\" /></PropertyVisualizer></ElementVisualizer>", 0),
+        ("type Card = { size?:float64 label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=field min=0 max=1 step=0.1 /><PropertyVisualizer property=label multiline=true><ValueChoice value=\"Hi\" label=\"greeting\" /></PropertyVisualizer></ElementVisualizer>", 0),
     ] {
         let warnings = warnings_of(body, "editor-hint-mismatch");
         assert_eq!(warnings.len(), count, "{body}: {warnings:#?}");

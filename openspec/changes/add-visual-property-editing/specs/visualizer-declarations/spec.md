@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: A property's editor hints come from its visualizer or its type
-Each editor hint of a property SHALL resolve on its own (`editor`, `min`, `max`, `step`, `unit`,
+Each editor hint of a property SHALL resolve on its own (`editor`, `min`, `max`, `step`,
 `multiline`, `placeholder` and `choices`): to the value its resolved `PropertyVisualizer` sets, and
 otherwise, for the hints `ValueVisualizer` has, to the value set by the `ValueVisualizer` of the alias
 the property's declared type names, read through occurrence suffixes as `format` is; otherwise to
@@ -14,8 +14,8 @@ order.
 - **THEN** the resolved hints of `Card.padding` and `Card.gap` SHALL be the minimum `0`, the maximum `64` and the choice `8` labeled `md`
 
 #### Scenario: A property visualizer overrides one hint
-- **WHEN** `Spacing` is hinted as above and `Card`'s visualizer has `<PropertyVisualizer property=padding max=32 unit="px" />`
-- **THEN** the resolved hints of `Card.padding` SHALL be the minimum `0`, the maximum `32`, the unit `px` and the choice `8` labeled `md`
+- **WHEN** `Spacing` is hinted as above and `Card`'s visualizer has `<PropertyVisualizer property=padding max=32 step=2 />`
+- **THEN** the resolved hints of `Card.padding` SHALL be the minimum `0`, the maximum `32`, the step `2` and the choice `8` labeled `md`
 
 #### Scenario: A property's choices replace its type's
 - **WHEN** `Spacing` is hinted as above and `Card`'s visualizer has `<PropertyVisualizer property=gap><ValueChoice value=2 /><ValueChoice value=4 /></PropertyVisualizer>`
@@ -23,8 +23,8 @@ order.
 
 ### Requirement: An editor hint that does not fit its property is a warning
 Analysis SHALL report an `editor-hint-mismatch` warning at a hint that does not fit the type of the
-property it resolves for, and a viewer SHALL ignore that hint: `editor=field`, `min`, `max`, `step`
-or `unit` where the type is not `int`, `int32`, `int64`, `float32`, `float64` or an alias of one;
+property it resolves for, and a viewer SHALL ignore that hint: `editor=field`, `min`, `max` or
+`step` where the type is not `int`, `int32`, `int64`, `float32`, `float64` or an alias of one;
 `editor=dropdown` or `editor=segmented` where it is not a union of cases with no properties;
 `multiline` or `placeholder` where it is not a string or an alias of one; and a `ValueChoice` whose
 `value` is not a number literal, signed or not, where the type is a number, or not a string literal

@@ -5,7 +5,7 @@
 
 ## 2. Editor hints
 
-- [x] 2.1 `@nx/visualizer`: `ValueEditor` and its doc comments; `editor`, `min`, `max`, `step`, `unit` on `PropertyVisualizer` and `ValueVisualizer`; `multiline` and `placeholder` on `PropertyVisualizer`; `ValueVisualizer.format` optional; the library still builds with no diagnostics
+- [x] 2.1 `@nx/visualizer`: `ValueEditor` and its doc comments; `editor`, `min`, `max`, `step` on `PropertyVisualizer` and `ValueVisualizer`; `multiline` and `placeholder` on `PropertyVisualizer`; `ValueVisualizer.format` optional; the library still builds with no diagnostics
 - [x] 2.2 Hint resolution beside `format`'s: a `PropertyVisualizer`'s hints win one by one, then the alias's `ValueVisualizer`; the `editor-hint-mismatch` and `editor-hint-range` warnings; verify with tests for each scenario in `visualizer-declarations`
 - [x] 2.3 The source tree: an `editor` value on `SourcePropertyVisualizer` and on an alias's `SourceVisualizer`, mismatched hints left out; the protocol types in `packages/language-protocol`; verify with source-tree tests and the TypeScript parity tests
 
@@ -20,7 +20,7 @@
 
 - [x] 4.1 Read hints from the tree
 - [x] 4.2 Arrows and scrubbing kept in range and stepped by `step`; a typed number out of range kept with its note
-- [x] 4.3 Units read after a number and shown after the field; typing the unit accepted and dropped
+- [x] 4.3 ~~Units read after a number~~ (removed in 5.8)
 - [x] 4.4 Segmented cases, falling back to the list past five cases or when too wide; `editor=dropdown` and `editor=field`
 - [x] 4.5 Multi-line string fields (Enter a line break, Ctrl/Cmd+Enter commits), Shift+Enter as a line break in any string field, strings written over several lines now editable, strings with escapes other than `\"` and `\\` still opening Source; placeholders
 - [x] 4.6 Verify each `viewer` scenario for hints with tests
@@ -35,6 +35,8 @@
 - [x] 5.6 The "Visual test cases" example: choices for a number and a string, steppers, a reference opening Source; screenshots light and dark
 
 - [x] 5.7 Room on a line (Bret, 2026-10-23): a hover chevron for values with choices; on a one-line element or a header, where more of the line follows, no hover tools, and an open field's tools take room in the line; verify the `viewer` scenario and in the browser
+
+- [x] 5.8 Remove `unit` (Bret, 2026-10-23), until units are part of the language: the library, analysis, the source tree, the protocol, the viewer, tests, the example and docs
 
 ## 6. The playground and docs
 

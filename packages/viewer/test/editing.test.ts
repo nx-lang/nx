@@ -978,7 +978,7 @@ describe("a row's menu", () => {
     assert.equal(edits.length, 1);
     assert.deepEqual(menuOf("latte.value.name"), ["Show in Source"], "a required property is not left out");
     press(root(element).querySelector(".menu-item")!, "Escape");
-    assert.deepEqual(menuOf("card.value.padding"), ["Reset to default 8 px", "Show in Source"], "with its unit");
+    assert.deepEqual(menuOf("card.value.padding"), ["Reset to default 8", "Show in Source"]);
     press(root(element).querySelector(".menu-item")!, "Escape");
     assert.deepEqual(menuOf("card.value.gap"), ["Reset to default 4", "Show in Source"]);
     press(root(element).querySelector(".menu-item")!, "Escape");
@@ -1021,14 +1021,7 @@ describe("a row's menu", () => {
 });
 
 describe("editor hints", () => {
-  it("reads a number's unit after it", async () => {
-    const element = show(await fixture("adding"));
-    const value = rendered(element, "card.value.padding.value");
-    assert.equal(value.nextElementSibling?.className, "unit");
-    assert.equal(reads(value.parentElement!).includes("8 px"), true);
-  });
-
-  it("takes a typed number with its unit, and keeps one out of range with a note", async () => {
+  it("keeps a number out of range in its field with a note", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     rendered(element, "card.value.padding.value").click();
@@ -1037,8 +1030,8 @@ describe("editor hints", () => {
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     press(input, "Enter");
     assert.deepEqual(edits, []);
-    assert.equal(root(element).querySelector(".edit-problem")?.textContent, "At most 64 px");
-    input.textContent = "12px";
+    assert.equal(root(element).querySelector(".edit-problem")?.textContent, "At most 64");
+    input.textContent = "12";
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     press(input, "Enter");
     assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
@@ -1317,7 +1310,7 @@ describe("steppers", () => {
     const shown = tools(element)!;
     assert.ok(shown.classList.contains("with-steppers"));
     assert.ok(!shown.classList.contains("with-choices"));
-    assert.equal(shown.previousElementSibling?.className, "unit", "past the value's unit");
+    assert.equal(shown.previousElementSibling, value, "just past the value");
     const up = shown.querySelector<HTMLElement>(".stepper.up")!;
     assert.match(up.title, /\u2191/);
     assert.match(up.title, /Shift/);
@@ -1381,7 +1374,7 @@ describe("steppers", () => {
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
     assert.equal(element.selection, "card.value.gap", "the selection stays");
   });
-  it("keeps the steppers as the pointer crosses the value's unit and the gap to reach them", async (t) => {
+  it("keeps the steppers as the pointer crosses the gap to reach them", async (t) => {
     // As a sheet, where the steppers cover nothing under the pointer.
     narrow(t, 30);
     const element = show(await fixture("adding"));
@@ -1391,8 +1384,8 @@ describe("steppers", () => {
     const value = rendered(element, "card.value.padding.value");
     over(value);
     const shown = tools(element)!;
-    over(shown.previousElementSibling!);
-    assert.equal(tools(element), shown, "over the unit");
+    over(value.closest(".sheet-value")!);
+    assert.equal(tools(element), shown, "over the value's cell");
     over(value.closest(".sheet-row")!);
     assert.equal(tools(element), shown, "over the gap in the value's row");
     over(shown);
@@ -1402,15 +1395,15 @@ describe("steppers", () => {
     assert.equal(tools(element), null, "gone over another property");
   });
 
-  it("keeps a let's steppers over its unit, and shows none where they would cover the line", async () => {
+  it("shows a let's steppers, and none where they would cover the line", async () => {
     const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     element.selection = "pad";
     over(rendered(element, "pad.value"));
     const shown = tools(element)!;
-    assert.equal(shown.previousElementSibling?.className, "unit");
-    over(shown.previousElementSibling!);
-    assert.equal(tools(element), shown, "over a let's unit");
+    assert.ok(shown.classList.contains("with-steppers"));
+    over(rendered(element, "pad.value").parentElement!);
+    assert.equal(tools(element), shown, "over the let's line");
 
     const edges = show(await fixture("editingEdges"));
     edges.selection = "box";

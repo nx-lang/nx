@@ -82,8 +82,6 @@ values, say:
   Shift by ten steps, and a typed number outside them SHALL stay in the field with a note saying the
   bound, such as `At most 64`, and SHALL NOT be committed; `editor=field` asks for the number field,
   which every number has;
-- a number with `unit` SHALL read the unit after it, quieter, and show it after the field; the unit
-  SHALL NOT be written, and an entry ending in it, such as `16px`, SHALL be taken as the number;
 - a case with `editor=segmented` SHALL show the union's cases as one row of buttons in its popover,
   unless there are more than five or they do not fit the reading's width, when it SHALL list them;
   `editor=dropdown` SHALL list them;
@@ -163,10 +161,6 @@ SHALL still fire `nx-open`.
 #### Scenario: Out of range
 - **WHEN** the reader types `80` in the field of a number hinted `max=64` and presses Enter
 - **THEN** no `nx-edit` SHALL fire and a note beside the field SHALL read `At most 64`
-
-#### Scenario: A unit
-- **WHEN** a number `padding=8` is hinted `unit="px"`
-- **THEN** it SHALL read `8 px`, and typing `12px` and Enter SHALL fire `nx-edit` setting the number `12`
 
 #### Scenario: A line break in a string
 - **WHEN** the reader edits `note="Ask for oat milk"`, with no hints, and presses Shift+Enter after

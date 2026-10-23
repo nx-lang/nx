@@ -4,8 +4,7 @@
 Each property in a declaration's `visualizer` `properties` list SHALL carry, when a `sourceTree`
 request asks for `visualizers`, besides its name and format, an `editor` value holding its resolved
 editor hints that fit its type, as the visualizer-declarations capability resolves them: `kind`
-(`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `unit`, `multiline`, `placeholder` and
-`choices`, each only when set. `choices` SHALL list the choices that fit, in order, each with its
+(`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `multiline`, `placeholder` and `choices`, each only when set. `choices` SHALL list the choices that fit, in order, each with its
 `value` typed as a `setValue` value is (`{ kind: "number", text }` or `{ kind: "string", value }`)
 and its `label` when it has one. A hint or choice reported as `editor-hint-mismatch` SHALL be left
 out, and a property's own mismatched hint SHALL NOT hide its type's hint of the same name. A `min` above
@@ -16,10 +15,10 @@ value as one with a format does. The values SHALL round-trip through JSON withou
 
 #### Scenario: A number's hints and choices
 - **WHEN** a client asks with `visualizers` for the source tree of a document that constructs
-  `<Card padding=8 />`, where `Card.padding` is typed `Spacing`, hinted `min=0 max=64 unit="px"`
+  `<Card padding=8 />`, where `Card.padding` is typed `Spacing`, hinted `min=0 max=64`
   with the choices `<ValueChoice value=4 label="sm" />` and `<ValueChoice value=8 label="md" />`
 - **THEN** the `properties` entry for `padding` in `Card`'s `visualizer` value SHALL carry an `editor`
-  value with the minimum `0`, the maximum `64`, the unit `px`, and the choices `4` labeled `sm` and
+  value with the minimum `0`, the maximum `64`, and the choices `4` labeled `sm` and
   `8` labeled `md`
 
 #### Scenario: A mismatched hint is left out

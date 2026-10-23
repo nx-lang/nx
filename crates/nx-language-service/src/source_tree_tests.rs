@@ -1857,15 +1857,15 @@ fn visualizers_round_trip_through_json() {
 // Editor hints
 // ---------------------------------------------------------------------------------------------
 
-/// A card library whose spacing alias has a range, a unit and choices, and a document that
-/// constructs a card.
+/// A card library whose spacing alias has a range and choices, and a document that constructs a
+/// card.
 const CARDS: &str = r#"import "@nx/visualizer"
 
 export type Spacing = int
 export type Size = small | medium | large
 export type Card = { title:string padding:Spacing = 8 gap?:Spacing size:Size = medium body?:string }
 
-visualizer Spacing = <ValueVisualizer editor=field min=0 max=64 unit="px">
+visualizer Spacing = <ValueVisualizer editor=field min=0 max=64>
   <ValueChoice value=4 label="xs" />
   <ValueChoice value=8 label="sm" />
   <ValueChoice value=16 label="md" />
@@ -1929,7 +1929,6 @@ fn an_aliass_hints_and_choices_reach_every_property_it_types() {
     assert_eq!(padding.kind.as_deref(), Some("field"));
     assert_eq!(padding.min, Some(SourceNumber(0.0)));
     assert_eq!(padding.max, Some(SourceNumber(64.0)));
-    assert_eq!(padding.unit.as_deref(), Some("px"));
     assert_eq!(
         padding.choices,
         vec![
@@ -2089,7 +2088,7 @@ fn choices_reach_through_an_alias_chain_and_inheritance() {
 fn hints_round_trip_through_json() {
     let tree = cards_tree();
     let json = serde_json::to_string(&tree).expect("json");
-    assert!(json.contains(r#""editor":{"kind":"field","min":0.0,"max":64.0,"unit":"px","choices":[{"value":{"kind":"number","text":"4"},"label":"xs"},{"value":{"kind":"number","text":"8"},"label":"sm"},{"value":{"kind":"number","text":"16"},"label":"md"}]}"#), "{json}");
+    assert!(json.contains(r#""editor":{"kind":"field","min":0.0,"max":64.0,"choices":[{"value":{"kind":"number","text":"4"},"label":"xs"},{"value":{"kind":"number","text":"8"},"label":"sm"},{"value":{"kind":"number","text":"16"},"label":"md"}]}"#), "{json}");
     assert!(
         json.contains(r#""choices":[{"value":{"kind":"string","value":"Hi"}}]"#),
         "{json}"

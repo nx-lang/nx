@@ -51,8 +51,6 @@ export type PropertyVisualizer = {
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
-  unit?: string
   /// Whether the property's string field takes line breaks: Enter starts a new line, and the
   /// value is written over several lines.
   multiline: boolean = false
@@ -77,8 +75,6 @@ export type ValueVisualizer = {
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
-  /// The unit a number is in, such as `"px"`: shown after the number, and never written.
-  unit?: string
   /// The values a viewer offers to pick for a value of the type, in order. They suggest and never
   /// restrict: any value of the type may still be written.
   content choices?: ValueChoice+

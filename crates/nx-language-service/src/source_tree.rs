@@ -322,9 +322,6 @@ pub struct SourceEditorHints {
     /// How far one step moves a number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<SourceNumber>,
-    /// The unit shown after a number, never written.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unit: Option<String>,
     /// Whether a string's field takes line breaks; present only when it does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiline: Option<bool>,
@@ -2464,7 +2461,7 @@ fn hint_fits(key: &str, value: &str, kind: HintValueKind) -> bool {
             "dropdown" | "segmented" => fits(HintValueKind::Cases),
             _ => false,
         },
-        "min" | "max" | "step" | "unit" => fits(HintValueKind::Number),
+        "min" | "max" | "step" => fits(HintValueKind::Number),
         "multiline" | "placeholder" => fits(HintValueKind::String),
         _ => false,
     }
@@ -2536,7 +2533,6 @@ fn editor_hints(hints: &Hints, kind: HintValueKind) -> Option<SourceEditorHints>
         min,
         max,
         step: number("step"),
-        unit: get("unit").map(str::to_string),
         multiline: get("multiline")
             .filter(|value| *value == "true")
             .map(|_| true),

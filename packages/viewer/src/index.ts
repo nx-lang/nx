@@ -31,7 +31,6 @@ import {
   choicesOf,
   defaultShown,
   defaultValue,
-  numberEntry,
   offsetAtPoint,
   pickerColor,
   rangeProblem,
@@ -885,8 +884,6 @@ export class NxViewerElement extends ElementBase {
       this.#body.replaceChildren(
         renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning })
       );
-      // Units are drawn before lines are measured, so a line that fits fits with them.
-      this.#markUnits(targets);
     };
     try {
       draw();
@@ -1183,7 +1180,7 @@ export class NxViewerElement extends ElementBase {
       // A line's unwritten properties, listed under it, are part of what is selected.
       if (this.#moreBlock !== undefined && this.#body.contains(this.#moreBlock)) {
         // The rows' cells stretch across the block, so how far they reach is read from what they hold.
-        const reach = [...this.#moreBlock.querySelectorAll<HTMLElement>(".more-label, .more-filter, .sheet-name, .more-value, .more-default, .unit")]
+        const reach = [...this.#moreBlock.querySelectorAll<HTMLElement>(".more-label, .more-filter, .sheet-name, .more-value, .more-default")]
           .filter((part) => part.closest<HTMLElement>(".sheet-row")?.hidden !== true)
           .map((part) => {
             // A cell may stretch across its grid; its text's own box says where it ends.
@@ -1372,40 +1369,6 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
       row.append(mark);
     }
-  }
-
-  /**
-   * Reads each number's unit after it, quieter, where its property's hints give one: never part of
-   * the value, so it is drawn beside it.
-   */
-  #markUnits(targets: ReadonlyMap<string, EditTarget>): void {
-    const units = new Map<string, string>();
-    for (const target of targets.values()) {
-      if (target.kind === "number" && target.hints?.unit !== undefined) {
-        units.set(target.key, target.hints.unit);
-      }
-    }
-    if (units.size === 0) {
-      return;
-    }
-    // The last element drawn for a key is the one the reading keeps for it.
-    const drawn = new Map<string, HTMLElement>();
-    for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
-      if (units.has(element.dataset["key"]!)) {
-        drawn.set(element.dataset["key"]!, element);
-      }
-    }
-    for (const [key, span] of drawn) {
-      span.after(this.#unitMark(units.get(key)!));
-    }
-  }
-
-  #unitMark(unit: string): HTMLElement {
-    const mark = this.ownerDocument.createElement("span");
-    mark.className = "unit";
-    mark.textContent = ` ${unit}`;
-    mark.setAttribute("aria-hidden", "true");
-    return mark;
   }
 
   /** The selected unit, as it is drawn, when the selection is one. */
@@ -1616,7 +1579,7 @@ export class NxViewerElement extends ElementBase {
   #problemOf(target: EditTarget, value: string): string | undefined {
     switch (target.kind) {
       case "number": {
-        const entry = numberEntry(value, target.hints);
+        const entry = value.trim();
         if (!isNumericLiteral(entry)) {
           return "Not a number";
         }
@@ -1755,7 +1718,7 @@ export class NxViewerElement extends ElementBase {
         }
         event.preventDefault();
         const steps = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
-        const stepped = stepNumber(numberEntry(field.textContent ?? "", target.hints), steps, target.signed !== false, target.hints);
+        const stepped = stepNumber((field.textContent ?? "").trim(), steps, target.signed !== false, target.hints);
         if (stepped !== undefined) {
           field.textContent = stepped;
           this.#validate(session);
@@ -1774,7 +1737,7 @@ export class NxViewerElement extends ElementBase {
     const target = session.target;
     let value = session.field!.textContent ?? "";
     if (target.kind === "number") {
-      value = numberEntry(value, target.hints);
+      value = value.trim();
     }
     if (value === this.#currentOf(target)) {
       this.#endSession(session, how === "key");
@@ -2189,7 +2152,7 @@ export class NxViewerElement extends ElementBase {
         return;
       }
       const raw = session.input?.value ?? "";
-      const value = target.kind === "number" ? numberEntry(raw, target.hints) : raw.trim();
+      const value = target.kind === "number" ? raw.trim() : raw.trim();
       // A popover left as it was leaves the value as it is.
       if (value === this.#currentOf(target)) {
         this.#cancel(session, true);
@@ -2336,7 +2299,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     for (const row of rows) {
-      row.hidden = !choiceMatches(row, typed, session.target.kind);
+      row.hidden = !choiceMatches(row, typed);
     }
     const rule = session.choiceList?.querySelector<HTMLElement>(".choices-rule");
     rule?.toggleAttribute("hidden", rows[0]?.hidden !== false || rows.slice(1).every((row) => row.hidden));
@@ -2444,7 +2407,7 @@ export class NxViewerElement extends ElementBase {
   // ---- Steppers -----------------------------------------------------------------------------
 
   /**
-   * Draws the tools past the value `span` draws for `target`, after its unit: a number's steppers,
+   * Draws the tools past the value `span` draws for `target`: a number's steppers,
    * and, while its field is open with choices, their chevron. Nothing for a value with neither.
    */
   #showTools(span: HTMLElement, target: EditTarget): void {
@@ -2466,8 +2429,7 @@ export class NxViewerElement extends ElementBase {
     const inLine = session?.field !== undefined && this.#followedOnItsLine(span);
     this.#tools.classList.toggle("in-line", inLine);
     this.#tools.dataset["toolsFor"] = target.key;
-    const unit = span.nextElementSibling;
-    (unit?.classList.contains("unit") === true ? unit : span).after(this.#tools);
+    span.after(this.#tools);
     this.#toolsHover = undefined;
     if (inLine || wasInLine) {
       // The line grew or shrank, so its highlight is redrawn to fit it.
@@ -2482,7 +2444,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Whether more of its line follows the value `span` draws, within its one-line element: another
-   * property or item, and not just its unit and the element's closing mark.
+   * property or item, and not just the element's closing mark.
    */
   #followedOnItsLine(span: HTMLElement): boolean {
     for (let at: Element | null = span; at !== null && !at.matches(".line-element, .sheet-head, .sheet-value, .source"); at = at.parentElement) {
@@ -2495,7 +2457,7 @@ export class NxViewerElement extends ElementBase {
           if (text.trim() !== "") {
             return true;
           }
-        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools, .line-close, .unit")) {
+        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools, .line-close")) {
           return true;
         }
       }
@@ -2525,8 +2487,8 @@ export class NxViewerElement extends ElementBase {
     if (element !== null && this.#tools.contains(element)) {
       return;
     }
-    // On the way from the value to the tools, the pointer crosses its unit and the space around it,
-    // which keep them; the gap past the unit is the tools' own.
+    // On the way from the value to the tools, the pointer crosses the space around it, which keeps
+    // them; the gap past the value is the tools' own.
     const shown = this.#toolsHover === undefined || !this.#tools.isConnected ? undefined : this.#rendered.get(this.#toolsHover);
     if (shown !== undefined && element !== null && this.#onTheWay(shown, element)) {
       return;
@@ -2557,14 +2519,12 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Whether `element` lies between the value `shown` and its tools: the value, its unit, or the
-   * row or line that holds them, though not another value in it.
+   * Whether `element` lies between the value `shown` and its tools: the value, or the row or line
+   * that holds them, though not another value in it.
    */
   #onTheWay(shown: HTMLElement, element: Element): boolean {
-    const unit = shown.nextElementSibling;
     return (
       shown.contains(element) ||
-      (unit?.classList.contains("unit") === true && unit.contains(element)) ||
       element === shown.parentElement ||
       element === shown.closest(".line-property, .sheet-row")
     );
@@ -2594,7 +2554,7 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    const from = session?.field !== undefined ? numberEntry(session.field.textContent ?? "", target.hints) : this.#currentOf(target);
+    const from = session?.field !== undefined ? (session.field.textContent ?? "").trim() : this.#currentOf(target);
     this.#stepping = { target, pointer: event.pointerId, y: event.clientY, direction: part.classList.contains("up") ? 1 : -1, from, value: undefined };
     try {
       part.setPointerCapture?.(event.pointerId);
@@ -2914,9 +2874,6 @@ export class NxViewerElement extends ElementBase {
       if (editor.kind === "number") {
         name.classList.add("scrub");
         name.dataset["scrubKey"] = valueKey;
-        if (hints?.unit !== undefined && property.default !== undefined) {
-          cell.append(this.#unitMark(hints.unit));
-        }
       }
     } else {
       // No editor takes its type, as a record's: Enter or a double-click opens the element in Source.
@@ -3088,9 +3045,7 @@ export class NxViewerElement extends ElementBase {
     }
     const target = this.#targets.get(`${attribute.key}.value`);
     const editor = target === undefined || target.kind === "run" ? undefined : { kind: target.kind };
-    const shown = defaultShown(this.ownerDocument, written, editor, target?.kind === "color" ? "color" : undefined);
-    const unit = target?.kind === "number" ? target.hints?.unit : undefined;
-    return unit === undefined ? shown : [...shown, this.#unitMark(unit)];
+    return defaultShown(this.ownerDocument, written, editor, target?.kind === "color" ? "color" : undefined);
   }
 
   /** Closes the row's menu; with `refocus`, the reading takes the keys again. */

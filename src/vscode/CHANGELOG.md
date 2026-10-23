@@ -21,8 +21,8 @@ All notable changes to this project will be documented in this file.
   and the NX title bar has Undo and Redo buttons.
 - `sourceEdit` also adds a property an element does not write (`addProperty`, aimed at the element,
   written in the element's layout).
-- `@nx/visualizer` has editor hints: `editor` (`field`, `dropdown`, `segmented`), `min`, `max`,
-  `step` and `unit`, and `ValueChoice` content (`choices`, each a value and an optional label), on
+- `@nx/visualizer` has editor hints: `editor` (`field`, `dropdown`, `segmented`), `min`, `max`
+  and `step`, and `ValueChoice` content (`choices`, each a value and an optional label), on
   `PropertyVisualizer` and `ValueVisualizer`, and `multiline` and `placeholder` on
   `PropertyVisualizer`; `ValueVisualizer.format` is optional. A hint or a choice that does not fit its
   property's type warns `editor-hint-mismatch`, and a `min` above its `max` warns `editor-hint-range`.
@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
   of the properties an element does not write.
 - `<nx-viewer>`: a selected element lists the properties it does not write under `Show N unset properties`, and sets
   one where it reads; a written row has a menu (Reset to default or Remove, and Show in Source);
-  numbers edit with ranges, units and steppers (click, Shift+click, or drag up and down), a number's
+  numbers edit with ranges and steppers (click, Shift+click, or drag up and down), a number's
   or a string's choices list under its field with the default's row first, unions edit as segmented
   buttons and strings over several lines as their hints say; Shift+Enter breaks a string's line.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.

@@ -271,7 +271,6 @@ Editor hints from the tree's visualizers shape the editors:
 | `editor=field`                               | The number field every number has                          |
 | `min`, `max`, `step`                         | Arrows, steppers and dragging stay in the range and step by `step`; a typed number outside it stays in the field with a note, as `At most 64` |
 | `ValueChoice` content (`choices`)            | A list under a number's or a string's field: each choice's label, then its value, quieter, or the value alone when none has a label; the default's row, `Default 16`, leads it |
-| `unit`                                       | Read after the number, quieter (`8 px`), and after its field; typing it, as `12px`, is taken as the number |
 | `editor=segmented`                           | A case's popover shows the cases as one row of buttons, or the list past five cases or when they do not fit |
 | `multiline`                                  | Enter breaks the line, and Ctrl or Cmd+Enter commits      |
 | `placeholder`                                | Shown, quieter, in the empty field; never written         |
@@ -280,9 +279,8 @@ In any string's field Shift+Enter breaks the line, and a string written over sev
 
 A field with choices shows a chevron just past it, and so does the value while the pointer rests on
 it in the selected row; a click on that chevron opens the field with its list. A click on the
-chevron, Alt+Down, or typing lists
-them, typing keeping those whose label or value holds what was typed; the current value's row is
-marked. While the list is closed, Up and Down step a number; while it is open, they move through it,
+chevron, Alt+Down, or typing lists them, typing keeping those whose label or value holds what was
+typed; the current value's row is marked. While the list is closed, Up and Down step a number; while it is open, they move through it,
 Enter picks the active row, and Escape closes the list before the field. Picking a choice commits its
 value, never its label; picking the default's row fires `{ kind: "remove" }` for the attribute, as
 Reset to default does, or, on a dimmed row, adds nothing. The field stays typeable: a choice is a
@@ -290,9 +288,8 @@ suggestion, and any entry the field takes commits. A choice the field would refu
 `max`, stays in the field with the field's note. A color's choices lead its popover, over its hex
 field.
 
-A number shows steppers, an up and a down button drawn just past the value and its unit so nothing
-moves, while its field is open and while the pointer rests on its value in the selected row. A click
-steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
+A number shows steppers, an up and a down button drawn just past the value so nothing moves, while
+its field is open and while the pointer rests on its value in the selected row. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
 A press that moves less than six pixels is still a click. Pressing a stepper and dragging further up
 or down scrubs the number, a step every four pixels, shown in place: on release it goes into the open
 field, or is committed once. A stepper keeps the usual cursor until it is dragged. Their tooltip names
@@ -321,7 +318,7 @@ laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribut
 was on is selected. Backspace alone does not, since a reader who meant to change the text would
 press it. A written row shows a quiet `⋯` at its end under the pointer and when selected; it opens a
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
-default (with the default, quieter, as `Reset to default  8 px`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
+default (with the default, quieter, as `Reset to default  8`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 
 A selected element ends with a quiet row, `Show N unset properties` (`Hide unset properties` while
 open), N being the properties it does not write; one
@@ -428,7 +425,7 @@ restyle it:
 | `--nx-viewer-field-border`            | a light or dark blue, the ring around an open field |
 | `--nx-viewer-field-selection`         | a light or dark blue, selected text in a field |
 | `--nx-viewer-invalid`                 | a light or dark red, the ring around an entry a field cannot take, and the border of the note saying why |
-| `--nx-viewer-unit-color`              | a gray, for a number's unit, a placeholder and a dimmed row's `default` |
+| `--nx-viewer-quiet-color`             | a gray, for a placeholder, a dimmed row's `default` and a choice's value |
 | `--nx-viewer-more-color`              | a gray, for the unset-properties row      |
 | `--nx-viewer-dimmed-opacity`          | `0.55`, for a property an element does not write |
 

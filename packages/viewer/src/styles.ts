@@ -512,12 +512,10 @@ export const styles = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A number's unit, read after it and quieter; never part of the value. */
-.source .unit { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); }
 /* A placeholder reads, quieter, in an empty field, and is never written. */
 .source .field:empty::before {
   content: attr(data-placeholder);
-  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
   pointer-events: none;
 }
 /* What a selected element does not write: a quiet row that opens a dimmed row to each property. */
@@ -537,7 +535,7 @@ export const styles = `
 .source .dimmed-row:focus-visible, .source .added-row:focus-visible { opacity: 1; background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); border-radius: 3px; outline: none; }
 .source .dimmed-row[hidden], .source .added-row[hidden] { display: none; }
 .source .more-default {
-  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-size: 0.85em;
 }
@@ -553,7 +551,7 @@ export const styles = `
 }
 .source .more-value:empty::before {
   content: attr(data-placeholder);
-  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
 }
 /* An empty field still reads as one, with room for the caret. */
 .source .field:empty { display: inline-block; min-width: 1ch; min-height: 1lh; vertical-align: top; }
@@ -626,12 +624,11 @@ export const styles = `
 }
 /* A default the item resets to, quieter, as the reading draws it. */
 .menu-value {
-  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
   font-family: var(--nx-viewer-source-font-family, var(--mono));
   font-size: var(--nx-viewer-source-font-size, 13px);
   white-space: nowrap;
 }
-.menu-value .unit { color: inherit; }
 .menu-value .swatch {
   display: inline-block;
   width: 0.75em;
@@ -667,7 +664,7 @@ export const styles = `
   font-size: var(--nx-viewer-source-font-size, 13px);
 }
 .popover .option.choice[hidden] { display: none; }
-.popover .choice-value { color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585)); white-space: nowrap; }
+.popover .choice-value { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); white-space: nowrap; }
 .popover .choice-value.alone { color: inherit; }
 /* With one column, the default's row keeps "Default" and the default on one line. */
 .popover .choices-list:not(.labeled) .option.choice-default:not([hidden]) {
@@ -699,7 +696,7 @@ export const styles = `
   vertical-align: -0.05em;
 }
 /* A number's steppers, Framer-style, and a field's choices chevron: drawn where they would stand in
-   the line, just past the value and its unit, and taken out of it, so nothing moves. */
+   the line, just past the value, and taken out of it, so nothing moves. */
 .source .value-tools {
   position: absolute;
   z-index: 2;

@@ -160,7 +160,7 @@ way:
 - **Formats.** A string bound to a property with the format `id` reads as a quiet token, and one with
   the format `color` reads with a small square of its color before it. A format changes how a value
   looks, never what it is, and does nothing to a value that is not a string literal.
-- **Editor hints.** A number hinted with a range steps within it and reads its `unit` after it; a
+- **Editor hints.** A number hinted with a range steps within it; a
   number or a string with `ValueChoice` content offers those values to pick under its field; a union
   hinted `segmented` edits as a row of buttons; a string hinted `multiline` takes line breaks. See [editor hints](/reference/libraries/visualizer#editor-hints).
 
