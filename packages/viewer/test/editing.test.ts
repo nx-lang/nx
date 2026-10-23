@@ -1209,6 +1209,24 @@ describe("choices", () => {
     assert.ok(!tools(sheet)!.classList.contains("in-line"), "nothing follows in a sheet's row: drawn over the gap");
   });
 
+  it("waits for the pointer to rest before its tools push the rest of a line right", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    over(rendered(element, "big.value.size.value"));
+    assert.equal(tools(element), null, "a pointer passing over moves nothing");
+    over(rendered(element, "big.value"));
+    t.mock.timers.tick(400);
+    assert.equal(tools(element), null, "gone on before it rested");
+    over(rendered(element, "big.value.size.value"));
+    t.mock.timers.tick(400);
+    assert.ok(tools(element)!.classList.contains("in-line"), "resting, they take room in the line");
+    over(rendered(element, "big.value"));
+    element.selection = "big.value";
+    over(rendered(element, "big.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("in-line"), "at once on the selected element");
+  });
+
   it("opens from its chevron, and picks with the pointer", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
@@ -1308,17 +1326,17 @@ describe("choices", () => {
 });
 
 describe("steppers", () => {
-  it("steps the selected row's number on a click, and ten steps on Shift+click, committed at once", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
+  it("steps a number on a click, and ten steps on Shift+click, committed at once", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer: they show at once, selected
+    // or not.
     narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     const value = rendered(element, "card.value.padding.value");
     value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    assert.equal(tools(element), null, "not on a row that is not selected");
-    element.selection = "card.value.padding";
-    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const shown = tools(element)!;
+    assert.ok(shown !== null, "on a row that is not selected too");
+    assert.equal(element.selection, undefined);
     assert.ok(shown.classList.contains("with-steppers"));
     assert.ok(!shown.classList.contains("with-choices"));
     assert.equal(shown.previousElementSibling, value, "just past the value");

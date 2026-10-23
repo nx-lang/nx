@@ -101,13 +101,13 @@ visualizer Banner = <ElementVisualizer icon="panel-top">
 /// The brand's warm accent.
 let accent:Color = "#c8a27a"
 
-// Hints: padding refuses 80 with "At most 64"; select its row and hover its value for
-// steppers (click, Shift+click for 10, or drag up and down), and gap's stay within 0 to 24. titleSize
-// has choices: select its row and hover it for steppers and a chevron, or open it and press Alt+Down,
-// click the chevron, or type (try "lg" or 2) to list them, with Default 16 on top; pick one, or type
-// 17, which is no choice and still commits. align is a row of buttons. tint is a reference to a named
-// value: it opens Source. intro was written over two lines and edits with Shift+Enter for a line
-// break. Select the banner and open "Show 3 unset properties":
+// Hints: padding refuses 80 with "At most 64"; hover its value for steppers (click, Shift+click for
+// 10, or drag up and down), and gap's stay within 0 to 24. titleSize has choices: hover it for
+// steppers and a chevron, or open it and press Alt+Down, click the chevron, or type (try "lg" or 2)
+// to list them, with Default 16 on top; pick one, or type 17, which is no choice and still commits.
+// align is a row of buttons. tint is a reference to a named value: it opens Source. intro was written
+// over two lines and edits with Shift+Enter for a line break. Select the banner and open "Show 3
+// unset properties":
 // badge lists its choices in one column, body is multi-line with a placeholder (Enter breaks a line,
 // Ctrl or Cmd+Enter commits), and cup has no editor, so it opens Source.
 let banner =
@@ -122,8 +122,9 @@ Ask what came in this morning."
     tint={accent}
   />
 
-// On one line: select it and hover titleSize, or open it; its steppers and chevron take room in
-// the line, pushing align right until they go. badge's chevron takes room before the closing />.
+// On one line: rest the pointer on titleSize, or open it; its steppers and chevron take room in the
+// line, pushing align right until they go. Passing over it moves nothing; selected, they show at
+// once. badge's chevron takes room before the closing />.
 // Click a stepper a few times: each click steps, and the selection stays.
 let strip = <Banner title="Fresh" titleSize=20 align=start badge="New" />
 

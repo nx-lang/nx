@@ -278,7 +278,7 @@ Editor hints from the tree's visualizers shape the editors:
 In any string's field Shift+Enter breaks the line, and a string written over several lines edits too.
 
 A field with choices shows a chevron just past it, and so does the value while the pointer rests on
-it in the selected row; a click on that chevron opens the field with its list. A click on the
+it; a click on that chevron opens the field with its list. A click on the
 chevron, Alt+Down, or typing lists them, typing keeping those whose label or value holds what was
 typed; the current value's row is marked. While the list is closed, Up and Down step a number; while it is open, they move through it, from the current value's row,
 Enter picks the active row, and Escape closes the list before the field. Picking a choice commits its
@@ -289,7 +289,9 @@ suggestion, and any entry the field takes commits. A choice the field would refu
 field.
 
 A number shows steppers, an up and a down button drawn just past the value so nothing moves, while
-its field is open and while the pointer rests on its value in the selected row. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
+its field is open and while the pointer rests on its value, selected or not. Where they take room in
+a line, outside the selection, they wait until the pointer has rested on the value for 300 ms, so a
+line doesn't jump as the pointer passes over it. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
 A press that moves less than six pixels is still a click. Pressing a stepper and dragging further up
 or down scrubs the number, a step every four pixels, shown in place: on release it goes into the open
 field, or is committed once. A stepper keeps the usual cursor until it is dragged. Their tooltip names

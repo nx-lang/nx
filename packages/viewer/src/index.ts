@@ -170,6 +170,8 @@ const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement
 const UNITS = ".sheet-head, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /** The units as they are drawn selected: a group stands for itself, not through its header. */
+/** How long the pointer rests on a value before its tools push the rest of its line right. */
+const TOOLS_REST_MS = 300;
 const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /**
@@ -378,6 +380,10 @@ export class NxViewerElement extends ElementBase {
   readonly #tools: HTMLSpanElement;
   /** The value the steppers were drawn past while the pointer rests on it, with no editor open. */
   #toolsHover: string | undefined;
+  /** Waits for the pointer to rest on a value whose tools would push the rest of its line right. */
+  #toolsTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The value `#toolsTimer` waits on. */
+  #toolsWaiting: string | undefined;
   /** The menu of a row's actions. */
   readonly #menu: HTMLDivElement;
   /** Whether the open editor holds an entry that differs from its value, as `nx-draft` last said. */
@@ -960,8 +966,7 @@ export class NxViewerElement extends ElementBase {
       const hovered = this.#rehover;
       const span = this.#rendered.get(hovered);
       const target = this.#targets.get(hovered);
-      const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-      if (span !== undefined && target !== undefined && selected?.contains(span) === true) {
+      if (span !== undefined && target !== undefined) {
         this.#showTools(span, target);
         this.#toolsHover = hovered;
       }
@@ -2500,6 +2505,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   #hideTools(): void {
+    this.#stopToolsWait();
     const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
     this.#tools.remove();
     this.#tools.classList.remove("open", "in-line");
@@ -2511,11 +2517,12 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Shows a number's steppers while the pointer rests on its value in the selected row, with no
-   * editor open, and hides them once it leaves for anything but them.
+   * Shows a number's steppers, or a value's choices chevron, while the pointer rests on the value,
+   * with no editor open, and hides them once it leaves for anything but them.
    */
   #hoverTools(element: Element | null): void {
     if (!this.#editable || this.#session !== undefined || this.#stepping !== undefined) {
+      this.#stopToolsWait();
       return;
     }
     if (element !== null && this.#tools.contains(element)) {
@@ -2530,25 +2537,47 @@ export class NxViewerElement extends ElementBase {
     const value = element?.closest?.(".editable-value:is(.edit-number, .edit-text)") as HTMLElement | null | undefined;
     const key = value === null || value === undefined ? undefined : keyOf(value);
     const target = key === undefined ? undefined : this.#targets.get(key);
-    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    // On the selected row: the row itself, a one-line element, or a property selected within one.
-    const onSelected =
-      value !== null &&
-      value !== undefined &&
-      selected?.contains(value) === true &&
-      (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS));
+    // Any value the pointer rests on, selected or not, as a case's chevron shows.
     const offered = target !== undefined && (target.kind === "number" || this.#hasChoices(target));
-    if (!onSelected || target === undefined || !offered || this.#rendered.get(key!) !== value) {
+    if (value === null || value === undefined || target === undefined || !offered || this.#rendered.get(key!) !== value) {
+      this.#stopToolsWait();
       if (this.#tools.isConnected) {
         this.#hideTools();
       }
       return;
     }
-    if (this.#toolsHover === key && this.#tools.isConnected) {
+    if ((this.#toolsHover === key && this.#tools.isConnected) || this.#toolsWaiting === key) {
       return;
     }
-    this.#showTools(value!, target);
+    this.#stopToolsWait();
+    // Where the tools take room in the line, they wait for the pointer to rest, so a line does not
+    // jump as the pointer passes over it; in the selected row, and where they are drawn over the gap
+    // past the value, they show at once.
+    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
+    const onSelected = selected?.contains(value) === true && (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS));
+    if (!onSelected && this.#followedOnItsLine(value)) {
+      if (this.#tools.isConnected) {
+        this.#hideTools();
+      }
+      this.#toolsWaiting = key;
+      this.#toolsTimer = setTimeout(() => {
+        this.#toolsTimer = undefined;
+        this.#toolsWaiting = undefined;
+        if (this.#session === undefined && this.#stepping === undefined && this.#rendered.get(key!) === value && value.isConnected) {
+          this.#showTools(value, target);
+          this.#toolsHover = key;
+        }
+      }, TOOLS_REST_MS);
+      return;
+    }
+    this.#showTools(value, target);
     this.#toolsHover = key;
+  }
+
+  #stopToolsWait(): void {
+    clearTimeout(this.#toolsTimer);
+    this.#toolsTimer = undefined;
+    this.#toolsWaiting = undefined;
   }
 
   /**

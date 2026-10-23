@@ -126,17 +126,19 @@ changes what a program means.
   A fixed set is a union, which has its own editors.
 - **Steppers**, Framer-style (Bret, 2026-10-22): an up and a down button over the gap just past a
   number, as the case chevron is drawn, so nothing moves. They show while the number's field is open
-  and on hover of a value in the selected row, not everywhere, so the reading does not flicker under
-  a passing pointer. A click steps once (Shift ten steps), into the open field or committed at once;
+  and on hover of a value, selected or not, as a case's chevron shows (Bret, 2026-10-23; first only in
+  the selected row). A click steps once (Shift ten steps), into the open field or committed at once;
   pressing one and dragging up or down scrubs, into the open field on release, else committed once.
   Their tooltip names the keys. Dragging a number's name sideways stays, as before. A value with
-  choices shows a chevron the same way, past the value on hover in the selected row, and a click on
+  choices shows a chevron the same way, past the value on hover, and a click on
   it opens the field with its list.
 - **Room on a line** (Bret, 2026-10-23): on a one-line element, or a group's header, the steppers and
   the chevron are wider than the one space past the value, so where more of the line follows, its
   closing `/>` included, they would cover it. There they take room in the line instead, on hover and
   while a field is open, pushing the rest right as a growing field does, and give it back when they
   go. In a sheet's row, or at the end of a line, they stay drawn over the gap, and nothing moves.
+  Outside the selection, where they would take room, they wait until the pointer rests on the value
+  about 300 ms, so a line does not jump as the pointer passes over it.
   Covering the next property was tried first; drawing the tools above or below the line would cover a
   neighboring line. After a stepper click commits, the redrawn reading shows the steppers again under
   the pointer, so the next click steps again rather than selecting the row beneath.
