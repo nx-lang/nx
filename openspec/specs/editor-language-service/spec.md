@@ -552,9 +552,10 @@ SHALL offer no completions.
 Every query over a workspace snapshot SHALL see a standard library that a snapshot document imports,
 by a written import or through the snapshot's implicit imports, whether or not the snapshot was
 constructed with a build context. Diagnostics SHALL match those the compiler reports for the same
-documents. Completions SHALL offer a standard library's declarations only in a document that has the
-library in scope, under the names its import form gives them, and each completion item SHALL carry
-the declaration's documentation. Hover on a standard library declaration, or on a field of one,
+documents, besides the editor-only warnings the language service adds: `editor-hint-range` for a
+range that only merging visualizer hints empties. Completions SHALL offer a standard library's
+declarations only in a document that has the library in scope, under the names its import form gives
+them, and each completion item SHALL carry the declaration's documentation. Hover on a standard library declaration, or on a field of one,
 SHALL show its signature and documentation under a label that identifies it as a standard library
 declaration and names the library. Completion of an import path SHALL NOT be required.
 
@@ -584,3 +585,4 @@ declaration and names the library. Completion of an import path SHALL NOT be req
 #### Scenario: An unknown standard library is reported in the editor
 - **WHEN** a snapshot document contains `import "@nx/automation"`
 - **THEN** diagnostics SHALL carry the unknown-standard-library diagnostic at the import
+

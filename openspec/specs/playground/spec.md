@@ -345,6 +345,10 @@ and each SHALL link to the documentation page for its topic.
   visualizer and by a property visualizer, a value after an emoji and a sequence of numbers, together
   with a string Visual opens in Source, an expression, a `for` and an `if`, and properties that may
   and may not be left out
+- **AND** it SHALL hold an element with unwritten properties to add, among them one whose type has no
+  editor, a value written as a reference, which opens Source, a number with labeled choices and a
+  range, a number with a range and no editor, a string with choices, a case hinted as segmented,
+  a string hinted multi-line with a placeholder, and a string written over several lines
 
 ### Requirement: Every example is checked against its expected output
 Every example SHALL have its expected output committed beside it. The playground's tests SHALL
