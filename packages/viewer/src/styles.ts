@@ -674,20 +674,32 @@ export const styles = `
 .source .value-tools.with-steppers .steppers {
   display: inline-flex;
   flex-direction: column;
+  gap: 1px;
   align-self: center;
-  /* A little taller than the line, so each half is a target a pointer can hit. */
+  box-sizing: border-box;
+  /* A little taller than the line, so each half is a target a pointer can hit; whole pixels, with the
+     rule between them as the gap, so the two halves are exactly the same height. */
   width: 18px;
-  height: calc(1lh + 6px);
+  height: 25px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
   border-radius: 4px;
   overflow: hidden;
-  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
-  box-shadow: inset 0 0 0 1px var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
 }
 /* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
-.source .value-tools .stepper { position: relative; flex: 1; cursor: default; }
-.source .value-tools .stepper.up { box-shadow: inset 0 -1px 0 var(--nx-viewer-card-border, light-dark(#d0d7de, #454545)); }
-.source .value-tools .stepper:hover { background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
-.source .value-tools .stepper:active { background: var(--nx-viewer-edit-active, light-dark(#0000001f, #ffffff29)); }
+.source .value-tools .stepper {
+  position: relative;
+  flex: 1 1 0;
+  cursor: default;
+  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
+}
+/* The hover and press tints lie over the field's color, so the rule's color never shows through. */
+.source .value-tools .stepper:hover {
+  background-image: linear-gradient(var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)) 0 0);
+}
+.source .value-tools .stepper:active {
+  background-image: linear-gradient(var(--nx-viewer-edit-active, light-dark(#0000001f, #ffffff29)) 0 0);
+}
 .source .value-tools .stepper::after, .source .value-tools .choices-toggle::after {
   content: "";
   position: absolute;
