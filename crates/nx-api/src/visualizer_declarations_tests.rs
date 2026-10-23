@@ -11,10 +11,12 @@ use nx_value::NxValue;
 
 const VISUALIZER_ROOT: &str = "@nx/visualizer";
 
-const VISUALIZER_TYPES: [&str; 5] = [
+const VISUALIZER_TYPES: [&str; 7] = [
     "ElementVisualizer",
     "IdPosition",
     "PropertyVisualizer",
+    "ValueChoice",
+    "ValueEditor",
     "ValueFormat",
     "ValueVisualizer",
 ];
@@ -66,7 +68,7 @@ fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
 // --- The library ------------------------------------------------------------------------------
 
 #[test]
-fn the_visualizer_library_exports_exactly_its_five_types() {
+fn the_visualizer_library_exports_exactly_its_seven_types() {
     let library = standard_library(VISUALIZER_ROOT).expect("the visualizer library");
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
     let mut exported = library
@@ -142,6 +144,121 @@ fn a_color_alias() {
     assert_clean(
         "type Color = string\n\
          visualizer Color = <ValueVisualizer format=color />",
+    );
+}
+
+#[test]
+fn a_property_with_editor_hints() {
+    assert_clean(
+        "type Card = { title:string padding:int = 8 body?:string }\n\
+         visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding editor=field min=0 max=48><ValueChoice value=8 label=\"sm\" /><ValueChoice value=16 /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder=\"What it says\" /></ElementVisualizer>",
+    );
+}
+
+#[test]
+fn a_spacing_alias_with_no_format() {
+    assert_clean(
+        "type Spacing = int\n\
+         visualizer Spacing = <ValueVisualizer min=0 max=64>\n\
+           <ValueChoice value=4 label=\"xs\" />\n\
+           <ValueChoice value=8 label=\"sm\" />\n\
+         </ValueVisualizer>",
+    );
+}
+
+#[test]
+fn hints_take_signed_and_real_numbers() {
+    assert_clean(
+        "type Offset = float64\n\
+         visualizer Offset = <ValueVisualizer min=-10 max=10.5 step=0.5><ValueChoice value=-2.5 /><ValueChoice value=0x10 /></ValueVisualizer>",
+    );
+}
+
+#[test]
+fn a_segmented_case() {
+    assert_clean(
+        "type Size = small | medium | large\n\
+         type Drink = { size:Size = medium }\n\
+         visualizer Drink = <ElementVisualizer><PropertyVisualizer property=size editor=segmented /></ElementVisualizer>",
+    );
+}
+
+fn warnings_of(body: &str, code: &str) -> Vec<NxDiagnostic> {
+    visualizer_diagnostics(body)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some(code))
+        .collect()
+}
+
+#[test]
+fn a_field_on_a_string_is_a_warning() {
+    let body = "type Card = { title:string }\n\
+                visualizer Card = <ElementVisualizer><PropertyVisualizer property=title editor=field placeholder=\"Title\" /></ElementVisualizer>";
+    let warnings = warnings_of(body, "editor-hint-mismatch");
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    assert_eq!(warnings[0].severity, NxSeverity::Warning);
+    assert!(warnings[0].message.contains("'editor'"), "{warnings:#?}");
+    assert!(
+        visualizer_diagnostics(body)
+            .iter()
+            .all(|diagnostic| diagnostic.severity != NxSeverity::Error),
+        "a hint is never an error"
+    );
+}
+
+#[test]
+fn each_hint_is_checked_against_its_type() {
+    for (body, count) in [
+        // Number hints on a string alias.
+        ("type Name = string\nvisualizer Name = <ValueVisualizer min=0 max=9 />", 2),
+        // A dropdown on a number.
+        ("type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=dropdown /></ElementVisualizer>", 1),
+        // Multi-line on a number.
+        ("type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size multiline=true placeholder=\"Size\" /></ElementVisualizer>", 2),
+        // A segmented control on a union with a payload case.
+        ("type Extra = none | syrup { flavor:string }\ntype Cup = { extra:Extra = none }\nvisualizer Cup = <ElementVisualizer><PropertyVisualizer property=extra editor=segmented /></ElementVisualizer>", 1),
+        // A string choice for a number, and a number choice for a string.
+        ("type Card = { size:int label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=\"Hi\" /><ValueChoice value=3 /></PropertyVisualizer><PropertyVisualizer property=label><ValueChoice value=3 /><ValueChoice value=\"Hi\" /></PropertyVisualizer></ElementVisualizer>", 2),
+        // A fraction for a whole number.
+        ("type Card = { size:int32 ratio:float64 }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=2.5 /><ValueChoice value=-3 /></PropertyVisualizer><PropertyVisualizer property=ratio><ValueChoice value=2.5 /></PropertyVisualizer></ElementVisualizer>", 1),
+        // Choices on an alias of neither, one warning a choice.
+        ("type Flag = boolean\nvisualizer Flag = <ValueVisualizer><ValueChoice value=true /><ValueChoice value=\"yes\" /></ValueVisualizer>", 2),
+        // Every hint that fits.
+        ("type Card = { size?:float64 label:string }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size editor=field min=0 max=1 step=0.1 /><PropertyVisualizer property=label multiline=true><ValueChoice value=\"Hi\" label=\"greeting\" /></PropertyVisualizer></ElementVisualizer>", 0),
+    ] {
+        let warnings = warnings_of(body, "editor-hint-mismatch");
+        assert_eq!(warnings.len(), count, "{body}: {warnings:#?}");
+    }
+}
+
+#[test]
+fn a_mismatched_choice_names_its_property() {
+    let warnings = warnings_of(
+        "type Card = { size:int }\nvisualizer Card = <ElementVisualizer><PropertyVisualizer property=size><ValueChoice value=\"Hi\" /></PropertyVisualizer></ElementVisualizer>",
+        "editor-hint-mismatch",
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    assert!(
+        warnings[0].message.contains("'size'") && warnings[0].message.contains("number literal"),
+        "{warnings:#?}"
+    );
+}
+
+#[test]
+fn an_empty_range_is_a_warning() {
+    let warnings = warnings_of(
+        "type Spacing = int\nvisualizer Spacing = <ValueVisualizer min=10 max=0 />",
+        "editor-hint-range",
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+}
+
+#[test]
+fn a_hint_is_not_a_constraint() {
+    assert_clean(
+        "type Card = { padding:int = 8 }\n\
+         visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding max=48 /></ElementVisualizer>\n\
+         let card = <Card padding=64 />",
     );
 }
 

@@ -19,6 +19,21 @@ use nx_hir::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// What kind of value an editor hint edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HintValueKind {
+    /// An `int`, `float32`, `float64` or other number.
+    Number,
+    /// A string.
+    String,
+    /// A union of cases with no properties.
+    Cases,
+    /// Anything else.
+    Other,
+    /// A type analysis already reported, which no hint is checked against.
+    Unknown,
+}
+
 /// What the name `Range` means in the module being checked.
 enum PreludeRangeName {
     /// The prelude's declaration, which is what the range operators construct.
@@ -1553,9 +1568,10 @@ impl<'a> InferenceContext<'a> {
             ),
             None => Type::Error,
         };
-        let previous = self
-            .visualizer_target
-            .replace((target_ty, target.as_ref().map(|target| target.record)));
+        let previous = self.visualizer_target.replace((
+            target_ty.clone(),
+            target.as_ref().map(|target| target.record),
+        ));
         let actual = self.infer_expr(visualizer.value);
         self.visualizer_target = previous;
 
@@ -1614,6 +1630,286 @@ impl<'a> InferenceContext<'a> {
                 message,
                 self.module.raw_module().expr_span(visualizer.value),
             );
+            return;
+        }
+        self.check_editor_hints(visualizer.value, target.record, &target_ty);
+    }
+
+    /// Reports each editor hint of a visualizer declaration's value that does not fit the type it
+    /// resolves for: a `ValueVisualizer`'s against its target, and a `PropertyVisualizer`'s against
+    /// its property. A hint never changes what a program means, so these are warnings, and a viewer
+    /// ignores such a hint.
+    fn check_editor_hints(
+        &mut self,
+        value: ExprId,
+        record: nx_hir::VisualizerRecord,
+        target_ty: &Type,
+    ) {
+        let Some((properties, content)) = self.visualizer_element_parts(value) else {
+            return;
+        };
+        match record {
+            nx_hir::VisualizerRecord::Value => {
+                let kind = self.hint_value_kind(target_ty);
+                self.check_hint_attributes(&properties, kind, None);
+                let integral = Self::is_integral(target_ty);
+                self.check_choices(&content, kind, integral, None);
+            }
+            nx_hir::VisualizerRecord::Element => {
+                let shape = match target_ty {
+                    Type::Named(named) => self.record_shape_of(named).ok().flatten(),
+                    _ => None,
+                };
+                for child in content {
+                    let Some((child_properties, choices)) = self.visualizer_element_parts(child)
+                    else {
+                        continue;
+                    };
+                    let property = child_properties.iter().find_map(|property| {
+                        (property.key.as_str() == "property").then(|| {
+                            match self.module.raw_module().expr(property.value) {
+                                ast::Expr::Ident(name) => Some(name.clone()),
+                                ast::Expr::ContextualName { name, .. } => Some(name.clone()),
+                                ast::Expr::ResolvedUnionCase { case, .. } => Some(case.clone()),
+                                _ => None,
+                            }
+                        })?
+                    });
+                    let field = property.as_ref().and_then(|name| {
+                        shape
+                            .as_ref()?
+                            .fields
+                            .iter()
+                            .find(|field| &field.name == name)
+                            .cloned()
+                    });
+                    let Some(field) = field else {
+                        continue;
+                    };
+                    let field_ty =
+                        self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty);
+                    let kind = self.hint_value_kind(&field_ty);
+                    self.check_hint_attributes(&child_properties, kind, Some(&field.name));
+                    let integral = Self::is_integral(&field_ty);
+                    self.check_choices(&choices, kind, integral, Some(&field.name));
+                }
+            }
+        }
+    }
+
+    /// The attributes and content of an element in a visualizer declaration's value.
+    fn visualizer_element_parts(
+        &self,
+        expr: ExprId,
+    ) -> Option<(Vec<nx_hir::Property>, Vec<ExprId>)> {
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Element { element, .. } => {
+                let element = self.module.raw_module().element(*element);
+                Some((element.properties.clone(), element.content.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// What kind of value an editor hint edits, for a value of type `ty`.
+    fn hint_value_kind(&self, ty: &Type) -> HintValueKind {
+        match ty.item() {
+            Type::Primitive(
+                Primitive::Int
+                | Primitive::Int32
+                | Primitive::Int64
+                | Primitive::Float32
+                | Primitive::Float64,
+            ) => HintValueKind::Number,
+            Type::Primitive(Primitive::String) => HintValueKind::String,
+            Type::Union(union) => {
+                let constant = nx_hir::resolve_union_definition(self.module, &union.name)
+                    .is_none_or(|definition| {
+                        definition.cases.iter().all(UnionCaseDef::is_fieldless)
+                    });
+                if constant {
+                    HintValueKind::Cases
+                } else {
+                    HintValueKind::Other
+                }
+            }
+            Type::Error | Type::Unknown => HintValueKind::Unknown,
+            _ => HintValueKind::Other,
+        }
+    }
+
+    /// Checks the hints among `attributes` against a value of `kind`, the value of the property
+    /// `property` when there is one.
+    fn check_hint_attributes(
+        &mut self,
+        attributes: &[nx_hir::Property],
+        kind: HintValueKind,
+        property: Option<&Name>,
+    ) {
+        if kind == HintValueKind::Unknown {
+            return;
+        }
+        let subject = match property {
+            Some(name) => format!("'{name}'"),
+            None => "this type".to_string(),
+        };
+        let mut min = None;
+        let mut max = None;
+        for attribute in attributes {
+            let name = attribute.key.as_str();
+            let needs = match name {
+                "editor" => match self.module.raw_module().expr(attribute.value) {
+                    ast::Expr::Ident(case)
+                    | ast::Expr::ContextualName { name: case, .. }
+                    | ast::Expr::ResolvedUnionCase { case, .. } => match case.as_str() {
+                        "field" => HintValueKind::Number,
+                        "dropdown" | "segmented" => HintValueKind::Cases,
+                        _ => continue,
+                    },
+                    _ => continue,
+                },
+                "min" | "max" | "step" => HintValueKind::Number,
+                "multiline" | "placeholder" => HintValueKind::String,
+                _ => continue,
+            };
+            if name == "min" {
+                min = self
+                    .hint_number(attribute.value)
+                    .map(|value| (value, attribute.span));
+            } else if name == "max" {
+                max = self.hint_number(attribute.value);
+            }
+            if needs != kind {
+                let what = match needs {
+                    HintValueKind::Number => "a number",
+                    HintValueKind::String => "a string",
+                    _ => "a union of cases with no properties",
+                };
+                self.warn(
+                    "editor-hint-mismatch",
+                    format!(
+                        "The editor hint '{name}' applies to {what}, and {subject} is not one; a viewer ignores it"
+                    ),
+                    attribute.span,
+                );
+            }
+        }
+        if let (Some((min, span)), Some(max)) = (min, max) {
+            if min > max {
+                self.warn(
+                    "editor-hint-range",
+                    format!(
+                        "The editor hint 'min' ({min}) is greater than 'max' ({max}), so the range is empty"
+                    ),
+                    span,
+                );
+            }
+        }
+    }
+
+    /// Whether a value of `ty` is a whole number: an `int`, `int32` or `int64`.
+    fn is_integral(ty: &Type) -> bool {
+        matches!(
+            ty.item(),
+            Type::Primitive(Primitive::Int | Primitive::Int32 | Primitive::Int64)
+        )
+    }
+
+    /// Checks each `ValueChoice` among `content` against a value of `kind`, a whole number when
+    /// `integral`, the value of the property `property` when there is one: a number takes number
+    /// literals, a string string literals, and nothing else takes choices.
+    fn check_choices(
+        &mut self,
+        content: &[ExprId],
+        kind: HintValueKind,
+        integral: bool,
+        property: Option<&Name>,
+    ) {
+        if kind == HintValueKind::Unknown {
+            return;
+        }
+        let subject = match property {
+            Some(name) => format!("'{name}'"),
+            None => "this type".to_string(),
+        };
+        for choice in content {
+            let Some((attributes, _)) = self.visualizer_choice_parts(*choice) else {
+                continue;
+            };
+            let Some(value) = attributes
+                .iter()
+                .find(|attribute| attribute.key.as_str() == "value")
+            else {
+                continue;
+            };
+            let number = self.hint_number(value.value);
+            if kind == HintValueKind::Number && integral && number.is_some_and(|n| n.fract() != 0.0)
+            {
+                self.warn(
+                    "editor-hint-mismatch",
+                    format!(
+                        "A choice for {subject} must be a whole number; a viewer ignores this one"
+                    ),
+                    value.span,
+                );
+                continue;
+            }
+            let written = if number.is_some() {
+                HintValueKind::Number
+            } else if matches!(
+                self.module.raw_module().expr(value.value),
+                ast::Expr::Literal(ast::Literal::String(_))
+            ) {
+                HintValueKind::String
+            } else {
+                HintValueKind::Other
+            };
+            let message = match kind {
+                HintValueKind::Number | HintValueKind::String if written == kind => continue,
+                HintValueKind::Number => format!(
+                    "A choice for {subject} must be a number literal; a viewer ignores this one"
+                ),
+                HintValueKind::String => format!(
+                    "A choice for {subject} must be a string literal; a viewer ignores this one"
+                ),
+                _ => format!(
+                    "Choices apply to a number or a string, and {subject} is neither; a viewer ignores them"
+                ),
+            };
+            self.warn("editor-hint-mismatch", message, value.span);
+        }
+    }
+
+    /// The attributes of a `ValueChoice` element or record in a visualizer declaration's value.
+    fn visualizer_choice_parts(
+        &self,
+        expr: ExprId,
+    ) -> Option<(Vec<nx_hir::Property>, Vec<ExprId>)> {
+        let parts = self.visualizer_element_parts(expr)?;
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Element { element, .. }
+                if self.module.raw_module().element(*element).tag.as_str() == "ValueChoice" =>
+            {
+                Some(parts)
+            }
+            _ => None,
+        }
+    }
+
+    /// A number literal written as a hint, signed or not.
+    fn hint_number(&self, expr: ExprId) -> Option<f64> {
+        match self.module.raw_module().expr(expr) {
+            ast::Expr::Literal(ast::Literal::Int(value)) => Some(*value as f64),
+            ast::Expr::Literal(ast::Literal::Int32(value)) => Some(f64::from(*value)),
+            ast::Expr::Literal(ast::Literal::Float(value) | ast::Literal::Float32(value)) => {
+                Some(value.0)
+            }
+            ast::Expr::UnaryOp {
+                op: ast::UnOp::Neg,
+                expr,
+                ..
+            } => self.hint_number(*expr).map(|value| -value),
+            _ => None,
         }
     }
 
@@ -6949,6 +7245,22 @@ impl<'a> InferenceContext<'a> {
         ))
     }
 
+    /// Resolves a type as `declaring_module` writes it, or as this module does when it is `None`,
+    /// without reporting anything: a tool's question about a type, not a check of the program.
+    pub fn resolve_written_type(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        self.type_from_type_ref_in_quietly(declaring_module, type_ref)
+    }
+
+    /// Whether a value of type `actual` satisfies a site of type `expected`, by the rules the checker
+    /// applies to a binding: aliases, subtypes, union cases and occurrences included.
+    pub fn satisfies(&self, actual: &Type, expected: &Type) -> bool {
+        self.type_satisfies_expected(actual, expected)
+    }
+
     /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.
     pub fn resolved_contextual_names(&self) -> &FxHashMap<ExprId, ContextualResolution> {
         &self.resolved_contextual_names
@@ -7016,7 +7328,7 @@ impl<'a> InferenceContext<'a> {
 
     /// Consumes the context and returns the environment and diagnostics.
     pub fn finish(self) -> (TypeEnvironment, Vec<Diagnostic>) {
-        (self.env, self.diagnostics)
+        (self.env, without_repeats(self.diagnostics))
     }
 
     fn register_type_definitions(&mut self) {
@@ -8304,6 +8616,17 @@ fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
     }
 }
 
+/// `diagnostics` with each one reported again, the same in every part, left out. An element with a
+/// property-list condition checks its direct properties once per path through its branches, and a
+/// mismatch found on each path is one defect.
+fn without_repeats(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    let mut seen: FxHashSet<Diagnostic> = FxHashSet::default();
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| seen.insert(diagnostic.clone()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8315,6 +8638,26 @@ mod tests {
 
     fn prepared(module: &LoweredModule) -> PreparedModule {
         PreparedModule::standalone("test.nx", module.clone())
+    }
+
+    #[test]
+    fn without_repeats_keeps_one_of_each_and_every_distinct_range() {
+        let at = |start: u32| {
+            Diagnostic::error("record-field-type-mismatch")
+                .with_message("Property 'accent' on 'Theme' expects string, found int")
+                .with_label(Label::primary(
+                    "test.nx",
+                    TextSpan::new(TextSize::from(start), TextSize::from(start + 4)),
+                ))
+                .build()
+        };
+        // Many diagnostics with one message at distinct ranges, each reported twice.
+        let diagnostics: Vec<Diagnostic> = (0..20_000u32)
+            .flat_map(|index| [at(index * 8), at(index * 8)])
+            .collect();
+        let kept = without_repeats(diagnostics);
+        assert_eq!(kept.len(), 20_000);
+        assert_eq!(kept[1], at(8), "the order is kept");
     }
 
     #[test]

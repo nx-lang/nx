@@ -3,9 +3,10 @@ import { document } from "./dom.js";
 import assert from "node:assert/strict";
 import { after, describe, it, type TestContext } from "node:test";
 
-import { fixture, nxHost, type Fixture } from "./fixtures.js";
-import { editTargets, isRemovable } from "../src/edit.js";
-import { offsetAtPoint } from "../src/editors.js";
+import { fixture, nxHost, treeOf, type Fixture } from "./fixtures.js";
+import { editTargets, isRemovable, unwrittenProperties } from "../src/edit.js";
+import { cardOf } from "../src/card.js";
+import { offsetAtPoint, rangeProblem } from "../src/editors.js";
 import { indexTree } from "../src/tree.js";
 import type { NxEditDetail, NxOpenDetail, NxViewerElement } from "../src/index.js";
 
@@ -351,7 +352,7 @@ describe("editing in place", () => {
     rendered(element, "latte.value.name.value").click();
     const open = field(element);
     assert.ok(open, "a click on a value opens its field");
-    assert.equal(element.selection, "latte.value.name", "and selects its row");
+    assert.equal(element.selection, undefined, "and leaves the selection as it was");
     const range = selection.getRangeAt(0);
     assert.ok(open.contains(range.startContainer), "the caret is in the field");
     assert.equal(range.collapsed, true, "where the click fell, with nothing selected");
@@ -385,10 +386,10 @@ describe("editing in place", () => {
     field(element)!.textContent = "Mocha";
     press(field(element)!, "Tab");
     assert.equal(edits.length, 1, "Tab commits");
-    assert.equal(element.selection, "latte.value.size", "and selects the next value's unit");
-    assert.equal(root(element).querySelector<HTMLElement>(".popover")!.hidden, false, "opening its editor");
+    assert.equal(root(element).querySelector<HTMLElement>(".popover")!.hidden, false, "opening the next value's editor");
+    assert.equal(element.selection, "latte.value.name", "and leaving the selection as it was");
     press(root(element).querySelector(".popover-filter")!, "Tab", { shiftKey: true });
-    assert.equal(element.selection, "latte.value.name", "Shift+Tab goes back");
+    assert.ok(field(element) !== null, "Shift+Tab goes back");
     assert.equal(field(element)?.textContent, "Mocha", "to the value as the reader left it");
   });
 
@@ -589,7 +590,7 @@ describe("editing in place", () => {
     element.selection = undefined;
     rendered(element, "latte.value.iced.value").click();
     assert.equal(edits.length, 3, "a click toggles it with nothing selected first");
-    assert.equal(element.selection, "latte.value.iced", "and selects its row");
+    assert.equal(element.selection, undefined, "and leaves the selection as it was");
   });
 
   it("steps a number with the arrows and keeps an entry it cannot take in the field, marked", async (t) => {
@@ -783,5 +784,859 @@ describe("editing in place", () => {
         assert.equal(node.textContent, text, `${node.dataset["key"]} reads as it did`);
       }
     }
+  });
+});
+
+/** The rows listing the selected element's unwritten properties, as drawn. */
+function moreRows(element: NxViewerElement): HTMLElement[] {
+  return Array.from(root(element).querySelectorAll<HTMLElement>(".dimmed-row, .added-row"));
+}
+
+function moreToggle(element: NxViewerElement): HTMLElement | null {
+  return root(element).querySelector<HTMLElement>(".more-toggle");
+}
+
+/** What a row reads, its spaces run together. */
+function reads(row: Element): string {
+  return Array.from(row.children)
+    .map((cell) => cell.textContent ?? "")
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function popover(element: NxViewerElement): HTMLElement {
+  return root(element).querySelector<HTMLElement>(".popover")!;
+}
+
+describe("what an element does not write", () => {
+  it("lists the unwritten properties in the visualizer's order, else declaration order, with their editors", async () => {
+    const { tree, text } = await fixture("adding");
+    const index = indexTree(tree, text);
+    const listed = (key: string) =>
+      unwrittenProperties(index, index.byKey.get(key)!).map((entry) => `${entry.property.name}:${entry.editor?.kind ?? "-"}`);
+    assert.deepEqual(listed("latte.value"), ["note:text", "iced:boolean", "shots:number", "color:color"]);
+    assert.deepEqual(listed("bare.value"), ["gap:number", "count:number", "mode:case", "body:text", "padding:number", "theme:-"]);
+    assert.deepEqual(listed("latte.value.code"), [], "an attribute is no element");
+  });
+
+  it("ends the selected element with Show N unset properties, and only the selected one, only when editable", async () => {
+    const element = show(await fixture("adding"));
+    assert.equal(moreToggle(element), null, "nothing is selected");
+    element.selection = "latte.value";
+    assert.equal(moreToggle(element)?.textContent, "Show 4 unset properties");
+    assert.equal(root(element).querySelectorAll(".more-toggle").length, 1);
+    element.selection = "latte.value.code";
+    assert.equal(moreToggle(element), null, "a row is not an element");
+    element.selection = "wide.value";
+    assert.equal(moreToggle(element)?.textContent, "Show 14 unset properties");
+    const reading = show(await fixture("adding"), false);
+    reading.selection = "latte.value";
+    assert.equal(moreToggle(reading), null, "not when the reading only reads");
+  });
+
+  it("opens to dimmed rows reading each default, and closes on Escape or another selection", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    assert.deepEqual(moreRows(element).map(reads), ["note", "iced ✗ default", "shots 1 default", "color"]);
+    assert.equal(element.selection, "latte.value", "the element stays selected");
+    press(moreRows(element)[0]!, "Escape");
+    assert.deepEqual(moreRows(element), [], "Escape closes the list");
+    assert.ok(moreToggle(element), "and keeps the row");
+    moreToggle(element)!.click();
+    element.selection = "mocha.value";
+    assert.deepEqual(moreRows(element), [], "another selection closes it");
+  });
+
+  it("opens with Enter on the row, and keeps open across a newer tree", async () => {
+    const fixed = await fixture("adding");
+    const element = show(fixed);
+    element.selection = "latte.value";
+    press(moreToggle(element)!, "Enter");
+    assert.equal(moreRows(element).length, 4);
+    element.tree = fixed.tree;
+    assert.equal(moreRows(element).length, 4, "still open on the same element");
+  });
+
+  it("adds a property from its dimmed row, which then reads as written", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    rendered(element, "latte.value.iced.value").click();
+    assert.deepEqual(edits, [
+      { key: "latte.value", edit: { kind: "addProperty", name: "iced", value: { kind: "boolean", value: true } } }
+    ]);
+    const row = moreRows(element)[1]!;
+    assert.ok(row.classList.contains("added-row"), "no longer dimmed");
+    assert.equal(reads(row), "iced ✓", "without its default note");
+    assert.equal(element.selection, "latte.value", "the selection is kept");
+  });
+
+  it("names the toggle for what it lists, and reads an unset value's type in its place", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    assert.equal(moreToggle(element)!.getAttribute("aria-label"), "4 unset properties");
+    moreToggle(element)!.click();
+    assert.equal(moreToggle(element)!.textContent, "Hide unset properties");
+    assert.equal(moreToggle(element)!.getAttribute("aria-expanded"), "true");
+    const note = rendered(element, "latte.value.note.value");
+    assert.equal(note.textContent, "", "nothing is written there");
+    assert.equal(note.dataset["placeholder"], "string", "its type, as a placeholder");
+    assert.equal(rendered(element, "latte.value.iced.value").dataset["placeholder"], undefined, "a default reads instead");
+    note.click();
+    assert.equal(field(element)!.dataset["placeholder"], "string", "the field keeps it until something is typed");
+  });
+
+  it("moves nothing when the newer tree writes the added property", async () => {
+    const fixed = await fixture("adding");
+    const element = show(fixed);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    rendered(element, "latte.value.iced.value").click();
+    const text = fixed.text.replace('size=small />', "size=small iced=true />");
+    assert.notEqual(text, fixed.text);
+    element.tree = (await treeOf([{ uri: "nx:///adding.nx", identity: "adding.nx", source: text }], { visualizers: { modules: [] } })).tree;
+    assert.equal(element.selection, "latte.value", "the selection is kept");
+    assert.ok(rendered(element, "latte.value.iced"), "the property reads as written");
+    assert.equal(moreToggle(element)?.textContent, "Hide unset properties");
+    assert.deepEqual(
+      moreRows(element).map((row) => row.dataset["name"]),
+      ["note", "shots", "color"],
+      "the list stays open on the rest"
+    );
+  });
+
+  it("opens a dimmed number on its default and adds what is typed", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    rendered(element, "latte.value.shots.value").click();
+    const open = field(element)!;
+    assert.equal(open.textContent, "1", "its default");
+    open.textContent = "3";
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "latte.value", edit: { kind: "addProperty", name: "shots", value: { kind: "number", text: "3" } } }]);
+  });
+
+  it("opens Source for a property no editor takes", async () => {
+    const element = show(await fixture("adding"));
+    const { edits, opens } = events(element);
+    element.selection = "bare.value";
+    moreToggle(element)!.click();
+    const theme = moreRows(element).find((row) => row.dataset["name"] === "theme")!;
+    press(theme, "Enter");
+    assert.deepEqual(edits, []);
+    assert.deepEqual(opens.map((open) => open.key), ["bare.value"]);
+    theme.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.equal(opens.length, 2);
+  });
+
+  it("filters past twelve", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "wide.value";
+    moreToggle(element)!.click();
+    const filter = root(element).querySelector<HTMLInputElement>(".more-filter");
+    assert.ok(filter, "a filter leads the rows");
+    filter.value = "c";
+    filter.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(moreRows(element).filter((row) => !row.hidden).map((row) => row.dataset["name"]), ["c"]);
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    assert.equal(root(element).querySelector(".more-filter"), null, "four rows need no filter");
+  });
+
+  it("shows a dimmed name's property card", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    moreToggle(element)!.click();
+    const name = moreRows(element)[0]!.querySelector<HTMLElement>(".sheet-name")!;
+    assert.equal(name.dataset["hover"], "latte.value.note");
+  });
+});
+
+describe("a row's menu", () => {
+  it("resets a property with a default, removes an optional one, and shows any row in Source", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits, opens } = events(element);
+    const menuOf = (key: string): string[] => {
+      rendered(element, key).querySelector<HTMLElement>(":scope > .row-menu")!.click();
+      return Array.from(root(element).querySelectorAll(".menu-item")).map(reads);
+    };
+    assert.ok(rendered(element, "latte.value.size").matches(".sheet-row"), "the drink reads as a group");
+    assert.deepEqual(menuOf("latte.value.size"), ["Reset to default medium", "Show in Source"], "the default it resets to");
+    assert.equal(element.selection, "latte.value.size", "opening the menu selects its row");
+    root(element).querySelector<HTMLElement>(".menu-item")!.click();
+    assert.deepEqual(edits, [{ key: "latte.value.size", edit: { kind: "remove" } }]);
+    assert.ok(root(element).querySelector<HTMLElement>(".menu")!.hidden, "a choice closes it");
+    assert.deepEqual(menuOf("mocha.value.color"), ["Remove", "Show in Source"]);
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    assert.ok(root(element).querySelector<HTMLElement>(".menu")!.hidden, "Escape closes it");
+    assert.equal(edits.length, 1);
+    assert.deepEqual(menuOf("latte.value.name"), ["Show in Source"], "a required property is not left out");
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    assert.deepEqual(menuOf("card.value.padding"), ["Reset to default 8", "Show in Source"]);
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    assert.deepEqual(menuOf("card.value.gap"), ["Reset to default 4", "Show in Source"]);
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    menuOf("latte.value.name");
+    root(element).querySelector<HTMLElement>(".menu-item")!.click();
+    assert.deepEqual(opens.map((open) => open.key), ["latte.value.name.value"]);
+  });
+
+  it("closes on a second press and click on its mark, and is not read as part of the row", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const mark = rendered(element, "latte.value.size").querySelector<HTMLElement>(":scope > .row-menu")!;
+    const menu = root(element).querySelector<HTMLElement>(".menu")!;
+    const pressAndClick = () => {
+      mark.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+      mark.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true }));
+      mark.click();
+    };
+    pressAndClick();
+    assert.equal(menu.hidden, false, "the first opens it");
+    pressAndClick();
+    assert.equal(menu.hidden, true, "the second closes it");
+    element.selection = "latte.value.size";
+    assert.ok(!(element.getAttribute("aria-label") ?? "").includes("\u22EF"));
+    const status = root(element).querySelector("[aria-live]")?.textContent ?? "";
+    assert.ok(!status.includes("\u22EF"), status);
+  });
+
+  it("opens from the keyboard on the selected row", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value.size";
+    press(body(element), "F10", { shiftKey: true });
+    const items = Array.from(root(element).querySelectorAll<HTMLElement>(".menu-item"));
+    assert.equal(items.length, 2);
+    assert.equal(root(element).activeElement, items[0], "its first item takes focus");
+    press(items[0]!, "ArrowDown");
+    assert.equal(root(element).activeElement, items[1]);
+  });
+});
+
+describe("editor hints", () => {
+  it("keeps a number out of range in its field with a note", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.padding.value").click();
+    const input = field(element)!;
+    input.textContent = "80";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(input, "Enter");
+    assert.deepEqual(edits, []);
+    assert.equal(root(element).querySelector(".edit-problem")?.textContent, "At most 64");
+    input.textContent = "12";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(input, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
+  });
+
+  it("steps a number within its range", async () => {
+    const element = show(await fixture("adding"));
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    open.textContent = "9";
+    press(open, "ArrowUp", { shiftKey: true });
+    assert.equal(open.textContent, "10", "kept at the most");
+  });
+
+  it("shows a segmented union as a row of buttons", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.mode.value").click();
+    assert.ok(popover(element).classList.contains("segmented"));
+    const filter = root(element).querySelector(".popover-filter")!;
+    press(filter, "ArrowRight");
+    press(filter, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.mode.value", edit: { kind: "setValue", value: { kind: "case", name: "dark" } } }]);
+  });
+
+  it("breaks a string's line with Shift+Enter, and with Enter where it takes several lines", async (t) => {
+    fakeSelection(t);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "mocha.value.note.value").click();
+    let open = field(element)!;
+    open.textContent = "Ask for oat milk";
+    const caret = document.createRange();
+    caret.setStart(open.firstChild!, 3);
+    caret.collapse(true);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(caret);
+    press(open, "Enter", { shiftKey: true });
+    assert.equal(open.textContent, "Ask\n for oat milk");
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "mocha.value.note.value", edit: { kind: "setValue", value: { kind: "string", value: "Ask\n for oat milk" } } }]);
+    rendered(element, "card.value.body.value").click();
+    open = field(element)!;
+    assert.equal(open.dataset["placeholder"], "Say more", "an empty field shows its placeholder");
+    assert.ok(open.classList.contains("field-lines"), "one box over several lines");
+    open.textContent = "One";
+    const end = document.createRange();
+    end.setStart(open.firstChild!, 3);
+    end.collapse(true);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(end);
+    press(open, "Enter");
+    assert.equal(edits.length, 1, "Enter breaks the line where the hint says several lines");
+    assert.equal(open.textContent, "One\n\n", "with the line break a browser keeps after a last one");
+    press(open, "Enter", { ctrlKey: true });
+    assert.equal(edits.length, 2, "Ctrl+Enter commits");
+    assert.deepEqual(edits[1]!.edit, { kind: "setValue", value: { kind: "string", value: "One\n" } }, "without the browser's line break");
+  });
+});
+
+/** The rows of the choices list, shown or not. */
+function choices(element: NxViewerElement): HTMLElement[] {
+  return Array.from(popover(element).querySelectorAll<HTMLElement>(".option.choice"));
+}
+
+/** What the shown rows of the choices list read. */
+function shownChoices(element: NxViewerElement): string[] {
+  return popover(element).hidden ? [] : choices(element).filter((row) => !row.hidden).map(reads);
+}
+
+function tools(element: NxViewerElement): HTMLElement | null {
+  return root(element).querySelector<HTMLElement>(".value-tools");
+}
+
+/** Presses `part` of the tools and lets go over it, as a click does, at the heights given. */
+function pressTool(part: Element, init: { shiftKey?: boolean; from?: number; to?: number[] } = {}): void {
+  const at = (type: string, clientY: number) =>
+    part.dispatchEvent(new window.MouseEvent(type, { bubbles: true, composed: true, cancelable: true, clientY, shiftKey: init.shiftKey === true }));
+  at("pointerdown", init.from ?? 0);
+  for (const y of init.to ?? []) {
+    at("pointermove", y);
+  }
+  at("pointerup", init.to?.at(-1) ?? init.from ?? 0);
+}
+
+describe("choices", () => {
+  it("lists a number's labeled choices under its field once asked, the default first, and picks one", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    assert.ok(popover(element).hidden, "the list waits to be asked for");
+    assert.ok(tools(element)?.classList.contains("with-choices"), "a chevron says it is there");
+    assert.equal(open.getAttribute("aria-expanded"), "false");
+    press(open, "ArrowDown", { altKey: true });
+    assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16", "lg 20"]);
+    assert.ok(popover(element).querySelector(".choices-list.labeled"), "two columns");
+    assert.ok(popover(element).querySelector(".option.choice-default + .choices-rule"), "a rule sets the default apart");
+    assert.deepEqual(
+      choices(element).filter((row) => row.classList.contains("current")).map(reads),
+      ["base 16"],
+      "the current value's choice is marked, not the default's"
+    );
+    assert.equal(open.getAttribute("aria-expanded"), "true");
+    press(open, "ArrowDown");
+    assert.equal(open.getAttribute("aria-activedescendant"), choices(element)[3]!.id, "Down starts from the current value's row");
+    press(open, "ArrowUp");
+    press(open, "ArrowUp");
+    assert.equal(open.getAttribute("aria-activedescendant"), choices(element)[1]!.id);
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
+    assert.equal(field(element), null);
+  });
+
+  it("keeps a choice the field would refuse in the field, with its note; a field with choices is a combobox", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    assert.equal(open.getAttribute("role"), "combobox");
+    assert.equal(open.getAttribute("aria-autocomplete"), "list");
+    assert.equal(open.getAttribute("aria-controls"), null, "no list is named while none is drawn");
+    press(open, "ArrowDown", { altKey: true });
+    assert.deepEqual(shownChoices(element), ["Default 0", "5", "99"]);
+    assert.ok(!popover(element).querySelector(".choices-list")!.classList.contains("labeled"), "one column");
+    const list = popover(element).querySelector(".choices-list")!;
+    assert.equal(open.getAttribute("aria-controls"), list.id);
+    const rule = list.querySelector(".choices-rule")!;
+    assert.equal(rule.getAttribute("role"), "none");
+    assert.equal(rule.getAttribute("aria-hidden"), "true");
+    choices(element)[2]!.click();
+    assert.deepEqual(edits, [], "past its max");
+    assert.equal(field(element), open, "the field stays open");
+    assert.equal(open.textContent, "99");
+    assert.equal(open.getAttribute("aria-invalid"), "true");
+    assert.equal(open.getAttribute("aria-expanded"), "false");
+    assert.equal(open.getAttribute("aria-controls"), null);
+    press(open, "ArrowDown", { altKey: true });
+    choices(element)[1]!.click();
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+  });
+
+  it("shows its chevron under the pointer in the selected row, which opens the field and its list", async () => {
+    const element = show(await fixture("adding"));
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    element.selection = "base.value.tone";
+    over(rendered(element, "base.value.tone.value"));
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-choices"), "a string's choices");
+    assert.ok(!shown.classList.contains("with-steppers"));
+    element.selection = "base.value.size";
+    over(rendered(element, "base.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("in-line"), "taking room in the line, so tone, which follows, moves along");
+    element.selection = "big.value.size";
+    over(rendered(element, "big.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("with-choices"), "a number's choices");
+    assert.ok(tools(element)!.classList.contains("with-steppers"), "and its steppers");
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.ok(field(element), "the field opens");
+    assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16", "lg 20"], "with its list");
+  });
+
+  it("makes room in the line for an open field's tools when more of the line follows", async (t) => {
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    rendered(element, "card.value.count.value").click();
+    assert.ok(tools(element)!.classList.contains("in-line"), "mode follows count on the card's line");
+    press(field(element)!, "Escape");
+    element.selection = "big.value";
+    over(rendered(element, "big.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("in-line"), "before the line's closing mark alone, even under the pointer");
+    narrow(t, 30);
+    const sheet = show(await fixture("adding"));
+    rendered(sheet, "card.value.count.value").click();
+    assert.ok(!tools(sheet)!.classList.contains("in-line"), "nothing follows in a sheet's row: drawn over the gap");
+  });
+
+  it("waits for the pointer to rest before its tools push the rest of a line right", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    over(rendered(element, "big.value.size.value"));
+    assert.equal(tools(element), null, "a pointer passing over moves nothing");
+    over(rendered(element, "big.value"));
+    t.mock.timers.tick(400);
+    assert.equal(tools(element), null, "gone on before it rested");
+    over(rendered(element, "big.value.size.value"));
+    t.mock.timers.tick(400);
+    assert.ok(tools(element)!.classList.contains("in-line"), "resting, they take room in the line");
+    over(rendered(element, "big.value"));
+    element.selection = "big.value";
+    over(rendered(element, "big.value.size.value"));
+    assert.ok(tools(element)!.classList.contains("in-line"), "at once on the selected element");
+  });
+
+  it("shows a case's chevron as the tools, taking room before />, which opens and closes its popover", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    const size = rendered(element, "latte.value.size.value");
+    over(size);
+    assert.equal(tools(element), null, "unselected, it waits for the pointer to rest");
+    t.mock.timers.tick(400);
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-choices") && !shown.classList.contains("with-steppers"));
+    assert.ok(shown.classList.contains("in-line"), "room before the closing />");
+    assert.equal(shown.previousElementSibling, size);
+    pressTool(shown.querySelector(".choices-toggle")!);
+    assert.ok(!popover(element).hidden, "the chevron opens the cases");
+    assert.ok(tools(element)!.classList.contains("open"));
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.ok(popover(element).hidden, "and closes them");
+    assert.ok(tools(element)?.classList.contains("in-line"), "staying under the pointer, its room kept");
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.ok(!popover(element).hidden, "so the next press opens them again");
+    assert.equal(element.selection, undefined, "selecting nothing");
+  });
+
+  it("covers the gap rather than wrap a line that only just fits", async () => {
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    element.selection = "big.value";
+    const line = rendered(element, "big.value");
+    assert.ok(line.matches(".line-element"));
+    // The line wraps to two once the tools take room in it.
+    line.getBoundingClientRect = () => {
+      const height = line.querySelector(".value-tools.in-line") === null ? 18 : 36;
+      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
+    };
+    over(rendered(element, "big.value.size.value"));
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-steppers"));
+    assert.ok(!shown.classList.contains("in-line"), "drawn over the gap");
+  });
+
+  it("shows an unset property's tools at once, under a one-line element selected", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const element = show(await fixture("adding"));
+    element.selection = "plain.value";
+    moreToggle(element)!.click();
+    // size reads its quiet default past it, which the tools move aside.
+    const size = rendered(element, "plain.value.size.value");
+    size.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    assert.ok(tools(element)?.classList.contains("in-line"), "no wait: the row is the selection's");
+  });
+
+  it("opens from its chevron, and picks with the pointer", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.size.value").click();
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.equal(shownChoices(element).length, 4);
+    assert.ok(tools(element)!.classList.contains("open"));
+    choices(element)[1]!.click();
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
+  });
+
+  it("resets to the default from its row, and adds nothing from it on a dimmed row", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "big.value.size.value").click();
+    press(field(element)!, "ArrowDown", { altKey: true });
+    choices(element)[0]!.click();
+    assert.deepEqual(edits, [{ key: "big.value.size", edit: { kind: "remove" } }]);
+    element.selection = "plain.value";
+    moreToggle(element)!.click();
+    rendered(element, "plain.value.size.value").click();
+    press(field(element)!, "ArrowDown", { altKey: true });
+    assert.ok(choices(element)[0]!.classList.contains("current"), "a dimmed row reads its default");
+    choices(element)[0]!.click();
+    assert.equal(edits.length, 1, "nothing to add");
+    assert.equal(field(element), null);
+  });
+
+  it("filters as the reader types, and takes what is typed past them", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    open.textContent = "1";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16"], "typing opens the list, by value");
+    open.textContent = "l";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(shownChoices(element), ["Default 16", "lg 20"], "and by label");
+    open.textContent = "17";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(shownChoices(element), [], "none holds it");
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "17" } } }]);
+  });
+
+  it("closes the list with Escape before the field, and steps the number while it is closed", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    press(open, "ArrowDown", { altKey: true });
+    press(open, "Escape");
+    assert.ok(popover(element).hidden);
+    assert.equal(field(element), open, "the field stays open");
+    press(open, "ArrowUp");
+    assert.equal(open.textContent, "17");
+    press(open, "Escape");
+    assert.equal(field(element), null);
+    assert.deepEqual(edits, []);
+  });
+
+  it("lists a string's choices in one column when none has a label", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "base.value.tone.value").click();
+    press(field(element)!, "ArrowDown", { altKey: true });
+    assert.deepEqual(shownChoices(element), ["warm", "cool"]);
+    assert.equal(popover(element).querySelector(".choices-list.labeled"), null);
+    assert.ok(choices(element)[0]!.classList.contains("current"));
+    choices(element)[1]!.click();
+    assert.deepEqual(edits, [{ key: "base.value.tone.value", edit: { kind: "setValue", value: { kind: "string", value: "cool" } } }]);
+  });
+
+  it("lists a color's choices over its field", async () => {
+    const source = [
+      'import "@nx/visualizer"',
+      "type Swatch = string",
+      'visualizer Swatch = <ValueVisualizer format=color><ValueChoice value="#c8a27a" label="tan" /><ValueChoice value="#5a3a22" label="brown" /></ValueVisualizer>',
+      'type Cup = { color:Swatch = "#ffffff" }',
+      'let cup = <Cup color="#c8a27a" />',
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///cup.nx", identity: "cup.nx", source }], { visualizers: { modules: [] } }));
+    const { edits } = events(element);
+    rendered(element, "cup.value.color.value").click();
+    assert.ok(popover(element).classList.contains("with-choices"));
+    assert.deepEqual(shownChoices(element), ["Default #ffffff", "tan #c8a27a", "brown #5a3a22"]);
+    assert.ok(choices(element)[1]!.querySelector(".swatch"), "each with its swatch");
+    const hex = root(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    press(hex, "ArrowDown");
+    press(hex, "ArrowDown");
+    press(hex, "ArrowDown");
+    press(hex, "Enter");
+    assert.deepEqual(edits, [{ key: "cup.value.color.value", edit: { kind: "setValue", value: { kind: "string", value: "#5a3a22" } } }]);
+  });
+});
+
+describe("steppers", () => {
+  it("steps a number on a click, and ten steps on Shift+click, committed at once", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer: they show at once, selected
+    // or not.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    const value = rendered(element, "card.value.padding.value");
+    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const shown = tools(element)!;
+    assert.ok(shown !== null, "on a row that is not selected too");
+    assert.equal(element.selection, undefined);
+    assert.ok(shown.classList.contains("with-steppers"));
+    assert.ok(!shown.classList.contains("with-choices"));
+    assert.equal(shown.previousElementSibling, value, "just past the value");
+    const up = shown.querySelector<HTMLElement>(".stepper.up")!;
+    assert.match(up.title, /\u2191/);
+    assert.match(up.title, /Shift/);
+    assert.match(up.title, /[Dd]rag/);
+    pressTool(up);
+    pressTool(up, { shiftKey: true });
+    assert.deepEqual(edits, [
+      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } },
+      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }
+    ]);
+    root(element).querySelector(".toolbar")!.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
+    assert.equal(tools(element), null, "gone once the pointer leaves");
+  });
+
+  it("takes a press that wanders a few pixels as a click, not a drag", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [102, 97] });
+    assert.ok(!body(element).classList.contains("stepping"));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+  });
+
+  it("steps into an open field, which commits", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(open.textContent, "3");
+    pressTool(tools(element)!.querySelector(".stepper.down")!, { shiftKey: true });
+    assert.equal(open.textContent, "0", "kept at the least");
+    assert.deepEqual(edits, []);
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "0" } } }]);
+  });
+
+  it("scrubs as a stepper is dragged up or down, shown in place and committed once on release", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    const value = rendered(element, "card.value.gap.value");
+    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 74 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "9", "shown as it moves");
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 30 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "16", "kept within the range");
+    assert.deepEqual(edits, []);
+    up.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 30 }));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
+    assert.equal(element.selection, "card.value.gap", "the selection stays");
+  });
+  it("keeps the steppers as the pointer crosses the gap to reach them", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.padding";
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const value = rendered(element, "card.value.padding.value");
+    over(value);
+    const shown = tools(element)!;
+    over(value.closest(".sheet-value")!);
+    assert.equal(tools(element), shown, "over the value's cell");
+    over(value.closest(".sheet-row")!);
+    assert.equal(tools(element), shown, "over the gap in the value's row");
+    over(shown);
+    pressTool(shown.querySelector(".stepper.up")!);
+    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } }]);
+    over(rendered(element, "card.value.gap.value").closest(".sheet-row")!);
+    assert.equal(tools(element), null, "gone over another property");
+  });
+
+  it("shows a let's steppers, and takes room for them where more of the line follows", async () => {
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    element.selection = "pad";
+    over(rendered(element, "pad.value"));
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-steppers"));
+    over(rendered(element, "pad.value").parentElement!);
+    assert.equal(tools(element), shown, "over the let's line");
+
+    const edges = show(await fixture("editingEdges"));
+    edges.selection = "box";
+    over(rendered(edges, "box.value.depth.value"));
+    assert.ok(tools(edges)!.classList.contains("in-line"), "in the line, before the rest of a one-line element's line");
+    over(rendered(edges, "box.value.items.value[0]"));
+    assert.ok(tools(edges)!.classList.contains("in-line"), "and before the next item");
+  });
+
+  it("keeps the steppers under the pointer through the tree a click brings, and through a cleared one", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(edits.length, 1);
+    const tree = element.tree;
+    element.tree = undefined;
+    element.tree = tree;
+    assert.ok(tools(element), "still there for the next click, not the row under them");
+    assert.equal(element.selection, "card.value.gap");
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(edits.length, 2, "the next click steps again");
+  });
+
+  it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 54 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "14");
+    element.tree = element.tree;
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "14", "still shown");
+    assert.ok(body(element).classList.contains("stepping"));
+    const again = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 46 }));
+    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 46 }));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
+    assert.ok(!body(element).classList.contains("stepping"));
+
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const down = tools(element)!.querySelector<HTMLElement>(".stepper.down")!;
+    down.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    down.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 110 }));
+    assert.ok(body(element).classList.contains("stepping"));
+    element.remove();
+    assert.ok(!body(element).classList.contains("stepping"), "nothing is left resizing");
+  });
+
+  it("shows the value as before when a drag ends where it began", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 84, 94] });
+    assert.deepEqual(edits, []);
+    const value = rendered(element, "card.value.gap.value");
+    assert.equal(value.textContent, "4");
+    assert.ok(!value.classList.contains("pending"), "nothing is waiting");
+  });
+
+  it("fills an open field from a drag, which commits", async (t) => {
+    // As a sheet, where the steppers cover nothing under the pointer.
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    rendered(element, "card.value.count.value").click();
+    const open = field(element)!;
+    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 82] });
+    assert.equal(open.textContent, "5");
+    assert.equal(field(element), open);
+    assert.deepEqual(edits, []);
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+  });
+});
+
+describe("bindings and other elements", () => {
+  it("edits no reference, to a named value, a parameter or a loop variable", async () => {
+    const { tree, text } = await fixture("bindings");
+    const targets = editTargets(indexTree(tree, text));
+    assert.equal(targets.get("banded.value.color.value"), undefined, "a let's member");
+    assert.equal(targets.get("tinted.value.color.value"), undefined, "a let");
+    assert.equal(targets.get("Special.body.name.value"), undefined, "a component's parameter");
+    assert.equal(targets.get("menu.body[0].size.value"), undefined, "a loop variable");
+  });
+
+  it("opens Source for a binding or a reference, never an editor", async () => {
+    const element = show(await fixture("bindings"));
+    const { edits, opens } = events(element);
+    const name = rendered(element, "Special.body.name.value");
+    assert.ok(!name.classList.contains("editable-value"));
+    name.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    const tint = rendered(element, "tinted.value.color.value");
+    assert.ok(!tint.classList.contains("editable-value"));
+    tint.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, composed: true }));
+    assert.deepEqual(opens.map((open) => open.key), ["Special.body.name.value", "tinted.value.color.value"]);
+    assert.deepEqual(edits, []);
+  });
+
+  it("edits every integer and float type NX has, and its one boolean", async () => {
+    const { tree, text } = await fixture("bindings");
+    const index = indexTree(tree, text);
+    assert.equal(editTargets(index).get("banded.value.big.value")?.kind, "number", "an int64");
+    const listed = unwrittenProperties(index, index.byKey.get("banded.value")!).map(
+      (entry) => `${entry.property.name}:${entry.editor?.kind ?? "-"}`
+    );
+    assert.deepEqual(listed, ["size:case", "few:number", "iced:boolean", "extra:case"]);
+  });
+
+  it("counts a property written under a condition as written", async () => {
+    const { tree, text } = await fixture("bindings");
+    const index = indexTree(tree, text);
+    const names = unwrittenProperties(index, index.byKey.get("sometimes.value")!).map((entry) => entry.property.name);
+    assert.ok(!names.includes("iced"), names.join(" "));
+  });
+
+  it("reads a value under a condition with its property's format and card", async () => {
+    const { tree, text } = await fixture("bindings");
+    const index = indexTree(tree, text);
+    assert.equal(editTargets(index).get("tagged.value.if[0].then.tint.value")?.kind, "color");
+    assert.equal(editTargets(index).get("tagged.value.if[0].then.label.value")?.kind, "text");
+    const card = cardOf(index, index.byKey.get("tagged.value.if[0].then.tint")!);
+    assert.equal(card?.signature, "(property) tint?: string");
+  });
+
+  it("offers a union case's element the properties it does not write", async () => {
+    const element = show(await fixture("bindings"));
+    const { edits } = events(element);
+    element.selection = "promo.value";
+    assert.equal(moreToggle(element)?.textContent, "Show 1 unset property");
+    moreToggle(element)!.click();
+    assert.deepEqual(moreRows(element).map(reads), ["pumps 1 default"]);
+    rendered(element, "promo.value.pumps.value").click();
+    const open = field(element)!;
+    open.textContent = "2";
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "promo.value", edit: { kind: "addProperty", name: "pumps", value: { kind: "number", text: "2" } } }]);
+  });
+
+  it("bounds nothing with an empty range", () => {
+    const hints = { min: 10, max: 0 };
+    assert.equal(rangeProblem("5", hints), undefined);
+    assert.equal(rangeProblem("20", hints), undefined);
   });
 });

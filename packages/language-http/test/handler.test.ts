@@ -12,6 +12,7 @@ import type {
   Hover,
   LanguageDocument,
   LanguageServiceErrorBody,
+  SourceEditAnswer,
   SourceTree,
 } from "@nx-lang/language-protocol";
 import { NxLibraryRegistry } from "@nx-lang/sdk-node";
@@ -391,6 +392,39 @@ test("a source tree asked with visualizers carries resolved visualizers and the 
   const refused = await handler(post("sourceTree", { documents, uri: FORM, visualizers: { modules: "tenant/x.nx" } }));
   assert.equal(refused.status, 400);
   assert.match((await json<LanguageServiceErrorBody>(refused)).error.message, /'visualizers'/);
+});
+
+test("an added property answers through HTTP, and a nameless one is refused", async () => {
+  const handler = createNxLanguageHandler();
+  const source = [
+    "type Drink = { name:string color?:string }",
+    'let latte = <Drink name="Latte" />',
+    "",
+  ].join("\n");
+  const documents = [{ uri: FORM, source }];
+
+  const added = await json<SourceEditAnswer>(
+    await handler(
+      post("sourceEdit", {
+        documents,
+        uri: FORM,
+        key: "latte.value",
+        edit: { kind: "addProperty", name: "color", value: { kind: "string", value: "tan" } },
+      }),
+    ),
+  );
+  assert.deepEqual(added.edits.map((edit) => edit.newText), [' color="tan"']);
+
+  const nameless = await handler(
+    post("sourceEdit", {
+      documents,
+      uri: FORM,
+      key: "latte.value",
+      edit: { kind: "addProperty", value: { kind: "string", value: "tan" } },
+    }),
+  );
+  assert.equal(nameless.status, 400);
+  assert.match((await json<LanguageServiceErrorBody>(nameless)).error.message, /'addProperty'/);
 });
 
 test("a request cannot replace a context document, and says what collided", async () => {

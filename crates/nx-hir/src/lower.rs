@@ -1823,7 +1823,13 @@ impl LoweringContext {
                 let span = node.span();
                 let element = self.lower_element(node);
 
-                if element.content.is_empty() {
+                // A record written with a property-list condition or match stays an element, which
+                // binds its entries as written; a record literal holds only direct properties.
+                let conditional = element
+                    .property_entries
+                    .iter()
+                    .any(|entry| !matches!(entry, PropertyEntry::Value(_)));
+                if element.content.is_empty() && !conditional {
                     if let Some(record_def) = self
                         .module
                         .find_item(element.tag.as_str())
@@ -2350,9 +2356,9 @@ impl LoweringContext {
 
     /// Reports every part of a visualizer declaration's value that is not written out.
     ///
-    /// <para>A visualizer's value is built only from element constructions, string and boolean
-    /// literals, and bare names, which name properties or cases. Anything computed — a braced
-    /// expression, a conditional, a loop, a number, text or an embed in an element's body — is
+    /// <para>A visualizer's value is built only from element constructions, string, boolean and
+    /// number literals, and bare names, which name properties or cases. Anything computed — a
+    /// braced expression, a conditional, a loop, text or an embed in an element's body — is
     /// reported, so every visualizer declaration can be read without evaluating it. The rule is
     /// checked on the syntax, because a braced literal and a bare one lower alike.</para>
     fn check_visualizer_value_is_written_out(&mut self, node: SyntaxNode) {
@@ -2378,14 +2384,18 @@ impl LoweringContext {
                 let written_out = node.children().all(|child| {
                     matches!(
                         child.kind(),
-                        SyntaxKind::STRING_LITERAL | SyntaxKind::BOOL_LITERAL
+                        SyntaxKind::STRING_LITERAL
+                            | SyntaxKind::BOOL_LITERAL
+                            | SyntaxKind::INT_LITERAL
+                            | SyntaxKind::REAL_LITERAL
+                            | SyntaxKind::HEX_LITERAL
                     )
                 });
                 if !written_out {
                     self.report_visualizer_value_not_written_out(node);
                 }
             }
-            SyntaxKind::CONTEXTUAL_NAME => {}
+            SyntaxKind::SIGNED_NUMERIC_LITERAL | SyntaxKind::CONTEXTUAL_NAME => {}
             kind if kind.is_comment() => {}
             _ => self.report_visualizer_value_not_written_out(node),
         }
@@ -2394,7 +2404,7 @@ impl LoweringContext {
     fn report_visualizer_value_not_written_out(&mut self, node: SyntaxNode) {
         self.add_diagnostic(
             format!(
-                "A visualizer's values must be written out: use a visualizer record, a string or boolean literal, or a bare property or case name, not '{}'",
+                "A visualizer's values must be written out: use a visualizer record, a string, boolean or number literal, or a bare property or case name, not '{}'",
                 node.text().trim()
             ),
             node.span(),

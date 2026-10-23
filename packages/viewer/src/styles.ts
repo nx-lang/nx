@@ -214,6 +214,8 @@ export const styles = `
 .source { container-type: inline-size; }
 @container (width < 64ch) {
   .source .sheet-row > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
+  /* An unwritten property with nothing to show takes no line of its own; a click on its name edits it. */
+  .source .dimmed-row > .sheet-value:has(> .more-value:empty:only-child) { display: none; }
 }
 
 /* A group's name is a step bolder than its rows, and a bracket runs down the group from under its
@@ -392,21 +394,6 @@ export const styles = `
   background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
   border-radius: 3px;
 }
-/* The chevron stands past the value's end, over the gap after it, so nothing moves, and nearer the
-   value than what follows the gap. */
-.body.editable .edit-case { position: relative; }
-.body.editable .edit-case:is(:hover, .editing)::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: -10px;
-  width: 8px;
-  height: 8px;
-  transform: translateY(-50%);
-  background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
-  pointer-events: none;
-}
 /* A boolean toggles on a second click, which would otherwise select the mark as a word. */
 .body.editable .edit-boolean { user-select: none; }
 /* A number's name drags sideways to change it. */
@@ -428,6 +415,10 @@ export const styles = `
   caret-color: var(--nx-viewer-foreground, CanvasText);
   font-weight: 400;
 }
+/* A number's field never breaks inside the number. */
+.source .field.field-number { white-space: nowrap; overflow-wrap: normal; }
+/* Over several lines, a field is one box, as wide as its longest line. */
+.source .field.field-lines { display: inline-block; vertical-align: top; }
 .source .field::selection {
   background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78));
 }
@@ -510,4 +501,254 @@ export const styles = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A placeholder reads, quieter, in an empty field, and is never written. */
+.source .field:empty::before {
+  content: attr(data-placeholder);
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
+  pointer-events: none;
+}
+/* What a selected element does not write: a quiet row that opens a dimmed row to each property. */
+.source .more { font-weight: 400; }
+.source .more-toggle { cursor: pointer; user-select: none; outline: none; }
+.source .more-toggle > .more-label {
+  grid-column: 1 / -1;
+  color: var(--nx-viewer-more-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.92em;
+}
+.source .more-toggle:hover > .more-label, .source .more-toggle:focus-visible > .more-label { color: var(--nx-viewer-foreground, CanvasText); }
+.source .more-toggle:focus-visible > .more-label { text-decoration: underline; }
+.source .dimmed-row { opacity: var(--nx-viewer-dimmed-opacity, 0.55); outline: none; }
+/* A row being set reads at full strength, its field as any other. */
+.source .dimmed-row:has(.field) { opacity: 1; }
+.source .dimmed-row:focus-visible, .source .added-row:focus-visible { opacity: 1; background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); border-radius: 3px; outline: none; }
+.source .dimmed-row[hidden], .source .added-row[hidden] { display: none; }
+.source .more-default {
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+}
+/* An optional property with no default keeps a place for its value, as wide as a short entry, so the
+   mark under the pointer and the field it opens are a size to click and type in; it reads the type
+   the property takes, quieter. */
+.source .more-value:empty, .source .more-value > .field:empty {
+  display: inline-block;
+  min-width: min(24ch, 100%);
+  white-space: nowrap;
+  min-height: 1lh;
+  vertical-align: top;
+}
+/* A field opened in an unset property's place keeps the place's width as it fills. */
+.source .more-value > .field { display: inline-block; min-width: min(24ch, 100%); vertical-align: top; }
+/* An unset uitext property's field types in the prose font its value reads in once written. */
+.source .more-value.more-prose > .field:not(:empty) {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
+}
+.source .more-value:empty::before {
+  content: attr(data-placeholder);
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
+}
+/* An empty field still reads as one, with room for the caret. */
+.source .field:empty { display: inline-block; min-width: 1ch; min-height: 1lh; vertical-align: top; }
+.source .more-filter-row > .more-filter {
+  grid-column: 1 / -1;
+  width: min(24ch, 100%);
+  margin: 1px 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  background: light-dark(#0000000a, #ffffff0f);
+}
+.source .more-filter-row > .more-filter:focus-visible { box-shadow: 0 0 0 1px var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
+/* Under a line, the list sets out as a group's rows do, from where the line's indentation ends. */
+.source .more-block {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 2ch;
+  justify-content: start;
+  padding-left: calc(var(--more-indent, 0) * 1ch);
+  white-space: pre;
+}
+/* A written row's menu: a quiet mark just past the row's end, under the pointer and when selected,
+   so it moves nothing. */
+.source .sheet-row[data-key] { position: relative; }
+.source .row-menu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 0.5ch;
+  padding: 0 0.4ch;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  font-weight: 400;
+}
+.source .sheet-row[data-key]:hover > .row-menu, .source .sheet-row.selected > .row-menu { opacity: 1; }
+.source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
+/* A row's menu opens over the reading, as a popover does. */
+.menu {
+  position: absolute;
+  z-index: 5;
+  min-width: 10rem;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-variation-settings: var(--nx-viewer-prose-font-variation, normal);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.menu[hidden] { display: none; }
+.menu-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+/* A default the item resets to, quieter, as the reading draws it. */
+.menu-value {
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  white-space: nowrap;
+}
+.menu-value .swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
+.menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+/* Segmented, a few cases read as one row of buttons; the filter takes the keys out of sight. */
+.popover.segmented { min-width: 0; }
+.popover.segmented > .popover-filter { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; }
+.popover.segmented .options { display: flex; flex-wrap: nowrap; gap: 2px; margin-top: 0; max-height: none; overflow: visible; }
+.popover.segmented .option {
+  padding: 2px 10px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  white-space: nowrap;
+}
+.popover.segmented .option.current { background: var(--nx-viewer-field-selection, light-dark(#add6ff, #264f78)); }
+.popover.segmented .option.current::before, .popover.segmented .option-doc { display: none; }
+/* A choices list, Paper-style: each choice's label, then its value, quieter, in a second column; one
+   column when no choice has a label. The default's row leads, set off by a rule. */
+.popover.choices { min-width: 8rem; }
+.popover .choices-list { margin-top: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.popover .choices-list.labeled { grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; }
+.popover .option.choice {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+}
+.popover .option.choice[hidden] { display: none; }
+.popover .choice-value { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); white-space: nowrap; }
+.popover .choice-value.alone { color: inherit; }
+/* With one column, the default's row keeps "Default" and the default on one line. */
+.popover .choices-list:not(.labeled) .option.choice-default:not([hidden]) {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 16px;
+}
+.popover .choice-default .choice-label { font-family: var(--nx-viewer-prose-font-family, inherit); font-size: 13px; }
+.popover .choices-rule {
+  grid-column: 1 / -1;
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+}
+.popover .choices-rule[hidden] { display: none; }
+/* A color's choices lead its popover, over its field and picker. */
+.popover.colors.with-choices { flex-wrap: wrap; }
+.popover.colors.with-choices > .popover-hex { flex: 1 1 auto; width: auto; min-width: 0; }
+.popover.colors .choices-list { flex: 1 0 100%; margin: 0 0 4px; }
+.popover .choices-list[hidden] { display: none; }
+.popover .option .swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
+/* A number's steppers, Framer-style, and a field's choices chevron: drawn where they would stand in
+   the line, just past the value, and taken out of it, so nothing moves. */
+.source .value-tools {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 1lh;
+  /* Padding, not a margin: the gap is the tools', so a pointer crossing it keeps them. */
+  padding-left: 4px;
+  user-select: none;
+  white-space: nowrap;
+}
+/* Taking room in the line, past an open field with more of its line after it. */
+.source .value-tools.in-line { position: static; vertical-align: top; }
+.source .value-tools .steppers, .source .value-tools .choices-toggle { display: none; }
+.source .value-tools.with-steppers .steppers {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  align-self: center;
+  box-sizing: border-box;
+  /* A little taller than the line, so each half is a target a pointer can hit; whole pixels, with the
+     rule between them as the gap, so the two halves are exactly the same height. */
+  width: 18px;
+  height: 25px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+}
+/* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
+.source .value-tools .stepper {
+  position: relative;
+  flex: 1 1 0;
+  cursor: default;
+  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
+}
+/* The hover and press tints lie over the field's color, so the rule's color never shows through. */
+.source .value-tools .stepper:hover {
+  background-image: linear-gradient(var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)) 0 0);
+}
+.source .value-tools .stepper:active {
+  background-image: linear-gradient(var(--nx-viewer-edit-active, light-dark(#0000001f, #ffffff29)) 0 0);
+}
+.source .value-tools .stepper::after, .source .value-tools .choices-toggle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 10px no-repeat;
+}
+.source .value-tools .stepper.up::after { transform: rotate(180deg); }
+.source .value-tools .stepper:hover::after, .source .value-tools .choices-toggle:hover::after {
+  background: var(--nx-viewer-foreground, CanvasText);
+}
+.source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
+.source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
+.body.stepping, .body.stepping * { cursor: ns-resize !important; user-select: none; }
 `;

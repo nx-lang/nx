@@ -194,6 +194,27 @@ type, its default as written, and whether it is optional, content or inherited),
 component's state, a union's cases, an alias's type, and a value's type and the range of its value.
 Optional properties of a node or a declaration are absent rather than `null` when they do not apply.
 
+A request with `visualizers: {}` (or `visualizers: { modules: [...] }`, naming further visualizer
+modules the host supplies) also resolves visualizer declarations: each declaration that has one
+carries a `visualizer`, with its title, id and icon, its properties in the order to show them, and,
+for each property or alias, a `format` and an `editor`. `editor` holds the editor hints that fit the
+type: `kind` (`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `multiline`,
+`placeholder` and `choices`. Each choice's `value` is typed as a `sourceEdit` `setValue` value, so a
+client passes it on as it is to write the choice:
+
+```ts
+const sizeProperty: SourcePropertyVisualizer = {
+  name: "size",
+  editor: {
+    max: 96,
+    choices: [
+      { value: { kind: "number", text: "12" }, label: "sm" },
+      { value: { kind: "number", text: "16" }, label: "base" },
+    ],
+  },
+};
+```
+
 ### `sourceEdit` (unstable)
 
 **Unstable:** the request's and the answer's shapes may change in any release until a later one
@@ -214,8 +235,9 @@ const refused: SourceEditAnswer = { edits: [], refused: "notEditable" };
 The request names a node of the document's source tree by its `key` and one change: `setValue`
 with a typed value (`string`, `number` as typed, `boolean`, or `case` by name) for a literal or a
 bare union case that is a whole value, `setText` with one line of text for a run of text content,
-or `remove` for an attribute. The answer's `edits` make the change: every range is in the document
-as sent and no two overlap, so a host applies them together; the service writes the spelling (quotes, escapes, kept braces, an
+`remove` for an attribute, or `addProperty` with a property's name and a typed value for an element,
+which writes the attribute after the element's last one, in its layout. The answer's `edits` make
+the change: every range is in the document as sent and no two overlap, so a host applies them together; the service writes the spelling (quotes, escapes, kept braces, an
 attribute's whole line). A change it cannot make answers no edits and `refused`: `unknownNode`,
 `notEditable` or `invalidValue`. A change that would leave the text as it is answers no edits and no
 refusal.

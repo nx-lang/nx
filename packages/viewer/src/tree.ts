@@ -2,7 +2,7 @@
  * What the reading asks of a source tree: each node's children, the slot it fills in its parent,
  * and each key's node.
  */
-import type { SourceNode, SourceTree } from "@nx-lang/language-protocol";
+import type { SourceNode, SourceProperty, SourceTree } from "@nx-lang/language-protocol";
 
 /** A source tree with the lookups the reading needs, built once per tree. */
 export interface TreeIndex {
@@ -82,4 +82,42 @@ export function nodeAtSpan(tree: SourceTree, start: number, end: number): number
 /** Whether the node at `candidate` wins over `found` for the same span: the first, or an element. */
 function prefers(tree: SourceTree, candidate: number, found: number | undefined): boolean {
   return found === undefined || (tree.nodes[candidate]?.role === "element" && tree.nodes[found]?.role !== "element");
+}
+
+/**
+ * The properties an element takes: its record's, action's or component's, or for an element of a
+ * union's case, the union's shared ones and then the case's. Nothing for an element of no known
+ * declaration.
+ */
+export function elementProperties(tree: SourceTree, element: SourceNode): readonly SourceProperty[] | undefined {
+  const declaration = element.declaration === undefined ? undefined : tree.declarations[element.declaration];
+  if (declaration === undefined) {
+    return undefined;
+  }
+  if (declaration.kind !== "union") {
+    return declaration.properties ?? [];
+  }
+  const name = element.name ?? "";
+  const written = name.slice(name.lastIndexOf(".") + 1);
+  const found = (declaration.cases ?? []).find((candidate) => candidate.name === written);
+  return found === undefined ? undefined : [...(declaration.properties ?? []), ...(found.properties ?? [])];
+}
+
+/**
+ * The element whose property the attribute at `at` sets: its parent, or the element whose
+ * property-list condition or match it is written under.
+ */
+export function attributeElement(tree: SourceTree, at: number): number | undefined {
+  let current = tree.nodes[at]?.parent;
+  while (current !== undefined) {
+    const node = tree.nodes[current]!;
+    if (node.role === "element") {
+      return current;
+    }
+    if (node.role === "attribute" || node.role === "declaration") {
+      return undefined;
+    }
+    current = node.parent;
+  }
+  return undefined;
 }

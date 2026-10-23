@@ -19,7 +19,35 @@ All notable changes to this project will be documented in this file.
   source; a value the reading cannot edit, such as an expression, fires `nx-open`.
 - The playground's Visual edits this way, through the editor, so undo and redo work in both views,
   and the NX title bar has Undo and Redo buttons.
-- `@nx-lang/sdk-wasm`'s module ABI version is now 9; the loader refuses a module of another version.
+- `sourceEdit` also adds a property an element does not write (`addProperty`, aimed at the element,
+  written in the element's layout).
+- `@nx/visualizer` has editor hints: `editor` (`field`, `dropdown`, `segmented`), `min`, `max`
+  and `step`, and `ValueChoice` content (`choices`, each a value and an optional label), on
+  `PropertyVisualizer` and `ValueVisualizer`, and `multiline` and `placeholder` on
+  `PropertyVisualizer`; `ValueVisualizer.format` is optional. A hint or a choice that does not fit its
+  property's type warns `editor-hint-mismatch` and leaves the hint it would have replaced (its base
+  visualizer's or its type's) in force; a `min` above its `max`, or a range that only merging
+  empties, warns `editor-hint-range`.
+  A visualizer declaration's value may hold number literals. With `visualizers`, the source tree
+  carries each property's resolved hints, its choices typed as `setValue` values, and lists the types
+  of the properties an element does not write.
+- `<nx-viewer>`: a selected element lists the properties it does not write under `Show N unset properties`, and sets
+  one where it reads; a written row has a menu (Reset to default or Remove, and Show in Source);
+  numbers edit with ranges and steppers (click, Shift+click, or drag up and down), a number's
+  or a string's choices list under its field with the default's row first, unions edit as segmented
+  buttons and strings over several lines as their hints say; Shift+Enter breaks a string's line.
+  A value's steppers or chevron show under the pointer, taking room on a one-line element, and a
+  click on a value opens its editor without selecting it.
+- `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
+
+### Fixes
+- A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,
+  keeps the properties its active branch sets in the interpreter. It used to drop them when the record
+  was declared in the same module. Executable codegen (NX IR, TypeScript, JavaScript), and so the
+  playground's preview, now refuses such a record with `codegen-unsupported-construct`, as it does a
+  component written that way, instead of emitting it without them.
+- A type error in an element with property-list conditions is reported once, not once per path through
+  its branches.
 
 ## 0.8.0
 

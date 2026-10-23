@@ -129,6 +129,12 @@ describe("the wasm SDK's in-process language service", () => {
           ];
         case "case":
           return [{ kind: "setValue", value: { kind: "case", name: "dark" } }];
+        case "element":
+          return [
+            { kind: "addProperty", name: "title", value: { kind: "string", value: "y" } },
+            { kind: "addProperty", name: "mode", value: { kind: "case", name: "dark" } },
+            { kind: "addProperty", name: "nope", value: { kind: "boolean", value: true } }
+          ];
         case "text":
           return [{ kind: "setText", text: "Goodbye" }, { kind: "setText", text: "a < b" }];
         default:

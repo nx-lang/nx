@@ -12,9 +12,9 @@ mod visualizers;
 
 pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
-    SourceCase, SourceDeclaration, SourceDeclarationKind, SourceFlag, SourceNode, SourceProperty,
-    SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
-    SourceVisualizer,
+    SourceCase, SourceChoice, SourceDeclaration, SourceDeclarationKind, SourceEditorHints,
+    SourceFlag, SourceNode, SourceNumber, SourceProperty, SourcePropertyVisualizer, SourceRole,
+    SourceTree, SourceTreeOptions, SourceTreeVisualizers, SourceVisualizer,
 };
 
 use nx_api::{
@@ -338,8 +338,65 @@ impl WorkspaceSnapshot {
     /// Computes editor diagnostics plus diagnostics that are not tied to any submitted document.
     pub fn diagnostic_report(&self) -> Result<DiagnosticReport, SnapshotError> {
         let workspace = self.to_workspace()?;
-        let diagnostics = validate_workspace(&workspace, &self.build_context);
+        let mut diagnostics = validate_workspace(&workspace, &self.build_context);
+        diagnostics.extend(self.merged_hint_diagnostics());
         Ok(self.project_diagnostic_report(&diagnostics))
+    }
+
+    /// The `editor-hint-range` warnings of each document's visualizer declarations whose range is
+    /// empty only once merged with the hints of the program's other visualizer declarations, which
+    /// analysis, checking one visualizer element at a time, does not see.
+    fn merged_hint_diagnostics(&self) -> Vec<NxDiagnostic> {
+        let declarations = self.workspace_declarations();
+        let mut found = Vec::new();
+        for document in &self.documents {
+            let identity = document.identity.as_str();
+            let holds_visualizers = declarations
+                .artifact(identity)
+                .and_then(|artifact| artifact.lowered_module.as_deref())
+                .is_some_and(|module| !module.visualizers().is_empty());
+            if !holds_visualizers {
+                continue;
+            }
+            let visualizers = visualizers::ProgramVisualizers::gather(
+                &declarations,
+                identity,
+                |identity| self.has_identity(identity),
+                self.build_context(),
+                &[],
+            );
+            let index = LineIndex::new(document.source());
+            for (range, message) in
+                source_tree::merged_range_warnings(&declarations, &visualizers, identity)
+            {
+                let (start, end): (usize, usize) = (range.start().into(), range.end().into());
+                let (from, to) = (
+                    index.byte_offset_to_position(start),
+                    index.byte_offset_to_position(end),
+                );
+                found.push(NxDiagnostic {
+                    severity: NxSeverity::Warning,
+                    code: Some("editor-hint-range".to_string()),
+                    message,
+                    labels: vec![NxDiagnosticLabel {
+                        file: identity.to_string(),
+                        span: nx_api::NxTextSpan {
+                            start_byte: start as i32,
+                            end_byte: end as i32,
+                            start_line: from.line as i32 + 1,
+                            start_column: from.character as i32 + 1,
+                            end_line: to.line as i32 + 1,
+                            end_column: to.character as i32 + 1,
+                        },
+                        message: None,
+                        primary: true,
+                    }],
+                    help: None,
+                    note: None,
+                });
+            }
+        }
+        found
     }
 
     /// Extracts top-level document symbols for the requested document.

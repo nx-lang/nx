@@ -2283,3 +2283,31 @@ fn top_level_values_are_inferred_in_declaration_order() {
         );
     }
 }
+
+#[test]
+fn test_a_property_mismatch_under_conditions_is_reported_once_per_element() {
+    let source = r#"
+        type Theme = { accent:string size?:int }
+        component <Badge accent:string size?:int /> = { <div /> }
+        let flag = true
+        let theme = <Theme accent=5 if flag { size=1 } if flag { size=2 } />
+        let badge() = <Badge accent=6 if flag { size=1 } />
+    "#;
+
+    let result = check_str(source, "conditional-mismatch-once.nx");
+    let mismatches = result
+        .errors()
+        .into_iter()
+        .filter(|diag| diag.message().contains("accent"))
+        .count();
+    assert_eq!(
+        mismatches,
+        2,
+        "{:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}

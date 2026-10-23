@@ -1852,3 +1852,487 @@ fn visualizers_round_trip_through_json() {
     let back: SourceTree = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, tree);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Editor hints
+// ---------------------------------------------------------------------------------------------
+
+/// A card library whose spacing alias has a range and choices, and a document that constructs a
+/// card.
+const CARDS: &str = r#"import "@nx/visualizer"
+
+export type Spacing = int
+export type Size = small | medium | large
+export type Card = { title:string padding:Spacing = 8 gap?:Spacing size:Size = medium body?:string }
+
+visualizer Spacing = <ValueVisualizer editor=field min=0 max=64>
+  <ValueChoice value=4 label="xs" />
+  <ValueChoice value=8 label="sm" />
+  <ValueChoice value=16 label="md" />
+</ValueVisualizer>
+visualizer Card = <ElementVisualizer>
+  <PropertyVisualizer property=gap max=32>
+    <ValueChoice value=2 label="hair" />
+  </PropertyVisualizer>
+  <PropertyVisualizer property=title editor=field placeholder="Title">
+    <ValueChoice value="Hi" />
+    <ValueChoice value=3 />
+  </PropertyVisualizer>
+  <PropertyVisualizer property=size editor=segmented />
+  <PropertyVisualizer property=body multiline=true />
+</ElementVisualizer>
+"#;
+
+fn cards_tree() -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/cards.nx", CARDS).with_version(1),
+            DocumentInput::new(
+                URI,
+                "import \"./cards.nx\"\n\nlet card = <Card title=\"Hi\" />\n",
+            )
+            .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+fn editor_of<'t>(
+    visualizer: &'t SourceVisualizer,
+    property: &str,
+) -> Option<&'t SourceEditorHints> {
+    visualizer
+        .properties
+        .iter()
+        .find(|candidate| candidate.name == property)
+        .unwrap_or_else(|| panic!("no property {property}"))
+        .editor
+        .as_ref()
+}
+
+fn number_choice(text: &str, label: Option<&str>) -> SourceChoice {
+    SourceChoice {
+        value: SourceEditValue::Number {
+            text: text.to_string(),
+        },
+        label: label.map(str::to_string),
+    }
+}
+
+#[test]
+fn an_aliass_hints_and_choices_reach_every_property_it_types() {
+    let tree = cards_tree();
+    let card = visualizer(&tree, "Card");
+    let padding = editor_of(card, "padding").expect("padding's hints");
+    assert_eq!(padding.kind.as_deref(), Some("field"));
+    assert_eq!(padding.min, Some(SourceNumber(0.0)));
+    assert_eq!(padding.max, Some(SourceNumber(64.0)));
+    assert_eq!(
+        padding.choices,
+        vec![
+            number_choice("4", Some("xs")),
+            number_choice("8", Some("sm")),
+            number_choice("16", Some("md")),
+        ]
+    );
+    // The alias carries its own hints.
+    let spacing = visualizer(&tree, "Spacing")
+        .editor
+        .as_ref()
+        .expect("Spacing's hints");
+    assert_eq!(spacing, padding);
+}
+
+#[test]
+fn a_property_visualizer_overrides_one_hint_and_replaces_the_choices() {
+    let tree = cards_tree();
+    let gap = editor_of(visualizer(&tree, "Card"), "gap").expect("gap's hints");
+    assert_eq!(gap.kind.as_deref(), Some("field"));
+    assert_eq!(gap.min, Some(SourceNumber(0.0)));
+    assert_eq!(gap.max, Some(SourceNumber(32.0)));
+    assert_eq!(gap.choices, vec![number_choice("2", Some("hair"))]);
+}
+
+#[test]
+fn a_mismatched_hint_is_left_out() {
+    let tree = cards_tree();
+    let card = visualizer(&tree, "Card");
+    let title = editor_of(card, "title").expect("title's hints");
+    assert_eq!(title.kind, None);
+    assert_eq!(title.placeholder.as_deref(), Some("Title"));
+    assert_eq!(
+        title.choices,
+        vec![SourceChoice {
+            value: SourceEditValue::String {
+                value: "Hi".to_string()
+            },
+            label: None,
+        }]
+    );
+    assert_eq!(
+        editor_of(card, "size").and_then(|hints| hints.kind.as_deref()),
+        Some("segmented")
+    );
+    assert_eq!(
+        editor_of(card, "body").and_then(|hints| hints.multiline),
+        Some(true)
+    );
+}
+
+/// A library whose choices take every path: spellings, a mismatched set, an alias chain and
+/// inheritance.
+const CHOICES: &str = r#"import "@nx/visualizer"
+
+export type Spacing = int
+export type Gap = Spacing
+export type Ratio = float64
+export abstract type Base = { pad:Spacing = 8 }
+export type Panel extends Base = {
+  big:int = 0
+  ratio:Ratio = 1
+  gap:Gap = 4
+  tight:Spacing = 2
+}
+
+visualizer Spacing = <ValueVisualizer>
+  <ValueChoice value=4 label="xs" />
+  <ValueChoice value=8 label="sm" />
+</ValueVisualizer>
+visualizer Ratio = <ValueVisualizer>
+  <ValueChoice value=-2.5 />
+  <ValueChoice value=0.1 />
+</ValueVisualizer>
+visualizer Base = <ElementVisualizer>
+  <PropertyVisualizer property=pad>
+    <ValueChoice value=6 label="base" />
+  </PropertyVisualizer>
+</ElementVisualizer>
+visualizer Panel = <ElementVisualizer>
+  <PropertyVisualizer property=big>
+    <ValueChoice value=9007199254740993 />
+    <ValueChoice value=-4 />
+    <ValueChoice value=0x10 />
+    <ValueChoice value=2.5 />
+  </PropertyVisualizer>
+  <PropertyVisualizer property=tight>
+    <ValueChoice value="wide" />
+  </PropertyVisualizer>
+</ElementVisualizer>
+"#;
+
+fn choices_tree() -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/choices.nx", CHOICES).with_version(1),
+            DocumentInput::new(URI, "import \"./choices.nx\"\n\nlet panel = <Panel />\n")
+                .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+fn choice_texts(visualizer: &SourceVisualizer, property: &str) -> Vec<String> {
+    editor_of(visualizer, property)
+        .map(|hints| {
+            hints
+                .choices
+                .iter()
+                .map(|choice| match &choice.value {
+                    SourceEditValue::Number { text } => text.clone(),
+                    SourceEditValue::String { value } => format!("{value:?}"),
+                    other => format!("{other:?}"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn choices_keep_their_literals_and_a_whole_number_takes_no_fraction() {
+    let tree = choices_tree();
+    let panel = visualizer(&tree, "Panel");
+    assert_eq!(
+        choice_texts(panel, "big"),
+        vec!["9007199254740993", "-4", "16"],
+        "every digit, a sign, and a hex literal as its value; 2.5 is left out of an int"
+    );
+    assert_eq!(choice_texts(panel, "ratio"), vec!["-2.5", "0.1"]);
+}
+
+#[test]
+fn choices_that_all_mismatch_leave_the_types_choices() {
+    let tree = choices_tree();
+    assert_eq!(
+        choice_texts(visualizer(&tree, "Panel"), "tight"),
+        vec!["4", "8"]
+    );
+}
+
+#[test]
+fn choices_reach_through_an_alias_chain_and_inheritance() {
+    let tree = choices_tree();
+    let panel = visualizer(&tree, "Panel");
+    assert_eq!(choice_texts(panel, "gap"), vec!["4", "8"], "Gap = Spacing");
+    assert_eq!(
+        choice_texts(panel, "pad"),
+        vec!["6"],
+        "Base's property visualizer, inherited"
+    );
+}
+
+#[test]
+fn hints_round_trip_through_json() {
+    let tree = cards_tree();
+    let json = serde_json::to_string(&tree).expect("json");
+    assert!(json.contains(r#""editor":{"kind":"field","min":0.0,"max":64.0,"choices":[{"value":{"kind":"number","text":"4"},"label":"xs"},{"value":{"kind":"number","text":"8"},"label":"sm"},{"value":{"kind":"number","text":"16"},"label":"md"}]}"#), "{json}");
+    assert!(
+        json.contains(r#""choices":[{"value":{"kind":"string","value":"Hi"}}]"#),
+        "{json}"
+    );
+    let back: SourceTree = serde_json::from_str(&json).expect("back");
+    assert_eq!(back, tree);
+}
+
+#[test]
+fn the_types_of_unwritten_properties_are_listed() {
+    let tree = cards_tree();
+    let declaration = |name: &str| {
+        tree.declarations
+            .iter()
+            .find(|candidate| candidate.name == name)
+            .unwrap_or_else(|| panic!("{name} is listed"))
+    };
+    // The card writes only `title`, and a reader can still edit `size` with its cases.
+    let size = declaration("Size");
+    assert_eq!(
+        size.cases
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["small", "medium", "large"]
+    );
+    assert_eq!(declaration("Spacing").ty.as_deref(), Some("int"));
+}
+
+#[test]
+fn a_union_cases_property_types_are_listed() {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(
+                "nx://tenant/extras.nx",
+                "export type Strength = mild | bold\nexport type Shots = int\nexport type Extra = none | syrup { flavor:string strength:Strength = mild shots:Shots = 1 }\n",
+            )
+            .with_version(1),
+            DocumentInput::new(
+                URI,
+                "import \"./extras.nx\"\n\nlet promo = <Extra.syrup flavor=\"mocha\" />\n",
+            )
+            .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let tree = with_visualizers(&snapshot, &[]);
+    let names: Vec<&str> = tree
+        .declarations
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(names.contains(&"Strength"), "{names:?}");
+    assert!(names.contains(&"Shots"), "{names:?}");
+}
+
+#[test]
+fn an_aliass_chain_is_listed_to_its_end() {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![DocumentInput::new(
+            URI,
+            "type Mode = light | dark\ntype Theme = Mode\ntype Panel = { theme:Theme = light }\n\nlet panel = <Panel />\n",
+        )
+        .with_version(1)],
+    )
+    .expect("snapshot");
+    let tree = with_visualizers(&snapshot, &[]);
+    let names: Vec<&str> = tree
+        .declarations
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(names.contains(&"Theme"), "{names:?}");
+    assert!(names.contains(&"Mode"), "{names:?}");
+}
+
+fn hinted_tree(library: &str) -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/hinted.nx", library).with_version(1),
+            DocumentInput::new(URI, "import \"./hinted.nx\"\n\nlet box = <Box />\n")
+                .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+#[test]
+fn a_mismatched_property_hint_leaves_the_aliass_in_force() {
+    let tree = hinted_tree(
+        r#"import "@nx/visualizer"
+
+export type Width = int
+export type Box = { width:Width = 1 }
+
+visualizer Width = <ValueVisualizer editor=field min=0 max=10 />
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width editor=dropdown />
+</ElementVisualizer>
+"#,
+    );
+    let width = editor_of(visualizer(&tree, "Box"), "width").expect("width's hints");
+    assert_eq!(width.kind.as_deref(), Some("field"));
+    assert_eq!(width.max, Some(SourceNumber(10.0)));
+}
+
+#[test]
+fn a_derived_visualizers_mismatched_hints_leave_its_bases_in_force() {
+    let tree = hinted_tree(
+        r#"import "@nx/visualizer"
+
+export abstract type Base = { width:int = 1 }
+export type Box extends Base = { tag?:string }
+
+visualizer Base = <ElementVisualizer>
+  <PropertyVisualizer property=width editor=field max=10>
+    <ValueChoice value=4 />
+    <ValueChoice value=8 />
+  </PropertyVisualizer>
+</ElementVisualizer>
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width editor=dropdown placeholder="Wide">
+    <ValueChoice value="x" />
+  </PropertyVisualizer>
+</ElementVisualizer>
+"#,
+    );
+    let box_ = visualizer(&tree, "Box");
+    let width = editor_of(box_, "width").expect("width's hints");
+    assert_eq!(
+        width.kind.as_deref(),
+        Some("field"),
+        "Base's editor, not dropdown"
+    );
+    assert_eq!(width.max, Some(SourceNumber(10.0)));
+    assert_eq!(width.placeholder, None, "a string's hint fits no int");
+    assert_eq!(
+        choice_texts(box_, "width"),
+        vec!["4", "8"],
+        "Base's choices, not \"x\""
+    );
+}
+
+#[test]
+fn an_empty_range_is_left_out() {
+    let tree = hinted_tree(
+        r#"import "@nx/visualizer"
+
+export type Width = int
+export type Box = { width:Width = 1 }
+
+visualizer Width = <ValueVisualizer min=10 max=0 step=2 />
+"#,
+    );
+    let width = editor_of(visualizer(&tree, "Box"), "width").expect("width's hints");
+    assert_eq!((width.min, width.max), (None, None));
+    assert_eq!(width.step, Some(SourceNumber(2.0)));
+}
+
+/// The `editor-hint-range` warnings of the library `hinted_tree` loads, each with the text it
+/// marks.
+fn merged_range_warnings_of(library: &str) -> Vec<(String, String)> {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new("nx://tenant/hinted.nx", library).with_version(1),
+            DocumentInput::new(URI, "import \"./hinted.nx\"\n\nlet box = <Box />\n")
+                .with_version(1),
+        ],
+    )
+    .expect("snapshot");
+    let report = snapshot.diagnostic_report().expect("diagnostics");
+    report
+        .documents
+        .iter()
+        .flat_map(|document| document.diagnostics.iter())
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some("editor-hint-range"))
+        .map(|diagnostic| {
+            let range = diagnostic.range;
+            (
+                library[range.start_byte as usize..range.end_byte as usize].to_string(),
+                diagnostic.message.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_range_only_merging_empties_warns_where_it_is_written() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export type Spacing = int
+export type Box = { padding:Spacing = 8 gap:Spacing = 4 }
+
+visualizer Spacing = <ValueVisualizer min=0 max=64 />
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=padding min=100 />
+  <PropertyVisualizer property=gap min=10 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0].0, "min=100");
+    assert!(warnings[0].1.contains("'padding'"), "{}", warnings[0].1);
+    assert!(warnings[0].1.contains("(100)") && warnings[0].1.contains("(64)"));
+}
+
+#[test]
+fn a_derived_range_over_its_bases_warns_on_the_derived_one() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export abstract type Base = { width:int = 1 }
+export type Box extends Base = { tag?:string }
+
+visualizer Base = <ElementVisualizer>
+  <PropertyVisualizer property=width max=10 />
+</ElementVisualizer>
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width min=20 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0].0, "min=20");
+}
+
+#[test]
+fn an_elements_own_empty_range_warns_once() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export type Box = { width:int = 1 }
+
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=width min=20 max=10 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "analysis's alone: {warnings:?}");
+    assert_eq!(warnings[0].0, "min=20");
+}

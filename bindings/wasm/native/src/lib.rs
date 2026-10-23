@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 9;
+pub const ABI_VERSION: u32 = 10;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;

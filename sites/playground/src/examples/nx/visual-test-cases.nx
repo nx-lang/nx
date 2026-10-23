@@ -3,8 +3,10 @@ import "@nx/visualizer"
 // Test cases for Visual, one or two of each. Hover a name, or select it and press i, for its card.
 // Click a value, or press Enter or F2 on the selected row, to edit it; Tab and Shift+Tab move between
 // values and Escape cancels. Delete (Cmd+Backspace on a Mac) leaves out a property that has a default
-// or is optional. Ctrl or Cmd+Z and Shift+Z, or the title bar's buttons, undo and redo. After each
-// edit, check Source.
+// or is optional, and so does Reset to default or Remove in a row's menu (the ⋯ at its end, or Shift+F10).
+// Select an element to see "Show N unset properties", the properties it does not write: open it and
+// set one; an optional one reads its type until set. Ctrl or Cmd+Z and Shift+Z, or the title bar's
+// buttons, undo and redo. After each edit, check Source.
 
 type uitext = string
 type Color = string
@@ -20,7 +22,7 @@ type Size =
   /// 16 oz
   | large
 
-type Extra = | none | syrup { flavor:uitext pumps:Count = 1 }
+type Extra = none | syrup { flavor:uitext pumps:Count = 1 }
 type Cup = { sleeve?:string lid:boolean = true }
 
 abstract type Item = {
@@ -48,6 +50,27 @@ type Pastry extends Item = {
 }
 
 type Water extends Item = { sparkling:boolean = false }
+
+/// Space between things, in pixels.
+type Spacing = int
+/// A text size, in pixels, on the brand's scale.
+type FontSize = int
+type Align = start | center | end
+
+type Banner = {
+  title:uitext
+  intro?:uitext
+  /// Room inside the banner's edge.
+  padding:Spacing = 8
+  gap:int = 4
+  /// How big the title reads.
+  titleSize:FontSize = 16
+  align:Align = start
+  badge?:uitext
+  body?:uitext
+  tint?:Color
+  cup?:Cup
+}
 type Note = { content text:uitext }
 type Menu = { title:uitext content items:Item+ }
 
@@ -57,6 +80,53 @@ visualizer Item = <ElementVisualizer title=name id=code icon="coffee" />
 visualizer Pastry = <ElementVisualizer idPosition=end icon="croissant" />
 visualizer Water = <ElementVisualizer icon="no-such-icon" />
 visualizer Cup = <ElementVisualizer><PropertyVisualizer property=sleeve format=color /></ElementVisualizer>
+visualizer Spacing = <ValueVisualizer min=0 max=64 />
+visualizer FontSize = <ValueVisualizer min=8 max=96>
+  <ValueChoice value=12 label="sm" />
+  <ValueChoice value=16 label="base" />
+  <ValueChoice value=20 label="lg" />
+  <ValueChoice value=28 label="xl" />
+</ValueVisualizer>
+visualizer Banner = <ElementVisualizer icon="panel-top">
+  <PropertyVisualizer property=gap min=0 max=24 />
+  <PropertyVisualizer property=align editor=segmented />
+  <PropertyVisualizer property=badge>
+    <ValueChoice value="New" />
+    <ValueChoice value="Seasonal" />
+    <ValueChoice value="Sold out" />
+  </PropertyVisualizer>
+  <PropertyVisualizer property=body multiline=true placeholder="A line or two for the banner" />
+</ElementVisualizer>
+
+/// The brand's warm accent.
+let accent:Color = "#c8a27a"
+
+// Hints: padding refuses 80 with "At most 64"; hover its value for steppers (click, Shift+click for
+// 10, or drag up and down), and gap's stay within 0 to 24. titleSize has choices: hover it for
+// steppers and a chevron, or open it and press Alt+Down, click the chevron, or type (try "lg" or 2)
+// to list them, with Default 16 on top; pick one, or type 17, which is no choice and still commits.
+// align is a row of buttons. tint is a reference to a named value: it opens Source. intro was written
+// over two lines and edits with Shift+Enter for a line break. Select the banner and open "Show 3
+// unset properties":
+// badge lists its choices in one column, body is multi-line with a placeholder (Enter breaks a line,
+// Ctrl or Cmd+Enter commits), and cup has no editor, so it opens Source.
+let banner =
+  <Banner
+    title="Fresh today"
+    intro="Pastries from the bakery next door.
+Ask what came in this morning."
+    padding=8
+    gap=4
+    titleSize=20
+    align=start
+    tint={accent}
+  />
+
+// On one line: rest the pointer on titleSize, or open it; its steppers and chevron take room in the
+// line, pushing align right until they go. Passing over it moves nothing; selected, they show at
+// once. badge's chevron takes room before the closing />.
+// Click a stepper a few times: each click steps, and the selection stays.
+let strip = <Banner title="Fresh" titleSize=20 align=start badge="New" />
 
 // Values: an untyped int and float; a string with escapes, which opens without them; and one with \n,
 // which Enter or a double-click opens in Source
@@ -75,8 +145,9 @@ let poem = <Note>Two lines
 let promo =
   <Extra.syrup flavor="mocha" />
 
-// Functions: priceOf's values are code and do not edit, but those Special's body writes do. Special
-// used as an element reads with the function icon.
+// Functions: priceOf's values are code and do not edit, but the literals Special's body writes do;
+// its {name} is a parameter, so it opens Source. Special used as an element reads
+// with the function icon.
 let priceOf(size:Size): float64 = { if size == Size.large { 5.5 } else { 4.5 } }
 let <Special name:uitext /> = <Drink code="SPC" name={name} size=large />
 // A qualified case edits as a case and keeps its Size.

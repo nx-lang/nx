@@ -125,7 +125,9 @@ export type SourceEdit =
   /** Set a run of text content written on one line. */
   | { kind: "setText"; text: string }
   /** Remove an attribute: Reset for a property with a default, Clear for an optional one. */
-  | { kind: "remove" };
+  | { kind: "remove" }
+  /** Add a property an element does not write, as an attribute in the element's layout. */
+  | { kind: "addProperty"; name: string; value: SourceEditValue };
 
 /** A value to write, by kind; the service decides its spelling. */
 export type SourceEditValue =
@@ -497,7 +499,47 @@ export interface SourceVisualizer {
   properties?: SourcePropertyVisualizer[];
   /** How an alias's string values are shown. */
   format?: SourceValueFormat;
+  /** How an alias's values are edited: its resolved editor hints that fit its type. */
+  editor?: SourceEditorHints;
 }
+
+/**
+ * The editor hints that apply to a value, each present only when set. A hint changes how a viewer
+ * edits the value, never what the value is.
+ */
+export interface SourceEditorHints {
+  /** The editor asked for. */
+  kind?: SourceValueEditor;
+  /** The smallest number the editor offers. */
+  min?: number;
+  /** The largest number the editor offers. */
+  max?: number;
+  /** How far one step moves a number. */
+  step?: number;
+  /** Present, and `true`, when a string's field takes line breaks. */
+  multiline?: boolean;
+  /** Text shown in an empty field, never written. */
+  placeholder?: string;
+  /**
+   * The values offered to pick, in order: suggestions, never restrictions. Each value is a number
+   * for a number property and a string for a string property.
+   */
+  choices?: SourceChoice[];
+}
+
+/** A value a viewer offers to pick. Picking it writes the value, never the label. */
+export interface SourceChoice {
+  /** The value, typed as a `setValue` edit carries it. */
+  value: SourceEditValue;
+  /** The name the choice reads by, such as `"lg"`. */
+  label?: string;
+}
+
+/**
+ * The editor a hint asks for: a number field, a list of a union's cases, or the cases as one row of
+ * buttons.
+ */
+export type SourceValueEditor = "field" | "dropdown" | "segmented";
 
 /** How a string value is shown. A format changes how the value looks, never what it is. */
 export type SourceValueFormat = "id" | "color";
@@ -510,6 +552,11 @@ export interface SourcePropertyVisualizer {
    * visualizer of the alias its type names.
    */
   format?: SourceValueFormat;
+  /**
+   * How the property's value is edited: its resolved editor hints that fit its type, each from its
+   * property visualizer, or else from the visualizer of the alias its type names.
+   */
+  editor?: SourceEditorHints;
 }
 
 /**

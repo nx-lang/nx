@@ -2,9 +2,9 @@
  * The pieces of the reading's editors: where in a value's rendering its text sits, the value shown
  * once an edit is made and before the host answers, a number's steps, and the popovers' content.
  */
-import type { SourceCase } from "@nx-lang/language-protocol";
+import type { SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
 
-import { isNumericLiteral, type EditTarget } from "./edit.js";
+import { isNumericLiteral, type EditTarget, type TypeEditor } from "./edit.js";
 import { decodeString } from "./source.js";
 
 /** A boolean's mark, as the reading draws it. */
@@ -93,18 +93,214 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
 }
 
 /**
- * `text`, a numeric literal, moved by `steps`: an integer stays one, and a real keeps as many
- * decimals as it has; unless `signed`, it stops at zero. Nothing when `text` is not a decimal number.
+ * `text`, a numeric literal, moved by `steps` of `hints.step`, or of one: an integer stays one, and a
+ * real keeps as many decimals as it or the step has; it stays within `hints.min` and `hints.max`,
+ * and unless `signed`, it stops at zero. Nothing when `text` is not a decimal number.
  */
-export function stepNumber(text: string, steps: number, signed = true): string | undefined {
+export function stepNumber(text: string, steps: number, signed = true, hints?: SourceEditorHints): string | undefined {
   const trimmed = text.trim();
   if (!isNumericLiteral(trimmed) || /[xXeE]/.test(trimmed)) {
     return undefined;
   }
-  const decimals = trimmed.includes(".") ? trimmed.length - trimmed.indexOf(".") - 1 : 0;
+  const step = hints?.step !== undefined && hints.step > 0 ? hints.step : 1;
+  const decimals = Math.max(decimalsOf(trimmed), decimalsOf(String(step)));
+  let next = Number(trimmed) + steps * step;
   // Where a number cannot be negative, it stops at zero.
-  const next = signed ? Number(trimmed) + steps : Math.max(0, Number(trimmed) + steps);
+  if (!signed) {
+    next = Math.max(0, next);
+  }
+  next = clamp(next, hints);
   return decimals === 0 ? String(Math.round(next)) : next.toFixed(decimals);
+}
+
+/** How many decimals a number is written with. */
+function decimalsOf(text: string): number {
+  return text.includes(".") ? text.length - text.indexOf(".") - 1 : 0;
+}
+
+/** `value` kept within the range `hints` gives, if any. */
+function clamp(value: number, hints: SourceEditorHints | undefined): number {
+  const low = hints?.min ?? -Infinity;
+  const high = hints?.max ?? Infinity;
+  return low > high ? value : Math.min(high, Math.max(low, value));
+}
+
+/** Why the number `entry` is outside the range its hints give, as `At most 64`, or nothing. */
+export function rangeProblem(entry: string, hints: SourceEditorHints | undefined): string | undefined {
+  const value = Number(entry);
+  if (hints === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
+    // An empty range bounds nothing.
+    return undefined;
+  }
+  if (hints.min !== undefined && value < hints.min) {
+    return `At least ${hints.min}`;
+  }
+  if (hints.max !== undefined && value > hints.max) {
+    return `At most ${hints.max}`;
+  }
+  return undefined;
+}
+
+/** A choice as the list offers it: the text its editor holds for it, and its label. */
+export interface Choice {
+  readonly value: string;
+  readonly label?: string | undefined;
+}
+
+/**
+ * The choices of `hints` that `kind`'s editor takes, as its field holds them: a number's text for a
+ * number, a string's content for a text or a color.
+ */
+export function choicesOf(hints: SourceEditorHints | undefined, kind: EditTarget["kind"]): Choice[] {
+  const choices: Choice[] = [];
+  for (const choice of hints?.choices ?? []) {
+    const value = choice.value;
+    if (kind === "number" && value.kind === "number" && isNumericLiteral(value.text)) {
+      choices.push({ value: value.text, label: choice.label });
+    } else if ((kind === "text" || kind === "color") && value.kind === "string") {
+      choices.push({ value: value.value, label: choice.label });
+    }
+  }
+  return choices;
+}
+
+/** Whether `a` and `b` are the same value of `kind`: the same number, however written, or the same text. */
+export function sameValue(kind: EditTarget["kind"], a: string, b: string): boolean {
+  if (kind === "number") {
+    const left = Number(a.trim());
+    const right = Number(b.trim());
+    return a.trim() !== "" && b.trim() !== "" && Number.isFinite(left) && left === right;
+  }
+  return a === b;
+}
+
+/**
+ * The rows of a choices list: the default's first, when `fallback` gives one, reading `Default` and
+ * its value; then each choice, its label and its value after it, quieter, or its value alone when
+ * no choice has a label. The row of `current` is marked: the default's when `current` is undefined.
+ */
+export function choiceRows(
+  document: Document,
+  target: EditTarget,
+  choices: readonly Choice[],
+  current: string | undefined,
+  fallback: string | undefined
+): HTMLElement[] {
+  const labeled = choices.some((choice) => choice.label !== undefined);
+  const row = (value: string, label: string | undefined, marked: boolean): HTMLElement => {
+    const option = document.createElement("div");
+    option.className = marked ? "option choice current" : "option choice";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(marked));
+    option.dataset["value"] = value;
+    if (label !== undefined) {
+      option.dataset["label"] = label;
+      const name = document.createElement("span");
+      name.className = "choice-label";
+      name.textContent = label;
+      option.append(name);
+    } else if (labeled) {
+      option.append(Object.assign(document.createElement("span"), { className: "choice-label" }));
+    }
+    const shown = document.createElement("span");
+    shown.className = label === undefined && !labeled ? "choice-value alone" : "choice-value";
+    if (target.kind === "color") {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.backgroundColor = value.trim();
+      swatch.setAttribute("aria-hidden", "true");
+      if (swatch.style.backgroundColor !== "") {
+        shown.append(swatch);
+      }
+    }
+    shown.append(value);
+    option.append(shown);
+    return option;
+  };
+  const rows: HTMLElement[] = [];
+  if (fallback !== undefined) {
+    const option = row(fallback, "Default", current === undefined);
+    option.classList.add("choice-default");
+    option.dataset["default"] = "true";
+    rows.push(option);
+  }
+  const marked = current === undefined ? -1 : choices.findIndex((choice) => sameValue(target.kind, choice.value, current));
+  choices.forEach((choice, position) => rows.push(row(choice.value, choice.label, position === marked)));
+  return rows;
+}
+
+/** Whether the choice `option` holds `typed`: in its label or its value, ignoring case. */
+export function choiceMatches(option: HTMLElement, typed: string): boolean {
+  const query = typed.trim().toLowerCase();
+  if (query === "") {
+    return true;
+  }
+  const label = (option.dataset["label"] ?? "").toLowerCase();
+  const value = (option.dataset["value"] ?? "").toLowerCase();
+  return label.includes(query) || value.includes(query);
+}
+
+/**
+ * What an unwritten property's editor opens on: its default, when it is a literal its editor takes,
+ * as a string's content or a case's name; otherwise nothing.
+ */
+export function defaultValue(written: string | undefined, editor: TypeEditor | undefined): string {
+  const text = written?.trim();
+  if (text === undefined || editor === undefined) {
+    return "";
+  }
+  switch (editor.kind) {
+    case "number":
+      return isNumericLiteral(text) ? text : "";
+    case "boolean":
+      return text === "true" || text === "false" ? text : "";
+    case "case": {
+      const name = text.slice(text.lastIndexOf(".") + 1);
+      return editor.cases?.some((candidate) => candidate.name === name) === true ? name : "";
+    }
+    default:
+      return text.startsWith('"') && text.endsWith('"') && text.length >= 2 ? (decodeString(text) ?? "") : "";
+  }
+}
+
+/**
+ * An unwritten property's default as the reading reads values: a string without its quotes, with
+ * its swatch when it is a color, a boolean as its mark, and anything else as written. Nothing for a
+ * property with no default.
+ */
+export function defaultShown(
+  document: Document,
+  written: string | undefined,
+  editor: TypeEditor | undefined,
+  format: SourceValueFormat | undefined
+): Node[] {
+  const text = written?.trim();
+  if (text === undefined) {
+    return [];
+  }
+  if (text === "true" || text === "false") {
+    const mark = document.createElement("span");
+    mark.className = `sheet-boolean ${text}`;
+    mark.textContent = BOOLEAN_MARKS[text];
+    mark.title = text;
+    mark.setAttribute("aria-label", text);
+    return [mark];
+  }
+  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
+    const words = decodeString(text) ?? text.slice(1, -1);
+    if (editor?.kind === "color" || format === "color") {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.backgroundColor = words.trim();
+      swatch.setAttribute("aria-hidden", "true");
+      return swatch.style.backgroundColor === "" ? [document.createTextNode(words)] : [swatch, document.createTextNode(words)];
+    }
+    return [document.createTextNode(words)];
+  }
+  return [document.createTextNode(text)];
 }
 
 /** A doc comment's first paragraph as plain text, for one line under a case's name. */

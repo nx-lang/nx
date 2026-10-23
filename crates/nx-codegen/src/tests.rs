@@ -3215,3 +3215,23 @@ fn generated_typescript_for_function_reference_sites_type_checks() {
     assert!(text.contains("(...args: never[]) => unknown"), "{text}");
     assert_generated_typescript_artifact_type_checks(&artifact);
 }
+
+#[test]
+fn a_record_with_a_property_list_condition_fails_before_emission() {
+    // Codegen does not bind conditional properties yet, so it refuses the record rather than
+    // emit it without them.
+    let artifact = artifact_from_source(
+        r#"
+type Theme = { accent:string muted?:string }
+let flag = true
+let root() = { <Theme accent="c" if flag { muted="d" } /> }
+"#,
+    );
+    let error = emit_program(&artifact, &CodegenOptions::javascript()).expect_err("codegen error");
+
+    assert!(error.diagnostics.iter().any(|diagnostic| diagnostic.code()
+        == Some("codegen-unsupported-construct")
+        && diagnostic
+            .message()
+            .contains("conditional element property fragments")));
+}

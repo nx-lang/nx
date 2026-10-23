@@ -1,7 +1,7 @@
 /**
  * ABI version this loader is written against. It must equal the module's `nx_wasm_abi_version`.
  */
-export const abiVersion = 9;
+export const abiVersion = 10;
 
 /**
  * The operation succeeded; the payload is its result, JSON unless the export says otherwise.

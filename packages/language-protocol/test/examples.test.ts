@@ -148,6 +148,13 @@ export const sourceEditAnswer: SourceEditAnswer = {
 
 export const sourceEditRefusal: SourceEditAnswer = { edits: [], refused: "notEditable" };
 
+export const addPropertyRequest: SourceEditRequest = {
+  documents,
+  uri: "nx://tenant/ui.nx",
+  key: "root.value",
+  edit: { kind: "addProperty", name: "color", value: { kind: "string", value: "#c8a27a" } },
+};
+
 /** An in-process implementation, the shape an editor integration is tested against. */
 export const fakeService: NxLanguageService = {
   hover: async () => hoverAnswer,
@@ -173,6 +180,7 @@ test("every example round-trips through JSON without loss", () => {
     sourceEditRequest,
     sourceEditAnswer,
     sourceEditRefusal,
+    addPropertyRequest,
   ]) {
     assert.deepEqual(JSON.parse(JSON.stringify(example)), example);
   }
