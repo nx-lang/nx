@@ -16,7 +16,7 @@ from `let`s guessed at intent from types alone, so they wait for design-system s
 
 ## What Changes
 
-- **More properties.** A selected element ends with a quiet `+ N more` row. Opening it lists the
+- **More properties.** A selected element ends with a quiet `Show N unset properties` row. Opening it lists the
   properties the element does not write, dimmed, each with its default and doc. Editing one writes it.
   A new `sourceEdit` edit, `addProperty`, writes an attribute into an element: on its line for a
   one-line element, on a line of its own for one written a property per line.

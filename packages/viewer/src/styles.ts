@@ -532,6 +532,8 @@ export const styles = `
 .source .more-toggle:hover > .more-label, .source .more-toggle:focus-visible > .more-label { color: var(--nx-viewer-foreground, CanvasText); }
 .source .more-toggle:focus-visible > .more-label { text-decoration: underline; }
 .source .dimmed-row { opacity: var(--nx-viewer-dimmed-opacity, 0.55); outline: none; }
+/* A row being set reads at full strength, its field as any other. */
+.source .dimmed-row:has(.field) { opacity: 1; }
 .source .dimmed-row:focus-visible, .source .added-row:focus-visible { opacity: 1; background: var(--nx-viewer-hover, light-dark(#0000000a, #ffffff0d)); border-radius: 3px; outline: none; }
 .source .dimmed-row[hidden], .source .added-row[hidden] { display: none; }
 .source .more-default {
@@ -539,8 +541,21 @@ export const styles = `
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-size: 0.85em;
 }
-/* An optional property with no default still takes a click where its value would be. */
-.source .more-value:empty { display: inline-block; min-width: 4ch; min-height: 1em; vertical-align: text-bottom; }
+/* An optional property with no default keeps a place for its value, as wide as a short entry, so the
+   mark under the pointer and the field it opens are a size to click and type in; it reads the type
+   the property takes, quieter. */
+.source .more-value:empty, .source .more-value > .field:empty {
+  display: inline-block;
+  width: min(24ch, 100%);
+  min-height: 1lh;
+  vertical-align: top;
+}
+.source .more-value:empty::before {
+  content: attr(data-placeholder);
+  color: var(--nx-viewer-unit-color, light-dark(#8c959f, #858585));
+}
+/* An empty field still reads as one, with room for the caret. */
+.source .field:empty { display: inline-block; min-width: 1ch; min-height: 1lh; vertical-align: top; }
 .source .more-filter-row > .more-filter {
   grid-column: 1 / -1;
   width: min(24ch, 100%);

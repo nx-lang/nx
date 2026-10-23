@@ -11,10 +11,10 @@
 
 ## 3. Discovery and the row menu in the viewer
 
-- [x] 3.1 The `+ N more` row on the selected element (sheet, group or one-line element): N counts the unwritten properties Visual can list; opening it draws them dimmed in visualizer order, else declaration order, with defaults, docs in the hover card, and a filter field past 12; verify with unit tests over fixtures
+- [x] 3.1 The `Show N unset properties` row on the selected element (sheet, group or one-line element): N counts the unwritten properties Visual can list; opening it draws them dimmed in visualizer order, else declaration order, with defaults, docs in the hover card, and a filter field past 12; verify with unit tests over fixtures
 - [x] 3.2 Editing a dimmed row fires `nx-edit` with `addProperty`; the row reads as written in place on the next tree, the selection kept; properties whose type has no editor fire `nx-open`; verify "Nothing moves" for an added property
 - [x] 3.3 The row menu: `⋯` on a selected or hovered written row, Reset to default or Remove, and Show in Source; keyboard reachable; no menu on dimmed rows; remove the quiet button from phase 1
-- [x] 3.4 Styles for the dimmed rows, the `+ N more` row and the menu, light and dark
+- [x] 3.4 Styles for the dimmed rows, the unset-properties row and the menu, light and dark
 
 ## 4. Hinted editors in the viewer
 
@@ -38,5 +38,5 @@
 
 - [x] 6.1 Extend the "Visual test cases" example with the cases in the `playground` scenario, each with a comment saying what to try
 - [x] 6.2 Verify the playground scenarios by tests and screenshots, in light and dark and at 375 pixels wide
-- [x] 6.3 Document hints, `+ N more` and the row menu in the viewer, visualizer and language packages' READMEs and changelogs (redone for 5.1 to 5.5)
+- [x] 6.3 Document hints, the unset-properties row and the row menu in the viewer, visualizer and language packages' READMEs and changelogs (redone for 5.1 to 5.5)
 - [x] 6.4 Run `cargo test`, `pnpm -r build` and `pnpm -r test`, and `openspec validate add-visual-property-editing --strict`, all passing

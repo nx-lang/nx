@@ -28,14 +28,17 @@ select the element that held the row.
 
 ### Requirement: A selected element offers the properties it does not write
 When the host has set `editable` and an element is selected, the element SHALL end it with a quiet
-row reading `+ N more`, N being how many of the element's declared properties it does not write,
+row reading `Show N unset properties` (`property` for one), and `Hide unset properties` while open,
+N being how many of the element's declared properties it does not write,
 content properties left out; for an element of a union's case, its declared properties are the
 union's shared ones and the case's, and a property written in any branch of a property-list
 condition or match counts as written; an element that writes all of them SHALL show no such row, and only the
 selected element SHALL show one. Opening the row, by a click or Enter, SHALL draw each unwritten
 property under it as a dimmed row, in the order its resolved visualizer lists properties, else in
 declaration order: its name, and its default read as the reading reads values, followed by a quiet
-`default`, or nothing for an optional property. A dimmed row's name SHALL show its property's hover
+`default`, or, for an optional property, its type, quieter, in a place for the value wide enough to
+click and type in, which a field opened there SHALL keep, its type shown until something is typed.
+The rows SHALL be drawn under the element, where it starts on its line, inside its highlight. A dimmed row's name SHALL show its property's hover
 card. With more than 12 such rows a filter field SHALL lead them, narrowing them as the reader types.
 A dimmed row whose type has an editor SHALL edit as a written value does, opening on its default; a
 commit SHALL fire `nx-edit` with the element's key and `addProperty`, the property's name and the
@@ -47,8 +50,9 @@ SHALL close it.
 #### Scenario: Seeing what else a drink can set
 - **WHEN** the reader selects `<Drink code="LAT" name="Latte" size=small />`, whose type declares
   `code`, `name`, `note?`, `size`, `iced` (default `false`), `shots` (default `1`) and `color?`
-- **THEN** the element SHALL end with `+ 4 more`, and opening it SHALL show the rows `note`, `iced`
-  reading `✗ default`, `shots` reading `1 default` and `color`
+- **THEN** the element SHALL end with `Show 4 unset properties`, and opening it SHALL show the rows
+  `note` reading `string`, quieter, `iced` reading `✗ default`, `shots` reading `1 default` and
+  `color` reading its type
 
 #### Scenario: Setting one
 - **WHEN** the reader clicks the cross of the dimmed row `iced`

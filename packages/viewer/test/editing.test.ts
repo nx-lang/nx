@@ -820,16 +820,16 @@ describe("what an element does not write", () => {
     assert.deepEqual(listed("latte.value.code"), [], "an attribute is no element");
   });
 
-  it("ends the selected element with + N more, and only the selected one, only when editable", async () => {
+  it("ends the selected element with Show N unset properties, and only the selected one, only when editable", async () => {
     const element = show(await fixture("adding"));
     assert.equal(moreToggle(element), null, "nothing is selected");
     element.selection = "latte.value";
-    assert.equal(moreToggle(element)?.textContent, "+ 4 more");
+    assert.equal(moreToggle(element)?.textContent, "Show 4 unset properties");
     assert.equal(root(element).querySelectorAll(".more-toggle").length, 1);
     element.selection = "latte.value.code";
     assert.equal(moreToggle(element), null, "a row is not an element");
     element.selection = "wide.value";
-    assert.equal(moreToggle(element)?.textContent, "+ 14 more");
+    assert.equal(moreToggle(element)?.textContent, "Show 14 unset properties");
     const reading = show(await fixture("adding"), false);
     reading.selection = "latte.value";
     assert.equal(moreToggle(reading), null, "not when the reading only reads");
@@ -874,6 +874,21 @@ describe("what an element does not write", () => {
     assert.equal(element.selection, "latte.value", "the selection is kept");
   });
 
+  it("names the toggle for what it lists, and reads an unset value's type in its place", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    assert.equal(moreToggle(element)!.getAttribute("aria-label"), "4 unset properties");
+    moreToggle(element)!.click();
+    assert.equal(moreToggle(element)!.textContent, "Hide unset properties");
+    assert.equal(moreToggle(element)!.getAttribute("aria-expanded"), "true");
+    const note = rendered(element, "latte.value.note.value");
+    assert.equal(note.textContent, "", "nothing is written there");
+    assert.equal(note.dataset["placeholder"], "string", "its type, as a placeholder");
+    assert.equal(rendered(element, "latte.value.iced.value").dataset["placeholder"], undefined, "a default reads instead");
+    note.click();
+    assert.equal(field(element)!.dataset["placeholder"], "string", "the field keeps it until something is typed");
+  });
+
   it("moves nothing when the newer tree writes the added property", async () => {
     const fixed = await fixture("adding");
     const element = show(fixed);
@@ -885,7 +900,7 @@ describe("what an element does not write", () => {
     element.tree = (await treeOf([{ uri: "nx:///adding.nx", identity: "adding.nx", source: text }], { visualizers: { modules: [] } })).tree;
     assert.equal(element.selection, "latte.value", "the selection is kept");
     assert.ok(rendered(element, "latte.value.iced"), "the property reads as written");
-    assert.equal(moreToggle(element)?.textContent, "+ 3 more");
+    assert.equal(moreToggle(element)?.textContent, "Hide unset properties");
     assert.deepEqual(
       moreRows(element).map((row) => row.dataset["name"]),
       ["note", "shots", "color"],
@@ -1467,7 +1482,7 @@ describe("bindings and other elements", () => {
     const element = show(await fixture("bindings"));
     const { edits } = events(element);
     element.selection = "promo.value";
-    assert.equal(moreToggle(element)?.textContent, "+ 1 more");
+    assert.equal(moreToggle(element)?.textContent, "Show 1 unset property");
     moreToggle(element)!.click();
     assert.deepEqual(moreRows(element).map(reads), ["pumps 1 default"]);
     rendered(element, "promo.value.pumps.value").click();

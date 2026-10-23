@@ -1141,7 +1141,7 @@ export class NxViewerElement extends ElementBase {
     if (frame.width === 0) {
       return;
     }
-    const draw = (from: HTMLElement, rows: DOMRect, className: string): void => {
+    const draw = (from: HTMLElement, rows: DOMRect, className: string, reach = 0): void => {
       const start = (from.matches(".sheet-row") ? from.querySelector<HTMLElement>(":scope > .sheet-name") : from) ?? from;
       // A block's later lines start further left, at its source indentation; it starts where its
       // first line does.
@@ -1156,7 +1156,9 @@ export class NxViewerElement extends ElementBase {
       box.className = `highlight ${className}`;
       box.style.left = `${left}px`;
       box.style.top = `${rows.top - frame.top + this.#body.scrollTop}px`;
-      const right = tight === undefined ? frame.width - 8 : tight.right - frame.left + pad + this.#body.scrollLeft;
+      // Rows drawn under a line element reach as far as the widest of them.
+      const right =
+        tight === undefined ? frame.width - 8 : Math.max(tight.right, reach) - frame.left + pad + this.#body.scrollLeft;
       box.style.width = `${Math.max(0, right - left)}px`;
       box.style.height = `${rows.height}px`;
       layer.append(box);
@@ -1180,7 +1182,19 @@ export class NxViewerElement extends ElementBase {
       }
       // A line's unwritten properties, listed under it, are part of what is selected.
       if (this.#moreBlock !== undefined && this.#body.contains(this.#moreBlock)) {
-        draw(unit, this.#moreBlock.getBoundingClientRect(), "selected-body");
+        // The rows' cells stretch across the block, so how far they reach is read from what they hold.
+        const reach = [...this.#moreBlock.querySelectorAll<HTMLElement>(".more-label, .more-filter, .sheet-name, .more-value, .more-default, .unit")]
+          .filter((part) => part.closest<HTMLElement>(".sheet-row")?.hidden !== true)
+          .map((part) => {
+            // A cell may stretch across its grid; its text's own box says where it ends.
+            if (part.childNodes.length === 0) {
+              return part.getBoundingClientRect().right;
+            }
+            const range = this.ownerDocument.createRange();
+            range.selectNodeContents(part);
+            return range.getBoundingClientRect().right;
+          });
+        draw(unit, this.#moreBlock.getBoundingClientRect(), "selected-body", Math.max(0, ...reach));
       }
     }
     const hovered = this.#hoveredUnit;
@@ -1540,8 +1554,10 @@ export class NxViewerElement extends ElementBase {
     field.spellcheck = target.kind === "run";
     field.textContent = text;
     // A placeholder reads, quieter, while the field is empty, and is never written.
-    const placeholder = target.kind === "text" ? target.hints?.placeholder : undefined;
-    if (placeholder !== undefined) {
+    // An unset property's field keeps reading the type its place showed until something is typed.
+    const placeholder =
+      (target.kind === "text" ? target.hints?.placeholder : undefined) ?? (target.adding === true ? span.dataset["placeholder"] : undefined);
+    if (placeholder !== undefined && placeholder !== "") {
       field.dataset["placeholder"] = placeholder;
       field.setAttribute("aria-placeholder", placeholder);
     }
@@ -2720,8 +2736,10 @@ export class NxViewerElement extends ElementBase {
     toggle.setAttribute("aria-expanded", String(open));
     const label = document.createElement("span");
     label.className = "more-label";
-    label.textContent = `+ ${unwritten.length} more`;
-    toggle.setAttribute("aria-label", `${unwritten.length} more ${unwritten.length === 1 ? "property" : "properties"}`);
+    const properties = unwritten.length === 1 ? "property" : "properties";
+    // Named for what it lists, unset properties, so it does not read as more of those written.
+    label.textContent = open ? `Hide unset ${properties}` : `Show ${unwritten.length} unset ${properties}`;
+    toggle.setAttribute("aria-label", `${unwritten.length} unset ${properties}`);
     toggle.append(label);
     rows.push(toggle);
     if (open) {
@@ -2770,6 +2788,13 @@ export class NxViewerElement extends ElementBase {
       } else {
         element.after(block);
       }
+      // Under the element itself, inside its highlight, where it starts partway along its line.
+      const blockBox = block.getBoundingClientRect();
+      const from = element.getClientRects()[0];
+      if (blockBox.width > 0 && from !== undefined) {
+        // In a narrow pane, no further in than halfway, so the rows keep room to read.
+        block.style.paddingLeft = `${Math.min(blockBox.width / 2, Math.max(0, from.left - blockBox.left))}px`;
+      }
       this.#moreDrawn = [block];
       this.#moreBlock = block;
     }
@@ -2810,6 +2835,10 @@ export class NxViewerElement extends ElementBase {
     cell.className = "sheet-value";
     const value = document.createElement("span");
     value.className = "more-value";
+    // With no default to show, the value's place reads the type it takes, quieter.
+    if (property.default === undefined) {
+      value.dataset["placeholder"] = hints?.placeholder ?? property.type;
+    }
     const start = defaultValue(property.default, editor);
     value.append(...defaultShown(document, property.default, editor, entry.format));
     cell.append(value);

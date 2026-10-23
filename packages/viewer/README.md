@@ -316,11 +316,14 @@ press it. A written row shows a quiet `⋯` at its end under the pointer and whe
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default, Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 
-A selected element ends with a quiet row, `+ N more`, N being the properties it does not write; one
+A selected element ends with a quiet row, `Show N unset properties` (`Hide unset properties` while
+open), N being the properties it does not write; one
 written under a property-list `if` or match counts as written, and an element of a union's case
 offers its case's properties. A
 click on it, or Enter, lists them as dimmed rows in its visualizer's order, else declaration order,
-each with its default and a quiet `default`, and a filter field past twelve. A dimmed row edits as a
+each with its default and a quiet `default`, or an optional one's type, quieter, in a place wide
+enough to click and type in, and a filter field past twelve. Under a one-line element the rows start
+where the element does. A dimmed row edits as a
 written value does, opening on its default; a commit fires `nx-edit` with the element's key and
 `{ kind: "addProperty", name, value }`, and the row reads as written until the host's tree. A
 property no editor takes, such as a record, fires `nx-open` with the element's key on Enter or a
@@ -419,7 +422,7 @@ restyle it:
 | `--nx-viewer-field-selection`         | a light or dark blue, selected text in a field |
 | `--nx-viewer-invalid`                 | a light or dark red, the ring around an entry a field cannot take, and the border of the note saying why |
 | `--nx-viewer-unit-color`              | a gray, for a number's unit, a placeholder and a dimmed row's `default` |
-| `--nx-viewer-more-color`              | a gray, for the `+ N more` row            |
+| `--nx-viewer-more-color`              | a gray, for the unset-properties row      |
 | `--nx-viewer-dimmed-opacity`          | `0.55`, for a property an element does not write |
 
 ## Development

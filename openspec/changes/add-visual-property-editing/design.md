@@ -51,11 +51,16 @@ Penpot's typed tokens), so named values wait for design-system support.
 
 ### More properties is a row on the selected element, not a panel
 
-The selected element's sheet, or its line, ends with a quiet `+ N more` row, N being the properties
+The selected element's sheet, or its line, ends with a quiet `Show N unset properties` row (Bret,
+2026-10-23: `+ N more` read as more written properties), `Hide unset properties` while open, N being the properties
 it does not write that Visual can list. It shows only on the selected element, so the reading stays
 as compact as Source until the reader asks. Opening it (click, or Enter on the row) draws the unwritten
 properties under it as dimmed rows, in the visualizer's order, else declaration order, each reading its
-default (`size  medium  default`) or nothing for an optional property, with its doc in the hover card.
+default (`size  medium  default`) or, for an optional property, its type, quieter (`note  string`),
+in a place as wide as a short entry (24 characters, or the row's width when narrower) that the hover
+mark and the field it opens fill, with its doc in the hover card. Under a one-line element that starts
+partway along its line, as `let <Special …/> = <Drink …/>`, the rows start under the element, inside
+its highlight, no further in than half the pane.
 Past 12 a filter field leads the list. A one-line element opens its list under its line, as a group
 would. Editing a dimmed row's value commits `addProperty`; the row then reads as written, in place,
 so nothing jumps. Collapsing the list, or selecting elsewhere, hides it again.
@@ -152,7 +157,7 @@ worry that a button beside each row makes destructive changes too easy. Dimmed r
 
 ## Risks / Trade-offs
 
-- **The `+ N more` row adds a line to the selected element.** It is one quiet line, only on the
+- **The unset-properties row adds a line to the selected element.** It is one quiet line, only on the
   selection. If it reads as clutter, it can move into the row menu.
 - **Choices write literals.** A document that picks `lg` holds `20`, not a name; if the library
   later changes its scale, the document keeps `20`. That is the point of choices as suggestions;
@@ -162,7 +167,7 @@ worry that a button beside each row makes destructive changes too easy. Dimmed r
 
 ## Open Questions
 
-1. The `+ N more` row: on the selected element only (proposed), or on every multi-line element?
+1. The unset-properties row: on the selected element only (proposed), or on every multi-line element?
 2. Named values: answered (Bret, 2026-10-22): not yet; choices a library declares instead, tokens
    with design-system support later.
 3. Sliders: answered (Bret, 2026-10-22): none for now; choices and steppers instead.

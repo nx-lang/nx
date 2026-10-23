@@ -29,7 +29,7 @@ All notable changes to this project will be documented in this file.
   A visualizer declaration's value may hold number literals. With `visualizers`, the source tree
   carries each property's resolved hints, its choices typed as `setValue` values, and lists the types
   of the properties an element does not write.
-- `<nx-viewer>`: a selected element lists the properties it does not write under `+ N more`, and sets
+- `<nx-viewer>`: a selected element lists the properties it does not write under `Show N unset properties`, and sets
   one where it reads; a written row has a menu (Reset to default or Remove, and Show in Source);
   numbers edit with ranges, units and steppers (click, Shift+click, or drag up and down), a number's
   or a string's choices list under its field with the default's row first, unions edit as segmented
