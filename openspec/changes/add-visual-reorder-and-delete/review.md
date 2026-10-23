@@ -88,7 +88,7 @@ confirmed RF1, RF2 and RF5.
   the newer tree comes, which leaves no list" asserts that only one `remove` is fired. Viewer
   tests pass (185).
 
-### 🟡 Fixed - RF3 In a one-line list, an item's hidden `⋯` overlaps the next item and is still clickable
+### ✅ Verified - RF3 In a one-line list, an item's hidden `⋯` overlaps the next item and is still clickable
 - **Severity:** Low
 - **Evidence:** `#markItems` (index.ts:1528-1557) appends the `.item-menu` anchor inside the
   `.line-element` itself. For an element in a list drawn on one line (`options={ <Option …/> <Option
@@ -144,6 +144,25 @@ confirmed RF1, RF2 and RF5.
   an item of a let's one-line sequence after the sequence". Checked in Chromium with a temporary
   `let xs = { <Option …/> <Option …/> <Option …/> }` (not committed): the mark sits past `}`, a
   point at `xs.value[1]`'s `<` hits that item, and the mark opens Move down, Delete, Show in Source.
+- **Verification (round 2):** In f1b90a7, `#lineEnd` falls back to the drawn list that holds
+  the item, and every item that shares its line now gets a `shared` mark. Shared marks show only
+  while their item is selected, never on hover. I re-ran my Chromium repro (`let xs = { <O …/>
+  <O …/> <O …/> }` typed into the playground, at 2000 px wide):
+  - All three `xs` marks are `shared` and hang at x=675–689, past the `}`. The items span
+    x=120–656.
+  - Hovering `xs.value[0]` and clicking the start of `xs.value[1]` hits `xs.value[1]`'s `<` and
+    selects it. This is the case that failed before.
+  - With `xs.value[0]` selected, only its mark is visible, and the start of `xs.value[1]` still
+    hits that item.
+  - Clicking the visible mark opens "Actions for O": Move down, Delete, Show in Source.
+  - The row case (`let row = <P options={ … } />`) and `let pair` are unchanged and correct.
+
+  The new viewer test passes, along with the whole suite (186).
+
+  One observation, not a finding: at 1300 px, a line that ends near the reading pane's right
+  edge puts the hung mark under the output pane, so the pointer cannot reach it there. The
+  written row's own `⋯` (`left: 100%`) has always behaved this way, and Shift+F10 or the
+  context-menu key still opens the menu.
 
 ### ✅ Verified - RF4 The implementation commit changed approved requirements, and one rewritten sentence is hard to parse
 - **Severity:** Low
@@ -283,3 +302,5 @@ confirmed RF1, RF2 and RF5.
   RF3 is reopened: a one-line list that is neither a row's value nor inside a one-line element,
   such as a `let` holding a one-line sequence, still hangs each item's mark over the next item,
   where a click opens the wrong menu. No new findings.
+- **Verification (round 2), against f1b90a7:** RF3 is verified. All findings RF1–RF6 are now
+  verified, and there are no new findings.
