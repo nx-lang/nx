@@ -736,7 +736,7 @@ the browser's extra line break, and a line break in the middle commits as typed.
 and closes `align`'s popover without selecting anything. `unit` is gone from the library, analysis,
 the source tree, the protocol, the viewer and the docs.
 
-### 🟡 Fixed - RF31 A hover tool taking room on a line that just fits wraps the line and moves the whole reading below it
+### ✅ Verified - RF31 A hover tool taking room on a line that just fits wraps the line and moves the whole reading below it
 - **Severity:** Medium
 - **Evidence:** `#showTools` puts the tools into the line as static content when more of the line
   follows (`packages/viewer/src/index.ts:2466-2475`, `.value-tools.in-line { position: static }` in
@@ -756,8 +756,9 @@ the source tree, the protocol, the viewer and the docs.
   fits, rests on a value with tools, and checks that the element keeps one line and the next unit's
   top stays put.
 - **Fix:** `#showTools` measures the line (`.line-element`, header, tag line or sheet value) before and after the tools join it; if it grew, they lose `in-line` and cover the gap, as in a sheet row, so nothing below moves. Test "covers the gap rather than wrap a line that only just fits"; your `wrap3.mjs` at 462 px now keeps the Latte line at 18 px and the next item in place. Spec, design and README say so.
+- **Verification:** Verified at `26df6a8`. `#showTools` takes the tools out, measures the line's height, puts them back and drops `in-line` if the line grew (`index.ts:2474-2485`). With `<nx-viewer>` 462 px wide in headless Chromium, resting on the LAT Drink's `size` now draws the chevron over the gap: the line stays 18 px and the next item stays at y = 455. At 502 px, where the room fits, the tools still take room in the line and the line grows from 391 to 407 px wide, still on one line. The jsdom test mocks the height, which is fine for a layout check. The spec and design describe the fallback.
 
-### 🟡 Fixed - RF32 Closing a case's popover from its chevron removes the chevron under the pointer, and the next click selects the element
+### ✅ Verified - RF32 Closing a case's popover from its chevron removes the chevron under the pointer, and the next click selects the element
 - **Severity:** Medium
 - **Evidence:** With a case's popover open, a press on its chevron reaches `#onDocumentPointerDown`
   first, in the capture phase (`index.ts:403-425`). The press is outside the popover, so the handler
@@ -776,8 +777,9 @@ the source tree, the protocol, the viewer and the docs.
   popover, show the tools again for that key, as `#rehover` does after a stepper click. Extend the
   test: after closing, the chevron is still shown, and a second press opens the popover again.
 - **Fix:** `#onDocumentPointerDown` leaves a press on `#tools` to `#onToolsPointerDown`, and closing a case's popover from its chevron shows the tools again for that key. The case-chevron test now closes, checks the chevron stays in-line, presses again to reopen, and that nothing is selected. In Chromium, three clicks on `strip`'s `align` chevron open, close and reopen with the selection empty.
+- **Verification:** Verified at `26df6a8`. A press on `#tools` is now left out of the document handler's cancel (`index.ts:420-422`), and the chevron's own handler closes the popover and shows the tools again (`index.ts:2625-2633`). In Chromium on `strip`'s `align`, the first click opens the popover. The second closes it, and the chevron stays under the pointer. The third opens it again. No `nx-select` fires, and the unset-properties row never shows. The extended jsdom test covers the reopen and the empty selection.
 
-### 🟡 Fixed - RF33 In an unset-properties row, the tools take room and push `default` aside, and under a one-line element they wait as if outside the selection
+### ✅ Verified - RF33 In an unset-properties row, the tools take room and push `default` aside, and under a one-line element they wait as if outside the selection
 - **Severity:** Low
 - **Evidence:** A dimmed row reads `value  default`. `#followedOnItsLine` counts the quiet
   `.more-default` sibling as more of the line (`index.ts:2487-2504`), so the tools get `in-line` and
@@ -793,8 +795,9 @@ the source tree, the protocol, the viewer and the docs.
   row's tools overlay as a sheet row's do. Also count the open `#moreBlock` as part of the selection
   in `#hoverTools`. Add a test on both.
 - **Fix:** Partly as recommended. `#hoverTools` counts a value inside the open `#moreBlock` as on the selection, so the tools show at once (test "shows an unset property's tools at once, under a one-line element selected"). I kept the tools taking room before the quiet `default`, rather than covering it: drawing them over the gap would hide the word, and moving it within its own row moves nothing else. The spec's "Room on a line", the design and the README now say an unset property's value moves its `default` aside.
+- **Verification:** Verified at `26df6a8`. The fixer's variant is acceptable. Moving the quiet `default` aside within its own row moves nothing else, and covering the word would hide it. The behavior is now specified in the viewer delta's "Room on a line", the design and the README, so code and spec agree. The 300 ms wait is gone: a value inside the open `#moreBlock` counts as on the selection (`index.ts:2571-2574`). In Chromium, with `strip` selected and its list open, `gap`'s tools are `in-line` 50 ms after the pointer arrives. A new jsdom test covers this.
 
-### 🟡 Fixed - RF34 The specs and docs still describe the earlier behavior in places
+### ✅ Verified - RF34 The specs and docs still describe the earlier behavior in places
 - **Severity:** Low
 - **Evidence:**
   - The base `viewer` requirement "A selection is a unit of the reading"
@@ -823,8 +826,9 @@ the source tree, the protocol, the viewer and the docs.
   "Room on a line" that items of a braced list take room too, or stop there. Add a clause to the
   changelog entry.
 - **Fix:** Added a MODIFIED "A selection is a unit of the reading" to the viewer delta (a click on an editable value with `editable` set opens its editor and leaves the selection; the scenario names a word that is not an editable value), and qualified the README's Selection section. Proposal (steppers and the Capabilities line), the design's Risks and task 5.7 are updated. "Room on a line" now covers earlier items of a braced list, an unset property's value, and the wrap fallback. The CHANGELOG's `<nx-viewer>` entry mentions the hover tools and that a click on a value no longer selects.
+- **Verification:** Verified at `26df6a8`. The viewer delta has a MODIFIED "A selection is a unit of the reading". It matches the base requirement word for word, except that it carves out a click on an editable value with `editable` set and narrows the "Selecting a line" scenario to a word that is not an editable value, and it keeps all five scenarios. The README's Selection section, the proposal's stepper wording and Capabilities line, the design's Risks, task 5.7, the "Room on a line" text (braced-list items, unset values, the wrap fallback) and the CHANGELOG entry are all updated. `openspec validate --strict` passes.
 
-### 🟡 Fixed - RF35 Small leftovers in the viewer's code after the latest commits
+### ✅ Verified - RF35 Small leftovers in the viewer's code after the latest commits
 - **Severity:** Low
 - **Evidence:**
   - `TOOLS_REST_MS` was inserted between `DRAWN_UNITS` and its doc comment, which leaves two doc
@@ -838,6 +842,7 @@ the source tree, the protocol, the viewer and the docs.
 - **Recommendation:** Move `TOOLS_REST_MS` below `DRAWN_UNITS` with its own comment, collapse the
   ternary to `raw.trim()`, and update the two doc comments.
 - **Fix:** `TOOLS_REST_MS` moved below `DRAWN_UNITS` with its own comment; the ternary is `raw.trim()`; `#showTools` and `#openNext` docs updated; `CHOICES_TITLE` has a doc comment.
+- **Verification:** Verified at `26df6a8`. `DRAWN_UNITS` has its own doc comment again, and so does `TOOLS_REST_MS` below it (`index.ts:175-179`). The ternary is `raw.trim()`. The `#showTools` and `#openNext` doc comments describe the current behavior, and `CHOICES_TITLE` has a doc comment.
 
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
@@ -922,3 +927,8 @@ the source tree, the protocol, the viewer and the docs.
   a case's popover from its chevron removes the chevron, so the next click selects the element and
   shows its unset-properties row (RF32). Three are Low: RF33 to RF35. Viewer tests (167), the three
   crates' Rust tests, clippy, fmt, playground tests and `openspec validate --strict` pass.
+- Verification of the 2026-10-23 review's fixes (2026-10-23, commit `26df6a8`): RF31 to RF35 are
+  verified, and nothing new was found. RF33 was fixed partly differently from the recommendation: the tools
+  still take room before the quiet `default`. That is now specified, and it is acceptable. Checked in headless
+  Chromium against the rebuilt viewer. Viewer tests (169) and `openspec validate --strict` pass. Every
+  finding from RF1 to RF35 is now verified.
