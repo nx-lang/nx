@@ -63,13 +63,15 @@ None.
   a click on a value opens its editor without changing the selection (modifying "Values edit in
   place" and "A selection is a unit of the reading").
 - `playground`: the test-cases example covers the new cases.
+- `editor-language-service`: diagnostics match the compiler's besides the editor-only
+  `editor-hint-range` for a range that only merging empties.
 
 ## Impact
 
 - `crates/nx-api/src/std/visualizer/visualizer.nx` and the visualizer resolution and diagnostics in
   the analyzer.
 - `crates/nx-language-service`: `source_edit` (`addProperty`), the source tree's visualizer values,
-  and tests.
+  the merged-range warning in its diagnostics, and tests.
 - `packages/language-protocol`: the `addProperty` edit and the visualizer hint fields.
 - `packages/viewer`: rows, menu, editors, styles, tests and README.
 - `sites/playground`: the test-cases example.

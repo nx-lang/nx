@@ -886,7 +886,7 @@ reviewer: the merged-range warning and a derived visualizer over its base.
 
 ## New Findings Discovered During 2026-10-23 15:42 Verification
 
-### 🟡 Fixed - RF38 The new scenario says analysis reports the merged-range warning, but only the language service does
+### ✅ Verified - RF38 The new scenario says analysis reports the merged-range warning, but only the language service does
 - **Severity:** Low
 - **Evidence:** The `visualizer-declarations` delta's new scenario "A range that merging empties" says
   "analysis SHALL report `editor-hint-range` at `min=100`"
@@ -907,6 +907,21 @@ reviewer: the merged-range warning and a derived visualizer over its base.
   diagnostics SHALL include"), since it depends on the declarations a document merges with. A new
   `editor-language-service` delta modifies "Language service resolves standard library declarations"
   so diagnostics match the compiler's besides this editor-only warning.
+- **Verification:** Verified at `a7547eb`. The `visualizer-declarations` requirement now says the language service reports a range that only merging empties, and the scenario says "the language service's diagnostics SHALL include". Analysis's own `min` above `max` stays analysis's. The new `editor-language-service` delta MODIFIES "Language service resolves standard library declarations". I diffed its block against the main spec (`openspec/specs/editor-language-service/spec.md`). The only difference is the inserted clause ("besides the editor-only warnings the language service adds: `editor-hint-range` for a range that only merging visualizer hints empties") and the reflow of the two lines around it. The rest of the requirement text and all six scenarios match word for word, so archiving loses nothing. `openspec validate add-visual-property-editing --strict` passes. The proposal does not yet list the new capability; see RF39.
+
+
+## New Findings Discovered During 2026-10-23 15:44 Verification
+
+### 🟡 Fixed - RF39 The proposal does not list `editor-language-service` among the modified capabilities
+- **Severity:** Low
+- **Evidence:** RF38's fix adds `specs/editor-language-service/spec.md`, a MODIFIED requirement. But
+  `proposal.md`'s "Modified Capabilities" still lists only `source-edits`, `visualizer-library`,
+  `visualizer-declarations`, `source-tree`, `viewer` and `playground`, and the Impact section does not
+  mention it either.
+- **Recommendation:** Add a bullet, such as "`editor-language-service`: diagnostics match the
+  compiler's besides the editor-only `editor-hint-range` for a range that only merging empties."
+- **Fix:** `proposal.md` lists `editor-language-service` under Modified Capabilities, and Impact names
+  the merged-range warning in the language service's diagnostics.
 
 
 ## Questions
@@ -1008,3 +1023,6 @@ reviewer: the merged-range warning and a derived visualizer over its base.
   RF38: the spec says analysis reports the merged-range warning, but only the language service does,
   so editor and compiler diagnostics now differ. `cargo test -p nx-language-service -p nx-types -p
   nx-api` (278 language-service tests), clippy and `cargo fmt --all --check` pass.
+- Verification of RF38 (2026-10-23 15:44, commit `a7547eb`): RF38 is verified. The new
+  `editor-language-service` delta matches the main spec except for the editor-only clause. One Low
+  finding is new: the proposal does not list that capability (RF39). `openspec validate --strict` passes.
