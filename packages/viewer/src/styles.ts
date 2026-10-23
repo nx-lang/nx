@@ -600,6 +600,9 @@ export const styles = `
 /* An item's menu hangs past the end of its first line from a point that takes no room. */
 .source .item-menu { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
 .source .item-menu > .row-menu { left: 0; }
+/* A folded group's header lines its parts up by their text; the mark's anchor has none, so it takes
+   the line's top instead of standing on the text and making the line taller. */
+.source .sheet.folded > .sheet-head > .item-menu { align-self: flex-start; }
 .source .sheet.selected > .sheet-head > .item-menu > .row-menu:not(.shared),
 .source .sheet-head:hover > .item-menu > .row-menu:not(.shared),
 .source .line-element.selected > .item-menu > .row-menu:not(.shared),
