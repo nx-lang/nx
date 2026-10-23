@@ -2,8 +2,7 @@
 
 ### Requirement: An item of a list is dragged by its icon
 When the host has set `editable`, the element SHALL let the reader move an item that moves: an
-element that is an item of a sequence or of element content, not inside a condition's branch or a
-loop's body, in a list of two or more items that holds no text. Where the reading draws such a list
+element that is an item of a sequence or of element content, not an item of a condition's branch or a loop's body, in a list of two or more items that holds no text. Where the reading draws such a list
 an item to a line, the item's handle SHALL be its icon, with the element's name beside it where the
 reading shows one, or its name alone where the host draws no icons; the element SHALL add no mark of
 its own for it. Over the handle the pointer SHALL show a grab cursor, and the hover card the icon or
@@ -50,8 +49,7 @@ well, where there is no handle to drag.
 
 ### Requirement: An item of a list can be deleted
 When the host has set `editable`, the element SHALL let the reader delete an item that can be
-deleted: an element that is an item of a sequence or of element content, not inside a condition's
-branch or a loop's body, in a list that holds no text, unless it is the only item of a list whose type
+deleted: an element that is an item of a sequence or of element content, not an item of a condition's branch or a loop's body, in a list that holds no text, unless it is the only item of a list whose type
 needs one or more (`FlowStep+`). With such an item selected, the reading focused and no editor open,
 Delete, or Cmd+Backspace, SHALL fire `nx-edit` with the item's key and `remove`; Backspace alone
 SHALL NOT. The element SHALL ask for no confirmation, since the host's undo takes the edit back.

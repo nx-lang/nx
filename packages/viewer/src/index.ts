@@ -1455,6 +1455,12 @@ export class NxViewerElement extends ElementBase {
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
+    // The menu mark of an item sharing its line stands apart from it, at the end of its row.
+    for (const mark of this.#body.querySelectorAll<HTMLElement>(".row-menu.shared")) {
+      if (mark.dataset["menuKey"] === key) {
+        mark.classList.add("selected");
+      }
+    }
     if (fire) {
       if (original !== undefined) {
         const words = spoken(original);
@@ -1521,6 +1527,27 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
+   * What ends the line `drawn`, drawn on one line with others, stands on: the written row it is the
+   * value of, or else the outermost element drawn on that line around it. Nothing when neither is
+   * found.
+   */
+  #lineEnd(drawn: HTMLElement): HTMLElement | undefined {
+    let outer: HTMLElement | undefined;
+    for (let at = drawn.parentElement; at !== null && at !== this.#body; at = at.parentElement) {
+      if (at.matches(".sheet-row[data-key]")) {
+        return at;
+      }
+      if (at.matches(".sheet-item, .sheet-head, .sheet, .source")) {
+        break;
+      }
+      if (at.matches(".line-element")) {
+        outer = at;
+      }
+    }
+    return outer;
+  }
+
+  /**
    * Gives each item of a list that moves or can be deleted the menu a written row has, at the end of
    * its first line, and, where the reading draws its list an item to a line and it moves, a handle
    * to drag it by: its icon and its name.
@@ -1543,9 +1570,7 @@ export class NxViewerElement extends ElementBase {
       if (line === null) {
         continue;
       }
-      // The mark hangs past the line's end from a point that takes no room, so nothing moves.
-      const anchor = this.ownerDocument.createElement("span");
-      anchor.className = "item-menu";
+      const ownLine = drawn.parentElement?.classList.contains("sheet-item") === true;
       const mark = this.ownerDocument.createElement("span");
       mark.className = "row-menu";
       mark.textContent = "\u22EF";
@@ -1553,9 +1578,22 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-haspopup", "menu");
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[at]!.name ?? "the item"}`);
       mark.dataset["menuKey"] = key;
-      anchor.append(mark);
-      line.append(anchor);
-      if (moves && drawn.parentElement?.classList.contains("sheet-item") === true) {
+      // An item that shares its line with others hangs its mark past the end of that line, shown
+      // while it is selected, where it covers none of them.
+      const end = ownLine ? undefined : this.#lineEnd(drawn);
+      if (end !== undefined) {
+        mark.classList.add("shared");
+      }
+      if (end?.matches(".sheet-row") === true) {
+        end.append(mark);
+      } else {
+        // The mark hangs past the line's end from a point that takes no room, so nothing moves.
+        const anchor = this.ownerDocument.createElement("span");
+        anchor.className = "item-menu";
+        anchor.append(mark);
+        (end ?? line).append(anchor);
+      }
+      if (moves && ownLine) {
         for (const part of line.querySelectorAll<HTMLElement>(":scope > .element-icon, :scope > .sheet-kind, :scope > .line-kind")) {
           part.classList.add("drag-handle");
           part.dataset["dragKey"] = key;
@@ -2189,7 +2227,8 @@ export class NxViewerElement extends ElementBase {
   /**
    * The item with `key`, as the tree shown has it, where it is now and how many items its list holds
    * now: past the moves and deletes fired and not yet seen in a tree from the host. Nothing for a
-   * node that is no item, or one of another list while those are pending.
+   * node that is no item, one of another list while those are pending, or the one item left of a
+   * sequence.
    */
   #itemAction(key: string | undefined): { list: ItemList; position: number; count: number } | undefined {
     const index = this.#index;
@@ -2205,7 +2244,8 @@ export class NxViewerElement extends ElementBase {
     if (following === undefined) {
       return { list, position: list.position, count: list.items.length };
     }
-    if (following.list !== list.key) {
+    // A sequence left with one item reads as that item, no longer an item of a list.
+    if (following.list !== list.key || (following.sequence && following.map.count < 2)) {
       return undefined;
     }
     const position = key === following.anchor ? following.position : following.map.positionOf(list.position);

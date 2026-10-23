@@ -116,6 +116,7 @@ describe("the wasm SDK's in-process language service", () => {
       "type Label = { content text:string }",
       "let label = <Label>Hello</Label>",
       'let row = { <Panel mode=light title="a" /> <Panel mode=dark title="b" /> }',
+      'let same = { <Panel mode=light title="a" /> <Panel mode=light title="a" /> }',
       "let column = {",
       "  // First",
       '  <Panel mode=light title="a" />',

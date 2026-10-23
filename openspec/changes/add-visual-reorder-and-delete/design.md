@@ -63,7 +63,8 @@ no touch panning.
 An item moves when it is an element that is an item of a sequence (`choices={ … }`, a `let`'s
 `{ … }`) or of element content (`steps`, a menu's drinks), its list has two or more items, and the
 list holds no text. Items an `if` or a `for` makes are code: they do not drag, and nothing drops
-among them, but an item can move past an `if` or `for` block, which is an item of the list. Literal
+among them, but an item can move past an `if` or `for` block, which is an item of the list. The
+items of an element inside a branch or a loop body are that element's own list, and move within it. Literal
 items (`{ 4 2 5 }`) are not selectable units in Visual, so they do not move in this change.
 
 Dragging works where the reading draws the list an item to a line, which is how a group draws what

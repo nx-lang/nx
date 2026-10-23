@@ -207,6 +207,11 @@ let short =
     <Ask id="else" label="Anything else?" />
   </Flow>
 
+// A list drawn on one line: select an option; Alt+Up and Alt+Down move it, Delete deletes it,
+// and its ⋯ waits at the end of the line
+type Pair = { options:Option+ }
+let pair = <Pair options={ <Option value="a" label="A" /> <Option value="b" label="B" /> <Option value="c" label="C" /> } />
+
 let root(): Menu = {
   // No visualizer: the box icon, and folded (its chevron, or Left) it counts its children
   <Menu title="Morning menu">

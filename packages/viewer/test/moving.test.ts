@@ -45,6 +45,7 @@ const SOURCE = [
   "  }",
   "</QuestionFlow>",
   'let pick = <Select choices={ <Choice value="x" /> <Choice value="y" /> <Choice value="z" /> } />',
+  'let pair = <Select choices={ <Choice value="p" /> <Choice value="q" /> } />',
   "let lone = <Box>",
   '  <Step id="z" />',
   "</Box>",
@@ -73,13 +74,18 @@ async function edited(text: string, key: string, edit: SourceEdit): Promise<stri
   }
 }
 
-/** The element showing `fixture`, everything unfolded, editable, with an icon for every element. */
-function show({ tree, text }: Fixture, folded: readonly string[] = []): NxViewerElement {
+/**
+ * The element showing `fixture`, everything unfolded, editable, with an icon for every element unless
+ * `icons` is false.
+ */
+function show({ tree, text }: Fixture, folded: readonly string[] = [], icons = true): NxViewerElement {
   const element = document.createElement("nx-viewer");
   document.body.append(element);
   element.folded = folded;
   element.editable = true;
-  element.icons = () => document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  if (icons) {
+    element.icons = () => document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  }
   element.text = text;
   element.tree = tree;
   created.push(element);
@@ -364,5 +370,75 @@ describe("moving and deleting in the reading", () => {
     pointer(handle, "pointermove", 10, 34);
     pointer(handle, "pointerup", 10, 34);
     assert.equal(fired.length, 0);
+  });
+  it("selects an item clicked on its handle, starting no drag, and its card says it drags", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const element = show(await sourceOf(SOURCE));
+    const fired = edits(element);
+    layOut(element, steps(4));
+    const icon = root(element).querySelector<HTMLElement>('.element-icon.drag-handle[data-drag-key="flow.value.steps[1]"]')!;
+    assert.ok(icon, "the icon is a handle");
+    icon.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    t.mock.timers.tick(500);
+    const card = root(element).querySelector<HTMLElement>(".card")!;
+    assert.equal(card.hidden, false);
+    assert.equal(card.lastElementChild?.textContent, "Drag to reorder");
+    pointer(icon, "pointerdown", 10, 27);
+    pointer(icon, "pointermove", 11, 29);
+    pointer(icon, "pointerup", 11, 29);
+    icon.dispatchEvent(new window.MouseEvent("click", { bubbles: true, composed: true, cancelable: true, clientX: 11, clientY: 29 }));
+    assert.equal(element.selection, "flow.value.steps[1]");
+    assert.equal(root(element).querySelector(".drag-ghost"), null);
+    assert.equal(fired.length, 0);
+  });
+
+  it("drags by the name alone where the host draws no icons", async () => {
+    const element = show(await sourceOf(SOURCE), [], false);
+    const handles = [...root(element).querySelectorAll<HTMLElement>('.drag-handle[data-drag-key="flow.value.steps[0]"]')];
+    assert.deepEqual(
+      handles.map((handle) => handle.classList.contains("line-kind")),
+      [true]
+    );
+  });
+
+  it("starts no drag and moves no other list while a move waits for the host's tree", async () => {
+    const element = show(await sourceOf(SOURCE));
+    const fired = edits(element);
+    layOut(element, steps(4));
+    element.selection = "flow.value.steps[0]";
+    press(body(element), "ArrowDown", { altKey: true });
+    assert.equal(fired.length, 1);
+    const handle = root(element).querySelector<HTMLElement>('.drag-handle[data-drag-key="flow.value.steps[2]"]')!;
+    pointer(handle, "pointerdown", 10, 45);
+    pointer(handle, "pointermove", 10, 5);
+    assert.equal(root(element).querySelector(".drag-ghost"), null, "no drag");
+    pointer(handle, "pointerup", 10, 5);
+    element.selection = "pick.value.choices.value[0]";
+    press(body(element), "ArrowDown", { altKey: true });
+    press(body(element), "Delete");
+    assert.equal(fired.length, 1, "nothing for another list");
+  });
+
+  it("deletes once from a sequence of two before the newer tree comes, which leaves no list", async () => {
+    const element = show(await sourceOf(SOURCE));
+    const fired = edits(element);
+    element.selection = "pair.value.choices.value[0]";
+    press(body(element), "Delete");
+    press(body(element), "Delete");
+    assert.deepEqual(fired, [{ key: "pair.value.choices.value[0]", edit: { kind: "remove" } }]);
+  });
+
+  it("hangs the menu mark of an item sharing its line at the end of its row, shown while selected", async () => {
+    const element = show(await sourceOf(SOURCE));
+    const mark = [...root(element).querySelectorAll<HTMLElement>(".row-menu")].find(
+      (candidate) => candidate.dataset["menuKey"] === "pick.value.choices.value[1]"
+    )!;
+    assert.ok(mark.classList.contains("shared"));
+    assert.equal(mark.parentElement!.parentElement, rendered(element, "pick.value"), "at the end of the line");
+    assert.equal(rendered(element, "pick.value.choices.value[1]").querySelector(".row-menu"), null, "not after the item");
+    element.selection = "pick.value.choices.value[1]";
+    assert.ok(mark.classList.contains("selected"));
+    element.selection = "pick.value.choices.value[0]";
+    assert.ok(!mark.classList.contains("selected"));
   });
 });

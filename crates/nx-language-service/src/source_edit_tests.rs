@@ -1069,6 +1069,74 @@ fn removing_an_item_on_one_line() {
 }
 
 #[test]
+fn removing_a_middle_item_on_one_line_takes_the_space_before_it() {
+    let source = "type C = { value:string }\ntype S = { choices:C* }\nlet s = <S choices={ <C value=\"a\" />  <C value=\"b\" /> <C value=\"c\" /> } />\n";
+    let after = edited(source, "s.value.choices.value[1]", SourceEdit::Remove);
+    assert!(
+        after.contains("{ <C value=\"a\" /> <C value=\"c\" /> }"),
+        "{after}"
+    );
+}
+
+#[test]
+fn moving_past_an_item_just_like_it_changes_nothing() {
+    let source = "type D = {}\ntype F = { content items:D* }\nlet f = <F>\n  <D />\n  <D />\n</F>\nlet g = <F> <D /> <D /> </F>\n";
+    for (key, to) in [
+        ("f.value.items[0]", 1),
+        ("f.value.items[1]", 0),
+        ("g.value.items[0]", 1),
+    ] {
+        let answer = edit(source, key, move_to(to));
+        assert_eq!(answer.refused, None, "{key}");
+        assert!(answer.edits.is_empty(), "{key}");
+    }
+}
+
+/// Items set apart by a blank line and a comment that belongs to neither.
+const NOTED: &str = r#"type Step = { id:string }
+type Flow = { content steps:Step* }
+let flow = <Flow>
+  <Step id="A" />
+
+  // Later steps
+
+  <Step id="B" />
+  <Step id="C" />
+</Flow>
+"#;
+
+#[test]
+fn removing_beside_a_comment_set_apart_by_blank_lines() {
+    let body = |source: &str| between(source, "let flow = <Flow>\n", "</Flow>").to_string();
+    // Of the blank lines that would stand together, one goes; the comment stays.
+    let first = edited(NOTED, "flow.value.steps[0]", SourceEdit::Remove);
+    assert_eq!(
+        body(&first),
+        "\n  // Later steps\n\n  <Step id=\"B\" />\n  <Step id=\"C\" />\n"
+    );
+    let second = edited(NOTED, "flow.value.steps[1]", SourceEdit::Remove);
+    assert_eq!(
+        body(&second),
+        "  <Step id=\"A\" />\n\n  // Later steps\n\n  <Step id=\"C\" />\n"
+    );
+}
+
+#[test]
+fn moving_beside_a_comment_set_apart_by_blank_lines() {
+    let body = |source: &str| between(source, "let flow = <Flow>\n", "</Flow>").to_string();
+    let down = edited(NOTED, "flow.value.steps[0]", move_to(2));
+    assert_eq!(
+        body(&down),
+        "\n  // Later steps\n\n  <Step id=\"B\" />\n  <Step id=\"C\" />\n  <Step id=\"A\" />\n"
+    );
+    let up = edited(NOTED, "flow.value.steps[2]", move_to(0));
+    assert_eq!(
+        body(&up),
+        "  <Step id=\"C\" />\n  <Step id=\"A\" />\n\n  // Later steps\n\n  <Step id=\"B\" />\n"
+    );
+}
+
+#[test]
 fn removing_an_item_with_crlf_line_breaks() {
     let source = FLOW.replace('\n', "\r\n");
     let after = edited(&source, "flow.value.steps[2]", SourceEdit::Remove);

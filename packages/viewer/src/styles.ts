@@ -587,19 +587,23 @@ export const styles = `
   border-radius: 3px;
   cursor: pointer;
   user-select: none;
-  opacity: 0;
+  visibility: hidden;
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   font-weight: 400;
 }
-.source .sheet-row[data-key]:hover > .row-menu, .source .sheet-row.selected > .row-menu { opacity: 1; }
+.source .sheet-row[data-key]:hover > .row-menu:not(.shared),
+.source .sheet-row.selected > .row-menu:not(.shared),
+.source .row-menu.shared.selected { visibility: visible; }
+/* While an item that shares the row's line is selected, the row's end shows the item's mark alone. */
+.source .sheet-row:has(> .row-menu.shared.selected) > .row-menu:not(.shared) { visibility: hidden; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
 /* An item's menu hangs past the end of its first line from a point that takes no room. */
 .source .item-menu { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
 .source .item-menu > .row-menu { left: 0; }
-.source .sheet.selected > .sheet-head > .item-menu > .row-menu,
-.source .sheet-head:hover > .item-menu > .row-menu,
-.source .line-element.selected > .item-menu > .row-menu,
-.source .line-element:hover > .item-menu > .row-menu { opacity: 1; }
+.source .sheet.selected > .sheet-head > .item-menu > .row-menu:not(.shared),
+.source .sheet-head:hover > .item-menu > .row-menu:not(.shared),
+.source .line-element.selected > .item-menu > .row-menu:not(.shared),
+.source .line-element:hover > .item-menu > .row-menu:not(.shared) { visibility: visible; }
 /* An item that moves is dragged by its icon and its name: a hand to grab, and no text selection
    or panning to compete with it. */
 .body.editable .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }

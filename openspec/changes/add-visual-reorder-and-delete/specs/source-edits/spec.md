@@ -1,8 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: An item moves within its list
-For `move`, the target SHALL be an element that is an item of a sequence or of element content, not
-inside a condition's branch or a loop's body, in a list that holds no text, and `to` SHALL be the
+For `move`, the target SHALL be an element that is an item of a sequence or of element content, not an item of a condition's branch or a loop's body, in a list that holds no text, and `to` SHALL be the
 position the item takes in its list once moved, counted as the list's keys count its items. The
 service SHALL move the item in the list's layout. In a list written an item to a line, where no item
 shares a line with another, it SHALL move the item's whole lines, with the comments and doc comments
@@ -43,8 +42,9 @@ answer no edits.
 The service SHALL also take for `remove` an item that `move` takes, whatever the list's length. In
 a list written an item to a line, it SHALL remove the item's whole lines with the comments and
 doc comments directly above it, and the blank lines between it and the item after it, or the item
-before it when it is the last; where more than blank lines stand there, it SHALL remove instead, of
-two blank lines that would then stand together, one. In a list written on one line, it SHALL remove the item and the space that separates it from the item
+before it when it is the last. When more than blank lines stand in that gap, it SHALL remove only
+the item's lines and, of two blank lines that would then stand together, one. In a list written on
+one line, it SHALL remove the item and the space that separates it from the item
 before it, or after it when it is the first. The service SHALL NOT check that the list may lose the
 item.
 
@@ -113,8 +113,7 @@ The service SHALL answer a request it cannot honor with no edits and a refusal t
 `unknownNode` when the document's source tree holds no node with the key; `notEditable` when the node
 is not a target the edit takes, such as a literal inside an expression, a text run over several lines,
 a value given to `remove`, anything but an element given to `addProperty`, or, given to `move` or
-as an element to `remove`, anything but an element item of a sequence or of element content, an item
-inside a condition's branch or a loop's body, an item of a list that holds text, or one of a list
+as an element to `remove`, anything but an element item of a sequence or of element content, an item of a condition's branch or a loop's body, an item of a list that holds text, or one of a list
 written neither an item to a line nor on one line; and `invalidValue` when the value cannot be spelled, such as a number
 that is not a numeric literal, a case name that is not an identifier, text that is empty or holds a
 line break, a property `addProperty` cannot add, or a `move` position outside the list. A refusal

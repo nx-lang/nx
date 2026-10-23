@@ -157,6 +157,11 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
                 source.get(*start..*end) != Some(new_text.as_str())
             });
             replacements.sort_by_key(|(start, end, _)| (*start, *end));
+            // Edits that, made together, leave the text as it is (as when an item moves past one
+            // just like it) change nothing either.
+            if !replacements.is_empty() && applied(source, &replacements) == source {
+                replacements.clear();
+            }
             let index = LineIndex::new(source);
             let edits = replacements
                 .into_iter()
@@ -175,6 +180,19 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
         }
         Err(reason) => SourceEditAnswer::refused(reason),
     }
+}
+
+/// The text once the replacements, sorted and not overlapping, are made.
+fn applied(source: &str, replacements: &[(usize, usize, String)]) -> String {
+    let mut text = String::with_capacity(source.len());
+    let mut from = 0;
+    for (start, end, new_text) in replacements {
+        text.push_str(&source[from..*start]);
+        text.push_str(new_text);
+        from = *end;
+    }
+    text.push_str(&source[from..]);
+    text
 }
 
 /// A replacement of the bytes `start..end`, or nothing to do.
@@ -601,22 +619,26 @@ fn comments_above(source: &str, tree: &SourceTree, line: usize) -> usize {
 }
 
 /// What taking the item at `position` out of its list removes: its span and the blank space that
-/// separates it from the item after it, or from the item before it when it is the last, and that
-/// space, which goes with the item where it is put back.
+/// separates it from a neighbour, and that space, which goes with the item where it is put back.
+/// Written an item to a line, the space is the one after the item, or before it when it is the
+/// last; on one line, the one before it, or after it when it is the first.
 fn cut(source: &str, list: &ItemList, position: usize) -> (usize, usize, String) {
     let (start, end) = list.spans[position];
-    if let Some(&(next, _)) = list.spans.get(position + 1) {
-        if is_blank(&source[end..next]) {
-            return (start, next, source[end..next].to_string());
-        }
-    }
-    if let Some(&(_, previous)) = position
-        .checked_sub(1)
-        .and_then(|before| list.spans.get(before))
-    {
-        if is_blank(&source[previous..start]) {
-            return (previous, end, source[previous..start].to_string());
-        }
+    let after = || {
+        let &(next, _) = list.spans.get(position + 1)?;
+        is_blank(&source[end..next]).then(|| (start, next, source[end..next].to_string()))
+    };
+    let before = || {
+        let &(_, previous) = list.spans.get(position.checked_sub(1)?)?;
+        is_blank(&source[previous..start])
+            .then(|| (previous, end, source[previous..start].to_string()))
+    };
+    let found = match list.layout {
+        ListLayout::Lines => after().or_else(before),
+        ListLayout::OneLine => before().or_else(after),
+    };
+    if let Some(found) = found {
+        return found;
     }
     // Lines apart from their neighbours by more than blank lines: the item's lines go, and of two
     // blank lines that would then stand together, one.
@@ -633,8 +655,9 @@ fn cut(source: &str, list: &ItemList, position: usize) -> (usize, usize, String)
     (start, end, String::new())
 }
 
-/// Removes an element that is an item of a list: its lines and the comments directly above it, or
-/// on one line, the item and the space before it, or after it when it is the first.
+/// Removes an element that is an item of a list: its lines, the comments directly above it and the
+/// blank lines after it (before it, when it is the last), or on one line, the item and the space
+/// before it, or after it when it is the first.
 fn remove_item(source: &str, tree: &SourceTree, at: usize) -> Replacements {
     let list = item_list(source, tree, at)?;
     let (start, end, _) = cut(source, &list, list.position);

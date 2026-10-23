@@ -358,7 +358,9 @@ moves and deletes it fired and reads the host's next tree with them: the moved i
 or after a delete the item that took its place, else the one before it, else what held the list;
 each fold on the list's items stays on its item, firing `nx-fold` with the new keys; and the live
 region says `Moved to 3 of 8` or `Deleted`. A host sets `text` before `tree`, as it does after any
-edit; a tree of the same text, as after a refusal, moves nothing. Keys pressed again before the next
+edit; a tree of the same text, as after a refusal, moves nothing. Until a tree comes, drags and the
+other lists' moves and deletes wait, so a host sets the tree again after an edit it does not make
+(refused, or answered with no edits). Keys pressed again before the next
 tree, as Alt+Down held, fire edits keyed as the text will be once the ones before are made, so a host
 that applies edits in order makes them all.
 
