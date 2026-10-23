@@ -266,6 +266,7 @@ export const styles = `
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   user-select: none;
 }
+/* The chevron is centered on the text's x-height, open or folded. */
 .source .fold::before {
   content: "";
   display: inline-block;
@@ -273,13 +274,13 @@ export const styles = `
   height: 0.28em;
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
-  transform: translateY(-0.18em) rotate(45deg);
+  transform: translateY(-0.31em) rotate(45deg);
   transition: transform 0.15s ease;
 }
-.source .fold.folded::before { transform: translateY(-0.05em) rotate(-45deg); }
+.source .fold.folded::before { transform: translateY(-0.13em) rotate(-45deg); }
 /* The chevron of what was just folded or opened starts where it was, and turns to where it is. */
-.source .fold.was-folded::before, .source .fold.folded.was-folded::before { transform: translateY(-0.05em) rotate(-45deg); }
-.source .fold.was-open::before, .source .fold.folded.was-open::before { transform: translateY(-0.18em) rotate(45deg); }
+.source .fold.was-folded::before, .source .fold.folded.was-folded::before { transform: translateY(-0.13em) rotate(-45deg); }
+.source .fold.was-open::before, .source .fold.folded.was-open::before { transform: translateY(-0.31em) rotate(45deg); }
 @media (prefers-reduced-motion: reduce) { .source .fold::before { transition: none; } }
 .body:hover .source .fold, .source .fold.folded, .source .fold:focus-visible { opacity: 1; }
 .source .fold:hover { color: var(--nx-viewer-foreground, CanvasText); }
