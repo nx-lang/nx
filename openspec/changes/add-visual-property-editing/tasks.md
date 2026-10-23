@@ -34,7 +34,7 @@
 - [x] 5.5 Steppers on numbers: an overlay past the value, shown while its field is open and on hover, selected or not (waiting for the pointer to rest where they take room in a line); click, Shift+click, and a vertical drag committed once on release; a tooltip; verify each `viewer` scenario
 - [x] 5.6 The "Visual test cases" example: choices for a number and a string, steppers, a reference opening Source; screenshots light and dark
 
-- [x] 5.7 Room on a line (Bret, 2026-10-23): a hover chevron for values with choices; on a one-line element or a header, where more of the line follows, no hover tools, and an open field's tools take room in the line; verify the `viewer` scenario and in the browser
+- [x] 5.7 Room on a line (Bret, 2026-10-23): a hover chevron for values with choices; on a one-line element or a header, where more of the line follows, the tools take room in the line, on hover (after a rest outside the selection, 5.5) and with a field open; verify the `viewer` scenario and in the browser
 
 - [x] 5.8 Remove `unit` (Bret, 2026-10-23), until units are part of the language: the library, analysis, the source tree, the protocol, the viewer, tests, the example and docs
 

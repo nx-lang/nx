@@ -34,6 +34,8 @@ All notable changes to this project will be documented in this file.
   numbers edit with ranges and steppers (click, Shift+click, or drag up and down), a number's
   or a string's choices list under its field with the default's row first, unions edit as segmented
   buttons and strings over several lines as their hints say; Shift+Enter breaks a string's line.
+  A value's steppers or chevron show under the pointer, taking room on a one-line element, and a
+  click on a value opens its editor without selecting it.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
 
 ### Fixes

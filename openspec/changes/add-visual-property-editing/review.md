@@ -717,6 +717,128 @@ Chromium.
   now holds the folded-in sentence. `cargo test -q -p nx-types` passes, and clippy is clean.
   **Confidence: high.**
 
+## New Findings Discovered During 2026-10-23 07:56 Review
+
+Scope of this pass: the whole change, `git diff 806223f...HEAD` at `a8598c4`, against the current
+proposal, design, specs and tasks. It focuses on what landed since `7fc84d0`: larger steppers and their
+6 px slop and 4 px drag step, the unset-properties wording, the removal of `unit`, room on a line and
+the 300 ms rest, hover tools anywhere, `#rehover`, `fieldText`/`withEndOfLines`, Up and Down from the
+current choice, the case chevron drawn as `.value-tools`, and a click on a value leaving the selection.
+Checks run: `packages/viewer` `pnpm test` (167 passed); `cargo test -p nx-types -p nx-api -p
+nx-language-service`, `cargo clippy --workspace --all-targets` and `cargo fmt --all --check` (all
+clean); `sites/playground` `pnpm test` (24 examples match); `openspec validate
+add-visual-property-editing --strict` (valid). Behavior was checked in headless Chromium against the
+playground's "Visual test cases" with throwaway Playwright scripts kept outside the repository. These
+work as specified: repeated stepper clicks on the unselected `strip` `titleSize` step 20 to 24 and fire
+one `setValue` each, including a click 50 ms after the last one, and the selection stays empty.
+`#rehover` brings the tools back after each commit. A trailing Shift+Enter commits `"Fresh\n"` without
+the browser's extra line break, and a line break in the middle commits as typed. The case chevron opens
+and closes `align`'s popover without selecting anything. `unit` is gone from the library, analysis,
+the source tree, the protocol, the viewer and the docs.
+
+### 🟡 Fixed - RF31 A hover tool taking room on a line that just fits wraps the line and moves the whole reading below it
+- **Severity:** Medium
+- **Evidence:** `#showTools` puts the tools into the line as static content when more of the line
+  follows (`packages/viewer/src/index.ts:2466-2475`, `.value-tools.in-line { position: static }` in
+  `styles.ts:709`). A `.line-element.alone` wraps (`white-space: pre-wrap`, `styles.ts:185-196`). What
+  fits on a line is measured only when the reading is drawn (`index.ts:905-922`, `#wrapped`
+  `index.ts:996`). So a line that fits with nothing to spare overflows once the tools join it. In
+  Chromium, with `<nx-viewer>` 462 px wide, the menu's `<Drink code="LAT" … size=small iced=false
+  shots=2 />` is one 18 px line. After the pointer rests 300 ms on `size`, the line is 36 px tall,
+  `shots=2` has wrapped, and every item below has moved down 18 px. They move back when the pointer
+  leaves. The spec's "Room on a line" lets the tools move what follows *along the line*. The design
+  adds the rest timer "so a line does not jump as the pointer passes over it". Here the whole reading
+  jumps on hover, with no editor open. Opening a field there has the same effect (`index.ts:1464`).
+- **Recommendation:** Before taking room, check whether the line would wrap: compare the line's
+  remaining width with the tools' width, or insert them and compare the line's client rects. If it
+  would wrap, draw the tools over the gap as in a sheet row. Another option is to reserve the tools'
+  width when measuring what fits. Add a test that narrows the reading until a one-line element just
+  fits, rests on a value with tools, and checks that the element keeps one line and the next unit's
+  top stays put.
+- **Fix:** `#showTools` measures the line (`.line-element`, header, tag line or sheet value) before and after the tools join it; if it grew, they lose `in-line` and cover the gap, as in a sheet row, so nothing below moves. Test "covers the gap rather than wrap a line that only just fits"; your `wrap3.mjs` at 462 px now keeps the Latte line at 18 px and the next item in place. Spec, design and README say so.
+
+### 🟡 Fixed - RF32 Closing a case's popover from its chevron removes the chevron under the pointer, and the next click selects the element
+- **Severity:** Medium
+- **Evidence:** With a case's popover open, a press on its chevron reaches `#onDocumentPointerDown`
+  first, in the capture phase (`index.ts:403-425`). The press is outside the popover, so the handler
+  cancels the session, and `#endSession` → `#hideTools` (`index.ts:1817`) takes the tools out and
+  clears `toolsFor`. `#onToolsPointerDown` then finds no key and does nothing (`index.ts:2599-2603`).
+  The branch meant to close the popover (`index.ts:2606-2613`) never runs. The popover closes, but
+  unlike a stepper click (`#rehover`), nothing brings the tools back. On a line they had taken room,
+  so the line gives the room back and shifts left under the pointer. In Chromium on `strip`'s
+  `align=start`, three things happen in turn. Rest, then click the chevron: the popover opens.
+  Click it again: the popover closes and the tools are gone. Click a third time at the same spot,
+  which is now `.line-gap`: `nx-select` fires for `strip.value`, and the `Show 6 unset properties`
+  row appears under the line. That pushes the reading down, which is what task 5.9 set out to stop.
+  The jsdom test (`editing.test.ts:1230-1247`) only checks that the popover hides, so it passes.
+- **Recommendation:** In `#onDocumentPointerDown`, leave a press whose `composedPath()` includes
+  `#tools` to `#onToolsPointerDown`, as it already does for the popover. After the chevron closes the
+  popover, show the tools again for that key, as `#rehover` does after a stepper click. Extend the
+  test: after closing, the chevron is still shown, and a second press opens the popover again.
+- **Fix:** `#onDocumentPointerDown` leaves a press on `#tools` to `#onToolsPointerDown`, and closing a case's popover from its chevron shows the tools again for that key. The case-chevron test now closes, checks the chevron stays in-line, presses again to reopen, and that nothing is selected. In Chromium, three clicks on `strip`'s `align` chevron open, close and reopen with the selection empty.
+
+### 🟡 Fixed - RF33 In an unset-properties row, the tools take room and push `default` aside, and under a one-line element they wait as if outside the selection
+- **Severity:** Low
+- **Evidence:** A dimmed row reads `value  default`. `#followedOnItsLine` counts the quiet
+  `.more-default` sibling as more of the line (`index.ts:2487-2504`), so the tools get `in-line` and
+  push `default` right. The design and spec instead say a sheet's row draws the tools over the gap,
+  and nothing moves. A one-line element's list is drawn after the element (`element.after(block)`,
+  `index.ts:2872`), outside its rendered node. So the `onSelected` test (`index.ts:2555-2556`) fails,
+  and the tools wait 300 ms, although these rows are drawn inside the selection's highlight and exist
+  only on the selected element. In Chromium, with `strip` selected and its list open, hovering the
+  dimmed `gap` shows nothing at 50 ms. At 450 ms it shows `value-tools with-steppers in-line`, with
+  `default` pushed to x = 251, past the tools at 221–243. Under a sheet (`banner`), the same row would
+  take room at once.
+- **Recommendation:** Stop `#followedOnItsLine` at `.more-value`, or skip `.more-default`, so a dimmed
+  row's tools overlay as a sheet row's do. Also count the open `#moreBlock` as part of the selection
+  in `#hoverTools`. Add a test on both.
+- **Fix:** Partly as recommended. `#hoverTools` counts a value inside the open `#moreBlock` as on the selection, so the tools show at once (test "shows an unset property's tools at once, under a one-line element selected"). I kept the tools taking room before the quiet `default`, rather than covering it: drawing them over the gap would hide the word, and moving it within its own row moves nothing else. The spec's "Room on a line", the design and the README now say an unset property's value moves its `default` aside.
+
+### 🟡 Fixed - RF34 The specs and docs still describe the earlier behavior in places
+- **Severity:** Low
+- **Evidence:**
+  - The base `viewer` requirement "A selection is a unit of the reading"
+    (`openspec/specs/viewer/spec.md:214-231`) says a click SHALL select the unit it falls in. Its
+    scenario says clicking a word of a one-line element selects the element. The delta modifies only
+    "Values edit in place", which now says such a click leaves the selection. With `editable` set,
+    the two requirements contradict each other. The README's "Selection" section repeats the
+    unqualified rule (`packages/viewer/README.md:191`).
+  - `proposal.md:35` says steppers show "while its field is open or on a selected row". The design's
+    Risks say they are "drawn only where they help (an open field, the selected row)"
+    (`design.md:178-179`). Both are stale since hover tools show anywhere. The proposal's
+    Capabilities line for `viewer` does not mention the modified "Values edit in place" requirement.
+  - `tasks.md` 5.7 says that where more of the line follows there are "no hover tools". The code and
+    spec now show them there after the rest.
+  - "Room on a line" in the design and spec covers one-line elements and group headers, and says that
+    in a sheet's row the tools "stay drawn over the gap". But `#followedOnItsLine` also takes room
+    (and waits) for a braced list's earlier items in a sheet row, as `ratings={ 4 2 5 }`, since it
+    checks the value's own siblings before stopping at `.sheet-value` (`index.ts:2488-2501`). That
+    is reasonable, since covering the next item would be worse, but it is unspecified.
+  - The CHANGELOG's `<nx-viewer>` entry (`src/vscode/CHANGELOG.md:32-36`) mentions neither the hover
+    tools nor that a click on a value no longer selects its unit. Phase 1's entry (line 14) is in the
+    same Unreleased section.
+- **Recommendation:** Add a MODIFIED "A selection is a unit of the reading" to the viewer delta,
+  carving out a click on an editable value when `editable` is set, and qualify the README's
+  Selection paragraph. Bring the proposal, the design's Risks and task 5.7 up to date. Either say in
+  "Room on a line" that items of a braced list take room too, or stop there. Add a clause to the
+  changelog entry.
+- **Fix:** Added a MODIFIED "A selection is a unit of the reading" to the viewer delta (a click on an editable value with `editable` set opens its editor and leaves the selection; the scenario names a word that is not an editable value), and qualified the README's Selection section. Proposal (steppers and the Capabilities line), the design's Risks and task 5.7 are updated. "Room on a line" now covers earlier items of a braced list, an unset property's value, and the wrap fallback. The CHANGELOG's `<nx-viewer>` entry mentions the hover tools and that a click on a value no longer selects.
+
+### 🟡 Fixed - RF35 Small leftovers in the viewer's code after the latest commits
+- **Severity:** Low
+- **Evidence:**
+  - `TOOLS_REST_MS` was inserted between `DRAWN_UNITS` and its doc comment, which leaves two doc
+    comments stacked over `TOOLS_REST_MS` and none on `DRAWN_UNITS` (`index.ts:173-176`).
+  - `const value = target.kind === "number" ? raw.trim() : raw.trim();` has the same expression on both
+    branches. It is left over from removing `numberEntry` (`index.ts:2185`).
+  - `#showTools`'s doc says the chevron shows only "while its field is open with choices"
+    (`index.ts:2443-2446`). It also shows past a case and past a hovered value with choices.
+  - `#openNext`'s doc still says it opens the next value "selecting its unit" (`index.ts:1875-1878`).
+  - `CHOICES_TITLE` has no doc comment, unlike the constants around it (`index.ts:141`).
+- **Recommendation:** Move `TOOLS_REST_MS` below `DRAWN_UNITS` with its own comment, collapse the
+  ternary to `raw.trim()`, and update the two doc comments.
+- **Fix:** `TOOLS_REST_MS` moved below `DRAWN_UNITS` with its own comment; the ternary is `raw.trim()`; `#showTools` and `#openNext` docs updated; `CHOICES_TITLE` has a doc comment.
+
 ## Questions
 - RF7 and RF8 were product calls. The fix took the reviewer's first option for each: a conditional write
   counts as written, and case elements are supported. Should a property written only under a condition count as written? Should
@@ -793,3 +915,10 @@ Chromium.
 - Verification of the third round (2026-10-22 23:52, commit `58a101e`): RF23 is verified. In headless
   Chromium, the default's row in an unlabeled list is one line, and it is hidden when filtered out.
   Nothing new was found. Every finding from RF1 to RF30 is now verified.
+- Review pass at `a8598c4` (2026-10-23 07:56): a fresh review of the whole change, focused on the
+  2026-10-23 behavior changes (room on a line, the rest timer, hover tools anywhere, `#rehover`, the case
+  chevron, `unit` removed, a click on a value leaving the selection). Two Medium findings are new. A
+  hover tool that takes room on a line that just fits wraps it and moves the reading below (RF31). Closing
+  a case's popover from its chevron removes the chevron, so the next click selects the element and
+  shows its unset-properties row (RF32). Three are Low: RF33 to RF35. Viewer tests (167), the three
+  crates' Rust tests, clippy, fmt, playground tests and `openspec validate --strict` pass.

@@ -1,5 +1,45 @@
 ## MODIFIED Requirements
 
+### Requirement: A selection is a unit of the reading
+A click SHALL select the unit it falls in: an element read as a group, by its header or the room
+between its rows; a row of a group; an element read as a line; an element written as its tags that
+starts a line; or a block written as it is, such as an `if`. When the host has set `editable`, a
+click on an editable value SHALL instead open its editor and leave the selection as it was. Outside every unit, a click SHALL select the
+smallest node under it, and a drag that selects text SHALL select nothing. Selecting SHALL fire
+`nx-select` with the node's key, role and range, and tell a screen reader what was selected. The host
+SHALL be able to select a node by key through `selection` without the event; a key the tree does not
+hold SHALL clear the selection. The up and down arrow keys SHALL select the previous and next unit, the
+left arrow the unit that holds the selected one, and the right arrow the first one it holds. A
+selection that is not itself a unit, such as a node the host selects inside a row, SHALL move from the
+unit that holds it, or, outside every unit, to the nearest unit after or before it. The
+selected unit and the one under the pointer SHALL be drawn as rows behind the text, from just before
+the unit's start to near the reading's right edge, or, for an element inside a line, as a property's
+value, to just past its end, a selected group's first line stronger than the rest of it, in colors a host sets through `--nx-viewer-selection`, `--nx-viewer-selection-inactive` and
+`--nx-viewer-hover`.
+
+#### Scenario: Selecting a line
+- **WHEN** a reader clicks a word of an element on one line that is not an editable value
+- **THEN** the element SHALL be selected and `nx-select` SHALL carry its key
+
+#### Scenario: Selecting from the host
+- **WHEN** the host sets `selection` to a node's key
+- **THEN** that node SHALL be selected and no `nx-select` SHALL fire
+
+#### Scenario: Walking the tree
+- **WHEN** a group is selected and the reader presses the right arrow, the down arrow and the left
+  arrow
+- **THEN** the selection SHALL move to the group's first item, to its second, and back to the group
+
+#### Scenario: Arrows from inside a row
+- **WHEN** the host selects the string `"z"` in a group's row `note` and the reader presses the left
+  arrow
+- **THEN** the selection SHALL move to the row `note`, and from `"z"` the down arrow SHALL select the
+  unit after that row
+
+#### Scenario: From an origin to a node
+- **WHEN** a value's origin names a byte range
+- **THEN** `nodeAtSpan` SHALL give the node with exactly that range, an element where several share it
+
 ### Requirement: Values edit in place when the host allows it
 When the host sets `editable`, the element SHALL let the reader edit a value where it reads; otherwise
 it SHALL offer no editing and read as it does without this property. A value SHALL be editable when it
@@ -191,8 +231,11 @@ that nothing moves, while its field is open and while the pointer is over its va
 not, when the host has set `editable`. On a one-line element, or a group's header, where more of the
 line follows the value, its closing `/>` included, the steppers and the chevron SHALL NOT cover it:
 they SHALL take room in the line, moving what follows along, as a field does when it grows, and
-SHALL give it back when they go. There, outside the selection, they SHALL wait until the pointer has
-rested on the value for a moment, so a line does not jump as the pointer passes over it. A click SHALL step the number once by `step`, or by one, and
+SHALL give it back when they go. So SHALL an earlier item of a braced list, and an unset property's
+value, whose quiet `default` moves aside. Where taking room would wrap a line that only just fits,
+the tools SHALL cover the gap instead, so nothing below moves. Outside the selection, where they take
+room, they SHALL wait until the pointer has rested on the value for a moment, so a line does not jump
+as the pointer passes over it; an unset property's row counts as its element's selection. A click SHALL step the number once by `step`, or by one, and
 Shift+click by ten steps, within `min` and `max`: into the field while it is open, else committed at
 once. Pressing a stepper and dragging up or down SHALL change the number by a step for every few
 pixels and show it in place: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow

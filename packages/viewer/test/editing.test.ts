@@ -1244,6 +1244,38 @@ describe("choices", () => {
     assert.ok(tools(element)!.classList.contains("open"));
     pressTool(tools(element)!.querySelector(".choices-toggle")!);
     assert.ok(popover(element).hidden, "and closes them");
+    assert.ok(tools(element)?.classList.contains("in-line"), "staying under the pointer, its room kept");
+    pressTool(tools(element)!.querySelector(".choices-toggle")!);
+    assert.ok(!popover(element).hidden, "so the next press opens them again");
+    assert.equal(element.selection, undefined, "selecting nothing");
+  });
+
+  it("covers the gap rather than wrap a line that only just fits", async () => {
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const element = show(await fixture("adding"));
+    element.selection = "big.value";
+    const line = rendered(element, "big.value");
+    assert.ok(line.matches(".line-element"));
+    // The line wraps to two once the tools take room in it.
+    line.getBoundingClientRect = () => {
+      const height = line.querySelector(".value-tools.in-line") === null ? 18 : 36;
+      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
+    };
+    over(rendered(element, "big.value.size.value"));
+    const shown = tools(element)!;
+    assert.ok(shown.classList.contains("with-steppers"));
+    assert.ok(!shown.classList.contains("in-line"), "drawn over the gap");
+  });
+
+  it("shows an unset property's tools at once, under a one-line element selected", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const element = show(await fixture("adding"));
+    element.selection = "plain.value";
+    moreToggle(element)!.click();
+    // size reads its quiet default past it, which the tools move aside.
+    const size = rendered(element, "plain.value.size.value");
+    size.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    assert.ok(tools(element)?.classList.contains("in-line"), "no wait: the row is the selection's");
   });
 
   it("opens from its chevron, and picks with the pointer", async () => {

@@ -189,7 +189,8 @@ to show the document as the reader left it.
 ## Selection
 
 A click selects the unit it falls in: a group (by its header, or the room between its rows), a row, an
-element on one line, or a block such as an `if`. Outside every unit, as in a function's body, it
+element on one line, or a block such as an `if`. With `editable` set, a click on a value opens its
+editor instead, and leaves the selection as it was. Outside every unit, as in a function's body, it
 selects the smallest node under the pointer. Selecting fires `nx-select`, whose `detail` is
 `{ key, role, range }`; `range` carries both editor positions and UTF-8 byte offsets, so a host can
 put an editor's cursor at the node. Setting `selection` selects without firing the event, and a key
@@ -300,8 +301,10 @@ the keys that do the same.
 On a one-line element, or a group's header, the steppers and the chevron would cover the next
 property, so where more of the line follows the value, its closing `/>` included, they take room in
 the line, on hover and while a field is open, pushing the rest right until they go. In a sheet's
-row, or at the end of a line, they are drawn over the gap and nothing moves. After a stepper click
-commits, they show again on the redrawn reading, so the next click steps again.
+row, or at the end of a line, they are drawn over the gap and nothing moves, and so they are where
+taking room would wrap a line that only just fits. An unset property's row moves its quiet `default`
+aside. After a stepper click commits, they show again on the redrawn reading, so the next click steps
+again, and a case's chevron stays after it closes its popover.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does, and leaves the selection as

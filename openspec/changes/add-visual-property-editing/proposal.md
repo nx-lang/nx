@@ -32,7 +32,7 @@ from `let`s guessed at intent from types alone, so they wait for design-system s
   beside its value (one column when no choice has a label), the property's default on a row of its
   own above them, the current value marked; picking writes the value, and the default's row resets.
   The field stays typeable, so choices suggest and never restrict. Steppers on numbers, Framer-style:
-  up and down buttons just past the value, while its field is open or on a selected row; a click
+  up and down buttons just past the value, while its field is open or the pointer rests on it; a click
   steps once, Shift ten steps, and a vertical drag scrubs. A segmented control for a union's cases;
   numbers kept in range, with a note when a typed
   number is outside it; a multi-line text field for `multiline` strings; a placeholder in an empty
@@ -59,7 +59,9 @@ None.
 - `visualizer-declarations`: hints merge like formats, an alias's hints reach the properties it types,
   and a hint that does not fit its property's type is a warning.
 - `source-tree`: a resolved visualizer carries each property's editor hints, and an alias's.
-- `viewer`: the more-properties row, the row menu, and the hinted editors: choices and steppers.
+- `viewer`: the more-properties row, the row menu, and the hinted editors: choices and steppers;
+  a click on a value opens its editor without changing the selection (modifying "Values edit in
+  place" and "A selection is a unit of the reading").
 - `playground`: the test-cases example covers the new cases.
 
 ## Impact

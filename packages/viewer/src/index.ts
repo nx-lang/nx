@@ -138,7 +138,9 @@ const STEPPER_SLOP = 6;
 /** How far the pointer moves up or down, in pixels, for a stepper dragged to step its number once. */
 const STEPPER_STEP = 4;
 
+/** The tooltip of a value's choices chevron. */
 const CHOICES_TITLE = "Choices (Alt+\u2193)";
+
 /** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
 const CARD_DELAY = 500;
 
@@ -171,9 +173,10 @@ const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement
 const UNITS = ".sheet-head, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /** The units as they are drawn selected: a group stands for itself, not through its header. */
+const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
+
 /** How long the pointer rests on a value before its tools push the rest of its line right. */
 const TOOLS_REST_MS = 300;
-const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /**
  * What `element` reads as, word by word: its text, with an icon read by its label, for telling a
@@ -414,7 +417,9 @@ export class NxViewerElement extends ElementBase {
     if (this.#menuKey !== undefined && !onMark && !event.composedPath().includes(this.#menu)) {
       this.#closeMenu(false);
     }
-    if (session !== undefined && session.field === undefined && !event.composedPath().includes(this.#popover)) {
+    // A press on the tools is theirs: a case's chevron closes its popover itself.
+    const path = event.composedPath();
+    if (session !== undefined && session.field === undefined && !path.includes(this.#popover) && !path.includes(this.#tools)) {
       this.#cancel(session, false);
       // A press on the value whose popover was open closes it, as a dropdown's does; the click
       // that follows does not open it again.
@@ -1874,7 +1879,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Opens the editor of the editable value after or before the one with `key`, in reading order,
-   * selecting its unit. A boolean, which has no editor, is passed over.
+   * leaving the selection as it was. A boolean, which has no editor, is passed over.
    */
   #openNext(key: string, direction: 1 | -1): void {
     const values: HTMLElement[] = [];
@@ -2182,7 +2187,7 @@ export class NxViewerElement extends ElementBase {
         return;
       }
       const raw = session.input?.value ?? "";
-      const value = target.kind === "number" ? raw.trim() : raw.trim();
+      const value = raw.trim();
       // A popover left as it was leaves the value as it is.
       if (value === this.#currentOf(target)) {
         this.#cancel(session, true);
@@ -2441,8 +2446,9 @@ export class NxViewerElement extends ElementBase {
   // ---- Steppers -----------------------------------------------------------------------------
 
   /**
-   * Draws the tools past the value `span` draws for `target`: a number's steppers,
-   * and, while its field is open with choices, their chevron. Nothing for a value with neither.
+   * Draws the tools past the value `span` draws for `target`: a number's steppers, and a chevron
+   * past a case, past a value with choices under the pointer, or past an open field with choices.
+   * Nothing for a value with none of these.
    */
   #showTools(span: HTMLElement, target: EditTarget): void {
     const session = this.#session?.target.key === target.key ? this.#session : undefined;
@@ -2463,11 +2469,20 @@ export class NxViewerElement extends ElementBase {
     this.#tools.querySelector<HTMLElement>(".choices-toggle")!.title = isCase ? "Cases" : CHOICES_TITLE;
     // With more of the line after it, even just its closing `/>`, the tools take room in the line, as
     // a field does as it grows, rather than cover what follows.
+    // Where taking room would wrap a line that just fits, moving all that reads below it, they cover
+    // the gap instead, as in a sheet's row.
     const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
-    const inLine = this.#followedOnItsLine(span);
+    this.#tools.remove();
+    let inLine = this.#followedOnItsLine(span);
+    const line = inLine ? span.closest<HTMLElement>(".line-element, .sheet-head, .tag-line, .sheet-value") : null;
+    const height = line?.getBoundingClientRect().height ?? 0;
     this.#tools.classList.toggle("in-line", inLine);
     this.#tools.dataset["toolsFor"] = target.key;
     span.after(this.#tools);
+    if (line !== null && line.getBoundingClientRect().height > height + 1) {
+      inLine = false;
+      this.#tools.classList.remove("in-line");
+    }
     this.#toolsHover = undefined;
     if (inLine || wasInLine) {
       // The line grew or shrank, so its highlight is redrawn to fit it.
@@ -2553,7 +2568,10 @@ export class NxViewerElement extends ElementBase {
     // jump as the pointer passes over it; in the selected row, and where they are drawn over the gap
     // past the value, they show at once.
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    const onSelected = selected?.contains(value) === true && (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS));
+    // The unset properties' rows are the selected element's, though drawn after a one-line element.
+    const onSelected =
+      (selected?.contains(value) === true && (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS))) ||
+      this.#moreBlock?.contains(value) === true;
     if (!onSelected && this.#followedOnItsLine(value)) {
       if (this.#tools.isConnected) {
         this.#hideTools();
@@ -2604,9 +2622,15 @@ export class NxViewerElement extends ElementBase {
     const session = this.#session?.target.key === key ? this.#session : undefined;
     if (part.classList.contains("choices-toggle")) {
       if (target.kind === "case") {
-        // A case's chevron opens its popover, and closes it as a dropdown's does.
+        // A case's chevron opens its popover, and closes it as a dropdown's does, staying under the
+        // pointer for the next press.
         if (session !== undefined) {
           this.#cancel(session, true);
+          const span = this.#rendered.get(key!);
+          if (span !== undefined) {
+            this.#showTools(span, target);
+            this.#toolsHover = key;
+          }
         } else {
           this.#openEditor(key!);
         }

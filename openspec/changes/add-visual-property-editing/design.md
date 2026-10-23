@@ -143,7 +143,9 @@ changes what a program means.
   while a field is open, pushing the rest right as a growing field does, and give it back when they
   go. In a sheet's row, or at the end of a line, they stay drawn over the gap, and nothing moves.
   Outside the selection, where they would take room, they wait until the pointer rests on the value
-  about 300 ms, so a line does not jump as the pointer passes over it.
+  about 300 ms, so a line does not jump as the pointer passes over it. Where taking room would wrap a
+  line that only just fits, they cover the gap instead, so nothing below moves. An earlier item of a
+  braced list takes room too, and so does an unset property's value, moving its quiet `default`.
   Covering the next property was tried first; drawing the tools above or below the line would cover a
   neighboring line. After a stepper click commits, the redrawn reading shows the steppers again under
   the pointer, so the next click steps again rather than selecting the row beneath.
@@ -175,8 +177,8 @@ worry that a button beside each row makes destructive changes too easy. Dimmed r
 - **Choices write literals.** A document that picks `lg` holds `20`, not a name; if the library
   later changes its scale, the document keeps `20`. That is the point of choices as suggestions;
   tokens that a document refers to come with design-system support.
-- **Steppers are small targets.** They are drawn only where they help (an open field, the selected
-  row), with a tooltip, and the arrow keys and the name drag remain.
+- **Steppers are small targets.** They are drawn only where they help (an open field, a value under
+  the pointer), with a tooltip, and the arrow keys and the name drag remain.
 
 ## Open Questions
 
