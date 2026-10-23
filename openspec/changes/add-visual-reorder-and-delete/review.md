@@ -19,7 +19,7 @@ confirmed RF1, RF2 and RF5.
 
 ## Findings
 
-### 🟡 Fixed - RF1 A move between identical items returns edits that leave the text unchanged, and Visual then waits for a tree that never comes
+### ✅ Verified - RF1 A move between identical items returns edits that leave the text unchanged, and Visual then waits for a tree that never comes
 - **Severity:** Medium
 - **Evidence:** `edit_tree` drops each replacement that rewrites its own bytes unchanged
   (crates/nx-language-service/src/source_edit.rs:156). It never checks whether the edits taken
@@ -52,7 +52,15 @@ confirmed RF1, RF2 and RF5.
   the playground's `onUnchanged` bumps the revision and re-sets the tree, which ends the viewer's
   wait. The viewer README now says a host sets the tree again after an edit it does not make.
 
-### 🟡 Fixed - RF2 A second Delete on a two-item sequence, before the new tree arrives, sends a key that no longer exists
+- **Verification:** In 07637d3, `edit_tree` builds the edited text (`applied`) and returns no edits
+  when it equals the source (source_edit.rs). The new test
+  `moving_past_an_item_just_like_it_changes_nothing` covers lines and one line, in both
+  directions, and the wasm parity corpus has `let same`. With no edits, the playground's edit
+  queue calls `onUnchanged`, which re-sets the tree and clears the viewer's `#following`. The
+  viewer README now states the host's duty. `cargo test -p nx-language-service source_edit`
+  passes (55), and so does the wasm parity test (8).
+
+### ✅ Verified - RF2 A second Delete on a two-item sequence, before the new tree arrives, sends a key that no longer exists
 - **Severity:** Low
 - **Evidence:** In a sequence of two (`choices={ <C value="a" /> <C value="b" /> }`, typed `C*`),
   the first Delete sets `following.map.count` to 1. A second Delete before the new tree arrives
@@ -74,6 +82,11 @@ confirmed RF1, RF2 and RF5.
 - **Fix:** `#itemAction` answers nothing once a sequence's following map has fewer than two items
   (index.ts), so the second Delete fires nothing. New viewer test "deletes once from a sequence of
   two before the newer tree comes, which leaves no list" (fixture `pair`).
+
+- **Verification:** `#itemAction` returns nothing once `following.sequence && following.map.count
+  < 2`, so a second Delete fires nothing. The new test "deletes once from a sequence of two before
+  the newer tree comes, which leaves no list" asserts that only one `remove` is fired. Viewer
+  tests pass (185).
 
 ### 🟡 Fixed - RF3 In a one-line list, an item's hidden `⋯` overlaps the next item and is still clickable
 - **Severity:** Low
@@ -104,7 +117,35 @@ confirmed RF1, RF2 and RF5.
   cases" example (`let pair`): the mark sits past `} />`, a point at the next item's `<` hits that
   item, and the mark opens Move down, Delete, Show in Source.
 
-### 🟡 Fixed - RF4 The implementation commit changed approved requirements, and one rewritten sentence is hard to parse
+- **Verification:** Fixed for a one-line list that is a written row's value or sits inside a
+  one-line element. In Chromium, on `let pair` and on `let row = <P options={ … } />`, the marks
+  are `shared`, all hang past the end of the line, and only the selected item's mark shows.
+  Marks are now `visibility: hidden`, so a hidden mark takes no clicks.
+
+  It is not fixed when `#lineEnd` (index.ts) finds neither a row nor an outer line element. A
+  `let` declaration holding a one-line sequence is one such case, for example
+  `let xs = { <O value="a" label="A" /> <O value="b" label="B" /> <O value="c" label="C" /> }`.
+  There `end` is `undefined`, so the mark is not `shared` and goes back inside the item's own
+  `.line-element`. In Chromium, `xs.value[0]` spans x=120–293, its mark x=297–311, and
+  `xs.value[1]` starts at x=301. The `.line-element:hover` rule makes that mark visible while the
+  pointer is over the item. After hovering `xs.value[0]` and moving to the start of
+  `xs.value[1]`, `elementFromPoint` returns `xs.value[0]`'s visible `row-menu`. A click there
+  opened `xs.value[0]`'s menu (Move down, Delete, Show in Source) instead of selecting
+  `xs.value[1]`.
+
+  Recommendation: treat every item that does not stand on its own line as shared. When
+  `#lineEnd` finds no row or outer element, anchor the mark after the list's last item, or at the
+  end of the line that holds the list, for example the declaration's line. Add a viewer test for
+  a one-line sequence in a `let`.
+- **Fix (round 2):** `#lineEnd` falls back to the list that holds the item (a `let`'s one-line
+  sequence), so the mark hangs past its `}`; only where none of row, outer one-line element or list
+  is drawn around the item does it stay after the item. Every item that shares its line now has a
+  `shared` mark, shown only while selected, never on hover. New viewer test "hangs the menu mark of
+  an item of a let's one-line sequence after the sequence". Checked in Chromium with a temporary
+  `let xs = { <Option …/> <Option …/> <Option …/> }` (not committed): the mark sits past `}`, a
+  point at `xs.value[1]`'s `<` hits that item, and the mark opens Move down, Delete, Show in Source.
+
+### ✅ Verified - RF4 The implementation commit changed approved requirements, and one rewritten sentence is hard to parse
 - **Severity:** Low
 - **Evidence:** 1e3dff0 edits specs/source-edits/spec.md, specs/viewer/spec.md and design.md, as
   well as checking off tasks. The behaviour changes are:
@@ -133,7 +174,12 @@ confirmed RF1, RF2 and RF5.
   own gaps, the touch fallback). They are called out to Bret in the thread for sign-off with this
   review.
 
-### 🟡 Fixed - RF5 Removing a middle item from a one-line list takes the space after it, where the spec says the space before it
+- **Verification:** The `remove` sentence in specs/source-edits/spec.md now reads clearly. The
+  implementer has passed the 1e3dff0 spec edits to Bret for sign-off. That approval is a human
+  step outside this review, and no further change is needed here. `openspec validate --strict`
+  passes.
+
+### ✅ Verified - RF5 Removing a middle item from a one-line list takes the space after it, where the spec says the space before it
 - **Severity:** Low
 - **Evidence:** The spec says "In a list written on one line, it SHALL remove the item and the
   space that separates it from the item before it, or after it when it is the first". `cut`
@@ -151,7 +197,14 @@ confirmed RF1, RF2 and RF5.
   `removing_a_middle_item_on_one_line_takes_the_space_before_it` (uneven spacing). A one-line move
   carries the space before it too, which gives the same order of items.
 
-### 🟡 Fixed - RF6 Several spec scenarios and risky paths have no tests
+- **Verification:** `cut` now tries the gap before the item first in `ListLayout::OneLine`, and
+  the gap after it first in `Lines`. The new test
+  `removing_a_middle_item_on_one_line_takes_the_space_before_it` uses uneven spacing. I checked
+  that a one-line move using the gap before still gives edits that don't overlap: the insert
+  point is before `spans[from-1].1` when moving up, and after `end` when moving down. The
+  existing one-line move tests and the repository round trip pass.
+
+### ✅ Verified - RF6 Several spec scenarios and risky paths have no tests
 - **Severity:** Low
 - **Evidence:** packages/viewer/test/moving.test.ts has no test for:
   - the viewer scenario "A click on the icon" (a click on the handle selects the item, and no drag
@@ -182,6 +235,18 @@ confirmed RF1, RF2 and RF5.
   and touch adjustment, which jsdom has neither of; it stays verified in Chromium only (touch
   drag at 375 px).
 
+- **Verification:** The listed tests are present in packages/viewer/test/moving.test.ts:
+  - a click on the handle selects without dragging, and the card ends `Drag to reorder`;
+  - the name is the only handle without `icons`;
+  - no drag, and no moves or deletes on another list, while a move is pending;
+  - repeated Delete on a two-item sequence;
+  - the shared mark.
+
+  The Rust tests are present for the `cut` fallback beside a comment set apart by blank lines,
+  and for a move that changes nothing. Leaving the touch redirect from the fold chevron to
+  browser checks is reasonable, since jsdom has no layout. All pass (Rust 55, viewer 185). The
+  RF3 gap above has no test yet.
+
 ## Questions
 - Can items inside an element that is itself inside an `if` branch or a `for` body be moved? For
   example, the steps of `<Group>` in `if wide { <Group> <A /> <B /> </Group> }`, or cells in a
@@ -197,6 +262,13 @@ confirmed RF1, RF2 and RF5.
   a condition's branch or a loop's body", and design decision 3 says so. The spec edits in 1e3dff0
   go to Bret for sign-off (RF4).
 
+- **Reviewer:** The answers are accepted. The spec wording "not an item of a condition's branch or
+  a loop's body" matches what the service and the viewer do.
+
+## New Findings Discovered During 2026-10-23 17:56 Verification
+
+- None. RF3 was reopened above.
+
 ## Summary
 - The change is solid overall. The language service's layout handling (whole lines with the
   comments directly above, blank-line spacing carried with the item, one-line lists, CRLF) is
@@ -207,3 +279,7 @@ confirmed RF1, RF2 and RF5.
   spec and leaves Visual waiting for a tree that never comes, disabling moves and deletes on other
   lists. RF2 and RF3 are smaller interaction bugs. RF4 is a process and wording point about spec
   edits made after approval, RF5 is a small spec divergence, and RF6 lists tests to add.
+- **Verification (2026-10-23 17:56), against 07637d3:** RF1, RF2, RF4, RF5 and RF6 are verified.
+  RF3 is reopened: a one-line list that is neither a row's value nor inside a one-line element,
+  such as a `let` holding a one-line sequence, still hangs each item's mark over the next item,
+  where a click opens the wrong menu. No new findings.

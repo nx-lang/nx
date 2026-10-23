@@ -1528,10 +1528,10 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * What ends the line `drawn`, drawn on one line with others, stands on: the written row it is the
-   * value of, or else the outermost element drawn on that line around it. Nothing when neither is
-   * found.
+   * value of, or else the outermost element drawn on that line around it, or else the list keyed
+   * `list` that holds it, as a `let`'s sequence. Nothing when none is found.
    */
-  #lineEnd(drawn: HTMLElement): HTMLElement | undefined {
+  #lineEnd(drawn: HTMLElement, list: string): HTMLElement | undefined {
     let outer: HTMLElement | undefined;
     for (let at = drawn.parentElement; at !== null && at !== this.#body; at = at.parentElement) {
       if (at.matches(".sheet-row[data-key]")) {
@@ -1544,7 +1544,11 @@ export class NxViewerElement extends ElementBase {
         outer = at;
       }
     }
-    return outer;
+    if (outer !== undefined) {
+      return outer;
+    }
+    const holder = this.#rendered.get(list);
+    return holder !== undefined && holder !== drawn && holder.contains(drawn) ? holder : undefined;
   }
 
   /**
@@ -1580,8 +1584,8 @@ export class NxViewerElement extends ElementBase {
       mark.dataset["menuKey"] = key;
       // An item that shares its line with others hangs its mark past the end of that line, shown
       // while it is selected, where it covers none of them.
-      const end = ownLine ? undefined : this.#lineEnd(drawn);
-      if (end !== undefined) {
+      const end = ownLine ? undefined : this.#lineEnd(drawn, list.key);
+      if (!ownLine) {
         mark.classList.add("shared");
       }
       if (end?.matches(".sheet-row") === true) {

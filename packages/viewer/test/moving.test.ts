@@ -46,6 +46,7 @@ const SOURCE = [
   "</QuestionFlow>",
   'let pick = <Select choices={ <Choice value="x" /> <Choice value="y" /> <Choice value="z" /> } />',
   'let pair = <Select choices={ <Choice value="p" /> <Choice value="q" /> } />',
+  'let xs = { <Choice value="m" /> <Choice value="n" /> <Choice value="o" /> }',
   "let lone = <Box>",
   '  <Step id="z" />',
   "</Box>",
@@ -440,5 +441,15 @@ describe("moving and deleting in the reading", () => {
     assert.ok(mark.classList.contains("selected"));
     element.selection = "pick.value.choices.value[0]";
     assert.ok(!mark.classList.contains("selected"));
+  });
+
+  it("hangs the menu mark of an item of a let's one-line sequence after the sequence", async () => {
+    const element = show(await sourceOf(SOURCE));
+    const mark = [...root(element).querySelectorAll<HTMLElement>(".row-menu")].find((candidate) => candidate.dataset["menuKey"] === "xs.value[0]")!;
+    assert.ok(mark.classList.contains("shared"));
+    assert.equal(mark.parentElement!.parentElement, rendered(element, "xs.value"), "after the sequence");
+    for (let after = mark.parentElement!.nextElementSibling; after !== null; after = after.nextElementSibling) {
+      assert.ok(after.matches(".item-menu"), "past its last part, among the other items' marks");
+    }
   });
 });
