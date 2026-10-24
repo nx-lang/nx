@@ -4,8 +4,9 @@
 The catalog's visualizer module SHALL give editor hints to the properties DrawnUI bounds or whose
 values fall on a scale, on the base that declares each so its controls inherit them, or on each
 layout container where that base is generic: a range and step for opacity and the ratio properties
-(`0` to `1`), whole-number steps from `0` for grid placement and `MaxLines` and whole-number steps
-for `ZIndex`, a range and step of `100` for `FontWeight`, choices on a scale for
+(`0` to `1`), whole-number steps from `0` for grid placement, whole-number steps
+for `MaxLines` and `ZIndex`, no range where DrawnUI uses values outside one (`-1` sizes, negative
+scales and spacing), a range and step of `100` for `FontWeight`, choices on a scale for
 `FontSize` and the spacing properties, the font names both of the fiddle's engines register as
 choices for `FontFamily`, segmented editors for the short layout and text unions, and multiline text for a
 label's and an editor's `Text`. Every hint SHALL fit its property's type.
