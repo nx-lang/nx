@@ -452,7 +452,10 @@ export function App() {
                 // The field's change was committed, not dropped: Undo takes back its edit.
                 draftDroppedAt.current = Number.NEGATIVE_INFINITY;
                 setEditsInFlight((count) => count + 1);
-                void applyVisualEdit(detail).finally(() => setEditsInFlight((count) => count - 1));
+                void applyVisualEdit(detail)
+                  // A failure is reported through the queue's onUnchanged.
+                  .catch(() => undefined)
+                  .finally(() => setEditsInFlight((count) => count - 1));
               }}
               onDraft={onVisualDraft}
               onOpen={openInSource}

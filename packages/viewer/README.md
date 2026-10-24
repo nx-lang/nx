@@ -427,7 +427,8 @@ const queue = createEditQueue(
   (text) => showTreeOf(text), // an edit changed the text: read it at once
   () => (viewer.tree = tree), // refused, unchanged or failed: give the element its tree again
 );
-viewer.addEventListener(NX_EDIT_EVENT, (event) => void queue((event as CustomEvent<NxEditDetail>).detail));
+// A failed edit rejects here too, after onUnchanged has been called.
+viewer.addEventListener(NX_EDIT_EVENT, (event) => void queue((event as CustomEvent<NxEditDetail>).detail).catch(() => undefined));
 // Undo after the edits fired before it, as one pressed while a field's edit is still being asked.
 const undo = () => queue.after(() => editor.trigger("visual", "undo", null));
 ```

@@ -30,13 +30,14 @@ API gets wrong for a real design system before it is published.
 - **The DrawnUI catalog's visualizers learn DrawnUI** (`nx/visualizers.nx`):
   - ranges and steps for the numbers DrawnUI bounds: `Opacity`, the ratio properties
     (`AnchorX`/`AnchorY`, `HorizontalFillRatio`, the gradient's `*Ratio`s) `0` to `1` by `0.05`;
-    `Rotation` by `1`; `Scale*` by `0.1`; `Row`, `Column`, their spans, `MaxLines` and `ZIndex` by
-    `1` from `0`; `FontWeight` `100` to `900` by `100`;
+    `Rotation` by `1`; `Scale*` by `0.1`; `Row` and `Column` by `1` from `0`, their spans from `1`,
+    `MaxLines` and `ZIndex` by `1`; `FontWeight` `100` to `900` by `100`; no range where DrawnUI
+    uses values outside one (`-1` sizes, negative scales and spacing);
   - choices: `FontSize` and `Spacing`/`RowSpacing`/`ColumnSpacing` on a type scale; `FontFamily` the
-    fonts the fiddle registers (`FontText`, `FontTextTitle` and the symbol and emoji fallbacks);
+    fonts both engines register (`FontText`, `FontTextTitle` and the symbol and emoji fallbacks);
   - segmented editors for short unions (`LayoutOptions`, `TextAlignment`, `FontAttributes`,
     `StrokeCap`, `ScrollOrientation`), multiline for a label's and an editor's `Text`, a placeholder
-    for `Source` and `Text`;
+    for an image's, an SVG's and a Lottie's `Source`;
   - the order of each control's properties, so the unset-properties list leads with what people set
     first (size and layout, then color and text, then the rest).
   The visualizer test already fails on any diagnostic, so a hint that does not fit its property's type

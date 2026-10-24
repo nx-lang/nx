@@ -112,13 +112,14 @@ All in `nx/visualizers.nx`, on the base that declares each property, so they are
 
 | Base | Hints |
 | --- | --- |
-| `SkiaControl` | `Opacity`, `AnchorX`, `AnchorY`, `HorizontalFillRatio`, `VerticalFillRatio` `min=0 max=1 step=0.05`; `Rotation step=1`; `Scale`, `ScaleX`, `ScaleY` `step=0.1`; `Row`, `Column`, `RowSpan`, `ColumnSpan`, `ZIndex` `min=0 step=1` (spans `min=1`); `HorizontalOptions`, `VerticalOptions` `editor=segmented`; `WidthRequest`, `HeightRequest` `min=0` |
-| `SkiaLayoutBase` | `Spacing`, `RowSpacing`, `ColumnSpacing` `min=0` with choices 0, 4, 8, 12, 16, 24, 32 |
-| `SkiaLabelBase` | `FontSize` `min=1` with choices 10, 12, 14, 16, 18, 20, 24, 32, 48; `FontWeight` `min=100 max=900 step=100`; `MaxLines` `min=0 step=1`; `FontFamily` choices of the registered fonts; `Text` `multiline`; `FontAttributes`, `VerticalTextAlignment` `editor=segmented` |
+| `SkiaControl` | `Opacity`, `AnchorX`, `AnchorY`, `HorizontalFillRatio`, `VerticalFillRatio` `min=0 max=1 step=0.05`; `Rotation step=1`; `Scale`, `ScaleX`, `ScaleY` `step=0.1` (no `min`: a negative scale mirrors); `Row`, `Column` `min=0 step=1`, `RowSpan`, `ColumnSpan` `min=1 step=1`, `ZIndex` `step=1`; `HorizontalOptions`, `VerticalOptions` `editor=segmented`; the size requests no range (DrawnUI's auto is `-1`) |
+| layout containers (`SkiaLayoutBase` is generic) | `Spacing`, `RowSpacing`, `ColumnSpacing` with choices 0, 4, 8, 12, 16, 24, 32 and no `min` (a negative spacing overlaps) |
+| `SkiaLabelBase` | `FontSize` `min=1` with choices 10, 12, 14, 16, 18, 20, 24, 32, 48; `FontWeight` `min=100 max=900 step=100`; `MaxLines` `step=1` (DrawnUI's default is `-1`); `FontFamily` choices of the registered fonts; `Text` `multiline`; `FontAttributes`, `VerticalTextAlignment` `editor=segmented` |
 | `SkiaImageBase`, `SkiaSvg`, `SkiaLottie` | `Source` `placeholder="URL or resource"` |
 | `SkiaShapeBase` | `StrokeWidth` `min=0`; `StrokeCap` `editor=segmented` |
 | `SkiaEditor` | `Text` `multiline` |
 | `SkiaGradient` (a record) | `StartXRatio`, `StartYRatio`, `EndXRatio`, `EndYRatio`, `Opacity` `min=0 max=1 step=0.05` |
+| `SkiaScroll`, `RefreshIndicator` | `Orientation` `editor=segmented` |
 
 The font choices are the names both engines register: `fiddle-react.js` (with the names
 drawnui-react's `AddSymbols` and `AddEmojis` give) and `nx/rust/src/player.rs`, which also registers
@@ -141,7 +142,9 @@ own properties before or after its bases' is NX's merge rule; task 2 found the n
 properties lead, then each base's in turn, so a label reads `Text`, `FontSize`, `TextColor`,
 `FontFamily` first and then `SkiaControl`'s.
 
-The values above are a starting table. Task 5 reads every preset in Visual and adjusts.
+A range bounds what the viewer's field takes, so the table gives one only where DrawnUI has no use
+for a value outside it (review RF4). No `Text` has a placeholder: an unset `Text` already reads its
+type in the unset list, and a written one is never empty for long. The values above are a starting table. Task 5 reads every preset in Visual and adjusts.
 
 ### 6. Tests
 
