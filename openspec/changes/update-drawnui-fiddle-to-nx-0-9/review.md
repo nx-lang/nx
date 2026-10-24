@@ -54,15 +54,16 @@
 
 ## New Findings Discovered During 2026-10-24 Verification
 
-### 🟡 Fixed - RF7 The catalog spec still says `MaxLines` steps from `0`, which no longer matches the module
+### ✅ Verified - RF7 The catalog spec still says `MaxLines` steps from `0`, which no longer matches the module
 - **Severity:** Low
 - **Evidence:** `specs/fiddle-nx-catalog-visualizers/spec.md:7` requires "whole-number steps from `0` for grid placement and `MaxLines`". After the RF4 fix, `nx/visualizers.nx` gives `MaxLines` only `step=1` with no `min`, and the proposal and design were updated to match, but the spec delta was not.
 - **Recommendation:** Reword the requirement to "whole-number steps from `0` for grid placement, and whole-number steps for `MaxLines` and `ZIndex`". You could also add that no range excludes values DrawnUI uses (`-1` sizes, negative scales and spacing).
 - **Fix:** The requirement now reads whole-number steps from `0` for grid placement, whole-number steps for `MaxLines` and `ZIndex`, and no range where DrawnUI uses values outside one (`-1` sizes, negative scales and spacing).
+- **Verification:** Verified in NX `335096f9`: `specs/fiddle-nx-catalog-visualizers/spec.md` now requires whole-number steps from `0` for grid placement, whole-number steps for `MaxLines` and `ZIndex`, and no range where DrawnUI uses values outside one. This matches `nx/visualizers.nx` (`MaxLines step=1`, `ZIndex step=1`, `Row`/`Column` `min=0`) and design.md. `openspec validate` reports the change valid.
 
 ## Questions
 - None (the RF4 question was answered: refusing entries is the viewer's specified behavior, and the table now adapts to it).
 
 ## Summary
-- Verification (fiddle `4c5a207`, NX `4681fd67`): RF1–RF6 verified, with `npm run test:nx -- --nx ../nx` passing 137 tests (1 skipped). One new low-severity finding, RF7, is a spec wording mismatch.
+- Verification (fiddle `4c5a207`, NX `4681fd67`): RF1–RF6 verified, with `npm run test:nx -- --nx ../nx` passing 137 tests (1 skipped). One new low-severity finding, RF7, a spec wording mismatch, was fixed in NX `335096f9` and verified. All findings are closed.
 - The edit-queue move into `@nx-lang/viewer` is clean and matches the viewer spec. The fiddle's integration follows the playground closely, and its unit and browser checks cover the main paths. The two Medium issues are host-behavior gaps: the editable state is not re-read when Visual is shown again, and the dropped-draft Undo guard the playground already has is missing. The rest are small edge cases and table/doc mismatches.
