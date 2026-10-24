@@ -51,7 +51,8 @@ items of the item's own list. Items do not slide apart to show the gap: Visual's
 moves under the reader, and with tall open groups a sliding list jumps. The reading changes once, on
 the host's newer tree. The line is not drawn at the two gaps beside the item, where a drop
 would not move it; a drop there, outside the list, or Escape cancels with no event. Near the top or bottom of the reading's scrolling area, the reading scrolls,
-faster the nearer the edge.
+faster the nearer the edge. An edge the press began near scrolls only once the pointer has left it, so an
+item drawn at the top can be dragged without the reading jumping.
 
 The drag uses pointer events with the pointer captured on the handle, which also makes a touch drag
 on it work; it starts once the pointer has moved 4 px, so a click on the handle selects the item. On touch, the browser can aim a press near the icon at the fold chevron beside it, so a

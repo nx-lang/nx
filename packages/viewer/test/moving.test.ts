@@ -353,6 +353,43 @@ describe("moving and deleting in the reading", () => {
     assert.equal(root(element).querySelector(".drag-ghost"), null, "the copy is gone");
   });
 
+  it("scrolls near an edge only once the pointer has left the edge the press began near", async () => {
+    const holder = document.createElement("div");
+    holder.style.overflowY = "auto";
+    Object.defineProperty(holder, "clientHeight", { value: 200 });
+    holder.getBoundingClientRect = () => ({ top: 0, bottom: 200, left: 0, right: 400, width: 400, height: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const scrolled: number[] = [];
+    holder.scrollBy = ((options: ScrollToOptions) => scrolled.push(options.top ?? 0)) as typeof holder.scrollBy;
+    document.body.append(holder);
+    const frames: FrameRequestCallback[] = [];
+    const globals = globalThis as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown };
+    const saved = { request: globals.requestAnimationFrame, cancel: globals.cancelAnimationFrame };
+    globals.requestAnimationFrame = (callback: FrameRequestCallback) => frames.push(callback);
+    globals.cancelAnimationFrame = () => undefined;
+    try {
+      const fixture = await sourceOf(SOURCE);
+      const element = show(fixture);
+      holder.append(element);
+      layOut(element, steps(4));
+      const handle = root(element).querySelector<HTMLElement>('.drag-handle[data-drag-key="flow.value.steps[0]"]')!;
+      pointer(handle, "pointerdown", 10, 9);
+      pointer(handle, "pointermove", 10, 15);
+      assert.ok(root(element).querySelector(".drag-ghost"), "dragging");
+      pointer(handle, "pointermove", 10, 5);
+      frames.splice(0).forEach((frame) => frame(0));
+      assert.deepEqual(scrolled, [], "not while the pointer has stayed near the top it began near");
+      pointer(handle, "pointermove", 10, 80);
+      pointer(handle, "pointermove", 10, 5);
+      frames.splice(0, 1).forEach((frame) => frame(0));
+      assert.ok(scrolled.length > 0 && scrolled[0]! < 0, "up, once it has been away");
+      press(body(element), "Escape");
+    } finally {
+      globals.requestAnimationFrame = saved.request;
+      globals.cancelAnimationFrame = saved.cancel;
+      holder.remove();
+    }
+  });
+
   it("cancels a drag on Escape, and on a drop outside the list or where the item is", async () => {
     const element = show(await sourceOf(SOURCE));
     const fired = edits(element);

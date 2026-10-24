@@ -157,8 +157,8 @@ let sizes:Size+ = { Size.small Size.large }
 // Lists to reorder and delete from. Drag a step by its icon or its name: a line shows where it
 // lands, Escape cancels, and the reading scrolls near its top and bottom. Or select a step and press
 // Alt+Up or Alt+Down, or use Move up and Move down in its ⋯ menu (Shift+F10). Delete or
-// Cmd+Backspace deletes the selected step. Fold the welcome, then move a step past it: the fold
-// stays on the welcome. The comment above "drink" moves with it; the step inside the if does not
+// Cmd+Backspace deletes the selected step. Fold "drink", then move "welcome" past it: the fold
+// stays on drink. The comment above "drink" moves with it; the step inside the if does not
 // move, but the if does. Undo takes each back; check Source after each.
 type Option = { value:Code label:uitext }
 abstract type Step = { id:Code }
@@ -174,8 +174,8 @@ visualizer Option = <ElementVisualizer title=label id=value icon="circle" />
 
 let wantsMilk = true
 
-// drink's options are written an option to a line, and drag too; size's are on one line, so they
-// move by Alt+Up and Alt+Down and the menu only.
+// Visual draws each list of options an option to a line, so both drag, though size's are written
+// on one line in Source: a move keeps each as it is written.
 let survey =
   <Flow title="Morning survey">
     <Statement

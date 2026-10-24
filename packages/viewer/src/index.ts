@@ -316,6 +316,11 @@ interface Drag {
   /** How far the reading scrolls each frame while the pointer is near its edge. */
   speed: number;
   frame: number | undefined;
+  /**
+   * Whether the top and the bottom edge scroll yet: not one the press began near, until the pointer
+   * has left it, so an item drawn near an edge can be dragged without the reading jumping.
+   */
+  edges?: { top: boolean; bottom: boolean };
 }
 
 /**
@@ -2452,8 +2457,17 @@ export class NxViewerElement extends ElementBase {
     // Near the top or the bottom of what scrolls the reading, it scrolls, faster nearer the edge.
     const port = this.#scrollPort();
     const edge = Math.min(DRAG_EDGE, port.height / 4);
-    const above = port.top + edge - drag.clientY;
-    const below = drag.clientY - (port.top + port.height - edge);
+    const near = (y: number): { top: boolean; bottom: boolean } => ({
+      top: y < port.top + edge,
+      bottom: y > port.top + port.height - edge
+    });
+    const began = near(drag.y);
+    const now = near(drag.clientY);
+    drag.edges ??= { top: !began.top, bottom: !began.bottom };
+    drag.edges.top ||= !now.top;
+    drag.edges.bottom ||= !now.bottom;
+    const above = drag.edges.top ? port.top + edge - drag.clientY : 0;
+    const below = drag.edges.bottom ? drag.clientY - (port.top + port.height - edge) : 0;
     drag.speed =
       above > 0 ? -Math.ceil(Math.min(1, above / edge) * DRAG_SPEED) : below > 0 ? Math.ceil(Math.min(1, below / edge) * DRAG_SPEED) : 0;
     if (drag.speed !== 0 && drag.frame === undefined && typeof requestAnimationFrame !== "undefined") {
