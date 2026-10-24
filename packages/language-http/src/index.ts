@@ -310,7 +310,7 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
     if (edit === undefined) {
       return {
         problem:
-          "The 'sourceEdit' query needs 'edit': { kind: 'setValue', value }, { kind: 'setText', text }, { kind: 'remove' } or { kind: 'addProperty', name, value }.",
+          "The 'sourceEdit' query needs 'edit': { kind: 'setValue', value }, { kind: 'setText', text }, { kind: 'remove' }, { kind: 'addProperty', name, value } or { kind: 'move', to }.",
       };
     }
     return { documents, uri, position, key: record.key, edit };
@@ -339,6 +339,10 @@ function sourceEditOf(candidate: unknown): SourceEdit | undefined {
         ? undefined
         : { kind: "addProperty", name: edit.name, value };
     }
+    case "move":
+      return typeof edit.to === "number" && Number.isSafeInteger(edit.to) && edit.to >= 0
+        ? { kind: "move", to: edit.to }
+        : undefined;
     default:
       return undefined;
   }

@@ -115,6 +115,15 @@ describe("the wasm SDK's in-process language service", () => {
       "let xs = { 1 2 }",
       "type Label = { content text:string }",
       "let label = <Label>Hello</Label>",
+      'let row = { <Panel mode=light title="a" /> <Panel mode=dark title="b" /> }',
+      'let same = { <Panel mode=light title="a" /> <Panel mode=light title="a" /> }',
+      "let column = {",
+      "  // First",
+      '  <Panel mode=light title="a" />',
+      "",
+      '  <Panel mode=dark title="b" />',
+      '  <Panel mode=dark title="c" />',
+      "}",
       ""
     ].join("\n");
     const request = { documents: [{ uri, source: editSource, version: 8 }], uri };
@@ -133,7 +142,11 @@ describe("the wasm SDK's in-process language service", () => {
           return [
             { kind: "addProperty", name: "title", value: { kind: "string", value: "y" } },
             { kind: "addProperty", name: "mode", value: { kind: "case", name: "dark" } },
-            { kind: "addProperty", name: "nope", value: { kind: "boolean", value: true } }
+            { kind: "addProperty", name: "nope", value: { kind: "boolean", value: true } },
+            { kind: "move", to: 0 },
+            { kind: "move", to: 2 },
+            { kind: "move", to: 9 },
+            { kind: "remove" }
           ];
         case "text":
           return [{ kind: "setText", text: "Goodbye" }, { kind: "setText", text: "a < b" }];

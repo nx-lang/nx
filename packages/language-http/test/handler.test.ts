@@ -427,6 +427,32 @@ test("an added property answers through HTTP, and a nameless one is refused", as
   assert.match((await json<LanguageServiceErrorBody>(nameless)).error.message, /'addProperty'/);
 });
 
+test("a move answers through HTTP, and one without a position is refused", async () => {
+  const handler = createNxLanguageHandler();
+  const source = [
+    "type Drink = { name:string }",
+    'let drinks = { <Drink name="Latte" /> <Drink name="Mocha" /> }',
+    "",
+  ].join("\n");
+  const documents = [{ uri: FORM, source }];
+
+  const moved = await json<SourceEditAnswer>(
+    await handler(
+      post("sourceEdit", { documents, uri: FORM, key: "drinks.value[1]", edit: { kind: "move", to: 0 } }),
+    ),
+  );
+  assert.equal(moved.refused, undefined);
+  assert.equal(moved.edits.length, 2);
+
+  for (const to of [undefined, -1, 1.5, "0"]) {
+    const unplaced = await handler(
+      post("sourceEdit", { documents, uri: FORM, key: "drinks.value[1]", edit: { kind: "move", to } }),
+    );
+    assert.equal(unplaced.status, 400);
+    assert.match((await json<LanguageServiceErrorBody>(unplaced)).error.message, /'move'/);
+  }
+});
+
 test("a request cannot replace a context document, and says what collided", async () => {
   const response = await contextHandler(
     post("diagnostics", { documents: [{ uri: CATALOG, source: "let mine = 1\n" }], uri: CATALOG }),

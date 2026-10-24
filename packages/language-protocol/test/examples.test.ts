@@ -155,6 +155,13 @@ export const addPropertyRequest: SourceEditRequest = {
   edit: { kind: "addProperty", name: "color", value: { kind: "string", value: "#c8a27a" } },
 };
 
+export const moveRequest: SourceEditRequest = {
+  documents,
+  uri: "nx://tenant/ui.nx",
+  key: "root.value[1]",
+  edit: { kind: "move", to: 0 },
+};
+
 /** An in-process implementation, the shape an editor integration is tested against. */
 export const fakeService: NxLanguageService = {
   hover: async () => hoverAnswer,
@@ -181,6 +188,7 @@ test("every example round-trips through JSON without loss", () => {
     sourceEditAnswer,
     sourceEditRefusal,
     addPropertyRequest,
+    moveRequest,
   ]) {
     assert.deepEqual(JSON.parse(JSON.stringify(example)), example);
   }

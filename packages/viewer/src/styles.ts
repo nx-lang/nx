@@ -266,6 +266,7 @@ export const styles = `
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   user-select: none;
 }
+/* The chevron is centered on the text's x-height, open or folded. */
 .source .fold::before {
   content: "";
   display: inline-block;
@@ -273,13 +274,13 @@ export const styles = `
   height: 0.28em;
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
-  transform: translateY(-0.18em) rotate(45deg);
+  transform: translateY(-0.31em) rotate(45deg);
   transition: transform 0.15s ease;
 }
-.source .fold.folded::before { transform: translateY(-0.05em) rotate(-45deg); }
+.source .fold.folded::before { transform: translateY(-0.13em) rotate(-45deg); }
 /* The chevron of what was just folded or opened starts where it was, and turns to where it is. */
-.source .fold.was-folded::before, .source .fold.folded.was-folded::before { transform: translateY(-0.05em) rotate(-45deg); }
-.source .fold.was-open::before, .source .fold.folded.was-open::before { transform: translateY(-0.18em) rotate(45deg); }
+.source .fold.was-folded::before, .source .fold.folded.was-folded::before { transform: translateY(-0.13em) rotate(-45deg); }
+.source .fold.was-open::before, .source .fold.folded.was-open::before { transform: translateY(-0.31em) rotate(45deg); }
 @media (prefers-reduced-motion: reduce) { .source .fold::before { transition: none; } }
 .body:hover .source .fold, .source .fold.folded, .source .fold:focus-visible { opacity: 1; }
 .source .fold:hover { color: var(--nx-viewer-foreground, CanvasText); }
@@ -372,6 +373,8 @@ export const styles = `
 }
 .card-doc > :first-child { margin-top: 0; }
 .card-doc > :last-child { margin-bottom: 0; }
+/* What a handle does, after what the item is, quieter. */
+.card-hint { margin-top: 4px; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); font-family: var(--nx-viewer-prose-font-family, inherit); }
 .card-doc :is(p, ul, ol, pre) { margin: 0 0 0.5em; }
 .card-doc :is(ul, ol) { padding-left: 1.4em; }
 .card-doc code {
@@ -585,12 +588,78 @@ export const styles = `
   border-radius: 3px;
   cursor: pointer;
   user-select: none;
-  opacity: 0;
+  visibility: hidden;
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   font-weight: 400;
 }
-.source .sheet-row[data-key]:hover > .row-menu, .source .sheet-row.selected > .row-menu { opacity: 1; }
+.source .sheet-row[data-key]:hover > .row-menu:not(.shared),
+.source .sheet-row.selected > .row-menu:not(.shared),
+.source .row-menu.shared.selected { visibility: visible; }
+/* While an item that shares the row's line is selected, the row's end shows the item's mark alone. */
+.source .sheet-row:has(> .row-menu.shared.selected) > .row-menu:not(.shared) { visibility: hidden; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
+/* An item's menu hangs past the end of its first line from a point that takes no room. */
+.source .item-menu { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
+.source .item-menu > .row-menu { left: 0; }
+/* A folded group's header lines its parts up by their text; the mark's anchor has none, so it takes
+   the line's top instead of standing on the text and making the line taller. */
+.source .sheet.folded > .sheet-head > .item-menu { align-self: flex-start; }
+.source .sheet.selected > .sheet-head > .item-menu > .row-menu:not(.shared),
+.source .sheet-head:hover > .item-menu > .row-menu:not(.shared),
+.source .line-element.selected > .item-menu > .row-menu:not(.shared),
+.source .line-element:hover > .item-menu > .row-menu:not(.shared) { visibility: visible; }
+/* An item that moves is dragged by its icon and its name: a hand to grab, and no text selection
+   or panning to compete with it. */
+.body.editable .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* A touch on a handle's icon may be taken as one on the fold chevron beside it, which then must not
+   pan either. */
+.body.editable .sheet-head:has(> .drag-handle) > .fold { touch-action: none; }
+/* A name is one word: as a box of its own it takes a touch-action, which an inline span does not. */
+.body.editable :is(.sheet-kind, .line-kind).drag-handle { display: inline-block; text-indent: 0; }
+.body.dragging, .body.dragging * { cursor: grabbing !important; }
+/* While dragged, the item stays where it is, muted, and a copy of one line follows the pointer. */
+.source .drag-source { opacity: 0.4; }
+.drag-ghost {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.6ch;
+  max-width: 24rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-foreground, CanvasText);
+  box-shadow: 0 4px 14px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0.92;
+}
+.drag-ghost > .element-icon {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--nx-viewer-icon-color, light-dark(#6e7781, #8b949e));
+}
+.drag-ghost > .element-icon > svg { display: block; width: 100%; height: 100%; stroke-width: 1.75; }
+.drag-ghost > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+/* Where the dragged item would land: a line in the selection's color between two items. */
+.drop-line {
+  position: absolute;
+  z-index: 2;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--nx-viewer-drop-line, var(--nx-viewer-selection-guide, light-dark(#0969da, #4daafc)));
+  pointer-events: none;
+}
+.drop-line[hidden] { display: none; }
 /* A row's menu opens over the reading, as a popover does. */
 .menu {
   position: absolute;

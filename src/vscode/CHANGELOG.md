@@ -38,6 +38,13 @@ All notable changes to this project will be documented in this file.
   buttons and strings over several lines as their hints say; Shift+Enter breaks a string's line.
   A value's steppers or chevron show under the pointer, taking room on a one-line element, and a
   click on a value opens its editor without selecting it.
+- Reordering and deleting in Visual: `sourceEdit` has a `move` edit (`{ kind: "move", to }`) for an
+  element that is an item of a list (a braced sequence or element content, outside `if` and `for`),
+  and `remove` takes such an item too; both keep the list's layout and take the comments directly
+  above the item with it. `<nx-viewer>` drags an item by its icon or name where its list reads an
+  item to a line, moves the selected item with Alt+Up and Alt+Down, deletes it with Delete or
+  Cmd+Backspace (not the only item of a `+` list), gives it a `⋯` menu (Move up, Move down, Delete,
+  Show in Source), and keeps the selection and folds on the moved items in the host's next tree.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
 
 ### Fixes

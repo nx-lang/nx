@@ -31,7 +31,7 @@ pub enum SourceEdit {
         /// The new text, one line, as it should read once parsed.
         text: String,
     },
-    /// Remove an attribute.
+    /// Remove an attribute, or an element that is an item of a list with the comments above it.
     Remove,
     /// Add a property an element does not write, as an attribute in the element's layout.
     AddProperty {
@@ -39,6 +39,11 @@ pub enum SourceEdit {
         name: String,
         /// Its value.
         value: SourceEditValue,
+    },
+    /// Move an element that is an item of a list to another position in that list.
+    Move {
+        /// The position the item takes once moved, counted as the list's keys count its items.
+        to: usize,
     },
 }
 
@@ -137,39 +142,64 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
         return SourceEditAnswer::refused(SourceEditRefusal::UnknownNode);
     };
     let result = match edit {
-        SourceEdit::SetValue { value } => set_value(source, tree, at, value),
-        SourceEdit::SetText { text } => set_text(source, tree, at, text),
+        SourceEdit::SetValue { value } => set_value(source, tree, at, value).map(Vec::from_iter),
+        SourceEdit::SetText { text } => set_text(source, tree, at, text).map(Vec::from_iter),
         SourceEdit::Remove => remove(source, tree, at),
-        SourceEdit::AddProperty { name, value } => add_property(source, tree, at, name, value),
+        SourceEdit::AddProperty { name, value } => {
+            add_property(source, tree, at, name, value).map(Vec::from_iter)
+        }
+        SourceEdit::Move { to } => move_item(source, tree, at, *to),
     };
     match result {
-        Ok(Some((start, end, new_text))) => {
-            if source.get(start..end) == Some(new_text.as_str()) {
-                return SourceEditAnswer {
-                    edits: Vec::new(),
-                    refused: None,
-                };
+        Ok(mut replacements) => {
+            // A replacement that writes what is there already changes nothing.
+            replacements.retain(|(start, end, new_text)| {
+                source.get(*start..*end) != Some(new_text.as_str())
+            });
+            replacements.sort_by_key(|(start, end, _)| (*start, *end));
+            // Edits that, made together, leave the text as it is (as when an item moves past one
+            // just like it) change nothing either.
+            if !replacements.is_empty() && applied(source, &replacements) == source {
+                replacements.clear();
             }
             let index = LineIndex::new(source);
-            let range = index.range_from_bytes(ByteTextRange::new(
-                TextSize::from(start as u32),
-                TextSize::from(end as u32),
-            ));
+            let edits = replacements
+                .into_iter()
+                .map(|(start, end, new_text)| TextEdit {
+                    range: index.range_from_bytes(ByteTextRange::new(
+                        TextSize::from(start as u32),
+                        TextSize::from(end as u32),
+                    )),
+                    new_text,
+                })
+                .collect();
             SourceEditAnswer {
-                edits: vec![TextEdit { range, new_text }],
+                edits,
                 refused: None,
             }
         }
-        Ok(None) => SourceEditAnswer {
-            edits: Vec::new(),
-            refused: None,
-        },
         Err(reason) => SourceEditAnswer::refused(reason),
     }
 }
 
+/// The text once the replacements, sorted and not overlapping, are made.
+fn applied(source: &str, replacements: &[(usize, usize, String)]) -> String {
+    let mut text = String::with_capacity(source.len());
+    let mut from = 0;
+    for (start, end, new_text) in replacements {
+        text.push_str(&source[from..*start]);
+        text.push_str(new_text);
+        from = *end;
+    }
+    text.push_str(&source[from..]);
+    text
+}
+
 /// A replacement of the bytes `start..end`, or nothing to do.
 type Replacement = Result<Option<(usize, usize, String)>, SourceEditRefusal>;
+
+/// Replacements of bytes in the document as sent, none overlapping, in any order.
+type Replacements = Result<Vec<(usize, usize, String)>, SourceEditRefusal>;
 
 fn byte_span(node: &SourceNode) -> (usize, usize) {
     (node.range.start_byte as usize, node.range.end_byte as usize)
@@ -374,9 +404,18 @@ fn reads_as_one_run(source: &str, start: usize, end: usize, text: &str) -> bool 
     find(syntax.root(), wanted)
 }
 
+/// Removes an item of a list, as [`remove_item`] does, or an attribute, as [`remove_attribute`]
+/// does.
+fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacements {
+    if tree.nodes[at].role == SourceRole::Element {
+        return remove_item(source, tree, at);
+    }
+    remove_attribute(source, tree, at).map(Vec::from_iter)
+}
+
 /// Removes an attribute with the space before it and a line comment after it, or its whole line when
 /// it stands alone there. A comment on the line above stays: it may be about more than the attribute.
-fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacement {
+fn remove_attribute(source: &str, tree: &SourceTree, at: usize) -> Replacement {
     let node = &tree.nodes[at];
     if node.role != SourceRole::Attribute || node.flags.contains(&SourceFlag::Content) {
         return Err(SourceEditRefusal::NotEditable);
@@ -423,6 +462,232 @@ fn remove(source: &str, tree: &SourceTree, at: usize) -> Replacement {
         if commented { after } else { end },
         String::new(),
     )))
+}
+
+/// How a list writes its items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListLayout {
+    /// Every item stands on lines of its own: an item is its whole lines, with the comments
+    /// directly above it.
+    Lines,
+    /// Every item is on one line, apart from the others by blank space only.
+    OneLine,
+}
+
+/// The list an item belongs to, read from the document.
+struct ItemList {
+    /// Each item's span, in order: its whole lines, line breaks included, with the comments
+    /// directly above it, in a list written an item to a line; the item alone on one line.
+    spans: Vec<(usize, usize)>,
+    /// The item's position in the list.
+    position: usize,
+    layout: ListLayout,
+}
+
+/// The list the element at `at` is an item of: a sequence or element content, not a condition's
+/// branch or a loop's body, that holds no text and is written an item to a line or on one line.
+fn item_list(source: &str, tree: &SourceTree, at: usize) -> Result<ItemList, SourceEditRefusal> {
+    let node = &tree.nodes[at];
+    let owner_index = node
+        .parent
+        .filter(|_| node.role == SourceRole::Element)
+        .ok_or(SourceEditRefusal::NotEditable)?;
+    let owner = &tree.nodes[owner_index as usize];
+    let is_list = match owner.role {
+        SourceRole::Sequence | SourceRole::Element => true,
+        SourceRole::Attribute => owner.flags.contains(&SourceFlag::Content),
+        _ => false,
+    };
+    if !is_list || item_position(&owner.key, &node.key).is_none() {
+        return Err(SourceEditRefusal::NotEditable);
+    }
+    let mut items = Vec::new();
+    for (index, child) in tree.nodes.iter().enumerate() {
+        if child.parent != Some(owner_index) {
+            continue;
+        }
+        // Text between items is part of what the list reads as; an item does not move past it.
+        if child.role == SourceRole::Text {
+            return Err(SourceEditRefusal::NotEditable);
+        }
+        if let Some(position) = item_position(&owner.key, &child.key) {
+            items.push((position, index));
+        }
+    }
+    items.sort_unstable();
+    let position = items
+        .iter()
+        .position(|&(_, index)| index == at)
+        .ok_or(SourceEditRefusal::NotEditable)?;
+    let spans = items
+        .iter()
+        .map(|&(_, index)| byte_span(&tree.nodes[index]))
+        .collect::<Vec<_>>();
+    if let Some(lines) = spans
+        .iter()
+        .map(|&(start, end)| item_lines(source, tree, start, end))
+        .collect::<Option<Vec<_>>>()
+    {
+        return Ok(ItemList {
+            spans: lines,
+            position,
+            layout: ListLayout::Lines,
+        });
+    }
+    let one_line = !source[spans[0].0..spans[spans.len() - 1].1].contains('\n')
+        && spans
+            .windows(2)
+            .all(|pair| is_blank(&source[pair[0].1..pair[1].0]));
+    if one_line {
+        return Ok(ItemList {
+            spans,
+            position,
+            layout: ListLayout::OneLine,
+        });
+    }
+    Err(SourceEditRefusal::NotEditable)
+}
+
+/// The position an item's key gives it in the list keyed `list`, as `steps[2]` gives `2`.
+fn item_position(list: &str, key: &str) -> Option<usize> {
+    key.strip_prefix(list)?
+        .strip_prefix('[')?
+        .strip_suffix(']')?
+        .parse()
+        .ok()
+}
+
+fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
+fn line_start(source: &str, at: usize) -> usize {
+    source[..at].rfind('\n').map_or(0, |line| line + 1)
+}
+
+/// The whole lines of an item that stands on lines of its own, with the comments directly above
+/// it, from the start of its first line to past the line break of its last; none when something
+/// else shares a line with it, other than a line comment after it.
+fn item_lines(source: &str, tree: &SourceTree, start: usize, end: usize) -> Option<(usize, usize)> {
+    let first = line_start(source, start);
+    if !is_blank(&source[first..start]) {
+        return None;
+    }
+    let rest = &source[end..];
+    let mut after = end + (rest.len() - rest.trim_start_matches([' ', '\t']).len());
+    if source[after..].starts_with("//") {
+        after = source[after..]
+            .find(['\r', '\n'])
+            .map_or(source.len(), |offset| after + offset);
+    }
+    if source[after..].starts_with("\r\n") {
+        after += 2;
+    } else if source[after..].starts_with('\n') {
+        after += 1;
+    } else {
+        return None;
+    }
+    Some((comments_above(source, tree, first), after))
+}
+
+/// The start of the first of the comment lines directly above the line starting at `line`, with no
+/// blank line between: each a comment that starts its line and ends the next one up.
+fn comments_above(source: &str, tree: &SourceTree, line: usize) -> usize {
+    let mut start = line;
+    while start > 0 {
+        let above_end = source[..start - 1]
+            .strip_suffix('\r')
+            .map_or(start - 1, str::len);
+        let above_start = line_start(source, above_end);
+        let above = &source[above_start..above_end];
+        if is_blank(above) {
+            break;
+        }
+        let text_end = above_start + above.trim_end().len();
+        let comment = tree.nodes.iter().find(|node| {
+            let (comment_start, comment_end) = byte_span(node);
+            matches!(node.role, SourceRole::Comment | SourceRole::DocComment)
+                && comment_start + source[comment_start..comment_end].trim_end().len() == text_end
+                && is_blank(&source[line_start(source, comment_start)..comment_start])
+        });
+        match comment {
+            Some(comment) => start = line_start(source, byte_span(comment).0),
+            None => break,
+        }
+    }
+    start
+}
+
+/// What taking the item at `position` out of its list removes: its span and the blank space that
+/// separates it from a neighbour, and that space, which goes with the item where it is put back.
+/// Written an item to a line, the space is the one after the item, or before it when it is the
+/// last; on one line, the one before it, or after it when it is the first.
+fn cut(source: &str, list: &ItemList, position: usize) -> (usize, usize, String) {
+    let (start, end) = list.spans[position];
+    let after = || {
+        let &(next, _) = list.spans.get(position + 1)?;
+        is_blank(&source[end..next]).then(|| (start, next, source[end..next].to_string()))
+    };
+    let before = || {
+        let &(_, previous) = list.spans.get(position.checked_sub(1)?)?;
+        is_blank(&source[previous..start])
+            .then(|| (previous, end, source[previous..start].to_string()))
+    };
+    let found = match list.layout {
+        ListLayout::Lines => after().or_else(before),
+        ListLayout::OneLine => before().or_else(after),
+    };
+    if let Some(found) = found {
+        return found;
+    }
+    // Lines apart from their neighbours by more than blank lines: the item's lines go, and of two
+    // blank lines that would then stand together, one.
+    let mut end = end;
+    if list.layout == ListLayout::Lines && start > 0 {
+        let above = line_start(source, start - 1);
+        let below_end = source[end..].find('\n').map(|offset| end + offset + 1);
+        if let Some(below_end) = below_end {
+            if is_blank(&source[above..start]) && is_blank(&source[end..below_end]) {
+                end = below_end;
+            }
+        }
+    }
+    (start, end, String::new())
+}
+
+/// Removes an element that is an item of a list: its lines, the comments directly above it and the
+/// blank lines after it (before it, when it is the last), or on one line, the item and the space
+/// before it, or after it when it is the first.
+fn remove_item(source: &str, tree: &SourceTree, at: usize) -> Replacements {
+    let list = item_list(source, tree, at)?;
+    let (start, end, _) = cut(source, &list, list.position);
+    Ok(vec![(start, end, String::new())])
+}
+
+/// Moves an element that is an item of a list to the position `to` in that list: its lines, with
+/// the comments directly above it, before the item that will follow it or after the last; on one
+/// line, the item and the space that separated it.
+fn move_item(source: &str, tree: &SourceTree, at: usize, to: usize) -> Replacements {
+    let list = item_list(source, tree, at)?;
+    let from = list.position;
+    if to >= list.spans.len() {
+        return Err(SourceEditRefusal::InvalidValue);
+    }
+    if to == from {
+        return Ok(Vec::new());
+    }
+    let (start, end, space) = cut(source, &list, from);
+    let (item_start, item_end) = list.spans[from];
+    let item = &source[item_start..item_end];
+    let insert = if to < from {
+        (list.spans[to].0, format!("{item}{space}"))
+    } else {
+        (list.spans[to].1, format!("{space}{item}"))
+    };
+    Ok(vec![
+        (start, end, String::new()),
+        (insert.0, insert.0, insert.1),
+    ])
 }
 
 /// Adds the attribute `name=value` to an element, after its last attribute and in its layout: on

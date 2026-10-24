@@ -39,6 +39,7 @@ import {
   valueHost
 } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
+import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.js";
 import { defaultFolded, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
@@ -178,6 +179,18 @@ const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .b
 /** How long the pointer rests on a value before its tools push the rest of its line right. */
 const TOOLS_REST_MS = 300;
 
+/** How far the pointer moves, in pixels, before a press on an item's handle becomes a drag. */
+const DRAG_SLOP = 4;
+
+/** How near the top or bottom of what scrolls the reading a drag scrolls it, in pixels. */
+const DRAG_EDGE = 40;
+
+/** How far a drag at the very edge scrolls the reading on each frame, in pixels. */
+const DRAG_SPEED = 16;
+
+/** How far above the first item or below the last a drag still lands in the list, in pixels. */
+const DRAG_REACH = 24;
+
 /**
  * What `element` reads as, word by word: its text, with an icon read by its label, for telling a
  * screen reader what is selected.
@@ -270,6 +283,63 @@ interface Stepping {
   readonly from: string;
   /** The number now, once the press became a drag. */
   value: string | undefined;
+}
+
+/** An item of a list pressed on its handle, and dragged once the press became a drag. */
+interface Drag {
+  /** The item's key, in the tree shown. */
+  readonly key: string;
+  readonly list: ItemList;
+  readonly handle: HTMLElement;
+  readonly pointer: number;
+  /** Where the press began. */
+  readonly x: number;
+  readonly y: number;
+  /** Where the pointer is now. */
+  clientX: number;
+  clientY: number;
+  /** Whether the press became a drag. */
+  started: boolean;
+  /** Ended by Escape or a new reading, before the pointer let go. */
+  cancelled: boolean;
+  /**
+   * The line of each item of the list, the first line of the comments directly above it, which
+   * move with it, or its own, and the item as it is drawn, in order.
+   */
+  rows: HTMLElement[];
+  tops: HTMLElement[];
+  items: HTMLElement[];
+  ghost?: HTMLElement;
+  line?: HTMLElement;
+  /** The gap the item would land in, before the item at that position, or nothing. */
+  gap: number | undefined;
+  /** How far the reading scrolls each frame while the pointer is near its edge. */
+  speed: number;
+  frame: number | undefined;
+  /**
+   * Whether the top and the bottom edge scroll yet: not one the press began near, until the pointer
+   * has left it, so an item drawn near an edge can be dragged without the reading jumping.
+   */
+  edges?: { top: boolean; bottom: boolean };
+}
+
+/**
+ * Moves and deletes fired on one list and not yet seen in a tree from the host. Items are keyed by
+ * their position, so until the host's newer tree comes, the reading keeps where each item has gone.
+ */
+interface Following {
+  readonly list: string;
+  readonly sequence: boolean;
+  readonly holder: string | undefined;
+  /** The text the first of them was fired against. */
+  readonly text: string;
+  readonly map: ItemMap;
+  /** The key the reader last acted on, as the tree shown has it, and where that item is now. */
+  anchor: string;
+  /** Nothing once the item was the list's last one and was deleted. */
+  position: number | undefined;
+  /** What the live region says once the newer tree is read. */
+  said: string;
 }
 
 /** A stepper's tooltip, which names the keys that do the same. */
@@ -368,6 +438,10 @@ export class NxViewerElement extends ElementBase {
   #moreCards = new Map<string, Card>();
   /** The menu of a row's actions, when open: the row's key. */
   #menuKey: string | undefined;
+  /** An item pressed on its handle, and dragged once the press became a drag. */
+  #drag: Drag | undefined;
+  /** Moves and deletes fired and not yet seen in a tree from the host. */
+  #following: Following | undefined;
 
   readonly #badge: HTMLSpanElement;
   readonly #body: HTMLDivElement;
@@ -400,6 +474,10 @@ export class NxViewerElement extends ElementBase {
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
       this.#closeCard();
+      if (this.#drag?.started === true && !this.#drag.cancelled) {
+        event.preventDefault();
+        this.#cancelDrag();
+      }
     }
   };
   /** Cancels a popover when the pointer goes down anywhere outside it. */
@@ -411,8 +489,7 @@ export class NxViewerElement extends ElementBase {
       .composedPath()
       .some(
         (node) =>
-          (node as Element).classList?.contains("row-menu") === true &&
-          (node as Element).closest<HTMLElement>(".sheet-row[data-key]")?.dataset["key"] === this.#menuKey
+          (node as Element).classList?.contains("row-menu") === true && (node as HTMLElement).dataset["menuKey"] === this.#menuKey
       );
     if (this.#menuKey !== undefined && !onMark && !event.composedPath().includes(this.#menu)) {
       this.#closeMenu(false);
@@ -572,6 +649,10 @@ export class NxViewerElement extends ElementBase {
     frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => {
+      // A drag holds the pointer: what it passes over is not hovered.
+      if (this.#drag?.started === true) {
+        return;
+      }
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
       this.#point(this.#hoverTargetOf(event.target));
       this.#hoverTools(event.target as Element);
@@ -630,11 +711,49 @@ export class NxViewerElement extends ElementBase {
   }
 
   set tree(tree: SourceTree | undefined) {
+    // Items moved or deleted since the last tree are where the host's newer tree puts them: the
+    // selection and the folds on that list follow them. A tree of the same text, as after a
+    // refusal, moved nothing.
+    const following = tree === undefined ? undefined : this.#following;
+    if (tree !== undefined) {
+      this.#following = undefined;
+    }
+    const follows = following !== undefined && following.text !== this.#text;
+    let selected: string | undefined;
+    let foldsMoved = false;
+    if (follows) {
+      const chosen = this.#chosenFolded;
+      if (chosen !== undefined) {
+        const folded = new Set(
+          [...chosen].flatMap((key) => {
+            const mapped = mappedKey(key, following.list, following.map, following.sequence);
+            return mapped === undefined ? [] : [mapped];
+          })
+        );
+        foldsMoved = folded.size !== chosen.size || [...folded].some((key) => !chosen.has(key));
+        this.#chosenFolded = folded;
+      }
+      selected =
+        following.position === undefined
+          ? following.holder
+          : following.sequence && following.map.count === 1
+            ? following.list
+            : `${following.list}[${following.position}]`;
+      this.#selection = undefined;
+    }
     this.#tree = tree;
     // A new tree says what each edit made of the source, or that it made nothing.
     this.#pending.clear();
     this.#removed.clear();
     this.#render();
+    if (follows) {
+      this.#select(selected, true);
+      if (foldsMoved) {
+        const detail: NxFoldDetail = { folded: [...this.#folded], selection: this.#selection };
+        this.dispatchEvent(new CustomEvent(NX_FOLD_EVENT, { detail, bubbles: true, composed: true }));
+      }
+      this.#announcer.textContent = following.said;
+    }
   }
 
   /** The text of the document the tree describes. */
@@ -849,8 +968,10 @@ export class NxViewerElement extends ElementBase {
   #render(): void {
     const tree = this.#tree;
     // What the card described may be gone, and so may what the pointer was over. An editor open is
-    // opened again on its value, as the reader left it, when the value is still there.
+    // opened again on its value, as the reader left it, when the value is still there. A drag ends,
+    // since what it was dragging over is drawn anew.
     this.#closeCard();
+    this.#cancelDrag();
     // A host that clears the tree before it sets the next one gets the editor back with that one.
     const session = this.#session;
     if (session !== undefined && !session.closed) {
@@ -1339,6 +1460,12 @@ export class NxViewerElement extends ElementBase {
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
+    // The menu mark of an item sharing its line stands apart from it, at the end of its row.
+    for (const mark of this.#body.querySelectorAll<HTMLElement>(".row-menu.shared")) {
+      if (mark.dataset["menuKey"] === key) {
+        mark.classList.add("selected");
+      }
+    }
     if (fire) {
       if (original !== undefined) {
         const words = spoken(original);
@@ -1398,7 +1525,89 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("role", "button");
       mark.setAttribute("aria-haspopup", "menu");
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
+      mark.dataset["menuKey"] = row.dataset["key"]!;
       row.append(mark);
+    }
+    this.#markItems(index);
+  }
+
+  /**
+   * What ends the line `drawn`, drawn on one line with others, stands on: the written row it is the
+   * value of, or else the outermost element drawn on that line around it, or else the list keyed
+   * `list` that holds it, as a `let`'s sequence. Nothing when none is found.
+   */
+  #lineEnd(drawn: HTMLElement, list: string): HTMLElement | undefined {
+    let outer: HTMLElement | undefined;
+    for (let at = drawn.parentElement; at !== null && at !== this.#body; at = at.parentElement) {
+      if (at.matches(".sheet-row[data-key]")) {
+        return at;
+      }
+      if (at.matches(".sheet-item, .sheet-head, .sheet, .source")) {
+        break;
+      }
+      if (at.matches(".line-element")) {
+        outer = at;
+      }
+    }
+    if (outer !== undefined) {
+      return outer;
+    }
+    const holder = this.#rendered.get(list);
+    return holder !== undefined && holder !== drawn && holder.contains(drawn) ? holder : undefined;
+  }
+
+  /**
+   * Gives each item of a list that moves or can be deleted the menu a written row has, at the end of
+   * its first line, and, where the reading draws its list an item to a line and it moves, a handle
+   * to drag it by: its icon and its name.
+   */
+  #markItems(index: TreeIndex): void {
+    for (const [key, drawn] of this.#rendered) {
+      const at = index.byKey.get(key);
+      if (at === undefined || index.tree.nodes[at]!.role !== "element" || !drawn.matches(".sheet, .line-element")) {
+        continue;
+      }
+      const list = itemListOf(index, at);
+      if (list === undefined) {
+        continue;
+      }
+      const moves = list.items.length >= 2;
+      if (!moves && needsOne(index, list)) {
+        continue;
+      }
+      const line = drawn.matches(".sheet") ? drawn.querySelector<HTMLElement>(":scope > .sheet-head") : drawn;
+      if (line === null) {
+        continue;
+      }
+      const ownLine = drawn.parentElement?.classList.contains("sheet-item") === true;
+      const mark = this.ownerDocument.createElement("span");
+      mark.className = "row-menu";
+      mark.textContent = "\u22EF";
+      mark.setAttribute("role", "button");
+      mark.setAttribute("aria-haspopup", "menu");
+      mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[at]!.name ?? "the item"}`);
+      mark.dataset["menuKey"] = key;
+      // An item that shares its line with others hangs its mark past the end of that line, shown
+      // while it is selected, where it covers none of them.
+      const end = ownLine ? undefined : this.#lineEnd(drawn, list.key);
+      if (!ownLine) {
+        mark.classList.add("shared");
+      }
+      if (end?.matches(".sheet-row") === true) {
+        end.append(mark);
+      } else {
+        // The mark hangs past the line's end from a point that takes no room, so nothing moves.
+        const anchor = this.ownerDocument.createElement("span");
+        anchor.className = "item-menu";
+        anchor.append(mark);
+        (end ?? line).append(anchor);
+      }
+      if (moves && ownLine) {
+        for (const part of line.querySelectorAll<HTMLElement>(":scope > .element-icon, :scope > .sheet-kind, :scope > .line-kind")) {
+          part.classList.add("drag-handle");
+          part.dataset["dragKey"] = key;
+        }
+      }
     }
   }
 
@@ -2001,6 +2210,9 @@ export class NxViewerElement extends ElementBase {
    * element it was on. Answers whether it did.
    */
   #removeSelected(): boolean {
+    if (this.#removeItem(this.#selection)) {
+      return true;
+    }
     const index = this.#index;
     const key = this.#selection;
     const at = key === undefined ? undefined : index?.byKey.get(key);
@@ -2017,6 +2229,292 @@ export class NxViewerElement extends ElementBase {
     const element = index.tree.nodes[at]!.parent;
     this.#select(element === undefined ? undefined : index.tree.nodes[element]!.key, true);
     return true;
+  }
+
+  // ---- Moving and deleting items ------------------------------------------------------------
+
+  /**
+   * The item with `key`, as the tree shown has it, where it is now and how many items its list holds
+   * now: past the moves and deletes fired and not yet seen in a tree from the host. Nothing for a
+   * node that is no item, one of another list while those are pending, or the one item left of a
+   * sequence.
+   */
+  #itemAction(key: string | undefined): { list: ItemList; position: number; count: number } | undefined {
+    const index = this.#index;
+    const at = key === undefined ? undefined : index?.byKey.get(key);
+    if (!this.#editable || index === undefined || at === undefined) {
+      return undefined;
+    }
+    const list = itemListOf(index, at);
+    if (list === undefined) {
+      return undefined;
+    }
+    const following = this.#following;
+    if (following === undefined) {
+      return { list, position: list.position, count: list.items.length };
+    }
+    // A sequence left with one item reads as that item, no longer an item of a list.
+    if (following.list !== list.key || (following.sequence && following.map.count < 2)) {
+      return undefined;
+    }
+    const position = key === following.anchor ? following.position : following.map.positionOf(list.position);
+    return position === undefined ? undefined : { list, position, count: following.map.count };
+  }
+
+  /** Notes a move or a delete about to fire, so the host's newer tree is read with it. */
+  #follow(
+    action: { list: ItemList; position: number; count: number },
+    key: string,
+    step: (map: ItemMap) => void,
+    position: number | undefined,
+    said: string
+  ): void {
+    let following = this.#following;
+    if (following === undefined) {
+      const { list } = action;
+      following = {
+        list: list.key,
+        sequence: list.sequence,
+        holder: list.holder,
+        text: this.#text,
+        map: new ItemMap(list.items.length),
+        anchor: key,
+        position: action.position,
+        said
+      };
+      this.#following = following;
+    }
+    step(following.map);
+    following.anchor = key;
+    following.position = position;
+    following.said = said;
+  }
+
+  /**
+   * Moves the item with `key` to the position `to` in its list, and answers whether it fired a move:
+   * not to where it is, nor past the list's ends.
+   */
+  #moveItem(key: string, to: number): boolean {
+    const action = this.#itemAction(key);
+    if (action === undefined || action.count < 2 || to < 0 || to >= action.count || to === action.position) {
+      return false;
+    }
+    const { list, position, count } = action;
+    this.#follow(action, key, (map) => map.move(position, to), to, `Moved to ${to + 1} of ${count}`);
+    this.#fire(NX_EDIT_EVENT, { key: `${list.key}[${position}]`, edit: { kind: "move", to } });
+    return true;
+  }
+
+  /**
+   * Deletes the item with `key`, unless it is the only item of a list whose type needs one, and
+   * answers whether it did. The item the host's newer tree puts in its place is selected then.
+   */
+  #removeItem(key: string | undefined): boolean {
+    const action = this.#itemAction(key);
+    const index = this.#index;
+    if (action === undefined || index === undefined || (action.count === 1 && needsOne(index, action.list))) {
+      return false;
+    }
+    const { list, position, count } = action;
+    const first = this.#following === undefined;
+    const next = position < count - 1 ? position : position > 0 ? position - 1 : undefined;
+    this.#follow(action, key!, (map) => map.delete(position), next, "Deleted");
+    if (first) {
+      // Shown muted until the newer tree comes, as a removed row is.
+      this.#removed.add(key!);
+      this.#rendered.get(key!)?.classList.add("pending");
+    }
+    this.#fire(NX_EDIT_EVENT, { key: `${list.key}[${position}]`, edit: { kind: "remove" } });
+    return true;
+  }
+
+  /** Starts the drag `drag`, once its press has moved far enough; answers whether it could. */
+  #startDrag(drag: Drag): boolean {
+    const index = this.#index;
+    if (index === undefined || this.#following !== undefined) {
+      return false;
+    }
+    const items = drag.list.items.map((at) => this.#rendered.get(index.tree.nodes[at]!.key));
+    const rows = items.map((item) => item?.closest<HTMLElement>(".sheet-item") ?? undefined);
+    const parent = rows[0]?.parentElement;
+    if (items.some((item) => item === undefined) || rows.some((row) => row === undefined || row.parentElement !== parent)) {
+      return false;
+    }
+    drag.items = items as HTMLElement[];
+    drag.rows = rows as HTMLElement[];
+    // The comments directly above an item, with no blank line between, go with it: a drop before
+    // the item lands above them. Above the first item of what an element holds, they are the
+    // element's, drawn just before.
+    drag.tops = drag.rows.map((row, position) => {
+      let top = row;
+      let line = index.tree.nodes[drag.list.items[position]!]!.range.start.line;
+      for (;;) {
+        const above = (top.previousElementSibling ??
+          (top.parentElement?.matches(".sheet-held") === true ? top.parentElement.previousElementSibling : null)) as HTMLElement | null;
+        const note = above?.querySelector<HTMLElement>(':scope > [data-role="comment"], :scope > [data-role="docComment"]');
+        const comment = note === null || note === undefined ? undefined : index.byKey.get(note.dataset["key"] ?? "");
+        const range = comment === undefined ? undefined : index.tree.nodes[comment]!.range;
+        if (above === null || drag.rows.includes(above) || range === undefined || range.end.line !== line - 1) {
+          return top;
+        }
+        top = above;
+        line = range.start.line;
+      }
+    });
+    drag.started = true;
+    try {
+      drag.handle.setPointerCapture?.(drag.pointer);
+    } catch {
+      // A pointer the DOM no longer knows ends with its next event.
+    }
+    this.#closeCard();
+    this.#hideTools();
+    this.#setHoveredUnit(undefined);
+    this.#body.classList.add("dragging");
+    const item = drag.items[drag.list.position]!;
+    item.classList.add("drag-source");
+    // A copy of one line, its icon and its name and title, follows the pointer.
+    const ghost = this.ownerDocument.createElement("div");
+    ghost.className = "drag-ghost";
+    ghost.setAttribute("aria-hidden", "true");
+    const line = item.matches(".sheet") ? item.querySelector(":scope > .sheet-head") : item;
+    const icon = line?.querySelector(":scope > .element-icon");
+    if (icon !== null && icon !== undefined) {
+      ghost.append(icon.cloneNode(true));
+    }
+    const words = this.ownerDocument.createElement("span");
+    words.textContent = this.#itemTitle(drag.list.items[drag.list.position]!);
+    ghost.append(words);
+    this.#frame.append(ghost);
+    drag.ghost = ghost;
+    const marker = this.ownerDocument.createElement("div");
+    marker.className = "drop-line";
+    marker.hidden = true;
+    marker.setAttribute("aria-hidden", "true");
+    this.#body.append(marker);
+    drag.line = marker;
+    return true;
+  }
+
+  /** What a dragged item's copy says: its name, and its title's value when its visualizer names one. */
+  #itemTitle(at: number): string {
+    const index = this.#index!;
+    const node = index.tree.nodes[at]!;
+    const title = node.declaration === undefined ? undefined : index.tree.declarations[node.declaration]?.visualizer?.title;
+    const attribute = (index.children[at] ?? []).find((child) => index.tree.nodes[child]!.role === "attribute" && index.tree.nodes[child]!.name === title);
+    const value = attribute === undefined ? undefined : (index.children[attribute] ?? []).map((child) => index.tree.nodes[child]!)[0];
+    const written = value?.role === "literal" ? (value.value ?? "") : "";
+    const shown = written.startsWith('"') && written.length >= 2 ? written.slice(1, -1) : "";
+    return shown === "" ? (node.name ?? "") : `${node.name ?? ""}  ${shown}`;
+  }
+
+  /**
+   * Follows the pointer in a drag: the copy goes with it, and the line marks the gap nearest it
+   * between the items of the list, when it is over the list and the gap would move the item.
+   */
+  #dragTo(drag: Drag): void {
+    const frame = this.#frame.getBoundingClientRect();
+    if (drag.ghost !== undefined) {
+      drag.ghost.style.left = `${drag.clientX - frame.left + 12}px`;
+      drag.ghost.style.top = `${drag.clientY - frame.top + 10}px`;
+    }
+    const bottoms = drag.rows.map((row) => row.getBoundingClientRect().bottom);
+    const tops = drag.tops.map((row) => row.getBoundingClientRect().top);
+    const body = this.#body.getBoundingClientRect();
+    const first = tops[0]!;
+    const last = bottoms[bottoms.length - 1]!;
+    const over =
+      drag.clientX >= body.left && drag.clientX <= body.right && drag.clientY >= first - DRAG_REACH && drag.clientY <= last + DRAG_REACH;
+    let gap: number | undefined;
+    let gapY = 0;
+    if (over) {
+      let nearest = Infinity;
+      for (let at = 0; at <= bottoms.length; at++) {
+        const y = at === 0 ? first : at === bottoms.length ? last : (bottoms[at - 1]! + tops[at]!) / 2;
+        if (Math.abs(drag.clientY - y) < nearest) {
+          nearest = Math.abs(drag.clientY - y);
+          gap = at;
+          gapY = y;
+        }
+      }
+      // The two gaps beside the item leave it where it is.
+      if (gap === drag.list.position || gap === drag.list.position + 1) {
+        gap = undefined;
+      }
+    }
+    drag.gap = gap;
+    const marker = drag.line;
+    if (marker !== undefined) {
+      marker.hidden = gap === undefined;
+      if (gap !== undefined) {
+        const beside = drag.items[Math.min(gap, drag.items.length - 1)]!;
+        const left = (beside.getClientRects()[0]?.left ?? body.left) - body.left + this.#body.scrollLeft;
+        marker.style.left = `${left}px`;
+        marker.style.top = `${gapY - body.top + this.#body.scrollTop - 1}px`;
+        marker.style.width = `${Math.max(0, body.width - 8 - left)}px`;
+      }
+    }
+    // Near the top or the bottom of what scrolls the reading, it scrolls, faster nearer the edge.
+    const port = this.#scrollPort();
+    const edge = Math.min(DRAG_EDGE, port.height / 4);
+    const near = (y: number): { top: boolean; bottom: boolean } => ({
+      top: y < port.top + edge,
+      bottom: y > port.top + port.height - edge
+    });
+    const began = near(drag.y);
+    const now = near(drag.clientY);
+    drag.edges ??= { top: !began.top, bottom: !began.bottom };
+    drag.edges.top ||= !now.top;
+    drag.edges.bottom ||= !now.bottom;
+    const above = drag.edges.top ? port.top + edge - drag.clientY : 0;
+    const below = drag.edges.bottom ? drag.clientY - (port.top + port.height - edge) : 0;
+    drag.speed =
+      above > 0 ? -Math.ceil(Math.min(1, above / edge) * DRAG_SPEED) : below > 0 ? Math.ceil(Math.min(1, below / edge) * DRAG_SPEED) : 0;
+    if (drag.speed !== 0 && drag.frame === undefined && typeof requestAnimationFrame !== "undefined") {
+      drag.frame = requestAnimationFrame(() => {
+        drag.frame = undefined;
+        if (this.#drag === drag && drag.started && !drag.cancelled && drag.speed !== 0) {
+          this.#scrollPort().element.scrollBy({ top: drag.speed, behavior: "instant" as ScrollBehavior });
+          this.#dragTo(drag);
+        }
+      });
+    }
+  }
+
+  /** Takes away what a drag drew, and lets the pointer go. */
+  #clearDrag(drag: Drag): void {
+    if (drag.frame !== undefined && typeof cancelAnimationFrame !== "undefined") {
+      cancelAnimationFrame(drag.frame);
+    }
+    drag.frame = undefined;
+    drag.ghost?.remove();
+    drag.line?.remove();
+    drag.items[drag.list.position]?.classList.remove("drag-source");
+    this.#body.classList.remove("dragging");
+    try {
+      drag.handle.releasePointerCapture?.(drag.pointer);
+    } catch {
+      // Already let go.
+    }
+  }
+
+  /**
+   * Ends a drag under way with nothing moved, as Escape does; the pointer letting go later is still
+   * the drag's, so its click selects nothing.
+   */
+  #cancelDrag(): void {
+    const drag = this.#drag;
+    if (drag === undefined) {
+      return;
+    }
+    if (!drag.started) {
+      this.#drag = undefined;
+      return;
+    }
+    if (!drag.cancelled) {
+      drag.cancelled = true;
+      this.#clearDrag(drag);
+    }
   }
 
   // ---- Popovers ---------------------------------------------------------------------------
@@ -3114,13 +3612,29 @@ export class NxViewerElement extends ElementBase {
       }
       items.push(button);
     };
-    const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
-    if (removal === "reset") {
-      item("remove", "Reset to default", this.#defaultShownFor(at));
-    } else if (removal === "remove") {
-      item("remove", "Remove");
+    const shortcut = (words: string): Node[] => [document.createTextNode(words)];
+    const action = this.#itemAction(key);
+    if (action !== undefined) {
+      // An item of a list: moved within it, or deleted.
+      if (action.count >= 2 && action.position > 0) {
+        item("up", "Move up", shortcut("Alt+\u2191"));
+      }
+      if (action.count >= 2 && action.position < action.count - 1) {
+        item("down", "Move down", shortcut("Alt+\u2193"));
+      }
+      if (action.count > 1 || !needsOne(index, action.list)) {
+        item("delete", "Delete", shortcut("Del"));
+      }
+      item("open", "Show in Source");
+    } else {
+      const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
+      if (removal === "reset") {
+        item("remove", "Reset to default", this.#defaultShownFor(at));
+      } else if (removal === "remove") {
+        item("remove", "Remove");
+      }
+      item("source", "Show in Source");
     }
-    item("source", "Show in Source");
     this.#menu.replaceChildren(...items);
     this.#menu.setAttribute("aria-label", `Actions for ${index.tree.nodes[at]!.name ?? "the row"}`);
     this.#menu.hidden = false;
@@ -3201,10 +3715,29 @@ export class NxViewerElement extends ElementBase {
     if (this.#selection !== key) {
       this.#select(key, true, false);
     }
-    if (item.dataset["action"] === "remove") {
-      this.#removeSelected();
-    } else {
-      this.#openSelected(true, true);
+    const position = this.#itemAction(key)?.position;
+    switch (item.dataset["action"]) {
+      case "remove":
+        this.#removeSelected();
+        break;
+      case "up":
+      case "down":
+        if (position !== undefined) {
+          this.#moveItem(key, position + (item.dataset["action"] === "down" ? 1 : -1));
+        }
+        break;
+      case "delete":
+        this.#removeItem(key);
+        break;
+      case "open": {
+        const at = this.#index?.byKey.get(key);
+        if (at !== undefined) {
+          this.#fireOpen(at);
+        }
+        break;
+      }
+      default:
+        this.#openSelected(true, true);
     }
   }
 
@@ -3212,6 +3745,40 @@ export class NxViewerElement extends ElementBase {
 
   #onPointerDown(event: PointerEvent): void {
     if (!this.#editable || event.button !== 0) {
+      return;
+    }
+    // A press on an item's handle drags the item once it moves; a click there selects it. A touch
+    // the browser gives the fold chevron beside a handle, though it fell on the handle, is the
+    // handle's.
+    let handle = (event.target as Element).closest?.(".drag-handle") as HTMLElement | null | undefined;
+    if ((handle === null || handle === undefined) && event.pointerType === "touch") {
+      const line = (event.target as Element).closest?.(".fold")?.parentElement;
+      handle = [...(line?.querySelectorAll<HTMLElement>(":scope > .drag-handle") ?? [])].find((candidate) => {
+        const box = candidate.getBoundingClientRect();
+        return event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+      });
+    }
+    const handled = handle === null || handle === undefined ? undefined : this.#index?.byKey.get(handle.dataset["dragKey"] ?? "");
+    const list = handled === undefined ? undefined : itemListOf(this.#index!, handled);
+    if (handle !== null && handle !== undefined && list !== undefined && this.#body.contains(handle)) {
+      this.#drag = {
+        key: handle.dataset["dragKey"]!,
+        list,
+        handle,
+        pointer: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        started: false,
+        cancelled: false,
+        rows: [],
+        tops: [],
+        items: [],
+        gap: undefined,
+        speed: 0,
+        frame: undefined
+      };
       return;
     }
     const name = (event.target as Element).closest?.(".scrub") as HTMLElement | null | undefined;
@@ -3223,6 +3790,26 @@ export class NxViewerElement extends ElementBase {
   }
 
   #onPointerMove(event: PointerEvent): void {
+    const drag = this.#drag;
+    if (drag !== undefined && event.pointerId === drag.pointer) {
+      if (drag.cancelled) {
+        return;
+      }
+      if (!drag.started) {
+        if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < DRAG_SLOP) {
+          return;
+        }
+        if (!this.#startDrag(drag)) {
+          this.#drag = undefined;
+          return;
+        }
+      }
+      event.preventDefault();
+      drag.clientX = event.clientX;
+      drag.clientY = event.clientY;
+      this.#dragTo(drag);
+      return;
+    }
     const scrub = this.#scrub;
     if (scrub === undefined || event.pointerId !== scrub.pointer) {
       return;
@@ -3281,6 +3868,25 @@ export class NxViewerElement extends ElementBase {
 
   /** Ends a drag: its number is committed once, as it was let go, unless the drag was cancelled. */
   #onPointerUp(event: PointerEvent, commit: boolean): void {
+    const drag = this.#drag;
+    if (drag !== undefined && event.pointerId === drag.pointer) {
+      this.#drag = undefined;
+      if (!drag.started) {
+        return;
+      }
+      // The click the press makes ends the drag, and selects nothing.
+      this.#ignoreClick = true;
+      setTimeout(() => (this.#ignoreClick = false), 0);
+      if (drag.cancelled) {
+        return;
+      }
+      const gap = commit ? drag.gap : undefined;
+      this.#clearDrag(drag);
+      if (gap !== undefined) {
+        this.#moveItem(drag.key, gap > drag.list.position ? gap - 1 : gap);
+      }
+      return;
+    }
     const scrub = this.#scrub;
     if (scrub === undefined || event.pointerId !== scrub.pointer) {
       return;
@@ -3317,11 +3923,11 @@ export class NxViewerElement extends ElementBase {
     // A row's menu opens from the mark at its end.
     const mark = target.closest?.(".row-menu") as HTMLElement | null | undefined;
     if (mark !== null && mark !== undefined && this.#body.contains(mark)) {
-      const row = mark.closest<HTMLElement>(".sheet-row[data-key]")!;
-      if (this.#menuKey === row.dataset["key"]) {
+      const key = mark.dataset["menuKey"]!;
+      if (this.#menuKey === key) {
         this.#closeMenu(true);
       } else {
-        this.#openMenu(row.dataset["key"]!, mark);
+        this.#openMenu(key, mark);
       }
       return;
     }
@@ -3393,15 +3999,30 @@ export class NxViewerElement extends ElementBase {
       this.#onMoreKey(event, target as HTMLElement);
       return;
     }
-    // The context menu key, or Shift+F10, opens the selected row's menu.
+    // The context menu key, or Shift+F10, opens the selected row's or item's menu.
     if (this.#editable && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))) {
-      const row = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-      const mark = row?.matches(".sheet-row") === true ? row.querySelector<HTMLElement>(":scope > .row-menu") : null;
-      if (mark !== null && mark !== undefined) {
+      const mark = [...this.#body.querySelectorAll<HTMLElement>(".row-menu")].find(
+        (candidate) => this.#selection !== undefined && candidate.dataset["menuKey"] === this.#selection
+      );
+      if (mark !== undefined) {
         event.preventDefault();
         this.#openMenu(this.#selection!, mark);
       }
       return;
+    }
+    if (event.key === "Escape" && this.#drag?.started === true && !this.#drag.cancelled) {
+      event.preventDefault();
+      this.#cancelDrag();
+      return;
+    }
+    // Alt+Up and Alt+Down move the selected item of a list within it.
+    if (this.#editable && event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      const action = this.#itemAction(this.#selection);
+      if (action !== undefined && action.count >= 2) {
+        event.preventDefault();
+        this.#moveItem(this.#selection!, action.position + (event.key === "ArrowDown" ? 1 : -1));
+        return;
+      }
     }
     // The units read as a tree: up and down walk its rows, left goes to the unit that holds this one,
     // and right into the first one it holds.
@@ -3484,6 +4105,9 @@ export class NxViewerElement extends ElementBase {
    * has rested there, and an open card for anything else closes after a moment's grace.
    */
   #point(target: HTMLElement | undefined): void {
+    if (this.#drag?.started === true) {
+      return;
+    }
     const key = target?.dataset["hover"];
     if (key === this.#pointedKey) {
       return;
@@ -3518,6 +4142,13 @@ export class NxViewerElement extends ElementBase {
     }
     clearTimeout(this.#cardCloseTimer);
     this.#fillCard(card);
+    if (anchor.classList.contains("drag-handle")) {
+      // The handle says what it does, quietly, after what the item is.
+      const hint = this.ownerDocument.createElement("div");
+      hint.className = "card-hint";
+      hint.textContent = "Drag to reorder";
+      this.#card.append(hint);
+    }
     this.#cardKey = key;
     this.#cardByKeyboard = byKeyboard;
     this.#card.hidden = false;
