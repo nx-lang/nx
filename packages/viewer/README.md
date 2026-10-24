@@ -407,6 +407,33 @@ viewer.addEventListener(NX_OPEN_EVENT, (event) => showInEditor((event as CustomE
 ```
 
 A host applies edits in the order they fire, each against the text the one before left.
+`createEditQueue` does that for a host whose editor keeps the text, as Monaco does:
+
+```ts
+import { createEditQueue, NX_EDIT_EVENT, type NxEditDetail } from "@nx-lang/viewer";
+
+const queue = createEditQueue(
+  service, // anything with the language service's `sourceEdit`
+  uri,
+  {
+    text: () => model.getValue(),
+    // Every range is in the text as it is now; applied together, as one undo step.
+    apply: (edits) => {
+      editor.pushUndoStop();
+      editor.executeEdits("visual", edits.map(({ range, newText }) => ({ range: toMonacoRange(range), text: newText })));
+      editor.pushUndoStop();
+    },
+  },
+  (text) => showTreeOf(text), // an edit changed the text: read it at once
+  () => (viewer.tree = tree), // refused, unchanged or failed: give the element its tree again
+);
+viewer.addEventListener(NX_EDIT_EVENT, (event) => void queue((event as CustomEvent<NxEditDetail>).detail));
+// Undo after the edits fired before it, as one pressed while a field's edit is still being asked.
+const undo = () => queue.after(() => editor.trigger("visual", "undo", null));
+```
+
+An answer for text that changed while it was asked is not applied, and a failed edit does not hold
+up the ones after it.
 
 ## Hover cards
 

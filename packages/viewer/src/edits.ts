@@ -1,3 +1,7 @@
+/**
+ * The edits `<nx-viewer>` fires, made in a host's text one after another: what a host whose editor
+ * keeps the text, as Monaco does, needs between the element's `nx-edit` and its language service.
+ */
 import type { NxLanguageService, SourceEdit, TextEdit } from "@nx-lang/language-protocol";
 
 /** What a Visual edit asks: the key of the node it is aimed at and the edit. */
@@ -56,14 +60,14 @@ export function createEditQueue(
     });
     // A failed edit does not hold up the ones after it.
     last = next.catch((error: unknown) => {
-      console.debug("nx visual edit", error);
+      console.debug("nx-viewer: an edit failed", error);
       onUnchanged();
     });
     return next;
   };
   const after = (step: () => void): Promise<void> => {
     const next = last.then(step);
-    last = next.catch((error: unknown) => console.debug("nx visual step", error));
+    last = next.catch((error: unknown) => console.debug("nx-viewer: a step after the edits failed", error));
     return next;
   };
   return Object.assign(queue, { after });

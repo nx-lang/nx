@@ -46,6 +46,7 @@ import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js"
 
 export { nodeAtSpan } from "./tree.js";
 export { keyAtRange, rangeOfKey } from "./selection.js";
+export { createEditQueue, type EditedDocument, type EditQueue, type VisualEdit } from "./edits.js";
 export type { NxViewerColor, NxViewerIcons } from "./source.js";
 
 /** The tag the element is defined under. */

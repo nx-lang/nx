@@ -46,6 +46,9 @@ All notable changes to this project will be documented in this file.
   Cmd+Backspace (not the only item of a `+` list), gives it a `⋯` menu (Move up, Move down, Delete,
   Show in Source), and keeps the selection and folds on the moved items in the host's next tree.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
+- `@nx-lang/viewer` exports `createEditQueue`, which makes `<nx-viewer>`'s edits in a host's text in the
+  order they fire, each against the text the one before left, and runs a step such as undo after them.
+  The playground's Visual uses it, as the DrawnUI fiddle's does.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,
