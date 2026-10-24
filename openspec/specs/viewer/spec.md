@@ -142,8 +142,8 @@ code read as written elsewhere SHALL keep its lines.
 - **THEN** the reading SHALL show the element as written, its second line two spaces in from its `<`
 
 ### Requirement: An element reads as a line where its properties fit
-An element that holds no element and no more than a line of text, and whose properties fit after its
-name on one line in the pane, SHALL read as a line however the document breaks its lines, and so
+An element SHALL read as a line, however the document breaks its lines, when it holds no element and
+no more than a line of text and its properties fit after its name on one line in the pane, and so
 SHALL one that shows one property at most, which a row would not shorten, wrapping where it must. A
 line SHALL show its icon and name, its id where its visualizer puts it, the value of the attribute
 its visualizer names as its title alone, each other attribute as `name=value`, and then what it
