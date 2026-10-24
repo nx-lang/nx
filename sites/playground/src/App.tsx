@@ -17,8 +17,7 @@ import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { keyAtRange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
-import { createEditQueue } from "./reading/edits.ts";
+import { createEditQueue, keyAtRange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
@@ -453,7 +452,10 @@ export function App() {
                 // The field's change was committed, not dropped: Undo takes back its edit.
                 draftDroppedAt.current = Number.NEGATIVE_INFINITY;
                 setEditsInFlight((count) => count + 1);
-                void applyVisualEdit(detail).finally(() => setEditsInFlight((count) => count - 1));
+                void applyVisualEdit(detail)
+                  // A failure is reported through the queue's onUnchanged.
+                  .catch(() => undefined)
+                  .finally(() => setEditsInFlight((count) => count - 1));
               }}
               onDraft={onVisualDraft}
               onOpen={openInSource}
