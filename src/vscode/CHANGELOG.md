@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.9.0
 
 ### Editing in Visual (unstable)
 - New language query, `sourceEdit`: the text edits that set a literal or a bare union case that is

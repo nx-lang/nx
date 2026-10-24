@@ -46,7 +46,8 @@ Paths under `nx/`, `src/`, `dev/` and `docs/` are in `~/src/DrawnUi.FiddleEngine
 
 ## 7. Release NX v0.9.0 and repin
 
-- [ ] 7.1 In this repository, write the `0.9.0` changelog section from "Unreleased" (adding `createEditQueue` and any fixes from tasks 2 and 3), and make sure every suite is green: `cargo test --workspace`, `pnpm -r test`, `dotnet test bindings/dotnet/NxLang.sln` after `cargo build --release -p nx-ffi`
+- [x] 7.1 In this repository, write the `0.9.0` changelog section from "Unreleased" (adding `createEditQueue` and any fixes from tasks 2 and 3), and make sure every suite is green: `cargo test --workspace`, `pnpm -r test`, `dotnet test bindings/dotnet/NxLang.sln` after `cargo build --release -p nx-ffi`
+  - Done 2026-10-24: `## 0.9.0` in `src/vscode/CHANGELOG.md` (with `createEditQueue`). `pnpm -r test` and `dotnet test` (172) pass; `cargo test --workspace --no-fail-fast` passes 3413 tests, with one timing test (`a_patch_that_supplies_a_large_value_again_does_not_walk_it_again`, a 20 s budget in a debug build) over budget under the parallel run on KimmysPC and passing alone in 10 s.
 - [ ] 7.2 Tag `v0.9.0` and review the draft release (NuGet, npm, the three crates, the VSIXs) with Bret; publish only once Bret approves; verify each registry serves 0.9.0
 - [ ] 7.3 In the fiddle, pin every `@nx-lang/*` at `0.9.0`, move `nx/rust/Cargo.toml` back to crates.io at `=0.9.0`, `npm install`, and re-emit `nx/catalog/drawnui.nxir` only if `npm run runtime` reports it stale; verify `npm run runtime`, `npm run test:nx`, `npm run test:nx:rust`, the Visual check and the Rust browser check pass without `--nx`, and the shares from task 1.1 still play
 - [ ] 7.4 Commit, push `nx-0.9` and open the fiddle PR, with the screenshots and a note for the drawfiddle.com maintainer to redeploy the runtime; verify CI is green
