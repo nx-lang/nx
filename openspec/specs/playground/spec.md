@@ -349,6 +349,10 @@ and each SHALL link to the documentation page for its topic.
   editor, a value written as a reference, which opens Source, a number with labeled choices and a
   range, a number with a range and no editor, a string with choices, a case hinted as segmented,
   a string hinted multi-line with a placeholder, and a string written over several lines
+- **AND** it SHALL hold lists to reorder and delete from: content of four or more steps, among them a group to fold, one
+  with a comment directly above it and an `if` block holding a step, a list property written an item
+  to a line, one written on one line, a list of one item, which does not drag, and the only item of a
+  list typed `+`, which cannot be deleted
 
 ### Requirement: Every example is checked against its expected output
 Every example SHALL have its expected output committed beside it. The playground's tests SHALL
