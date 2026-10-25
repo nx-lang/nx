@@ -1745,4 +1745,27 @@ describe("live edits", () => {
     rendered(element, "card.value.padding").querySelector<HTMLElement>(".sheet-name")!.click();
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
   });
+
+  it("commits stepper clicks made with the field closed when the reader opens that field", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    rendered(element, "card.value.gap.value").click();
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
+    assert.equal(field(element)?.textContent, "5", "the field opens on the value the clicks left");
+  });
+
+  it("commits stepper clicks made with the field closed when the element leaves the page", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    element.remove();
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
+  });
 });

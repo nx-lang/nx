@@ -186,10 +186,10 @@ recompiling a large snippet per step proves slow.
 
 ## Risks / Trade-offs
 
-- **Typing in Source during a gesture.** The fiddle shows one view at a time, so this needs the
-  playground's split view; the queue then drops the gesture's bookkeeping and keeps the text, the
-  preview left outside the history.
-
+- **Leaving Visual during a gesture.** Both hosts show one view at a time, and switching to Source
+  records an open gesture as one step (`after`), so typing or an undo in Source never meets a
+  preview outside the history; the viewer also commits a gesture when it leaves the page. The
+  viewer's own commit that follows a recorded gesture changes nothing.
 
 - **Long unset lists.** A `SkiaLabel` lists about 80 rows. The order and the viewer's filter field
   (over 12 rows) make it usable; descriptions and defaults (proposal enhancements 2 and 3) would make

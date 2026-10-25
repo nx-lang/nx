@@ -46,10 +46,10 @@ Paths under `nx/`, `src/`, `dev/` and `docs/` are in `~/src/DrawnUi.FiddleEngine
 
 ## 8. Live edits (added after testing)
 
-- [ ] 8.1 In `packages/viewer`, fire `nx-edit` with `live: true` while a value changes (field typing after 300 ms, steppers, arrows, scrubbing, the color picker and hex field), end each gesture with a commit or, on cancel, the opening value; commit a closed field's stepper clicks after 500 ms or on the next interaction; commit a color popover closed by a press elsewhere; verify with `editing.test.ts` cases for each
-- [ ] 8.2 Give `createEditQueue` live edits through an optional `preview`, rebased on the gesture's start, superseded ones skipped, the commit one step, a cancel no step, and an open gesture recorded before another edit or `after`; verify with `edits.test.ts` cases
-- [ ] 8.3 Implement `preview` in the playground's editor and the fiddle's view (`model.applyEdits`); verify with `visual.test.ts` cases and the playground's tests, and a browser check that a stepper click in an open field changes the canvas and the color picker's live drag is one Undo
-- [ ] 8.4 Update the viewer README, the changelog's 0.9.0 section, `README-NX.md`; rebuild and restart the local fiddle for testing
+- [x] 8.1 In `packages/viewer`, fire `nx-edit` with `live: true` while a value changes (field typing after 300 ms, steppers, arrows, scrubbing, the color picker and hex field), end each gesture with a commit or, on cancel, the opening value; commit a closed field's stepper clicks after 500 ms or on the next interaction; commit a color popover closed by a press elsewhere; verify with `editing.test.ts` cases for each
+- [x] 8.2 Give `createEditQueue` live edits through an optional `preview`, rebased on the gesture's start, superseded ones skipped, the commit one step, a cancel no step, and an open gesture recorded before another edit or `after`; verify with `edits.test.ts` cases
+- [x] 8.3 Implement `preview` in the playground's editor and the fiddle's view (`model.applyEdits`); verify with `visual.test.ts` cases and the playground's tests, and a browser check that a stepper click in an open field changes the canvas and the color picker's live drag is one Undo
+- [x] 8.4 Update the viewer README, the changelog's 0.9.0 section, `README-NX.md`; rebuild and restart the local fiddle for testing
 
 ## 7. Release NX v0.9.0 and repin
 

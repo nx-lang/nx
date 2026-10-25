@@ -242,6 +242,7 @@ export function App() {
       cursorToPlace.current = offsetAtPosition(text, detail.range.start);
     }
     setSelection(detail.key);
+    void applyVisualEdit.after(() => undefined);
     setMode("source");
   };
 
@@ -273,6 +274,9 @@ export function App() {
       cursorToSelect.current = editor.current?.cursor() ?? null;
       selectedOnEntry.current = undefined;
     } else {
+      // A value still changing in Visual is recorded as one step before Source takes typing or an
+      // undo, which must not meet a preview outside the history.
+      void applyVisualEdit.after(() => undefined);
       const { tree, text } = reading;
       const moved = selection !== selectedOnEntry.current;
       if (moved && selection !== undefined && tree !== null && text !== null && text === source) {

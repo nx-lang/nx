@@ -270,3 +270,60 @@ test("a document that cannot preview ignores live edits", async () => {
   assert.equal(edited.text(), example);
 });
 
+
+test("the commit of a change a step after the edits recorded changes nothing", async () => {
+  const edited = previewing(example);
+  const unchanged: number[] = [];
+  const queue = createEditQueue(service, uri, edited, () => undefined, () => unchanged.push(1));
+  const key = await keyOf(example, "Latte", "name");
+  await queue({ key, edit: shots("Mocha"), live: true });
+  // An undo pressed before the viewer commits: the preview is recorded, then undone.
+  await queue.after(() => edited.set(edited.steps.pop()!));
+  assert.equal(edited.text(), example);
+  await queue({ key, edit: shots("Mocha") });
+  assert.equal(edited.text(), example, "the undone change does not come back");
+  assert.deepEqual(edited.steps, []);
+  assert.equal(unchanged.length, 1);
+});
+
+test("a commit keeps the previewed value in the text while it is asked", async () => {
+  const edited = previewing(example);
+  const key = await keyOf(example, "Latte", "name");
+  const seen: string[] = [];
+  const watching = {
+    sourceEdit(request: SourceEditRequest) {
+      seen.push(edited.text());
+      return service.sourceEdit(request);
+    }
+  };
+  const queue = createEditQueue(watching, uri, edited, () => undefined);
+  await queue({ key, edit: shots("Mocha"), live: true });
+  await queue({ key, edit: shots("Mocha!") });
+  assert.ok(seen[1]!.includes('name="Mocha"'), "not the text before the change");
+  assert.ok(edited.text().includes('name="Mocha!"'));
+  assert.deepEqual(edited.steps, [example]);
+});
+
+test("a preview never splits a character outside the BMP", async () => {
+  const edited = previewing(example);
+  const ranges: TextEdit[] = [];
+  const queue = createEditQueue(
+    service,
+    uri,
+    {
+      ...edited,
+      preview(edits: readonly TextEdit[]) {
+        ranges.push(...edits);
+        edited.preview(edits);
+      }
+    },
+    () => undefined
+  );
+  const key = await keyOf(example, "Latte", "name");
+  await queue({ key, edit: shots("Hi 😀"), live: true });
+  await queue({ key, edit: shots("Hi 😁"), live: true });
+  assert.ok(edited.text().includes('name="Hi 😁"'));
+  const last = ranges.at(-1)!;
+  assert.equal(last.newText, "😁", "the whole character is replaced");
+  assert.equal(last.range.endByte - last.range.startByte, 4);
+});

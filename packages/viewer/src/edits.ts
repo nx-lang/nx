@@ -50,7 +50,7 @@ interface Gesture {
  * skipped. The next edit of that value without `live` takes the preview back and is answered for that
  * text and applied as one step, so the whole change is one step of the history, or none when it
  * changes nothing. An edit of another value, or `after`, first records a preview still shown as one
- * step.
+ * step; the commit of a change `after` recorded, coming after the step, changes nothing.
  */
 export function createEditQueue(
   service: Pick<NxLanguageService, "sourceEdit">,
@@ -61,6 +61,9 @@ export function createEditQueue(
 ): EditQueue {
   let last: Promise<void> = Promise.resolve();
   let gesture: Gesture | null = null;
+  // The value whose change `after` last recorded: the commit that ends it on the viewer's side, still
+  // to come, is already a step, and applied again it would bring back what the step undid.
+  let recorded: string | null = null;
   // How many edits have been fired: a live edit whose turn comes after a newer one was fired is skipped.
   let fired = 0;
 
@@ -92,6 +95,7 @@ export function createEditQueue(
 
   const live = (edit: VisualEdit, number: number): Promise<void> =>
     last.then(async () => {
+      recorded = null;
       if (number !== fired || document.preview === undefined) {
         return;
       }
@@ -124,15 +128,38 @@ export function createEditQueue(
 
   const committed = (edit: VisualEdit): Promise<void> =>
     last.then(async () => {
+      if (recorded === edit.key && gesture === null) {
+        recorded = null;
+        onUnchanged();
+        return;
+      }
+      recorded = null;
       let text = document.text();
-      let restored = false;
       if (gesture !== null && gesture.key === edit.key && gesture.shown === text) {
-        // The change ends: its preview is taken back, and the edit asked for the text it began from.
-        preview(gesture.shown, gesture.start);
-        restored = gesture.shown !== gesture.start;
+        // The change ends: the edit is asked for the text it began from while its preview still
+        // shows, and the preview is taken back only as the answer is applied, in one turn, so the
+        // text never reads the old value in between.
+        const open = gesture;
+        const answer = await ask(open.start, edit);
         gesture = null;
-        text = document.text();
-      } else if (gesture !== null) {
+        if (document.text() !== open.shown) {
+          // An edit typed in Source meanwhile: the text stays as it is.
+          onUnchanged();
+          return;
+        }
+        preview(open.shown, open.start);
+        if (answer.edits.length > 0) {
+          document.apply(answer.edits);
+        }
+        const after = document.text();
+        if (after !== null && after !== open.shown) {
+          onApplied(after);
+        } else {
+          onUnchanged();
+        }
+        return;
+      }
+      if (gesture !== null) {
         text = close();
       }
       if (text === null) {
@@ -142,11 +169,7 @@ export function createEditQueue(
       const answer = await ask(text, edit);
       // An edit typed in Source meanwhile moved the text the answer counts in.
       if (answer.edits.length === 0 || document.text() !== text) {
-        if (restored && document.text() !== null) {
-          onApplied(document.text()!);
-        } else {
-          onUnchanged();
-        }
+        onUnchanged();
         return;
       }
       document.apply(answer.edits);
@@ -170,6 +193,7 @@ export function createEditQueue(
   const after = (step: () => void): Promise<void> => {
     const next = last.then(() => {
       // A step of the history sees every change as a step of it.
+      recorded = gesture?.key ?? recorded;
       close();
       step();
     });
@@ -196,9 +220,16 @@ function differenceOf(from: string, to: string): TextEdit[] {
   while (head < shorter && from.charCodeAt(head) === to.charCodeAt(head)) {
     head += 1;
   }
+  // A range never splits a surrogate pair: the two halves are one character.
+  if (head > 0 && isHighSurrogate(from.charCodeAt(head - 1))) {
+    head -= 1;
+  }
   let tail = 0;
   while (tail < shorter - head && from.charCodeAt(from.length - 1 - tail) === to.charCodeAt(to.length - 1 - tail)) {
     tail += 1;
+  }
+  if (tail > 0 && isLowSurrogate(from.charCodeAt(from.length - tail))) {
+    tail -= 1;
   }
   const starts = lineStarts(from);
   const position = (offset: number) => {
@@ -217,6 +248,9 @@ function differenceOf(from: string, to: string): TextEdit[] {
     },
   ];
 }
+
+const isHighSurrogate = (unit: number): boolean => unit >= 0xd800 && unit <= 0xdbff;
+const isLowSurrogate = (unit: number): boolean => unit >= 0xdc00 && unit <= 0xdfff;
 
 /** Where each line of `text` starts, in UTF-16 offsets. */
 function lineStarts(text: string): number[] {

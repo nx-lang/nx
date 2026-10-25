@@ -61,6 +61,37 @@
 - **Fix:** The requirement now reads whole-number steps from `0` for grid placement, whole-number steps for `MaxLines` and `ZIndex`, and no range where DrawnUI uses values outside one (`-1` sizes, negative scales and spacing).
 - **Verification:** Verified in NX `335096f9`: `specs/fiddle-nx-catalog-visualizers/spec.md` now requires whole-number steps from `0` for grid placement, whole-number steps for `MaxLines` and `ZIndex`, and no range where DrawnUI uses values outside one. This matches `nx/visualizers.nx` (`MaxLines step=1`, `ZIndex step=1`, `Row`/`Column` `min=0`) and design.md. `openspec validate` reports the change valid.
 
+## Findings of the 2026-10-25 review of live edits (task 8)
+
+Reviewed NX `4f2a571..3da76a2` plus the docs commit, and the fiddle `4c5a207..202a39f`.
+
+### ✅ Fixed - RF8 Undo within 500 ms of a closed field's stepper click comes back undone
+- **Severity:** High
+- **Evidence:** `after()` recorded the preview as a step and the host undid it, but the viewer's settle timer then committed the stepped value, which the queue applied again as a new step.
+- **Fix:** The queue remembers the value whose change `after` recorded, and the commit of it that follows changes nothing (`onUnchanged`). New `edits.test.ts` case.
+
+### ✅ Fixed - RF9 Leaving Visual during a gesture leaves the preview outside the history
+- **Severity:** Medium
+- **Evidence:** Neither host ended the gesture on a switch to Source, and `disconnectedCallback` kept the live timers, so typing or an undo in Source met a preview the history never recorded.
+- **Fix:** The fiddle's `hide()` and the playground's switch to Source (and Show in Source) call `after(() => undefined)` to record the gesture as a step; the viewer commits a gesture on disconnect. The design's risk note is corrected. New `editing.test.ts` case.
+
+### ✅ Fixed - RF10 Opening the field of the number being stepped drops the clicks
+- **Severity:** Medium
+- **Evidence:** `#openEditor` seeded the field with `#currentOf`, the value the gesture began from.
+- **Fix:** Opening a value's editor, other than a redrawn reading reopening one, first commits that value's stepping, so the field opens on the stepped value. New `editing.test.ts` case.
+
+### ✅ Fixed - RF11 A preview's edit can split a surrogate pair
+- **Severity:** Medium
+- **Evidence:** `differenceOf` compared UTF-16 units, so one emoji replaced by another could start the range between the halves of a pair, which Monaco widens, corrupting the text.
+- **Fix:** The common head and tail never end inside a pair. New `edits.test.ts` case.
+
+### ✅ Fixed - RF12 A commit shows the old text while it is asked
+- **Severity:** Low
+- **Evidence:** `committed()` took the preview back before awaiting the language service, so the canvas jumped back and forth.
+- **Fix:** The commit is asked against the gesture's start while the preview shows, and the preview is taken back and the answer applied in one turn. New `edits.test.ts` case.
+
+**Verification (BretPC):** viewer 208/208, playground 125/125, `pnpm -r test` green, fiddle `npm run test:nx -- --nx ../nx` 140/140, and `nx/visual-check.mjs` all checks passed against a runtime rebuilt from this NX.
+
 ## Questions
 - None (the RF4 question was answered: refusing entries is the viewer's specified behavior, and the table now adapts to it).
 

@@ -731,6 +731,9 @@ export class NxViewerElement extends ElementBase {
     this.ownerDocument.removeEventListener("keydown", this.#onDocumentKey);
     this.ownerDocument.removeEventListener("pointerdown", this.#onDocumentPointerDown, true);
     this.#closeCard();
+    // A value still going live is committed: the host has it as one change, and no timer outlives
+    // the element.
+    this.#settleLive();
     this.#dropSession();
   }
 
@@ -1777,7 +1780,9 @@ export class NxViewerElement extends ElementBase {
    * when a reading drawn again opens an editor the reader had open; a boolean toggles instead.
    */
   #openEditor(key: string, draft?: string, caret?: Caret): void {
-    if (this.#live !== undefined && this.#live.target.key !== key) {
+    // Another value's change ends first; so does this value's stepping, its field opened on the value
+    // the clicks left. A reading drawn again reopens its editor with a caret, and keeps its change.
+    if (this.#live !== undefined && (this.#live.target.key !== key || caret === undefined)) {
       this.#settleLive();
     }
     const target = this.#targets.get(key);
