@@ -14,12 +14,26 @@ undo history, in the order the edits were made, each against the text the one be
 service refuses or answers with no change SHALL leave the text as it was and the value reading as
 before. After an edit, the reading SHALL be asked for at once rather than after the typing pause.
 An edit in Visual SHALL reach diagnostics, run gating, HotReload and sharing as typing the same change
-does. While the editor is read-only, as for a share opened to view, the reading SHALL edit nothing.
+does. A value the reader is still changing, as with a stepper, the color picker or a pause in
+typing, SHALL reach the editor's text, the diagnostics and HotReload at once, and the whole change
+SHALL be one step of the undo history once committed; a change cancelled SHALL leave the text and the
+history as they were. While the editor is read-only, as for a share opened to view, the reading SHALL
+edit nothing.
 Showing either view SHALL NOT run, re-run or stop the snippet.
 
 #### Scenario: Editing a number re-runs as typing does
 - **WHEN** HotReload is on and the visitor changes `FontSize=26` to `32` in Visual
 - **THEN** the editor's text SHALL read `FontSize=32` and the snippet SHALL run once, as after typing it
+
+#### Scenario: The canvas follows a stepper
+- **WHEN** HotReload is on and the visitor opens the field of `FontSize=26` in Visual and clicks its up
+  stepper
+- **THEN** the editor's text SHALL read `FontSize=27` and the snippet SHALL run, before the field closes
+
+#### Scenario: A color picked live, one step
+- **WHEN** the visitor drags in the color picker of `TextColor` and then closes the popover
+- **THEN** the canvas SHALL follow the drag, and one Undo SHALL take the text back to the color before
+  the drag
 
 #### Scenario: One undo step
 - **WHEN** the visitor sets a color in Visual and then presses Ctrl+Z in the reading

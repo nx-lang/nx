@@ -53,6 +53,11 @@ export interface NxEditorHandle {
    * it does any edit.
    */
   applyEdits(edits: readonly TextEdit[]): void;
+  /**
+   * Applies `edits` outside the undo history, as a preview of a value Visual is still changing; the
+   * edit that ends the change takes it back first, so the history never holds it.
+   */
+  previewEdits(edits: readonly TextEdit[]): void;
   /** Undoes the last step of the editor's history, wherever it was made. */
   undo(): void;
   /** Redoes the step last undone. */
@@ -151,6 +156,18 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
         })),
       );
       instance.pushUndoStop();
+    },
+    previewEdits(edits) {
+      const model = editor.current?.getModel();
+      if (model === null || model === undefined || edits.length === 0) {
+        return;
+      }
+      model.applyEdits(
+        edits.map(({ range: { start, end }, newText }) => ({
+          range: new monaco.Range(start.line + 1, start.character + 1, end.line + 1, end.character + 1),
+          text: newText,
+        })),
+      );
     },
     undo() {
       editor.current?.trigger("nx-visual", "undo", null);

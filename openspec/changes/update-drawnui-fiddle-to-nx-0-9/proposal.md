@@ -24,6 +24,13 @@ API gets wrong for a real design system before it is published.
   on). A share opened read-only, or an old-schema share not yet edited, reads as before and edits
   nothing. Visual's bar gains Undo and Redo while Visual shows. `nx-open` (Show in Source, Enter on an
   expression) switches to Source with that value selected.
+- **Live edits** (added after testing, before the release). A value the reader is still changing
+  reaches the host at once: `<nx-viewer>` fires `nx-edit` with `live: true` for each stepper step,
+  arrow key, scrub, color-picker move and pause in typing, and ends the gesture with an ordinary
+  `nx-edit`, which the edit queue makes one undo step (the live ones are previews outside the
+  history). Escape takes the previews back. Stepper clicks with the field closed commit once the
+  reader pauses, and a color popover closed by a press elsewhere commits. The fiddle's and the
+  playground's canvases follow as they do typing.
 - **The edit queue moves into `@nx-lang/viewer`.** The playground's `createEditQueue` (edits applied in
   order, each against the text the one before left, with `after` for undo) is what any Monaco host
   needs, so it becomes a viewer export before the release, and both hosts use it.

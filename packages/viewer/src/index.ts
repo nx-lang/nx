@@ -79,6 +79,12 @@ export interface NxEditDetail {
   /** The key of the node the edit is aimed at: a literal, a case, a run of text or an attribute. */
   readonly key: string;
   readonly edit: SourceEdit;
+  /**
+   * Set on a value the reader is still changing, as a stepper, the color picker or a pause in typing
+   * gives it: shown at once, replaced by the next value, and ended by an edit without `live`, the
+   * value committed or, when the change is cancelled, the value it began from.
+   */
+  readonly live?: true;
 }
 
 /** What the `nx-open` event carries: the node to open in the source. */
@@ -260,6 +266,27 @@ interface Caret {
   readonly end: number;
 }
 
+/** A value going live while the reader changes it. */
+interface Live {
+  /** The value, as it was when the change began. */
+  readonly target: EditTarget;
+  /** The key its edits are aimed at. */
+  readonly key: string;
+  /** The value it began from. */
+  readonly from: string;
+  /** The last value fired live, if one was. */
+  last: string | undefined;
+  /** A value waiting for typing to pause. */
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** The commit of stepper clicks made with the field closed, once the reader pauses. */
+  settle: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** How long typing pauses before its entry goes live. */
+const LIVE_TYPING_DELAY = 300;
+/** How long after the last stepper click, with the field closed, the clicks are committed. */
+const STEP_SETTLE_DELAY = 500;
+
 /** A number's name being dragged sideways to change it. */
 interface Scrub {
   target: EditTarget;
@@ -415,6 +442,7 @@ export class NxViewerElement extends ElementBase {
   #reopen: Reopen | undefined;
   /** Each value edited since the host last set a tree, as the reader left it, shown until it does. */
   #pending = new Map<string, string>();
+  #live: Live | undefined;
   /** The attributes removed since the host last set a tree, shown muted until it does. */
   #removed = new Set<string>();
   #scrub: Scrub | undefined;
@@ -498,7 +526,7 @@ export class NxViewerElement extends ElementBase {
     // A press on the tools is theirs: a case's chevron closes its popover itself.
     const path = event.composedPath();
     if (session !== undefined && session.field === undefined && !path.includes(this.#popover) && !path.includes(this.#tools)) {
-      this.#cancel(session, false);
+      this.#closeElsewhere(session);
       // A press on the value whose popover was open closes it, as a dropdown's does; the click
       // that follows does not open it again.
       if (event.composedPath().includes(session.span)) {
@@ -584,7 +612,7 @@ export class NxViewerElement extends ElementBase {
       const next = event.relatedTarget as Node | null;
       const session = this.#session;
       if (session !== undefined && session.field === undefined && next !== null && !this.#popover.contains(next)) {
-        this.#cancel(session, false);
+        this.#closeElsewhere(session);
       }
     });
 
@@ -1416,6 +1444,10 @@ export class NxViewerElement extends ElementBase {
    * again, the folds stay as they are.
    */
   #select(key: string | undefined, fire: boolean, reveal = true): void {
+    // The reader moving on commits a value still going live.
+    if (fire && this.#live !== undefined) {
+      this.#settleLive();
+    }
     // Selecting another unit closes the list of an element's unwritten properties.
     if (key !== this.#moreOpen) {
       this.#moreOpen = undefined;
@@ -1635,13 +1667,109 @@ export class NxViewerElement extends ElementBase {
     return target.adding === true ? "" : (this.#index?.tree.nodes[target.at]?.value ?? "");
   }
 
-  /** The value `target` reads as now: as the reader left it, or as the tree gives it. */
+  /**
+   * The value `target` reads as now: as the reader left it, or as the tree gives it, or, while it
+   * goes live, the value its change began from, since a live value is not yet committed.
+   */
   #currentOf(target: EditTarget): string {
+    const live = this.#live;
+    if (live !== undefined && live.target.key === target.key) {
+      return live.from;
+    }
     return this.#pending.get(target.key) ?? target.value;
   }
 
+  /** The value `target` shows now: the last value it went live with, or its current one. */
+  #shownOf(target: EditTarget): string {
+    const live = this.#live;
+    return live !== undefined && live.target.key === target.key ? (live.last ?? live.from) : this.#currentOf(target);
+  }
+
   #fire(name: string, detail: NxEditDetail | NxOpenDetail): void {
+    // Another edit ends a value still going live first, so the host has it as one change.
+    if (name === NX_EDIT_EVENT && (detail as NxEditDetail).live !== true && this.#live !== undefined && this.#live.key !== detail.key) {
+      this.#settleLive();
+    }
     this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
+  }
+
+  /**
+   * Fires `target`'s entry `value` live, after `delay` or at once, when the editor can take it and it
+   * differs from the last value fired. A property the element does not write is added only when
+   * committed, and a case or a boolean has no entry to go live with.
+   */
+  #goLive(target: EditTarget, value: string, delay: number): void {
+    if (!this.#editable || target.adding === true || (target.kind !== "number" && target.kind !== "text" && target.kind !== "run" && target.kind !== "color")) {
+      return;
+    }
+    let live = this.#live;
+    if (live !== undefined && live.target.key !== target.key) {
+      this.#settleLive();
+      live = undefined;
+    }
+    if (live !== undefined) {
+      clearTimeout(live.timer);
+      live.timer = undefined;
+    }
+    if (this.#problemOf(target, value) !== undefined) {
+      return;
+    }
+    if (live === undefined) {
+      if (value === this.#currentOf(target)) {
+        return;
+      }
+      live = { target, key: this.#editKeyOf(target), from: this.#currentOf(target), last: undefined, timer: undefined, settle: undefined };
+      this.#live = live;
+    }
+    const going = live;
+    const send = (): void => {
+      going.timer = undefined;
+      if (this.#live !== going || value === (going.last ?? going.from)) {
+        return;
+      }
+      going.last = value;
+      this.dispatchEvent(
+        new CustomEvent<NxEditDetail>(NX_EDIT_EVENT, {
+          detail: { key: going.key, edit: editOf(going.target, value), live: true },
+          bubbles: true,
+          composed: true,
+        })
+      );
+    };
+    if (delay <= 0) {
+      send();
+    } else {
+      going.timer = setTimeout(send, delay);
+    }
+  }
+
+  /** Ends the value going live, if `key`'s, with nothing to commit: what it began from is fired back. */
+  #revertLive(key: string): void {
+    const live = this.#live;
+    if (live === undefined || live.target.key !== key) {
+      return;
+    }
+    this.#live = undefined;
+    clearTimeout(live.timer);
+    clearTimeout(live.settle);
+    if (live.last !== undefined) {
+      this.#fire(NX_EDIT_EVENT, { key: live.key, edit: editOf(live.target, live.from) });
+    }
+  }
+
+  /** Commits the value going live with the last value it showed, as when the reader moves on. */
+  #settleLive(): void {
+    const live = this.#live;
+    if (live === undefined) {
+      return;
+    }
+    clearTimeout(live.timer);
+    clearTimeout(live.settle);
+    if (live.last === undefined) {
+      this.#live = undefined;
+      return;
+    }
+    this.#commitValue(live.target, live.last);
   }
 
   /**
@@ -1649,6 +1777,9 @@ export class NxViewerElement extends ElementBase {
    * when a reading drawn again opens an editor the reader had open; a boolean toggles instead.
    */
   #openEditor(key: string, draft?: string, caret?: Caret): void {
+    if (this.#live !== undefined && this.#live.target.key !== key) {
+      this.#settleLive();
+    }
     const target = this.#targets.get(key);
     const span = this.#rendered.get(key);
     if (target === undefined || span === undefined) {
@@ -1853,13 +1984,17 @@ export class NxViewerElement extends ElementBase {
    * typing pauses, so a number half typed, as `-`, does not flash a message, or at once, `now`, as
    * when Enter is pressed on it.
    */
-  #validate(session: EditSession, now = false): void {
+  #validate(session: EditSession, now = false, liveDelay = LIVE_TYPING_DELAY): void {
     const input = session.field ?? session.input;
     if (input === undefined || session.target.kind === "case") {
       return;
     }
     this.#reportDraft(this.#draftOf(session) !== this.#currentOf(session.target));
     const problem = this.#problemOf(session.target, this.#draftOf(session) ?? "");
+    // What the editor holds goes live: a number or a color as it is committed, trimmed.
+    const draft = this.#draftOf(session) ?? "";
+    const entry = session.target.kind === "number" || session.target.kind === "color" ? draft.trim() : draft;
+    this.#goLive(session.target, entry, liveDelay);
     input.classList.toggle("invalid", problem !== undefined);
     input.setAttribute("aria-invalid", String(problem !== undefined));
     clearTimeout(this.#problemTimer);
@@ -1972,7 +2107,7 @@ export class NxViewerElement extends ElementBase {
         const stepped = stepNumber((field.textContent ?? "").trim(), steps, target.signed !== false, target.hints);
         if (stepped !== undefined) {
           field.textContent = stepped;
-          this.#validate(session);
+          this.#validate(session, false, 0);
           this.#selectAll(field);
         }
         return;
@@ -1991,6 +2126,7 @@ export class NxViewerElement extends ElementBase {
       value = value.trim();
     }
     if (value === this.#currentOf(target)) {
+      this.#revertLive(target.key);
       this.#endSession(session, how === "key");
       session.host!.replaceChildren(...session.restore!);
       return true;
@@ -2012,8 +2148,23 @@ export class NxViewerElement extends ElementBase {
     return true;
   }
 
+  /**
+   * Closes a popover the reader left for something else: a color holding an entry it can take
+   * commits it, as leaving a field does; anything else is cancelled.
+   */
+  #closeElsewhere(session: EditSession): void {
+    const value = session.target.kind === "color" ? (session.input?.value ?? "").trim() : undefined;
+    if (value !== undefined && value !== this.#currentOf(session.target) && this.#problemOf(session.target, value) === undefined) {
+      this.#endSession(session, false);
+      this.#commitValue(session.target, value);
+      return;
+    }
+    this.#cancel(session, false);
+  }
+
   /** Closes `session` without an edit, putting back what its value showed. */
   #cancel(session: EditSession, refocus: boolean): void {
+    this.#revertLive(session.target.key);
     this.#endSession(session, refocus);
     session.host?.replaceChildren(...session.restore!);
   }
@@ -2060,6 +2211,24 @@ export class NxViewerElement extends ElementBase {
 
   /** Sets `target` to `value`: fires `nx-edit` and shows the value, muted, until the host's tree. */
   #commitValue(target: EditTarget, value: string): void {
+    const live = this.#live !== undefined && this.#live.target.key === target.key ? this.#live : undefined;
+    if (live !== undefined) {
+      // The change that went live ends here: committed, or, back where it began, taken back.
+      if (value === live.from) {
+        this.#revertLive(target.key);
+        return;
+      }
+      this.#live = undefined;
+      clearTimeout(live.timer);
+      clearTimeout(live.settle);
+      this.#pending.set(target.key, value);
+      const span = this.#rendered.get(target.key);
+      if (span !== undefined) {
+        showValue(span, target, this.#writtenOf(target), value);
+      }
+      this.#fire(NX_EDIT_EVENT, { key: live.key, edit: editOf(live.target, value) });
+      return;
+    }
     if (value === this.#currentOf(target)) {
       return;
     }
@@ -2626,7 +2795,7 @@ export class NxViewerElement extends ElementBase {
     });
     picker.addEventListener("input", () => {
       input.value = picker.value;
-      this.#validate(session);
+      this.#validate(session, false, 0);
     });
     picker.addEventListener("change", () => this.#choose(session, picker.value));
     this.#validate(session);
@@ -3147,7 +3316,7 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    const from = session?.field !== undefined ? (session.field.textContent ?? "").trim() : this.#currentOf(target);
+    const from = session?.field !== undefined ? (session.field.textContent ?? "").trim() : this.#shownOf(target);
     this.#stepping = { target, pointer: event.pointerId, y: event.clientY, direction: part.classList.contains("up") ? 1 : -1, from, value: undefined };
     try {
       part.setPointerCapture?.(event.pointerId);
@@ -3210,6 +3379,21 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
+    if (!dragged && commit) {
+      // A click goes live, and clicks on the same number are committed together once the reader
+      // pauses, or moves on.
+      this.#showStepped(target, value);
+      const live = this.#live;
+      if (live !== undefined && live.target.key === target.key) {
+        clearTimeout(live.settle);
+        live.settle = setTimeout(() => {
+          if (this.#live === live) {
+            this.#settleLive();
+          }
+        }, STEP_SETTLE_DELAY);
+      }
+      return;
+    }
     this.#endNumberDrag(target, stepping.from, value, commit);
   }
 
@@ -3247,6 +3431,8 @@ export class NxViewerElement extends ElementBase {
       this.#commitValue(target, value);
       return;
     }
+    // Back where it began, or cancelled: what went live is taken back.
+    this.#revertLive(target.key);
     const span = this.#rendered.get(target.key);
     if (span === undefined) {
       return;
@@ -3263,13 +3449,14 @@ export class NxViewerElement extends ElementBase {
     const session = this.#session;
     if (session?.target.key === target.key && session.field !== undefined) {
       session.field.textContent = value;
-      this.#validate(session);
+      this.#validate(session, false, 0);
       return;
     }
     const span = this.#rendered.get(target.key);
     if (span !== undefined) {
       showValue(span, target, this.#writtenOf(target), value);
     }
+    this.#goLive(target, value, 0);
   }
 
   // ---- Line breaks --------------------------------------------------------------------------
@@ -3787,7 +3974,7 @@ export class NxViewerElement extends ElementBase {
     if (target === undefined || target.kind !== "number" || stepNumber(this.#currentOf(target), 0) === undefined) {
       return;
     }
-    this.#scrub = { target, name: name!, pointer: event.pointerId, x: event.clientX, from: this.#currentOf(target), value: undefined };
+    this.#scrub = { target, name: name!, pointer: event.pointerId, x: event.clientX, from: this.#shownOf(target), value: undefined };
   }
 
   #onPointerMove(event: PointerEvent): void {
@@ -3837,6 +4024,7 @@ export class NxViewerElement extends ElementBase {
     if (span !== undefined) {
       showValue(span, scrub.target, this.#writtenOf(scrub.target), value);
     }
+    this.#goLive(scrub.target, value, 0);
   }
 
   /**

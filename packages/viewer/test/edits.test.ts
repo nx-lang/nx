@@ -53,13 +53,34 @@ function document(initial: string) {
     },
     apply(edits: readonly TextEdit[]) {
       steps.push(text);
-      const before = text;
-      const spans = edits
-        .map((edit) => ({ start: offset(before, edit.range.start), end: offset(before, edit.range.end), newText: edit.newText }))
-        .sort((a, b) => b.start - a.start);
-      for (const { start, end, newText } of spans) {
-        text = text.slice(0, start) + newText + text.slice(end);
-      }
+      text = applied(text, edits);
+    }
+  };
+
+  function applied(before: string, edits: readonly TextEdit[]): string {
+    let after = before;
+    const spans = edits
+      .map((edit) => ({ start: offset(before, edit.range.start), end: offset(before, edit.range.end), newText: edit.newText }))
+      .sort((a, b) => b.start - a.start);
+    for (const { start, end, newText } of spans) {
+      after = after.slice(0, start) + newText + after.slice(end);
+    }
+    return after;
+  }
+}
+
+/** A document that also previews edits outside its history, as Monaco's `model.applyEdits` does. */
+function previewing(initial: string) {
+  const base = document(initial);
+  const previews: string[] = [];
+  return {
+    ...base,
+    previews,
+    preview(edits: readonly TextEdit[]) {
+      // Applied as a step would be, then the step forgotten: the history never sees it.
+      base.apply(edits);
+      base.steps.pop();
+      previews.push(base.text());
     }
   };
 }
@@ -176,3 +197,76 @@ test("a step taken after an edit is fired waits for it, as an undo pressed while
   await Promise.all([edit, undo]);
   assert.deepEqual(order, ["edit", "undo"]);
 });
+
+const shots = (value: string) => ({ kind: "setValue" as const, value: { kind: "string" as const, value } });
+
+test("live edits preview each value, and their commit is one step of the history", async () => {
+  const edited = previewing(example);
+  const applied: string[] = [];
+  const queue = createEditQueue(service, uri, edited, (text) => applied.push(text));
+  const key = await keyOf(example, "Latte", "name");
+  await queue({ key, edit: shots("F"), live: true });
+  await queue({ key, edit: shots("Fl"), live: true });
+  assert.ok(edited.text().includes('name="Fl"'));
+  assert.deepEqual(edited.steps, [], "previews are outside the history");
+  await queue({ key, edit: shots("Flat white") });
+  assert.ok(edited.text().includes('name="Flat white"'));
+  assert.deepEqual(edited.steps, [example], "one step, from the text before the change");
+  assert.equal(applied.at(-1), edited.text());
+});
+
+test("a change taken back leaves the text and the history as they were", async () => {
+  const edited = previewing(example);
+  const applied: string[] = [];
+  const queue = createEditQueue(service, uri, edited, (text) => applied.push(text));
+  const key = await keyOf(example, "Latte", "name");
+  await queue({ key, edit: shots("Mocha"), live: true });
+  await queue({ key, edit: shots("Latte") });
+  assert.equal(edited.text(), example);
+  assert.deepEqual(edited.steps, []);
+  assert.equal(applied.at(-1), example, "the host reads the text the preview went back to");
+});
+
+test("a live edit superseded before its turn is skipped", async () => {
+  const edited = previewing(example);
+  let asked = 0;
+  const counting = {
+    sourceEdit(request: SourceEditRequest) {
+      asked += 1;
+      return service.sourceEdit(request);
+    }
+  };
+  const queue = createEditQueue(counting, uri, edited, () => undefined);
+  const key = await keyOf(example, "Latte", "name");
+  await Promise.all([
+    queue({ key, edit: shots("A"), live: true }),
+    queue({ key, edit: shots("B"), live: true }),
+    queue({ key, edit: shots("C"), live: true })
+  ]);
+  assert.equal(asked, 1, "only the last is asked");
+  assert.ok(edited.text().includes('name="C"'));
+});
+
+test("another value's edit, or a step after the edits, records a preview still shown as one step", async () => {
+  const edited = previewing(example);
+  const queue = createEditQueue(service, uri, edited, () => undefined);
+  await queue({ key: await keyOf(example, "Latte", "name"), edit: shots("Mocha"), live: true });
+  await queue({ key: await keyOf(example, "Cold brew", "name"), edit: shots("Nitro") });
+  assert.equal(edited.steps.length, 2, "the preview as a step, then the edit");
+  assert.ok(edited.text().includes('name="Mocha"') && edited.text().includes('name="Nitro"'));
+  const second = previewing(example);
+  const queued = createEditQueue(service, uri, second, () => undefined);
+  await queued({ key: await keyOf(example, "Latte", "name"), edit: shots("Mocha"), live: true });
+  let seen = "";
+  await queued.after(() => (seen = second.text()));
+  assert.ok(seen.includes('name="Mocha"'));
+  assert.deepEqual(second.steps, [example], "recorded before the step runs");
+});
+
+test("a document that cannot preview ignores live edits", async () => {
+  const edited = document(example);
+  const queue = createEditQueue(service, uri, edited, () => assert.fail("nothing is applied"));
+  await queue({ key: await keyOf(example, "Latte", "name"), edit: shots("Mocha"), live: true });
+  assert.equal(edited.text(), example);
+});
+

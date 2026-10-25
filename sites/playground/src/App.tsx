@@ -185,7 +185,11 @@ export function App() {
       createEditQueue(
         languageService,
         MODEL_URI,
-        { text: () => editor.current?.text() ?? null, apply: (edits) => editor.current?.applyEdits(edits) },
+        {
+          text: () => editor.current?.text() ?? null,
+          apply: (edits) => editor.current?.applyEdits(edits),
+          preview: (edits) => editor.current?.previewEdits(edits),
+        },
         (text) => {
           immediateTree.current = text;
         },

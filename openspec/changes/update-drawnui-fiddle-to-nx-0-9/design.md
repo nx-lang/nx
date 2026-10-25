@@ -158,7 +158,38 @@ type in the unset list, and a written one is never empty for long. The values ab
   see the canvas change with HotReload on, undo from the bar and the keys, a read-only share that
   edits nothing, reorder and delete an item, Show in Source.
 
+### 7. Live edits: previews outside the history, one step per gesture
+
+Testing the fiddle showed a stepper or the color picker changing nothing until its editor closed. The
+viewer now fires `nx-edit` with `live: true` while a value changes (typing after a 300 ms pause, at
+once for steppers, arrows, scrubbing and the picker), and the commit that ends it as before.
+
+- **Viewer.** One live gesture at a time, keyed by the edited value, remembering the target and the
+  value it opened on. The commit always fires when a live edit went out, even for the value the
+  host's tree now reads; a cancel fires the opening value. A closed field's stepper clicks go live
+  and commit 500 ms after the last, or when anything else happens in the reading. A color popover
+  closed by a press elsewhere commits a valid changed entry, like a field's blur.
+- **Queue.** `EditedDocument` gains optional `preview(edits)`, applied outside the undo history
+  (Monaco's `model.applyEdits`). A live edit is asked against the text before the gesture, and its
+  answer becomes one minimal edit from the current text, so previews replace each other. The commit
+  takes the preview back, asks against the gesture's start and applies its answer with the history,
+  so the history only ever sees text it recorded. Superseded live edits are skipped. An edit of
+  another value, or `after`, first records an open gesture as one step.
+- **Hosts.** The fiddle and the playground implement `preview` with `model.applyEdits`; the model's
+  content change drives diagnostics, HotReload and the reading's next tree as typing does.
+
+*Alternative:* commit every step and merge undo steps afterwards. Rejected: Monaco cannot merge
+existing undo elements, and every step would be a step.
+
+*Alternative:* a canvas-only preview that patches values without recompiling. Kept for later, if
+recompiling a large snippet per step proves slow.
+
 ## Risks / Trade-offs
+
+- **Typing in Source during a gesture.** The fiddle shows one view at a time, so this needs the
+  playground's split view; the queue then drops the gesture's bookkeeping and keeps the text, the
+  preview left outside the history.
+
 
 - **Long unset lists.** A `SkiaLabel` lists about 80 rows. The order and the viewer's filter field
   (over 12 rows) make it usable; descriptions and defaults (proposal enhancements 2 and 3) would make

@@ -79,13 +79,20 @@ function field(element: NxViewerElement): HTMLElement | null {
   return root(element).querySelector<HTMLElement>(".field");
 }
 
-/** Every `nx-edit` and `nx-open` the element fires, in order. */
-function events(element: NxViewerElement): { edits: NxEditDetail[]; opens: NxOpenDetail[] } {
+/**
+ * Every `nx-edit` and `nx-open` the element fires, in order: the edits it commits, and apart from
+ * them the live edits it fires while a value changes.
+ */
+function events(element: NxViewerElement): { edits: NxEditDetail[]; opens: NxOpenDetail[]; lives: NxEditDetail[] } {
   const edits: NxEditDetail[] = [];
   const opens: NxOpenDetail[] = [];
-  element.addEventListener(NX_EDIT_EVENT, (event) => edits.push((event as CustomEvent<NxEditDetail>).detail));
+  const lives: NxEditDetail[] = [];
+  element.addEventListener(NX_EDIT_EVENT, (event) => {
+    const detail = (event as CustomEvent<NxEditDetail>).detail;
+    (detail.live === true ? lives : edits).push(detail);
+  });
   element.addEventListener(NX_OPEN_EVENT, (event) => opens.push((event as CustomEvent<NxOpenDetail>).detail));
-  return { edits, opens };
+  return { edits, opens, lives };
 }
 
 /**
@@ -1326,7 +1333,7 @@ describe("choices", () => {
 
   it("closes the list with Escape before the field, and steps the number while it is closed", async () => {
     const element = show(await fixture("adding"));
-    const { edits } = events(element);
+    const { edits, lives } = events(element);
     rendered(element, "base.value.size.value").click();
     const open = field(element)!;
     press(open, "ArrowDown", { altKey: true });
@@ -1337,7 +1344,9 @@ describe("choices", () => {
     assert.equal(open.textContent, "17");
     press(open, "Escape");
     assert.equal(field(element), null);
-    assert.deepEqual(edits, []);
+    // The step went live, and Escape takes it back.
+    assert.deepEqual(lives, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "17" } }, live: true }]);
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
   });
 
   it("lists a string's choices in one column when none has a label", async () => {
@@ -1377,12 +1386,13 @@ describe("choices", () => {
 });
 
 describe("steppers", () => {
-  it("steps a number on a click, and ten steps on Shift+click, committed at once", async (t) => {
+  it("steps a number on a click, and ten steps on Shift+click, live at once and committed once the reader pauses", async (t) => {
     // As a sheet, where the steppers cover nothing under the pointer: they show at once, selected
     // or not.
     narrow(t, 30);
     const element = show(await fixture("adding"));
-    const { edits } = events(element);
+    const { edits, lives } = events(element);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const value = rendered(element, "card.value.padding.value");
     value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const shown = tools(element)!;
@@ -1397,10 +1407,15 @@ describe("steppers", () => {
     assert.match(up.title, /[Dd]rag/);
     pressTool(up);
     pressTool(up, { shiftKey: true });
-    assert.deepEqual(edits, [
-      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } },
-      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }
+    assert.deepEqual(lives, [
+      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } }, live: true },
+      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } }, live: true }
     ]);
+    assert.deepEqual(edits, [], "not committed while the reader is still clicking");
+    t.mock.timers.tick(499);
+    assert.deepEqual(edits, []);
+    t.mock.timers.tick(1);
+    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }]);
     root(element).querySelector(".toolbar")!.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
     assert.equal(tools(element), null, "gone once the pointer leaves");
@@ -1410,12 +1425,12 @@ describe("steppers", () => {
     // As a sheet, where the steppers cover nothing under the pointer.
     narrow(t, 30);
     const element = show(await fixture("adding"));
-    const { edits } = events(element);
+    const { lives } = events(element);
     element.selection = "card.value.gap";
     rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [102, 97] });
     assert.ok(!body(element).classList.contains("stepping"));
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+    assert.deepEqual(lives, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } }, live: true }]);
   });
 
   it("steps into an open field, which commits", async (t) => {
@@ -1458,7 +1473,7 @@ describe("steppers", () => {
     // As a sheet, where the steppers cover nothing under the pointer.
     narrow(t, 30);
     const element = show(await fixture("adding"));
-    const { edits } = events(element);
+    const { lives } = events(element);
     element.selection = "card.value.padding";
     const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const value = rendered(element, "card.value.padding.value");
@@ -1470,7 +1485,7 @@ describe("steppers", () => {
     assert.equal(tools(element), shown, "over the gap in the value's row");
     over(shown);
     pressTool(shown.querySelector(".stepper.up")!);
-    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } } }]);
+    assert.deepEqual(lives, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } }, live: true }]);
     over(rendered(element, "card.value.gap.value").closest(".sheet-row")!);
     assert.equal(tools(element), null, "gone over another property");
   });
@@ -1497,18 +1512,19 @@ describe("steppers", () => {
     // As a sheet, where the steppers cover nothing under the pointer.
     narrow(t, 30);
     const element = show(await fixture("adding"));
-    const { edits } = events(element);
+    const { lives } = events(element);
     element.selection = "card.value.gap";
     rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.equal(edits.length, 1);
+    assert.equal(lives.length, 1);
     const tree = element.tree;
     element.tree = undefined;
     element.tree = tree;
     assert.ok(tools(element), "still there for the next click, not the row under them");
     assert.equal(element.selection, "card.value.gap");
     pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.equal(edits.length, 2, "the next click steps again");
+    assert.equal(lives.length, 2, "the next click steps again");
+    assert.deepEqual(lives[1]!.edit, { kind: "setValue", value: { kind: "number", text: "6" } }, "on from the number the last click showed");
   });
 
   it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async (t) => {
@@ -1545,11 +1561,13 @@ describe("steppers", () => {
     // As a sheet, where the steppers cover nothing under the pointer.
     narrow(t, 30);
     const element = show(await fixture("adding"));
-    const { edits } = events(element);
+    const { edits, lives } = events(element);
     element.selection = "card.value.gap";
     rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 84, 94] });
-    assert.deepEqual(edits, []);
+    // The drag went live, and ending where it began takes it back.
+    assert.ok(lives.length > 0);
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "4" } } }]);
     const value = rendered(element, "card.value.gap.value");
     assert.equal(value.textContent, "4");
     assert.ok(!value.classList.contains("pending"), "nothing is waiting");
@@ -1638,5 +1656,93 @@ describe("bindings and other elements", () => {
     const hints = { min: 10, max: 0 };
     assert.equal(rangeProblem("5", hints), undefined);
     assert.equal(rangeProblem("20", hints), undefined);
+  });
+});
+
+describe("live edits", () => {
+  const cup = async () => {
+    const source = [
+      'import "@nx/visualizer"',
+      "type Swatch = string",
+      "visualizer Swatch = <ValueVisualizer format=color />",
+      'type Cup = { color:Swatch = "#ffffff" }',
+      'let cup = <Cup color="#c8a27a" />',
+      ""
+    ].join("\n");
+    return treeOf([{ uri: "nx:///cup.nx", identity: "cup.nx", source }], { visualizers: { modules: [] } });
+  };
+  const color = (value: string) => ({ kind: "setValue", value: { kind: "string", value } });
+  const number = (text: string) => ({ kind: "setValue", value: { kind: "number", text } });
+
+  it("goes live with each step of an open field's steppers, and commits on Enter", async () => {
+    const element = show(await fixture("adding"));
+    const { edits, lives } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.deepEqual(lives.map((detail) => detail.edit), [number("17"), number("18")]);
+    assert.ok(lives.every((detail) => detail.live === true && detail.key === "base.value.size.value"));
+    assert.deepEqual(edits, []);
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: number("18") }]);
+  });
+
+  it("goes live with a typed entry once typing pauses, and never with one it cannot take", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const element = show(await fixture("adding"));
+    const { lives } = events(element);
+    rendered(element, "base.value.size.value").click();
+    const open = field(element)!;
+    for (const text of ["2", "24"]) {
+      open.textContent = text;
+      open.dispatchEvent(new window.Event("input", { bubbles: true }));
+      t.mock.timers.tick(100);
+    }
+    assert.deepEqual(lives, [], "not while typing");
+    t.mock.timers.tick(200);
+    assert.deepEqual(lives.map((detail) => detail.edit), [number("24")]);
+    open.textContent = "24px";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    t.mock.timers.tick(1000);
+    assert.equal(lives.length, 1, "an entry it cannot take waits");
+  });
+
+  it("goes live as the color picker moves, and takes it back on Escape", async () => {
+    const element = show(await cup());
+    const { edits, lives } = events(element);
+    rendered(element, "cup.value.color.value").click();
+    const picker = popover(element).querySelector<HTMLInputElement>(".popover-picker")!;
+    for (const value of ["#112233", "#445566"]) {
+      picker.value = value;
+      picker.dispatchEvent(new window.Event("input", { bubbles: true }));
+    }
+    assert.deepEqual(lives.map((detail) => detail.edit), [color("#112233"), color("#445566")]);
+    press(popover(element).querySelector(".popover-hex")!, "Escape");
+    assert.deepEqual(edits, [{ key: "cup.value.color.value", edit: color("#c8a27a") }]);
+  });
+
+  it("commits a color when its popover is left for something else", async () => {
+    const element = show(await cup());
+    const { edits } = events(element);
+    rendered(element, "cup.value.color.value").click();
+    const picker = popover(element).querySelector<HTMLInputElement>(".popover-picker")!;
+    picker.value = "#112233";
+    picker.dispatchEvent(new window.Event("input", { bubbles: true }));
+    document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+    assert.deepEqual(edits, [{ key: "cup.value.color.value", edit: color("#112233") }]);
+    assert.ok(popover(element).hidden);
+  });
+
+  it("commits stepper clicks made with the field closed when the reader selects something else", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits, lives } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    pressTool(tools(element)!.querySelector(".stepper.up")!);
+    assert.equal(lives.length, 1);
+    rendered(element, "card.value.padding").querySelector<HTMLElement>(".sheet-name")!.click();
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
   });
 });
