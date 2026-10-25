@@ -49,6 +49,12 @@ All notable changes to this project will be documented in this file.
 - `@nx-lang/viewer` exports `createEditQueue`, which makes `<nx-viewer>`'s edits in a host's text in the
   order they fire, each against the text the one before left, and runs a step such as undo after them.
   The playground's Visual uses it, as the DrawnUI fiddle's does.
+- Live edits in Visual: while a value is still changing (a stepper, the arrows, scrubbing, the color
+  picker, a pause in typing), `<nx-viewer>` fires `nx-edit` with `live: true`, and the commit or, on
+  Escape, the opening value ends the change. `createEditQueue`'s document takes an optional
+  `preview`, applied outside the undo history, so the canvas follows the value and the whole change is
+  one undo step. A closed number field's stepper clicks commit 500 ms after the last, and a color
+  popover closed by a press elsewhere keeps its color. The playground previews live edits.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,

@@ -256,6 +256,13 @@ The host asks its language service for the text edits, applies them to its own t
 joins its editor's undo history, and sets the new text and tree. Until it does, the edited value
 reads muted; a host that sets the same tree again, as after a refused edit, has it read as before.
 
+While a value is still changing, as with a stepper, the arrows, dragging a name, the color picker or a
+pause of 300 ms in typing, `nx-edit` fires with `live: true` on each change, for the host to show at
+once, outside its undo history. Each live value replaces the one before, and the change ends with an
+edit without `live`: the value committed (Enter, leaving the field, closing the popover, or 500 ms after
+the last stepper click on a closed field) or, when it is cancelled with Escape, the value it began from.
+A host that ignores live edits sees only the commits, as before.
+
 | Value                                              | Editor                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------- |
 | A string, `uitext` or an id                        | A field in the value's place, holding it without quotes or escapes |
@@ -423,6 +430,9 @@ const queue = createEditQueue(
       editor.executeEdits("visual", edits.map(({ range, newText }) => ({ range: toMonacoRange(range), text: newText })));
       editor.pushUndoStop();
     },
+    // Optional: shows a live edit at once, outside the undo history. The commit takes the preview
+    // back and applies the whole change with `apply`, as one undo step.
+    preview: (edits) => model.applyEdits(edits.map(({ range, newText }) => ({ range: toMonacoRange(range), text: newText }))),
   },
   (text) => showTreeOf(text), // an edit changed the text: read it at once
   () => (viewer.tree = tree), // refused, unchanged or failed: give the element its tree again
@@ -434,7 +444,9 @@ const undo = () => queue.after(() => editor.trigger("visual", "undo", null));
 ```
 
 An answer for text that changed while it was asked is not applied, and a failed edit does not hold
-up the ones after it.
+up the ones after it. A live edit is asked against the text before its change began, so previews
+replace each other; one superseded before its turn is skipped, and an edit of another value, or
+`after`, first records a change still open as one step. Without `preview`, live edits are ignored.
 
 ## Hover cards
 
