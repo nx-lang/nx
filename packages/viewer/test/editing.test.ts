@@ -1699,7 +1699,7 @@ describe("live edits", () => {
       open.dispatchEvent(new window.Event("input", { bubbles: true }));
       t.mock.timers.tick(100);
     }
-    assert.deepEqual(lives, [], "not while typing");
+    assert.equal(lives.length, 0, "not while typing");
     t.mock.timers.tick(200);
     assert.deepEqual(lives.map((detail) => detail.edit), [number("24")]);
     open.textContent = "24px";

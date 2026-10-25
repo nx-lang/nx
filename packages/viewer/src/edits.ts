@@ -208,7 +208,14 @@ function differenceOf(from: string, to: string): TextEdit[] {
     }
     return { line, character: offset - starts[line]! };
   };
-  return [{ range: { start: position(head), end: position(from.length - tail) }, newText: to.slice(head, to.length - tail) }];
+  const bytes = (offset: number) => new TextEncoder().encode(from.slice(0, offset)).length;
+  const end = from.length - tail;
+  return [
+    {
+      range: { start: position(head), end: position(end), startByte: bytes(head), endByte: bytes(end) },
+      newText: to.slice(head, to.length - tail),
+    },
+  ];
 }
 
 /** Where each line of `text` starts, in UTF-16 offsets. */
