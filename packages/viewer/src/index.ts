@@ -240,6 +240,9 @@ interface EditSession {
   readonly field?: HTMLElement;
   /** A popover's field: a case's filter or a color's hex. */
   readonly input?: HTMLInputElement;
+  /** A color's picker, and what listens to it and to the hex field. */
+  readonly picker?: HTMLInputElement;
+  readonly listening?: AbortController;
   /** A case popover's options, and the one Enter chooses. */
   readonly options?: readonly HTMLElement[];
   active?: HTMLElement | undefined;
@@ -440,6 +443,11 @@ export class NxViewerElement extends ElementBase {
   #session: EditSession | undefined;
   /** The editor to open again once the reading is drawn with a tree. */
   #reopen: Reopen | undefined;
+  /**
+   * A color popover kept open through a reading drawn again, its fields kept in the page: the
+   * browser closes its picker when the input leaves the page, as one going live would draw anew.
+   */
+  #keptColor: { key: string; input: HTMLInputElement; picker: HTMLInputElement; listening: AbortController } | undefined;
   /** Each value edited since the host last set a tree, as the reader left it, shown until it does. */
   #pending = new Map<string, string>();
   #live: Live | undefined;
@@ -452,6 +460,8 @@ export class NxViewerElement extends ElementBase {
   #closedOnPress: string | undefined;
   /** A stepper pressed, and dragged up or down once the press became a drag. */
   #stepping: Stepping | undefined;
+  /** A press on a stepper held through a cleared tree, to go on with the next one. */
+  #restep: Stepping | undefined;
   /** The key of the element whose unwritten properties are listed. */
   #moreOpen: string | undefined;
   /** What the filter of the unwritten properties holds. */
@@ -1008,9 +1018,13 @@ export class NxViewerElement extends ElementBase {
     const session = this.#session;
     if (session !== undefined && !session.closed) {
       this.#reopen = { key: session.target.key, draft: this.#draftOf(session), caret: this.#caretOf(session) };
+      if (session.picker !== undefined && session.input !== undefined && session.listening !== undefined) {
+        this.#keptColor = { key: session.target.key, input: session.input, picker: session.picker, listening: session.listening };
+      }
     }
-    // A press on a stepper goes on with the next tree, on the same number.
-    const stepping = this.#stepping;
+    // A press on a stepper goes on with the next tree, on the same number, through a cleared one too.
+    const stepping = this.#stepping ?? this.#restep;
+    this.#restep = undefined;
     // So do steppers shown under the pointer, as after a click on one commits, so the next click
     // finds them rather than what lies under them.
     if (this.#session === undefined && stepping === undefined && this.#tools.isConnected && this.#toolsHover !== undefined) {
@@ -1044,6 +1058,7 @@ export class NxViewerElement extends ElementBase {
           this.#body.style.minHeight = "";
         }
       }, EMPTY_HOLD);
+      this.#restep = stepping;
       return;
     }
     // A drag on a number's name goes on with the next tree, on the same number.
@@ -1118,6 +1133,13 @@ export class NxViewerElement extends ElementBase {
       // reopened editor never selects, so the next key does not replace it.
       const end = reopen.draft?.length ?? 0;
       this.#openEditor(reopen.key, reopen.draft, reopen.caret ?? { start: end, end });
+    }
+    // A color popover whose value is gone closes.
+    const kept = this.#keptColor;
+    this.#keptColor = undefined;
+    if (kept !== undefined) {
+      kept.listening.abort();
+      this.#closePopover();
     }
     if (stepping !== undefined) {
       this.#resumeStepping(stepping);
@@ -2209,6 +2231,9 @@ export class NxViewerElement extends ElementBase {
 
   /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
   #closePopover(): void {
+    if (this.#keptColor !== undefined) {
+      return;
+    }
     this.#popover.hidden = true;
     this.#popover.className = "popover";
     this.#popover.replaceChildren();
@@ -2778,33 +2803,60 @@ export class NxViewerElement extends ElementBase {
   /** A hex field and the browser's color picker, for a string its visualizer formats as a color. */
   #openColor(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
     const document = this.ownerDocument;
-    const input = document.createElement("input");
-    input.className = "popover-hex";
-    input.value = text;
-    input.spellcheck = false;
-    input.setAttribute("aria-label", `${this.#labelOf(target)}: hex color`);
-    const picker = document.createElement("input");
-    picker.type = "color";
-    picker.className = "popover-picker";
-    picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
-    picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
-    this.#popover.className = "popover colors";
-    this.#popover.replaceChildren(input, picker);
+    // Reopened on a reading drawn again, the popover keeps its fields, and the browser its picker.
+    const kept = this.#keptColor?.key === target.key ? this.#keptColor : undefined;
+    this.#keptColor = undefined;
+    kept?.listening.abort();
+    // The page's own, as its elements take only its signals.
+    const listening = new (document.defaultView?.AbortController ?? AbortController)();
+    const { signal } = listening;
+    let input: HTMLInputElement;
+    let picker: HTMLInputElement;
+    if (kept !== undefined) {
+      ({ input, picker } = kept);
+      // Its choices are listed again, for the value as the new tree reads it.
+      this.#popover.querySelector(".choices-list")?.remove();
+      this.#popover.classList.remove("with-choices");
+    } else {
+      input = document.createElement("input");
+      input.className = "popover-hex";
+      input.value = text;
+      input.spellcheck = false;
+      input.setAttribute("aria-label", `${this.#labelOf(target)}: hex color`);
+      picker = document.createElement("input");
+      picker.type = "color";
+      picker.className = "popover-picker";
+      picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
+      picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
+      this.#popover.className = "popover colors";
+      this.#popover.replaceChildren(input, picker);
+    }
     this.#popover.hidden = false;
     span.classList.add("editing");
-    const session: EditSession = { target, span, input, closed: false };
+    const session: EditSession = { target, span, input, picker, listening, closed: false };
     this.#session = session;
-    input.addEventListener("input", () => {
-      this.#validate(session);
-      this.#filterChoices(session, input.value, true);
-    });
-    picker.addEventListener("input", () => {
-      input.value = picker.value;
-      this.#validate(session, false, 0);
-    });
-    picker.addEventListener("change", () => this.#choose(session, picker.value));
+    input.addEventListener(
+      "input",
+      () => {
+        this.#validate(session);
+        this.#filterChoices(session, input.value, true);
+      },
+      { signal }
+    );
+    picker.addEventListener(
+      "input",
+      () => {
+        input.value = picker.value;
+        this.#validate(session, false, 0);
+      },
+      { signal }
+    );
+    picker.addEventListener("change", () => this.#choose(session, picker.value), { signal });
     this.#validate(session);
     this.#placeCard(span, this.#popover);
+    if (kept !== undefined) {
+      return;
+    }
     input.focus({ preventScroll: true });
     if (caret === undefined) {
       input.select();

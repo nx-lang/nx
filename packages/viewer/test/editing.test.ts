@@ -1557,6 +1557,27 @@ describe("steppers", () => {
     assert.ok(!body(element).classList.contains("stepping"), "nothing is left resizing");
   });
 
+  it("carries a drag on through a cleared tree and the next, as a host gives a live edit's", async (t) => {
+    narrow(t, 30);
+    const element = show(await fixture("adding"));
+    const { edits, lives } = events(element);
+    element.selection = "card.value.gap";
+    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
+    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 74 }));
+    assert.ok(lives.length > 0, "the drag went live");
+    const tree = element.tree;
+    element.tree = undefined;
+    element.tree = tree;
+    const again = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
+    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 54 }));
+    assert.equal(rendered(element, "card.value.gap.value").textContent, "14", "still stepping");
+    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 54 }));
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "14" } } }]);
+  });
+
   it("shows the value as before when a drag ends where it began", async (t) => {
     // As a sheet, where the steppers cover nothing under the pointer.
     narrow(t, 30);
@@ -1720,6 +1741,27 @@ describe("live edits", () => {
     assert.deepEqual(lives.map((detail) => detail.edit), [color("#112233"), color("#445566")]);
     press(popover(element).querySelector(".popover-hex")!, "Escape");
     assert.deepEqual(edits, [{ key: "cup.value.color.value", edit: color("#c8a27a") }]);
+  });
+
+  it("keeps the color popover's picker in the page through the trees its live edits bring", async () => {
+    const element = show(await cup());
+    const { edits, lives } = events(element);
+    rendered(element, "cup.value.color.value").click();
+    const picker = popover(element).querySelector<HTMLInputElement>(".popover-picker")!;
+    picker.value = "#112233";
+    picker.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.equal(lives.length, 1);
+    const tree = element.tree;
+    element.tree = undefined;
+    element.tree = tree;
+    assert.ok(!popover(element).hidden, "still open");
+    assert.equal(popover(element).querySelector(".popover-picker"), picker, "the same picker, which the browser keeps open");
+    assert.ok(picker.isConnected);
+    picker.value = "#445566";
+    picker.dispatchEvent(new window.Event("input", { bubbles: true }));
+    assert.deepEqual(lives.map((detail) => detail.edit), [color("#112233"), color("#445566")], "each move once");
+    picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.deepEqual(edits, [{ key: "cup.value.color.value", edit: color("#445566") }]);
   });
 
   it("commits a color when its popover is left for something else", async () => {
