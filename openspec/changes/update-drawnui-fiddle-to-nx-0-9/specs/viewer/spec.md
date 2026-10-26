@@ -122,7 +122,9 @@ SHALL give it back when they go. So SHALL an earlier item of a braced list, and 
 value, whose quiet `default` moves aside. Where taking room would wrap a line that only just fits,
 the tools SHALL cover the gap instead, so nothing below moves. Outside the selection, where they take
 room, they SHALL wait until the pointer has rested on the value for a moment, so a line does not jump
-as the pointer passes over it; an unset property's row counts as its element's selection. A click SHALL step the number once by `step`, or by one, and
+as the pointer passes over it; an unset property's row counts as its element's selection. A selected
+property, as a row or on a line, SHALL show its value's tools with the pointer on no other value,
+without opening its editor, and they SHALL come back to it when the pointer leaves another value. A click SHALL step the number once by `step`, or by one, and
 Shift+click by ten steps, within `min` and `max`: into the field while it is open, else applied at once as a live edit and
 committed once the reader pauses, so a run of clicks is one commit. Pressing a stepper and dragging
 up or down SHALL change the number by a step for every few pixels and show it in place, each step
@@ -215,6 +217,11 @@ is selected its `⋯` SHALL show right after it, taking room in the line, and De
   `color` and opens the `⋯` shown after it
 - **THEN** the menu SHALL list Remove and Show in Source, and Remove SHALL fire `nx-edit` removing
   that attribute
+
+#### Scenario: A selected property shows its tools
+- **WHEN** the reader clicks the name of `size=16` on a line, with the pointer then leaving the reading
+- **THEN** the steppers SHALL show past `16`, no field SHALL open, and a click on the up stepper
+  SHALL make it `17`
 
 ## ADDED Requirements
 

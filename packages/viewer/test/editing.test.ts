@@ -1472,7 +1472,30 @@ describe("steppers", () => {
     pressTool(shown.querySelector(".stepper.up")!);
     assert.deepEqual(lives, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } }, live: true }]);
     over(rendered(element, "card.value.gap.value").closest(".sheet-row")!);
-    assert.equal(tools(element), null, "gone over another property");
+    assert.equal(tools(element)?.dataset["toolsFor"], "card.value.padding.value", "over another property, back with the selected one's value");
+    element.selection = "card.value";
+    assert.equal(tools(element), null, "and gone once it is not selected");
+  });
+
+  it("shows a selected property's tools with no pointer over it, inline too, and follows the pointer to another value and back", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const element = show(await fixture("adding"));
+    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    assert.equal(tools(element), null);
+    const name = rendered(element, "base.value.size").querySelector<HTMLElement>(".line-name")!;
+    name.click();
+    assert.equal(element.selection, "base.value.size");
+    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "the steppers, as soon as it is selected");
+    assert.ok(field(element) === null, "and no editor opens");
+    over(rendered(element, "big.value.size.value"));
+    t.mock.timers.tick(300);
+    assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "the pointer's value, once it rests");
+    body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
+    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "back where the selection is");
+    rendered(element, "base.value.size.value").click();
+    assert.ok(field(element), "a click on the value still opens it");
+    press(field(element)!, "Escape");
+    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "and closing it leaves the tools");
   });
 
   it("shows a let's steppers, and takes room for them where more of the line follows", async () => {

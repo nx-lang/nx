@@ -58,6 +58,8 @@ All notable changes to this project will be documented in this file.
 - `<nx-viewer>`: a property written on a line is selected by a click on its name, and then shows
   its row's `⋯` menu right after it (Reset to default or Remove, and Show in Source);
   Delete removes it as it removes a row.
+- `<nx-viewer>`: a selected property shows its value's steppers or chevron without the pointer over
+  it.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,

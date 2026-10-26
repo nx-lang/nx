@@ -1130,6 +1130,8 @@ export class NxViewerElement extends ElementBase {
         this.#showTools(span, target);
         this.#toolsHover = hovered;
       }
+    } else if (!this.#tools.isConnected) {
+      this.#restTools();
     }
     this.#rehover = undefined;
     // Fonts that arrive later change where the rows fall, and what fits on a line.
@@ -1461,12 +1463,11 @@ export class NxViewerElement extends ElementBase {
     if (this.#menuKey !== undefined && this.#menuKey !== key) {
       this.#closeMenu(false);
     }
-    // Steppers drawn while the pointer rested on a value belong to the row that was selected.
-    if (this.#session === undefined && this.#stepping === undefined && this.#tools.isConnected) {
-      this.#hideTools();
-    }
     this.#selectNode(key, fire, reveal);
     this.#drawMore();
+    // A selected property shows its value's tools; steppers drawn while the pointer rested on another
+    // value were that value's.
+    this.#restTools();
   }
 
   #selectNode(key: string | undefined, fire: boolean, reveal: boolean): void {
@@ -2191,6 +2192,7 @@ export class NxViewerElement extends ElementBase {
     // A field's popover lists its choices; a popover editor is the popover itself.
     this.#closePopover();
     this.#hideTools();
+    this.#restTools();
     if (refocus) {
       this.#body.focus({ preventScroll: true });
     }
@@ -3198,6 +3200,52 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /** Whether `target`'s value has tools to show: a number's steppers, a case's or its choices' chevron. */
+  #offersTools(target: EditTarget): boolean {
+    return target.kind === "number" || target.kind === "case" || this.#hasChoices(target);
+  }
+
+  /** The value of the selected property, as it is drawn, when it has tools to show. */
+  #selectedToolsValue(): { span: HTMLElement; target: EditTarget } | undefined {
+    const index = this.#index;
+    const at = this.#selection === undefined ? undefined : index?.byKey.get(this.#selection);
+    if (!this.#editable || index === undefined || at === undefined || index.tree.nodes[at]!.role !== "attribute") {
+      return undefined;
+    }
+    for (const child of index.children[at] ?? []) {
+      const key = index.tree.nodes[child]!.key;
+      const target = this.#targets.get(key);
+      const span = this.#rendered.get(key);
+      if (target !== undefined && span !== undefined && span.isConnected && this.#offersTools(target)) {
+        return { span, target };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Shows the tools where they rest when the pointer is on no value: past the selected property's
+   * value, or nowhere. An editor open or a stepper pressed keeps the tools it has.
+   */
+  #restTools(): void {
+    if (this.#session !== undefined || this.#stepping !== undefined) {
+      return;
+    }
+    const selected = this.#selectedToolsValue();
+    if (selected === undefined) {
+      if (this.#tools.isConnected) {
+        this.#hideTools();
+      }
+      return;
+    }
+    if (this.#tools.isConnected && this.#tools.dataset["toolsFor"] === selected.target.key) {
+      this.#toolsHover = undefined;
+      return;
+    }
+    this.#stopToolsWait();
+    this.#showTools(selected.span, selected.target);
+  }
+
   /** Whether `target` offers choices its editor lists. */
   #hasChoices(target: EditTarget): boolean {
     return (target.kind === "number" || target.kind === "text") && choicesOf(target.hints, target.kind).length > 0;
@@ -3260,15 +3308,19 @@ export class NxViewerElement extends ElementBase {
     const key = value === null || value === undefined ? undefined : keyOf(value);
     const target = key === undefined ? undefined : this.#targets.get(key);
     // Any value the pointer rests on, selected or not, as a case's chevron shows.
-    const offered = target !== undefined && (target.kind === "number" || target.kind === "case" || this.#hasChoices(target));
+    const offered = target !== undefined && this.#offersTools(target);
     if (value === null || value === undefined || target === undefined || !offered || this.#rendered.get(key!) !== value) {
       this.#stopToolsWait();
-      if (this.#tools.isConnected) {
-        this.#hideTools();
-      }
+      this.#restTools();
       return;
     }
     if ((this.#toolsHover === key && this.#tools.isConnected) || this.#toolsWaiting === key) {
+      return;
+    }
+    // The selected property's tools are already there.
+    if (this.#tools.isConnected && this.#tools.dataset["toolsFor"] === key) {
+      this.#stopToolsWait();
+      this.#toolsHover = key;
       return;
     }
     this.#stopToolsWait();
@@ -3282,9 +3334,7 @@ export class NxViewerElement extends ElementBase {
         (this.#unitOf(value) === selected || selected.matches(".line-property") || !selected.matches(DRAWN_UNITS))) ||
       this.#moreBlock?.contains(value) === true;
     if (!onSelected && this.#followedOnItsLine(value)) {
-      if (this.#tools.isConnected) {
-        this.#hideTools();
-      }
+      this.#restTools();
       this.#toolsWaiting = key;
       this.#toolsTimer = setTimeout(() => {
         this.#toolsTimer = undefined;

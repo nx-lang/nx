@@ -297,7 +297,8 @@ suggestion, and any entry the field takes commits. A choice the field would refu
 field.
 
 A number shows steppers, an up and a down button drawn just past the value so nothing moves, while
-its field is open and while the pointer rests on its value, selected or not. Where they take room in
+its field is open, while the pointer rests on its value, selected or not, and while its property is
+selected, with the pointer anywhere else. Where they take room in
 a line, outside the selection, they wait until the pointer has rested on the value for 300 ms, so a
 line doesn't jump as the pointer passes over it. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
 A press that moves less than six pixels is still a click. Pressing a stepper and dragging further up
