@@ -68,6 +68,13 @@ describe("carrying a selection to and from an editor", () => {
     const gone = await tree(removed);
     const place = removed.indexOf("  />") + 1;
     assert.equal(gone.nodes.find((candidate) => candidate.key === keyOfChange(gone, removed, place))!.role, "element");
+    // An attribute added last and taken out again leaves its place just after the one before it:
+    // the element lost it, not that attribute, on several lines or on one.
+    for (const left of ['let root() = <Card\n    title="Hi"\n    pad=8\n  />', 'let root() = <Card title="Hi" pad=8 />']) {
+      const after = await tree(left);
+      const point = left.indexOf("pad=8") + "pad=8".length;
+      assert.equal(after.nodes.find((candidate) => candidate.key === keyOfChange(after, left, point))!.role, "element", left);
+    }
   });
 
   it("spans the changes of one step in the text they left", () => {

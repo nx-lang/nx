@@ -256,7 +256,7 @@ The host asks its language service for the text edits, applies them to its own t
 joins its editor's undo history, and sets the new text and tree. Until it does, the edited value
 reads muted; a host that sets the same tree again, as after a refused edit, has it read as before.
 
-While a value is still changing, as with a stepper, the arrows, dragging a name, the color picker or a
+While a value is still changing, as with a stepper, the arrows, dragging a stepper, the color picker or a
 pause of 300 ms in typing, `nx-edit` fires with `live: true` on each change, for the host to show at
 once, outside its undo history. Each live value replaces the one before, and the change ends with an
 edit without `live`: the value committed (Enter, leaving the field, closing the popover, or 500 ms after

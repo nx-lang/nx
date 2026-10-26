@@ -1793,3 +1793,69 @@ describe("live edits", () => {
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
   });
 });
+
+describe("selection as editors open, and gestures the reader moves on from", () => {
+  it("keeps an element selected, and its unset list open, when a value it lists opens", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "base.value";
+    moreToggle(element)!.click();
+    const listed = moreRows(element).length;
+    assert.ok(listed > 0);
+    rendered(element, "base.value.size.value").click();
+    assert.ok(field(element), "the field opens");
+    assert.equal(element.selection, "base.value", "the element stays selected");
+    assert.equal(moreRows(element).length, listed, "and its list stays");
+  });
+
+  it("keeps a unit selected when Enter opens its first value, and Escape leaves it selected", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "latte.value";
+    press(body(element), "Enter");
+    const open = field(element) ?? root(element).querySelector<HTMLElement>(".popover:not([hidden]) input");
+    assert.ok(open, "an editor opens");
+    assert.equal(element.selection, "latte.value");
+    press(open, "Escape");
+    assert.equal(element.selection, "latte.value", "Escape keeps the selection");
+  });
+
+  it("commits stepper clicks made with the field closed on a press elsewhere, and on the host's undo keys", async (t) => {
+    narrow(t, 30);
+    for (const how of ["press", "keys"] as const) {
+      const element = show(await fixture("adding"));
+      const { edits } = events(element);
+      element.selection = "card.value.gap";
+      pressTool(tools(element)!.querySelector(".stepper.up")!);
+      assert.deepEqual(edits, [], "settling");
+      if (how === "press") {
+        document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+      } else {
+        press(body(element), "z", { ctrlKey: true });
+      }
+      assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }], how);
+    }
+  });
+
+  it("keeps a double-click's word selected", async (t) => {
+    const selection = fakeSelection(t);
+    const element = show(await fixture("adding"));
+    const name = rendered(element, "base.value.size").querySelector<HTMLElement>(".line-name")!;
+    selection.selectAllChildren(name);
+    name.dispatchEvent(new window.MouseEvent("click", { bubbles: true, composed: true, detail: 2 }));
+    assert.equal(selection.isCollapsed, false, "the word stays selected");
+    assert.notEqual(element.selection, "base.value.size", "and nothing is chosen");
+  });
+
+  it("hangs a selected inline property's mark over the gap where its room would wrap the line", async () => {
+    const element = show(await fixture("adding"));
+    const line = rendered(element, "big.value");
+    line.getBoundingClientRect = () => {
+      const wraps = line.querySelector(".property-menu:not(.over-gap) > .row-menu.selected") !== null;
+      const height = wraps ? 36 : 18;
+      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
+    };
+    element.selection = "big.value.size";
+    const anchor = rendered(element, "big.value.size").nextElementSibling as HTMLElement;
+    assert.ok(anchor.matches(".property-menu"));
+    assert.ok(anchor.classList.contains("over-gap"), "no room taken");
+  });
+});

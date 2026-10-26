@@ -54,7 +54,7 @@ closes. Opening an editor SHALL close any hover card.
 - **WHEN** the host has set `editable` and the reader clicks in the middle of the value `"Latte"`,
   with nothing selected
 - **THEN** a field SHALL open on `Latte` with the caret between the characters the click fell
-  between and no text selected, and nothing SHALL be selected
+  between and no text selected, and its property SHALL be selected
 
 #### Scenario: A click on a name selects
 - **WHEN** the reader clicks the name of the row `name`
@@ -101,9 +101,9 @@ each choice reading its label, and its value after it, quieter, in a second colu
 label reads its value alone, in one column when none has a label. When the property has a default, a
 row of its own above the choices, set off by a rule, SHALL read `Default` and the default. The choice
 equal to the current value SHALL be marked. While the field is open, a chevron past it SHALL show
-that the list is there, and so SHALL one past the value while the pointer is over it, as the steppers
-below do; a click on it, or Alt+Down, SHALL open the list (a
-click on the hover chevron opening the field with it), and so SHALL typing, the list
+that the list is there, and so SHALL one past the value while its property is selected, as the
+steppers below do; a click on it, or Alt+Down, SHALL open the list (a
+click on the selected property's chevron opening the field with it), and so SHALL typing, the list
 then holding the choices whose label or value holds what was typed. While the list is closed, Up and
 Down SHALL step a number; while it is open, they SHALL move through it, from the current value's row
 when no row is active yet, Enter SHALL choose the active
@@ -128,8 +128,8 @@ up or down SHALL change the number by a step for every few pixels and show it in
 going live: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow
 keys, Shift and dragging. A property's name SHALL NOT drag: a click on it selects the property. A
 case's chevron SHALL show past the value as the choices chevron does, under the same rules for
-hover and for room on a line, SHALL stay while the pointer moves onto it, and a click on it SHALL
-open the case's popover, as a click on the value does, or close it when open.
+selection and for room on a line, and a click on it SHALL open the case's popover, as a click on
+the value does, or close it when open.
 
 In any string field, Shift+Enter SHALL make a line break. A string literal written over several lines
 SHALL edit in a field that holds line breaks; one written with an escape other than `\"` and `\\`

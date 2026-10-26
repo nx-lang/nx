@@ -36,8 +36,10 @@ All notable changes to this project will be documented in this file.
   numbers edit with ranges and steppers (click, Shift+click, or drag up and down), a number's
   or a string's choices list under its field with the default's row first, unions edit as segmented
   buttons and strings over several lines as their hints say; Shift+Enter breaks a string's line.
-  A value's steppers or chevron show under the pointer, taking room on a one-line element, and a
-  click on a value opens its editor without selecting it.
+  A selected property's value shows its steppers or chevron, taking room on a one-line element, and
+  its `⋯` menu just past them; a click on a value, or Tab, opens its editor and selects its property.
+  A property written on a line is selected by a click on its name, and Delete removes it as it
+  removes a row.
 - Reordering and deleting in Visual: `sourceEdit` has a `move` edit (`{ kind: "move", to }`) for an
   element that is an item of a list (a braced sequence or element content, outside `if` and `for`),
   and `remove` takes such an item too; both keep the list's layout and take the comments directly
@@ -55,15 +57,9 @@ All notable changes to this project will be documented in this file.
   `preview`, applied outside the undo history, so the canvas follows the value and the whole change is
   one undo step. A closed number field's stepper clicks commit 500 ms after the last, and a color
   popover closed by a press elsewhere keeps its color. The playground previews live edits.
-- `<nx-viewer>`: a property written on a line is selected by a click on its name, and then shows
-  its row's `⋯` menu right after it (Reset to default or Remove, and Show in Source);
-  Delete removes it as it removes a row.
 - `@nx-lang/viewer` exports `keyOfChange` and `spanOfChanges`, which find the property or element a
   change to the text touched; the playground's Undo and Redo select it in Visual, scrolled into view,
   as the fiddle's do.
-- `<nx-viewer>`: a value's steppers and chevron show for the selected property, not under the
-  pointer, and a click on a value, or Tab, selects its property as its editor opens; a row's `⋯` sits
-  just past its value and those tools.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,

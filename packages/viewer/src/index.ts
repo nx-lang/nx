@@ -500,6 +500,11 @@ export class NxViewerElement extends ElementBase {
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
     this.#closedOnPress = undefined;
+    // Stepper clicks made with the field closed are committed by a press anywhere but the tools, as
+    // on the host's Undo, which then takes back the whole change.
+    if (session === undefined && this.#live !== undefined && !event.composedPath().includes(this.#tools)) {
+      this.#settleLive();
+    }
     // A press on the open menu's own mark leaves it to the click that follows, which closes it.
     const onMark = event
       .composedPath()
@@ -1440,9 +1445,29 @@ export class NxViewerElement extends ElementBase {
     }
     this.#selectNode(key, fire, reveal);
     this.#drawMore();
-    // A selected property shows its value's tools; steppers drawn while the pointer rested on another
-    // value were that value's.
+    this.#fitPropertyMark();
+    // A selected property shows its value's tools, and only it.
     this.#restTools();
+  }
+
+  /**
+   * Lets a selected inline property's mark take room after it only where that wraps no line; on a
+   * line that only just fits, it hangs over the gap from a point that takes no room, as a row's does.
+   */
+  #fitPropertyMark(): void {
+    const anchor = [...this.#body.querySelectorAll<HTMLElement>(".property-menu")].find(
+      (candidate) => candidate.querySelector(".row-menu.selected") !== null
+    );
+    const line = anchor?.closest<HTMLElement>(".line-element, .sheet-head, .tag-line, .sheet-value");
+    if (anchor === undefined || line === null || line === undefined) {
+      return;
+    }
+    anchor.classList.add("over-gap");
+    const height = line.getBoundingClientRect().height;
+    anchor.classList.remove("over-gap");
+    if (line.getBoundingClientRect().height > height + 1) {
+      anchor.classList.add("over-gap");
+    }
   }
 
   #selectNode(key: string | undefined, fire: boolean, reveal: boolean): void {
@@ -1769,7 +1794,7 @@ export class NxViewerElement extends ElementBase {
    * Opens the editor of the value with `key`, holding `draft` with `caret` when they are given, as
    * when a reading drawn again opens an editor the reader had open; a boolean toggles instead.
    */
-  #openEditor(key: string, draft?: string, caret?: Caret): void {
+  #openEditor(key: string, draft?: string, caret?: Caret, select = true): void {
     // Another value's change ends first; so does this value's stepping, its field opened on the value
     // the clicks left. A reading drawn again reopens its editor with a caret, and keeps its change.
     if (this.#live !== undefined && (this.#live.target.key !== key || caret === undefined)) {
@@ -1784,9 +1809,12 @@ export class NxViewerElement extends ElementBase {
       this.#cancel(this.#session, false);
     }
     // The value's property is selected as its editor opens, from a click, Tab or a chevron, so its
-    // tools and its menu stay once the editor closes; a reading drawn again keeps the selection.
+    // tools and its menu stay once the editor closes. A reading drawn again keeps the selection, as
+    // Enter on a selected unit does, and so does an element whose unset properties are listed, so
+    // the list stays.
     const property = this.#propertyOf(key);
-    if (caret === undefined && property !== undefined && property !== this.#selection) {
+    const listing = this.#moreOpen !== undefined && property !== undefined && this.#isInside(property, this.#moreOpen);
+    if (select && caret === undefined && property !== undefined && property !== this.#selection && !listing) {
       this.#select(property, true, false);
     }
     this.#closeCard();
@@ -2263,7 +2291,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Opens the editor of the editable value after or before the one with `key`, in reading order,
-   * leaving the selection as it was. A boolean, which has no editor, is passed over.
+   * selecting its property. A boolean, which has no editor, is passed over.
    */
   #openNext(key: string, direction: 1 | -1): void {
     const values: HTMLElement[] = [];
@@ -2294,7 +2322,7 @@ export class NxViewerElement extends ElementBase {
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
     const first = source ? undefined : unit !== undefined ? this.#unitValues(unit)[0] : selected?.matches(".editable-value") === true ? selected : undefined;
     if (first !== undefined) {
-      this.#openEditor(keyOf(first)!);
+      this.#openEditor(keyOf(first)!, undefined, undefined, false);
       return true;
     }
     const index = this.#index;
@@ -3217,13 +3245,17 @@ export class NxViewerElement extends ElementBase {
    * cover it, and every other mark back to just past its value.
    */
   #fitRowMark(): void {
-    for (const anchor of this.#body.querySelectorAll<HTMLElement>(".row-anchor")) {
+    for (const anchor of this.#body.querySelectorAll<HTMLElement>(".row-anchor, .property-menu")) {
       anchor.style.marginLeft = "";
     }
     if (!this.#tools.isConnected || this.#tools.classList.contains("in-line")) {
       return;
     }
-    const anchor = this.#tools.closest(".sheet-row")?.querySelector<HTMLElement>(":scope > :is(.sheet-value, .sheet-below) > .row-anchor");
+    // An inline property's mark follows the property; a row's, its value.
+    const after = this.#tools.closest(".line-property")?.nextElementSibling;
+    const anchor = after?.matches(".property-menu") === true
+      ? (after as HTMLElement)
+      : this.#tools.closest(".sheet-row")?.querySelector<HTMLElement>(":scope > :is(.sheet-value, .sheet-below) > .row-anchor");
     if (anchor === null || anchor === undefined) {
       return;
     }
@@ -3985,7 +4017,7 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  // ---- Dragging a number's name -----------------------------------------------------------
+  // ---- Pressing in the reading ------------------------------------------------------------
 
   #onPointerDown(event: PointerEvent): void {
     this.#pressedAt = { x: event.clientX, y: event.clientY };
@@ -4082,8 +4114,8 @@ export class NxViewerElement extends ElementBase {
       this.#toggleFold(toggle.dataset["foldKey"]!, event.altKey);
       return;
     }
-    // The press that ended a drag of a number's name, or a click inside an open field, is not a
-    // choice of node.
+    // The press that ended an item's drag, or a click inside an open field, is not a choice of
+    // node.
     if (this.#ignoreClick) {
       this.#ignoreClick = false;
       return;
@@ -4130,8 +4162,9 @@ export class NxViewerElement extends ElementBase {
     const textSelection = root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
       // A hand that trembles while it clicks selects a letter or two: still a click.
+      // A double- or triple-click's word or line is a selection the reader made on purpose.
       const pressed = this.#pressedAt;
-      if (pressed === undefined || Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= TEXT_SELECT_SLOP) {
+      if (event.detail > 1 || pressed === undefined || Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= TEXT_SELECT_SLOP) {
         return;
       }
       textSelection.removeAllRanges();
@@ -4178,6 +4211,10 @@ export class NxViewerElement extends ElementBase {
     const target = event.target as Element;
     if (!this.#body.contains(target)) {
       return;
+    }
+    // The host's undo and redo, pressed in the reading, see stepper clicks still settling committed.
+    if (this.#session === undefined && this.#live !== undefined && (event.ctrlKey || event.metaKey) && /^[zy]$/i.test(event.key)) {
+      this.#settleLive();
     }
     const more = target.closest?.(".more, .more-block") as HTMLElement | null | undefined;
     if (more !== null && more !== undefined) {

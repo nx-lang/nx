@@ -82,7 +82,9 @@ export function rangeOfKey(tree: SourceTree, source: string, key: string): { sta
  * declarations.
  */
 export function keyOfChange(tree: SourceTree, source: string, start: number, end: number = start): string | undefined {
-  const key = keyAtRange(tree, source, start, end);
+  // Where text was taken out, the place is a point between what is left: what holds it is what lost
+  // the text, never the node that ends just before it, as a cursor there would be in.
+  const key = start === end ? keyAround(tree, source, start) : keyAtRange(tree, source, start, end);
   let at = key === undefined ? undefined : tree.nodes.findIndex((node) => node.key === key);
   while (at !== undefined && at >= 0) {
     const node = tree.nodes[at]!;
@@ -92,6 +94,19 @@ export function keyOfChange(tree: SourceTree, source: string, start: number, end
     at = node.parent;
   }
   return key;
+}
+
+/** The key of the smallest node of `tree` that holds the UTF-16 offset `at` strictly inside it. */
+function keyAround(tree: SourceTree, source: string, at: number): string | undefined {
+  let found: { key: string; size: number } | undefined;
+  for (const node of tree.nodes) {
+    const start = offsetAt(source, node.range.start);
+    const end = offsetAt(source, node.range.end);
+    if (start < at && at < end && (found === undefined || end - start <= found.size)) {
+      found = { key: node.key, size: end - start };
+    }
+  }
+  return found?.key;
 }
 
 /**

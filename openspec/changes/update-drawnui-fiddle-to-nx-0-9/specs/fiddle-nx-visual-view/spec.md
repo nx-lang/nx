@@ -43,8 +43,9 @@ Showing either view SHALL NOT run, re-run or stop the snippet.
 #### Scenario: Undo selects what it changed
 - **WHEN** the visitor steps `Spacing` in Visual, scrolls down and selects something else, and presses
   Undo
-- **THEN** the reading SHALL select the `Spacing` row and scroll it into view, or, when the step took
-  a property out or put one back, the element holding it
+- **THEN** the reading SHALL select the `Spacing` row and scroll it into view; when a step takes a
+  property out, as an Undo of one added, it SHALL select the element that held it, and when it puts
+  one back, that property
 
 #### Scenario: A read-only share
 - **WHEN** a visitor opens someone else's share, read-only, and clicks a value in Visual

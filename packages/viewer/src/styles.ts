@@ -600,6 +600,8 @@ export const styles = `
 .source .property-menu { display: none; }
 .source .property-menu:has(> .row-menu.selected) { display: inline-block; position: relative; width: 2.5ch; height: 1lh; vertical-align: top; }
 .source .property-menu > .row-menu { left: 0; margin-left: 0.25ch; }
+/* Where its room would wrap a line that only just fits, it hangs over the gap instead. */
+.source .property-menu.over-gap:has(> .row-menu.selected) { width: 0; }
 /* A line's own mark gives way to the one of a property or an item selected on it, at the same place. */
 .source :has(> .item-menu > .row-menu.shared.selected) > .item-menu > .row-menu:not(.shared) { visibility: hidden; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
