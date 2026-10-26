@@ -133,8 +133,11 @@ const MORE_FILTER_PAST = 12;
 /** How far the pointer moves sideways, in pixels, for a number's name dragged to step it once. */
 const SCRUB_STEP = 2;
 
-/** How far the pointer moves before a press on a number's name becomes a drag, in pixels. */
-const SCRUB_SLOP = 3;
+/**
+ * How far the pointer moves before a press on a number's name becomes a drag, in pixels: as a
+ * stepper's, since a name is clicked to select its property, and a hand rarely keeps still.
+ */
+const SCRUB_SLOP = 6;
 
 /**
  * How far the pointer moves before a press on a stepper becomes a drag, in pixels: more than a name's,
@@ -142,6 +145,9 @@ const SCRUB_SLOP = 3;
  * target.
  */
 const STEPPER_SLOP = 6;
+
+/** How far the pointer moves while pressed, in pixels, before the text it selects is a selection of text, not a click. */
+const TEXT_SELECT_SLOP = 6;
 
 /** How far the pointer moves up or down, in pixels, for a stepper dragged to step its number once. */
 const STEPPER_STEP = 4;
@@ -443,6 +449,8 @@ export class NxViewerElement extends ElementBase {
   #session: EditSession | undefined;
   /** The editor to open again once the reading is drawn with a tree. */
   #reopen: Reopen | undefined;
+  /** Where the last press in the reading fell, to tell a click from a drag that selects text. */
+  #pressedAt: { x: number; y: number } | undefined;
   /**
    * A color popover kept open through a reading drawn again, its fields kept in the page: the
    * browser closes its picker when the input leaves the page, as one going live would draw anew.
@@ -4015,6 +4023,7 @@ export class NxViewerElement extends ElementBase {
   // ---- Dragging a number's name -----------------------------------------------------------
 
   #onPointerDown(event: PointerEvent): void {
+    this.#pressedAt = { x: event.clientX, y: event.clientY };
     if (!this.#editable || event.button !== 0) {
       return;
     }
@@ -4230,7 +4239,12 @@ export class NxViewerElement extends ElementBase {
     const root = this.shadowRoot as (ShadowRoot & { getSelection?(): Selection | null }) | null;
     const textSelection = root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
     if (textSelection !== null && textSelection !== undefined && !textSelection.isCollapsed) {
-      return;
+      // A hand that trembles while it clicks selects a letter or two: still a click.
+      const pressed = this.#pressedAt;
+      if (pressed === undefined || Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= TEXT_SELECT_SLOP) {
+        return;
+      }
+      textSelection.removeAllRanges();
     }
     // A click on an editable value edits it, as a form's field does: a field opens with the caret
     // where the click fell, a boolean toggles, and a case or a color opens its popover, as a click on

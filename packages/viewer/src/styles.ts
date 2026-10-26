@@ -597,6 +597,8 @@ export const styles = `
 .source .row-menu.shared.selected { visibility: visible; }
 /* While an item that shares the row's line is selected, the row's end shows the item's mark alone. */
 .source .sheet-row:has(> .row-menu.shared.selected) > .row-menu:not(.shared) { visibility: hidden; }
+/* A line's own mark gives way to the one of a property or an item selected on it, at the same place. */
+.source :has(> .item-menu > .row-menu.shared.selected) > .item-menu > .row-menu:not(.shared) { visibility: hidden; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
 /* An item's menu hangs past the end of its first line from a point that takes no room. */
 .source .item-menu { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }

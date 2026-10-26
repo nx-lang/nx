@@ -658,6 +658,19 @@ describe("editing in place", () => {
     assert.notEqual(element.selection, "latte.value.shots", "the drag's click does not select");
   });
 
+  it("selects the property when a press on its name moves too little to drag", async (t) => {
+    narrow(t, 40);
+    const element = show(await fixture("editing"));
+    const { edits } = events(element);
+    const name = root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]')!;
+    name.dispatchEvent(pointer("pointerdown", 100));
+    name.dispatchEvent(pointer("pointermove", 104));
+    name.dispatchEvent(pointer("pointerup", 104));
+    name.click();
+    assert.equal(element.selection, "latte.value.shots", "a hand's tremble is still a click");
+    assert.deepEqual(edits, []);
+  });
+
   it("carries a drag on through a newer tree", async (t) => {
     narrow(t, 40);
     const fixed = await fixture("editing");
