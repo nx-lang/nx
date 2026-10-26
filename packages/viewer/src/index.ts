@@ -3246,7 +3246,7 @@ export class NxViewerElement extends ElementBase {
    */
   #fitRowMark(): void {
     for (const anchor of this.#body.querySelectorAll<HTMLElement>(".row-anchor, .property-menu")) {
-      anchor.style.marginLeft = "";
+      anchor.style.transform = "";
     }
     if (!this.#tools.isConnected || this.#tools.classList.contains("in-line")) {
       return;
@@ -3261,8 +3261,9 @@ export class NxViewerElement extends ElementBase {
     }
     const tools = this.#tools.getBoundingClientRect();
     const at = anchor.getBoundingClientRect();
+    // Moved by a transform, which takes no room, so the move wraps no line the tools left alone.
     if (tools.width > 0 && at.left < tools.right && Math.abs(at.top - tools.top) < tools.height) {
-      anchor.style.marginLeft = `${Math.ceil(tools.right - at.left)}px`;
+      anchor.style.transform = `translateX(${Math.ceil(tools.right - at.left)}px)`;
     }
   }
 
@@ -4288,7 +4289,8 @@ export class NxViewerElement extends ElementBase {
         const toggle = unit === undefined ? undefined : this.#unitValues(unit).find((value) => this.#targets.get(keyOf(value)!)?.kind === "boolean");
         if (toggle !== undefined) {
           event.preventDefault();
-          this.#openEditor(keyOf(toggle)!);
+          // As Enter on the selected unit does, Space keeps the selection.
+          this.#openEditor(keyOf(toggle)!, undefined, undefined, false);
         }
         return;
       }

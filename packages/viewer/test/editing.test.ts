@@ -1858,4 +1858,31 @@ describe("selection as editors open, and gestures the reader moves on from", () 
     assert.ok(anchor.matches(".property-menu"));
     assert.ok(anchor.classList.contains("over-gap"), "no room taken");
   });
+
+  it("moves a selected inline property's mark past tools drawn over the gap without taking room", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "base.value.size";
+    const shown = tools(element)!;
+    const line = rendered(element, "big.value");
+    // The line only just fits: tools in it, or a mark taking room, would wrap it.
+    line.getBoundingClientRect = () => {
+      const wraps = line.querySelector(".value-tools.in-line") !== null || line.querySelector(".property-menu:not(.over-gap) > .row-menu.selected") !== null;
+      const height = wraps ? 36 : 18;
+      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
+    };
+    shown.getBoundingClientRect = () => ({ x: 100, y: 0, top: 0, left: 100, right: 130, bottom: 18, width: 30, height: 18, toJSON: () => ({}) }) as DOMRect;
+    const anchor = rendered(element, "big.value.size").nextElementSibling as HTMLElement;
+    anchor.getBoundingClientRect = () => ({ x: 104, y: 0, top: 0, left: 104, right: 104, bottom: 18, width: 0, height: 18, toJSON: () => ({}) }) as DOMRect;
+    element.selection = "big.value.size";
+    assert.ok(!tools(element)!.classList.contains("in-line"), "the tools cover the gap");
+    assert.equal(anchor.style.marginLeft, "", "the mark takes no room");
+    assert.match(anchor.style.transform, /translateX\(26px\)/, "and is moved past the tools");
+  });
+
+  it("keeps the selected unit when Space toggles its boolean", async () => {
+    const element = show(await fixture("editing"));
+    element.selection = "latte.value";
+    press(body(element), " ");
+    assert.equal(element.selection, "latte.value");
+  });
 });
