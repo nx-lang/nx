@@ -61,8 +61,9 @@ All notable changes to this project will be documented in this file.
 - `@nx-lang/viewer` exports `keyOfChange` and `spanOfChanges`, which find the property or element a
   change to the text touched; the playground's Undo and Redo select it in Visual, scrolled into view,
   as the fiddle's do.
-- `<nx-viewer>`: a selected property shows its value's steppers or chevron without the pointer over
-  it, and a row's `⋯` sits just past its value and those tools.
+- `<nx-viewer>`: a value's steppers and chevron show for the selected property, not under the
+  pointer, and a click on a value, or Tab, selects its property as its editor opens; a row's `⋯` sits
+  just past its value and those tools.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,

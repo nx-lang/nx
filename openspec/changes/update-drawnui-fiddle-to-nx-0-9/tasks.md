@@ -54,6 +54,7 @@ Paths under `nx/`, `src/`, `dev/` and `docs/` are in `~/src/DrawnUi.FiddleEngine
 - [x] 8.6 Remove dragging a number's name sideways (Bret: it overloads a name that is clicked to select), leaving the steppers to drag; hang an inline property's `⋯` right after it; verify with the viewer tests and a browser check
 - [x] 8.7 Show a selected property's value tools (steppers, chevron) with the pointer elsewhere, without opening its editor; verify with an `editing.test.ts` case and a browser check in Bret's Chrome
 - [x] 8.8 Undo and Redo select, scrolled into view, the property or element they changed (`keyOfChange`, `spanOfChanges` in the viewer; the fiddle's view and the playground); keep the steppers inside the reading's visible edge; verify with `selection.test.ts`, `visual.test.ts` cases and a browser check
+- [x] 8.9 Show the value tools only for the selected property (and an open editor), never under the pointer; select a value's property when its editor opens; verify with `editing.test.ts` cases and a browser check in Bret's Chrome
 
 ## 7. Release NX v0.9.0 and repin
 

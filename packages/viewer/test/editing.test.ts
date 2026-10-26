@@ -347,7 +347,7 @@ describe("editing in place", () => {
     assert.equal(element.selection, "latte.value.label");
   });
 
-  it("opens a value on a click, with a caret and nothing selected, and selects on a click on its name", async (t) => {
+  it("opens a value on a click, with a caret and its property selected, and selects on a click on its name", async (t) => {
     narrow(t, 40);
     const selection = fakeSelection(t);
     const element = show(await fixture("editing"));
@@ -359,7 +359,7 @@ describe("editing in place", () => {
     rendered(element, "latte.value.name.value").click();
     const open = field(element);
     assert.ok(open, "a click on a value opens its field");
-    assert.equal(element.selection, undefined, "and leaves the selection as it was");
+    assert.equal(element.selection, "latte.value.name", "and selects its property");
     const range = selection.getRangeAt(0);
     assert.ok(open.contains(range.startContainer), "the caret is in the field");
     assert.equal(range.collapsed, true, "where the click fell, with nothing selected");
@@ -394,7 +394,7 @@ describe("editing in place", () => {
     press(field(element)!, "Tab");
     assert.equal(edits.length, 1, "Tab commits");
     assert.equal(root(element).querySelector<HTMLElement>(".popover")!.hidden, false, "opening the next value's editor");
-    assert.equal(element.selection, "latte.value.name", "and leaving the selection as it was");
+    assert.equal(element.selection, "latte.value.size", "and selecting its property");
     press(root(element).querySelector(".popover-filter")!, "Tab", { shiftKey: true });
     assert.ok(field(element) !== null, "Shift+Tab goes back");
     assert.equal(field(element)?.textContent, "Mocha", "to the value as the reader left it");
@@ -597,7 +597,7 @@ describe("editing in place", () => {
     element.selection = undefined;
     rendered(element, "latte.value.iced.value").click();
     assert.equal(edits.length, 3, "a click toggles it with nothing selected first");
-    assert.equal(element.selection, undefined, "and leaves the selection as it was");
+    assert.equal(element.selection, "latte.value.iced", "and selects its property");
   });
 
   it("steps a number with the arrows and keeps an entry it cannot take in the field, marked", async (t) => {
@@ -1187,46 +1187,33 @@ describe("choices", () => {
   });
 
   it("makes room in the line for an open field's tools when more of the line follows", async (t) => {
-    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     rendered(element, "card.value.count.value").click();
     assert.ok(tools(element)!.classList.contains("in-line"), "mode follows count on the card's line");
     press(field(element)!, "Escape");
-    element.selection = "big.value";
-    over(rendered(element, "big.value.size.value"));
-    assert.ok(tools(element)!.classList.contains("in-line"), "before the line's closing mark alone, even under the pointer");
+    element.selection = "big.value.size";
+    assert.ok(tools(element)!.classList.contains("in-line"), "before the line's closing mark alone");
     narrow(t, 30);
     const sheet = show(await fixture("adding"));
     rendered(sheet, "card.value.count.value").click();
     assert.ok(!tools(sheet)!.classList.contains("in-line"), "nothing follows in a sheet's row: drawn over the gap");
   });
 
-  it("waits for the pointer to rest before its tools push the rest of a line right", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+  it("shows no tools under the pointer, only for the selected property", async () => {
     const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     over(rendered(element, "big.value.size.value"));
-    assert.equal(tools(element), null, "a pointer passing over moves nothing");
-    over(rendered(element, "big.value"));
-    t.mock.timers.tick(400);
-    assert.equal(tools(element), null, "gone on before it rested");
-    over(rendered(element, "big.value.size.value"));
-    t.mock.timers.tick(400);
-    assert.ok(tools(element)!.classList.contains("in-line"), "resting, they take room in the line");
-    over(rendered(element, "big.value"));
-    element.selection = "big.value";
-    over(rendered(element, "big.value.size.value"));
-    assert.ok(tools(element)!.classList.contains("in-line"), "at once on the selected element");
+    assert.equal(tools(element), null, "a pointer over a value moves nothing");
+    element.selection = "big.value.size";
+    assert.ok(tools(element)!.classList.contains("in-line"), "selected, they take room in the line");
+    over(rendered(element, "base.value.size.value"));
+    assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "and stay with the selection");
   });
 
   it("shows a case's chevron as the tools, taking room before />, which opens and closes its popover", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
-    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     const size = rendered(element, "latte.value.size.value");
-    over(size);
-    assert.equal(tools(element), null, "unselected, it waits for the pointer to rest");
-    t.mock.timers.tick(400);
+    element.selection = "latte.value.size";
     const shown = tools(element)!;
     assert.ok(shown.classList.contains("with-choices") && !shown.classList.contains("with-steppers"));
     assert.ok(shown.classList.contains("in-line"), "room before the closing />");
@@ -1236,16 +1223,13 @@ describe("choices", () => {
     assert.ok(tools(element)!.classList.contains("open"));
     pressTool(tools(element)!.querySelector(".choices-toggle")!);
     assert.ok(popover(element).hidden, "and closes them");
-    assert.ok(tools(element)?.classList.contains("in-line"), "staying under the pointer, its room kept");
+    assert.ok(tools(element)?.classList.contains("in-line"), "staying with the selection, its room kept");
     pressTool(tools(element)!.querySelector(".choices-toggle")!);
     assert.ok(!popover(element).hidden, "so the next press opens them again");
-    assert.equal(element.selection, undefined, "selecting nothing");
   });
 
   it("covers the gap rather than wrap a line that only just fits", async () => {
-    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
-    element.selection = "big.value";
     const line = rendered(element, "big.value");
     assert.ok(line.matches(".line-element"));
     // The line wraps to two once the tools take room in it.
@@ -1253,21 +1237,22 @@ describe("choices", () => {
       const height = line.querySelector(".value-tools.in-line") === null ? 18 : 36;
       return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
     };
-    over(rendered(element, "big.value.size.value"));
+    element.selection = "big.value.size";
     const shown = tools(element)!;
     assert.ok(shown.classList.contains("with-steppers"));
     assert.ok(!shown.classList.contains("in-line"), "drawn over the gap");
   });
 
-  it("shows an unset property's tools at once, under a one-line element selected", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+  it("shows an unset property's tools once its field opens, under a one-line element selected", async () => {
     const element = show(await fixture("adding"));
     element.selection = "plain.value";
     moreToggle(element)!.click();
     // size reads its quiet default past it, which the tools move aside.
     const size = rendered(element, "plain.value.size.value");
     size.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    assert.ok(tools(element)?.classList.contains("in-line"), "no wait: the row is the selection's");
+    assert.equal(tools(element), null, "not under the pointer");
+    size.click();
+    assert.ok(tools(element)?.classList.contains("with-steppers"), "with its field");
   });
 
   it("opens from its chevron, and picks with the pointer", async () => {
@@ -1372,17 +1357,15 @@ describe("choices", () => {
 
 describe("steppers", () => {
   it("steps a number on a click, and ten steps on Shift+click, live at once and committed once the reader pauses", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer: they show at once, selected
-    // or not.
+    // As a sheet, where the steppers cover nothing past the value.
     narrow(t, 30);
     const element = show(await fixture("adding"));
     const { edits, lives } = events(element);
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const value = rendered(element, "card.value.padding.value");
-    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+    element.selection = "card.value.padding";
     const shown = tools(element)!;
-    assert.ok(shown !== null, "on a row that is not selected too");
-    assert.equal(element.selection, undefined);
+    assert.ok(shown !== null, "on the selected row");
     assert.ok(shown.classList.contains("with-steppers"));
     assert.ok(!shown.classList.contains("with-choices"));
     assert.equal(shown.previousElementSibling, value, "just past the value");
@@ -1401,9 +1384,8 @@ describe("steppers", () => {
     assert.deepEqual(edits, []);
     t.mock.timers.tick(1);
     assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }]);
-    root(element).querySelector(".toolbar")!.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
-    assert.equal(tools(element), null, "gone once the pointer leaves");
+    element.selection = "card.value";
+    assert.equal(tools(element), null, "gone once another unit is selected");
   });
 
   it("takes a press that wanders a few pixels as a click, not a drag", async (t) => {
@@ -1477,8 +1459,7 @@ describe("steppers", () => {
     assert.equal(tools(element), null, "and gone once it is not selected");
   });
 
-  it("shows a selected property's tools with no pointer over it, inline too, and follows the pointer to another value and back", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+  it("shows a selected property's tools with no pointer over it, inline too, and keeps them as the pointer moves", async () => {
     const element = show(await fixture("adding"));
     const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     assert.equal(tools(element), null);
@@ -1488,31 +1469,24 @@ describe("steppers", () => {
     assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "the steppers, as soon as it is selected");
     assert.ok(field(element) === null, "and no editor opens");
     over(rendered(element, "big.value.size.value"));
-    t.mock.timers.tick(300);
-    assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "the pointer's value, once it rests");
     body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
-    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "back where the selection is");
-    rendered(element, "base.value.size.value").click();
-    assert.ok(field(element), "a click on the value still opens it");
+    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "the pointer moves nothing");
+    rendered(element, "big.value.size.value").click();
+    assert.equal(element.selection, "big.value.size", "a click on another value selects its property");
     press(field(element)!, "Escape");
-    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "and closing it leaves the tools");
+    assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "and closing its field leaves its tools");
   });
 
   it("shows a let's steppers, and takes room for them where more of the line follows", async () => {
-    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     const element = show(await fixture("adding"));
     element.selection = "pad";
-    over(rendered(element, "pad.value"));
     const shown = tools(element)!;
-    assert.ok(shown.classList.contains("with-steppers"));
-    over(rendered(element, "pad.value").parentElement!);
-    assert.equal(tools(element), shown, "over the let's line");
+    assert.ok(shown.classList.contains("with-steppers"), "a let selected shows its value's");
 
     const edges = show(await fixture("editingEdges"));
-    edges.selection = "box";
-    over(rendered(edges, "box.value.depth.value"));
+    edges.selection = "box.value.depth";
     assert.ok(tools(edges)!.classList.contains("in-line"), "in the line, before the rest of a one-line element's line");
-    over(rendered(edges, "box.value.items.value[0]"));
+    edges.selection = "box.value.items.value[0]";
     assert.ok(tools(edges)!.classList.contains("in-line"), "and before the next item");
   });
 

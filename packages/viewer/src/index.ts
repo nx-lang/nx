@@ -180,9 +180,6 @@ const UNITS = ".sheet-head, .sheet-row:not(.more), .line-element, .tag-line, .bl
 /** The units as they are drawn selected: a group stands for itself, not through its header. */
 const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line, .line-property";
 
-/** How long the pointer rests on a value before its tools push the rest of its line right. */
-const TOOLS_REST_MS = 300;
-
 /** How far the pointer moves, in pixels, before a press on an item's handle becomes a drag. */
 const DRAG_SLOP = 4;
 
@@ -394,11 +391,6 @@ export class NxViewerElement extends ElementBase {
   #selection: string | undefined;
   /** Each key's rendering. */
   #rendered = new Map<string, HTMLElement>();
-  /**
-   * The value whose steppers showed under the pointer when the reading was drawn again, as after a
-   * click on one commits: they show again on the new reading, so the next click finds them.
-   */
-  #rehover: string | undefined;
   /** The unit under the pointer, highlighted as a row. */
   #hoveredUnit: HTMLElement | undefined;
   /** The body's width the reading was last measured at, for what fits on a line. */
@@ -481,12 +473,6 @@ export class NxViewerElement extends ElementBase {
   readonly #popover: HTMLDivElement;
   /** A number's steppers and a field's choices chevron, drawn past the value they act on. */
   readonly #tools: HTMLSpanElement;
-  /** The value the steppers were drawn past while the pointer rests on it, with no editor open. */
-  #toolsHover: string | undefined;
-  /** Waits for the pointer to rest on a value whose tools would push the rest of its line right. */
-  #toolsTimer: ReturnType<typeof setTimeout> | undefined;
-  /** The value `#toolsTimer` waits on. */
-  #toolsWaiting: string | undefined;
   /** The menu of a row's actions. */
   readonly #menu: HTMLDivElement;
   /** Whether the open editor holds an entry that differs from its value, as `nx-draft` last said. */
@@ -685,12 +671,10 @@ export class NxViewerElement extends ElementBase {
       }
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
       this.#point(this.#hoverTargetOf(event.target));
-      this.#hoverTools(event.target as Element);
     });
     this.#body.addEventListener("pointerleave", () => {
       this.#setHoveredUnit(undefined);
       this.#point(undefined);
-      this.#hoverTools(null);
     });
     // The highlights follow the layout: a wider pane moves the right edge they run to.
     if (typeof ResizeObserver !== "undefined") {
@@ -1016,11 +1000,6 @@ export class NxViewerElement extends ElementBase {
     // A press on a stepper goes on with the next tree, on the same number, through a cleared one too.
     const stepping = this.#stepping ?? this.#restep;
     this.#restep = undefined;
-    // So do steppers shown under the pointer, as after a click on one commits, so the next click
-    // finds them rather than what lies under them.
-    if (this.#session === undefined && stepping === undefined && this.#tools.isConnected && this.#toolsHover !== undefined) {
-      this.#rehover = this.#toolsHover;
-    }
     this.#dropSession();
     this.#pointedKey = undefined;
     this.#rendered.clear();
@@ -1127,18 +1106,9 @@ export class NxViewerElement extends ElementBase {
     }
     if (stepping !== undefined) {
       this.#resumeStepping(stepping);
-    } else if (this.#rehover !== undefined && this.#session === undefined) {
-      const hovered = this.#rehover;
-      const span = this.#rendered.get(hovered);
-      const target = this.#targets.get(hovered);
-      if (span !== undefined && target !== undefined) {
-        this.#showTools(span, target);
-        this.#toolsHover = hovered;
-      }
     } else if (!this.#tools.isConnected) {
       this.#restTools();
     }
-    this.#rehover = undefined;
     // Fonts that arrive later change where the rows fall, and what fits on a line.
     const remeasure = this.ownerDocument.fonts !== undefined && this.ownerDocument.fonts.status !== "loaded";
     void this.ownerDocument.fonts?.ready.then(() => (remeasure ? this.#remeasure() : this.#paintHighlights()));
@@ -1812,6 +1782,12 @@ export class NxViewerElement extends ElementBase {
     }
     if (this.#session !== undefined) {
       this.#cancel(this.#session, false);
+    }
+    // The value's property is selected as its editor opens, from a click, Tab or a chevron, so its
+    // tools and its menu stay once the editor closes; a reading drawn again keeps the selection.
+    const property = this.#propertyOf(key);
+    if (caret === undefined && property !== undefined && property !== this.#selection) {
+      this.#select(property, true, false);
     }
     this.#closeCard();
     this.#closeMenu(false);
@@ -3171,7 +3147,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Draws the tools past the value `span` draws for `target`: a number's steppers, and a chevron
-   * past a case, past a value with choices under the pointer, or past an open field with choices.
+   * past a case, past a selected property's value with choices, or past an open field with choices.
    * Nothing for a value with none of these.
    */
   #showTools(span: HTMLElement, target: EditTarget): void {
@@ -3179,7 +3155,7 @@ export class NxViewerElement extends ElementBase {
     const steppers = target.kind === "number";
     const isCase = target.kind === "case";
     // The chevron says a list is there: past a case, past an open field with choices, and past a
-    // value with choices under the pointer.
+    // selected property's value with choices.
     const chevron =
       isCase || (session === undefined ? this.#hasChoices(target) : session.field !== undefined && (session.choices?.length ?? 0) > 0);
     if (!steppers && !chevron) {
@@ -3207,7 +3183,6 @@ export class NxViewerElement extends ElementBase {
       inLine = false;
       this.#tools.classList.remove("in-line");
     }
-    this.#toolsHover = undefined;
     this.#fitRowMark();
     this.#edgeTools();
     if (inLine || wasInLine) {
@@ -3259,32 +3234,53 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /** The key of the property whose value has `key`, when it is one an element writes. */
+  #propertyOf(key: string): string | undefined {
+    const target = this.#targets.get(key);
+    const index = this.#index;
+    if (target === undefined || target.adding === true || index === undefined) {
+      return undefined;
+    }
+    const parent = index.tree.nodes[target.at]!.parent;
+    return parent !== undefined && index.tree.nodes[parent]!.role === "attribute" ? index.tree.nodes[parent]!.key : undefined;
+  }
+
   /** Whether `target`'s value has tools to show: a number's steppers, a case's or its choices' chevron. */
   #offersTools(target: EditTarget): boolean {
     return target.kind === "number" || target.kind === "case" || this.#hasChoices(target);
   }
 
-  /** The value of the selected property, as it is drawn, when it has tools to show. */
+  /**
+   * The selected value, or the value of the selected property or declaration, as it is drawn, when
+   * it has tools to show.
+   */
   #selectedToolsValue(): { span: HTMLElement; target: EditTarget } | undefined {
     const index = this.#index;
     const at = this.#selection === undefined ? undefined : index?.byKey.get(this.#selection);
-    if (!this.#editable || index === undefined || at === undefined || index.tree.nodes[at]!.role !== "attribute") {
+    if (!this.#editable || index === undefined || at === undefined) {
       return undefined;
     }
-    for (const child of index.children[at] ?? []) {
-      const key = index.tree.nodes[child]!.key;
+    const found = (key: string): { span: HTMLElement; target: EditTarget } | undefined => {
       const target = this.#targets.get(key);
       const span = this.#rendered.get(key);
-      if (target !== undefined && span !== undefined && span.isConnected && this.#offersTools(target)) {
-        return { span, target };
+      return target !== undefined && span !== undefined && span.isConnected && this.#offersTools(target) ? { span, target } : undefined;
+    };
+    const own = found(index.tree.nodes[at]!.key);
+    if (own !== undefined || index.tree.nodes[at]!.role === "element") {
+      return own;
+    }
+    for (const child of index.children[at] ?? []) {
+      const value = found(index.tree.nodes[child]!.key);
+      if (value !== undefined) {
+        return value;
       }
     }
     return undefined;
   }
 
   /**
-   * Shows the tools where they rest when the pointer is on no value: past the selected property's
-   * value, or nowhere. An editor open or a stepper pressed keeps the tools it has.
+   * Shows the tools where they rest with no editor open: past the selected property's value, or
+   * nowhere. An editor open or a stepper pressed keeps the tools it has.
    */
   #restTools(): void {
     if (this.#session !== undefined || this.#stepping !== undefined) {
@@ -3298,10 +3294,8 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     if (this.#tools.isConnected && this.#tools.dataset["toolsFor"] === selected.target.key) {
-      this.#toolsHover = undefined;
       return;
     }
-    this.#stopToolsWait();
     this.#showTools(selected.span, selected.target);
   }
 
@@ -3334,7 +3328,6 @@ export class NxViewerElement extends ElementBase {
   }
 
   #hideTools(): void {
-    this.#stopToolsWait();
     const wasInLine = this.#tools.isConnected && this.#tools.classList.contains("in-line");
     this.#tools.remove();
     this.#tools.classList.remove("open", "in-line");
@@ -3342,90 +3335,7 @@ export class NxViewerElement extends ElementBase {
       queueMicrotask(() => this.#paintHighlights());
     }
     delete this.#tools.dataset["toolsFor"];
-    this.#toolsHover = undefined;
     this.#fitRowMark();
-  }
-
-  /**
-   * Shows a number's steppers, or a value's choices chevron, while the pointer rests on the value,
-   * with no editor open, and hides them once it leaves for anything but them.
-   */
-  #hoverTools(element: Element | null): void {
-    if (!this.#editable || this.#session !== undefined || this.#stepping !== undefined) {
-      this.#stopToolsWait();
-      return;
-    }
-    if (element !== null && this.#tools.contains(element)) {
-      return;
-    }
-    // On the way from the value to the tools, the pointer crosses the space around it, which keeps
-    // them; the gap past the value is the tools' own.
-    const shown = this.#toolsHover === undefined || !this.#tools.isConnected ? undefined : this.#rendered.get(this.#toolsHover);
-    if (shown !== undefined && element !== null && this.#onTheWay(shown, element)) {
-      return;
-    }
-    const value = element?.closest?.(".editable-value:is(.edit-number, .edit-text, .edit-case)") as HTMLElement | null | undefined;
-    const key = value === null || value === undefined ? undefined : keyOf(value);
-    const target = key === undefined ? undefined : this.#targets.get(key);
-    // Any value the pointer rests on, selected or not, as a case's chevron shows.
-    const offered = target !== undefined && this.#offersTools(target);
-    if (value === null || value === undefined || target === undefined || !offered || this.#rendered.get(key!) !== value) {
-      this.#stopToolsWait();
-      this.#restTools();
-      return;
-    }
-    if ((this.#toolsHover === key && this.#tools.isConnected) || this.#toolsWaiting === key) {
-      return;
-    }
-    // The selected property's tools are already there.
-    if (this.#tools.isConnected && this.#tools.dataset["toolsFor"] === key) {
-      this.#stopToolsWait();
-      this.#toolsHover = key;
-      return;
-    }
-    this.#stopToolsWait();
-    // Where the tools take room in the line, they wait for the pointer to rest, so a line does not
-    // jump as the pointer passes over it; in the selected row, and where they are drawn over the gap
-    // past the value, they show at once.
-    const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
-    // The unset properties' rows are the selected element's, though drawn after a one-line element.
-    const onSelected =
-      (selected?.contains(value) === true &&
-        (this.#unitOf(value) === selected || selected.matches(".line-property") || !selected.matches(DRAWN_UNITS))) ||
-      this.#moreBlock?.contains(value) === true;
-    if (!onSelected && this.#followedOnItsLine(value)) {
-      this.#restTools();
-      this.#toolsWaiting = key;
-      this.#toolsTimer = setTimeout(() => {
-        this.#toolsTimer = undefined;
-        this.#toolsWaiting = undefined;
-        if (this.#session === undefined && this.#stepping === undefined && this.#rendered.get(key!) === value && value.isConnected) {
-          this.#showTools(value, target);
-          this.#toolsHover = key;
-        }
-      }, TOOLS_REST_MS);
-      return;
-    }
-    this.#showTools(value, target);
-    this.#toolsHover = key;
-  }
-
-  #stopToolsWait(): void {
-    clearTimeout(this.#toolsTimer);
-    this.#toolsTimer = undefined;
-    this.#toolsWaiting = undefined;
-  }
-
-  /**
-   * Whether `element` lies between the value `shown` and its tools: the value, or the row or line
-   * that holds them, though not another value in it.
-   */
-  #onTheWay(shown: HTMLElement, element: Element): boolean {
-    return (
-      shown.contains(element) ||
-      element === shown.parentElement ||
-      element === shown.closest(".line-property, .sheet-row")
-    );
   }
 
   #onToolsPointerDown(event: PointerEvent): void {
@@ -3448,7 +3358,6 @@ export class NxViewerElement extends ElementBase {
           const span = this.#rendered.get(key!);
           if (span !== undefined) {
             this.#showTools(span, target);
-            this.#toolsHover = key;
           }
         } else {
           this.#openEditor(key!);
@@ -4228,9 +4137,10 @@ export class NxViewerElement extends ElementBase {
       textSelection.removeAllRanges();
     }
     // A click on an editable value edits it, as a form's field does: a field opens with the caret
-    // where the click fell, a boolean toggles, and a case or a color opens its popover, as a click on
-    // its tools does: the selection stays as it was, so nothing else moves. A click anywhere else in
-    // a unit, as on a property's name, selects the unit.
+    // where the click fell, a boolean toggles, and a case or a color opens its popover. Its property
+    // is selected too, as any editor opened selects its property, so its tools and its menu stay
+    // once the editor closes. A click anywhere else
+    // in a unit, as on a property's name, selects the unit.
     const value = this.#editable ? (target.closest?.(".editable-value") as HTMLElement | null | undefined) : undefined;
     if (value !== null && value !== undefined && this.#body.contains(value)) {
       const key = keyOf(value)!;

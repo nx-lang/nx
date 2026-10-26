@@ -21,17 +21,17 @@ The element SHALL find a value's type through its element's declaration and the 
 the tree's declaration table. An editor SHALL take the value's own place in the reading, and a popover
 SHALL open over the reading, so that opening an editor moves nothing else. A popover SHALL be placed
 by its value before anything in it is brought into view, and SHALL scroll only its own list, never the
-reading. A click on an editable value SHALL edit it and SHALL leave the selection as it was: a field SHALL open with a
+reading. A click on an editable value SHALL edit it and SHALL select its property: a field SHALL open with a
 collapsed caret where the click fell, a click on a check or cross SHALL toggle the boolean, and a
 case or a color SHALL open its popover; a click anywhere else in a unit, as on a property's name,
 SHALL select the unit and open nothing. The second click of a double-click SHALL NOT toggle a boolean
 again, and a click on a value whose popover is open SHALL close it, as a dropdown's does. Enter or F2 with a unit selected SHALL open the editor of its value, or of its first value
 when it holds several, with the field's text selected; Space SHALL toggle a boolean. Under the
 pointer, an editable value SHALL show a faint mark and a text cursor, or a hand for one that toggles
-or opens a popover, and a case SHALL show a chevron after it. An open field SHALL read as an input,
+or opens a popover. An open field SHALL read as an input,
 with a ring of its own apart from the selection's color. Enter or leaving the field SHALL commit, Escape
 SHALL cancel and keep the selection, and Tab and Shift+Tab SHALL commit and open the next and previous
-editable value, the selection again left as it was. A text field SHALL grow with its text and wrap within the reading's width. A number
+editable value, selecting its property. A text field SHALL grow with its text and wrap within the reading's width. A number
 SHALL be committed once when a drag ends, while the drag's values go live as the next requirement
 says, and an entry an editor cannot take, such as a number field
 holding `12px`, SHALL stay in the field marked as invalid and SHALL NOT be committed; once typing
@@ -114,17 +114,14 @@ default does, or, on a dimmed row, add nothing. The field SHALL stay typeable: t
 and never restrict, and any entry the field takes SHALL commit.
 
 A number SHALL show steppers, an up and a down button drawn over the space just past the value so
-that nothing moves, while its field is open and while the pointer is over its value, selected or
-not, when the host has set `editable`. On a one-line element, or a group's header, where more of the
+that nothing moves, while its field is open and while its property, or the value itself, is
+selected, when the host has set `editable`; the pointer over a value SHALL show no tools. On a one-line element, or a group's header, where more of the
 line follows the value, its closing `/>` included, the steppers and the chevron SHALL NOT cover it:
 they SHALL take room in the line, moving what follows along, as a field does when it grows, and
 SHALL give it back when they go. So SHALL an earlier item of a braced list, and an unset property's
 value, whose quiet `default` moves aside. Where taking room would wrap a line that only just fits,
-the tools SHALL cover the gap instead, so nothing below moves. Outside the selection, where they take
-room, they SHALL wait until the pointer has rested on the value for a moment, so a line does not jump
-as the pointer passes over it; an unset property's row counts as its element's selection. A selected
-property, as a row or on a line, SHALL show its value's tools with the pointer on no other value,
-without opening its editor, and they SHALL come back to it when the pointer leaves another value. A click SHALL step the number once by `step`, or by one, and
+the tools SHALL cover the gap instead, so nothing below moves. A selected property, as a row or on
+a line, SHALL show its value's tools without opening its editor, wherever the pointer is. A click SHALL step the number once by `step`, or by one, and
 Shift+click by ten steps, within `min` and `max`: into the field while it is open, else applied at once as a live edit and
 committed once the reader pauses, so a run of clicks is one commit. Pressing a stepper and dragging
 up or down SHALL change the number by a step for every few pixels and show it in place, each step
@@ -153,8 +150,8 @@ SHALL still fire `nx-open`.
 - **THEN** the element SHALL fire `nx-edit` setting the number `17`
 
 #### Scenario: A stepper
-- **WHEN** the reader points at `padding=8`, selected or not, and clicks the up stepper past its
-  value, and then Shift-clicks it
+- **WHEN** the reader selects `padding=8` and clicks the up stepper past its value, and then
+  Shift-clicks it
 - **THEN** the element SHALL fire `nx-edit` setting the number `9`, and then the number `19`
 
 #### Scenario: A stepper dragged
@@ -165,21 +162,20 @@ SHALL still fire `nx-open`.
 
 #### Scenario: Room on a line
 - **WHEN** the reader selects `<Banner title="Fresh" titleSize=20 align=start badge="New" />`, on one
-  line, with `titleSize` and `badge` hinted with choices, and points at `titleSize`, then at `badge`
+  line, with `titleSize` and `badge` hinted with choices, and selects `titleSize`, then `badge`
 - **THEN** the steppers and chevron past `titleSize` SHALL sit in the line, before `align`, and the
   chevron past `badge` SHALL sit before the closing `/>`, covering neither
 
 #### Scenario: A case's chevron
-- **WHEN** the reader points at `size=large` in `<Drink code="SPC" size=large />`, on one line, moves
-  the pointer onto the chevron past it, and clicks it
+- **WHEN** the reader selects `size=large` in `<Drink code="SPC" size=large />`, on one line, and
+  clicks the chevron past it
 - **THEN** the chevron SHALL sit before the closing `/>`, covering nothing, SHALL stay shown, and the
   popover of `Size`'s cases SHALL open
 
 #### Scenario: Resting before making room
-- **WHEN** the reader, with nothing selected, moves the pointer across `titleSize` on that line
-  without stopping, and then rests on it
-- **THEN** nothing in the line SHALL move as the pointer passes, and once it rests the steppers and
-  chevron SHALL take room before `align`
+- **WHEN** the reader, with nothing selected, moves the pointer across `titleSize` on that line and
+  rests on it
+- **THEN** nothing in the line SHALL move and no steppers SHALL show
 
 #### Scenario: A refused choice
 - **WHEN** the reader opens a number hinted `max=10` with the choices `5` and `99`, and chooses `99`
@@ -219,7 +215,7 @@ is selected its `⋯` SHALL show right after it, taking room in the line, and De
   that attribute
 
 #### Scenario: A selected property shows its tools
-- **WHEN** the reader clicks the name of `size=16` on a line, with the pointer then leaving the reading
+- **WHEN** the reader clicks the name of `size=16` on a line
 - **THEN** the steppers SHALL show past `16`, no field SHALL open, and a click on the up stepper
   SHALL make it `17`
 
