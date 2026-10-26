@@ -333,7 +333,7 @@ backslash they stand for; a string drawn as code, between its own quotes, reads 
 On a selected row whose property has a default or is optional, Delete, or Cmd+Backspace (a Mac
 laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribute, and the element it
 was on is selected. Backspace alone does not, since a reader who meant to change the text would
-press it. A written row shows a quiet `⋯` at its end under the pointer and when selected; it opens a
+press it. A written row shows a quiet `⋯` just past its value (and past its steppers or chevron) under the pointer and when selected; it opens a
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default (with the default, quieter, as `Reset to default  8`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 A property written on a line has the same menu: a click on its name selects it, and its `⋯` shows

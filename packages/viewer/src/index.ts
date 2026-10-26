@@ -1540,7 +1540,8 @@ export class NxViewerElement extends ElementBase {
     for (const key of this.#removed) {
       this.#rendered.get(key)?.classList.add("pending");
     }
-    // Each written row has a menu of what can be done with it, opened from a quiet mark at its end.
+    // Each written row has a menu of what can be done with it, opened from a quiet mark just past its
+    // value, as a property on a line has, from a point that takes no room.
     for (const row of this.#body.querySelectorAll<HTMLElement>(".sheet-row[data-key]")) {
       const mark = this.ownerDocument.createElement("span");
       mark.className = "row-menu";
@@ -1549,7 +1550,15 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-haspopup", "menu");
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
       mark.dataset["menuKey"] = row.dataset["key"]!;
-      row.append(mark);
+      const holder = row.querySelector<HTMLElement>(":scope > .sheet-below") ?? row.querySelector<HTMLElement>(":scope > .sheet-value");
+      if (holder === null) {
+        row.append(mark);
+        continue;
+      }
+      const anchor = this.ownerDocument.createElement("span");
+      anchor.className = "row-anchor";
+      anchor.append(mark);
+      holder.append(anchor);
     }
     // A property written on a line has the same menu, right after it while it is selected, taking
     // room there, so it shows where the reader clicked.
@@ -3194,9 +3203,32 @@ export class NxViewerElement extends ElementBase {
       this.#tools.classList.remove("in-line");
     }
     this.#toolsHover = undefined;
+    this.#fitRowMark();
     if (inLine || wasInLine) {
       // The line grew or shrank, so its highlight is redrawn to fit it.
       queueMicrotask(() => this.#paintHighlights());
+    }
+  }
+
+  /**
+   * Moves a row's menu mark past the tools drawn over the gap after its value, where they would
+   * cover it, and every other mark back to just past its value.
+   */
+  #fitRowMark(): void {
+    for (const anchor of this.#body.querySelectorAll<HTMLElement>(".row-anchor")) {
+      anchor.style.marginLeft = "";
+    }
+    if (!this.#tools.isConnected || this.#tools.classList.contains("in-line")) {
+      return;
+    }
+    const anchor = this.#tools.closest(".sheet-row")?.querySelector<HTMLElement>(":scope > :is(.sheet-value, .sheet-below) > .row-anchor");
+    if (anchor === null || anchor === undefined) {
+      return;
+    }
+    const tools = this.#tools.getBoundingClientRect();
+    const at = anchor.getBoundingClientRect();
+    if (tools.width > 0 && at.left < tools.right && Math.abs(at.top - tools.top) < tools.height) {
+      anchor.style.marginLeft = `${Math.ceil(tools.right - at.left)}px`;
     }
   }
 
@@ -3266,7 +3298,7 @@ export class NxViewerElement extends ElementBase {
           if (text.trim() !== "") {
             return true;
           }
-        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools")) {
+        } else if (next.nodeType === 1 && !(next as Element).matches(".value-tools, .row-anchor, .property-menu")) {
           return true;
         }
       }
@@ -3284,6 +3316,7 @@ export class NxViewerElement extends ElementBase {
     }
     delete this.#tools.dataset["toolsFor"];
     this.#toolsHover = undefined;
+    this.#fitRowMark();
   }
 
   /**

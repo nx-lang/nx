@@ -573,8 +573,8 @@ export const styles = `
   padding-left: calc(var(--more-indent, 0) * 1ch);
   white-space: pre;
 }
-/* A written row's menu: a quiet mark just past the row's end, under the pointer and when selected,
-   so it moves nothing. */
+/* A written row's menu: a quiet mark just past its value, or past the tools drawn there, under the
+   pointer and when selected, from a point that takes no room, so it moves nothing. */
 .source .sheet-row[data-key] { position: relative; }
 .source .row-menu {
   position: absolute;
@@ -589,11 +589,13 @@ export const styles = `
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   font-weight: 400;
 }
-.source .sheet-row[data-key]:hover > .row-menu:not(.shared),
-.source .sheet-row.selected > .row-menu:not(.shared),
+.source .row-anchor { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
+.source .row-anchor > .row-menu { left: 0; }
+.source .sheet-row[data-key]:hover > :is(.sheet-value, .sheet-below) > .row-anchor > .row-menu,
+.source .sheet-row.selected > :is(.sheet-value, .sheet-below) > .row-anchor > .row-menu,
 .source .row-menu.shared.selected { visibility: visible; }
-/* While an item that shares the row's line is selected, the row's end shows the item's mark alone. */
-.source .sheet-row:has(> .row-menu.shared.selected) > .row-menu:not(.shared) { visibility: hidden; }
+/* While an item that shares the row's line is selected, the row shows the item's mark alone. */
+.source .sheet-row:has(> .row-menu.shared.selected) > :is(.sheet-value, .sheet-below) > .row-anchor > .row-menu { visibility: hidden; }
 /* An inline property's mark follows it while it is selected, taking room in the line. */
 .source .property-menu { display: none; }
 .source .property-menu:has(> .row-menu.selected) { display: inline-block; position: relative; width: 2.5ch; height: 1lh; vertical-align: top; }

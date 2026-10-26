@@ -935,7 +935,7 @@ describe("a row's menu", () => {
     const element = show(await fixture("adding"));
     const { edits, opens } = events(element);
     const menuOf = (key: string): string[] => {
-      rendered(element, key).querySelector<HTMLElement>(":scope > .row-menu")!.click();
+      rendered(element, key).querySelector<HTMLElement>(":scope > * > .row-anchor > .row-menu")!.click();
       return Array.from(root(element).querySelectorAll(".menu-item")).map(reads);
     };
     assert.ok(rendered(element, "latte.value.size").matches(".sheet-row"), "the drink reads as a group");
@@ -962,7 +962,7 @@ describe("a row's menu", () => {
   it("closes on a second press and click on its mark, and is not read as part of the row", async (t) => {
     narrow(t, 30);
     const element = show(await fixture("adding"));
-    const mark = rendered(element, "latte.value.size").querySelector<HTMLElement>(":scope > .row-menu")!;
+    const mark = rendered(element, "latte.value.size").querySelector<HTMLElement>(":scope > * > .row-anchor > .row-menu")!;
     const menu = root(element).querySelector<HTMLElement>(".menu")!;
     const pressAndClick = () => {
       mark.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));

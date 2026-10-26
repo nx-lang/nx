@@ -196,8 +196,8 @@ SHALL still fire `nx-open`.
 - **THEN** the element SHALL fire `nx-edit` setting a string holding a line break after `Ask`
 
 ### Requirement: A selected row has a menu
-When the host has set `editable`, a written row SHALL show a quiet `⋯` at its end while the pointer is
-over it and while it is selected. Opening it SHALL list Reset to default for a property with a
+When the host has set `editable`, a written row SHALL show a quiet `⋯` just past its value, or past the
+value's tools when they show, while the pointer is over it and while it is selected. Opening it SHALL list Reset to default for a property with a
 default, followed, quieter, by the default as the reading draws it when it is a short literal, Remove
 for an optional one, and Show in Source for every row; Reset and Remove SHALL fire
 `nx-edit` removing the attribute, as Delete does, and Show in Source SHALL fire `nx-open` with the
