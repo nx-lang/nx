@@ -256,10 +256,17 @@ The host asks its language service for the text edits, applies them to its own t
 joins its editor's undo history, and sets the new text and tree. Until it does, the edited value
 reads muted; a host that sets the same tree again, as after a refused edit, has it read as before.
 
+While a value is still changing, as with a stepper, the arrows, dragging a stepper, the color picker or a
+pause of 300 ms in typing, `nx-edit` fires with `live: true` on each change, for the host to show at
+once, outside its undo history. Each live value replaces the one before, and the change ends with an
+edit without `live`: the value committed (Enter, leaving the field, closing the popover, or 500 ms after
+the last stepper click on a closed field) or, when it is cancelled with Escape, the value it began from.
+A host that ignores live edits sees only the commits, as before.
+
 | Value                                              | Editor                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------- |
 | A string, `uitext` or an id                        | A field in the value's place, holding it without quotes or escapes |
-| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; dragging the property's name sideways changes it, committed once on release |
+| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; its steppers step on a click and change it as they are dragged up or down, committed once on release |
 | A boolean                                          | Toggles: a click on its mark, or Space                         |
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
@@ -278,8 +285,8 @@ Editor hints from the tree's visualizers shape the editors:
 
 In any string's field Shift+Enter breaks the line, and a string written over several lines edits too.
 
-A field with choices shows a chevron just past it, and so does the value while the pointer rests on
-it; a click on that chevron opens the field with its list. A click on the
+A field with choices shows a chevron just past it, and so does the value while its property is
+selected; a click on that chevron opens the field with its list. A click on the
 chevron, Alt+Down, or typing lists them, typing keeping those whose label or value holds what was
 typed; the current value's row is marked. While the list is closed, Up and Down step a number; while it is open, they move through it, from the current value's row,
 Enter picks the active row, and Escape closes the list before the field. Picking a choice commits its
@@ -290,9 +297,8 @@ suggestion, and any entry the field takes commits. A choice the field would refu
 field.
 
 A number shows steppers, an up and a down button drawn just past the value so nothing moves, while
-its field is open and while the pointer rests on its value, selected or not. Where they take room in
-a line, outside the selection, they wait until the pointer has rested on the value for 300 ms, so a
-line doesn't jump as the pointer passes over it. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
+its field is open and while its property is selected; the pointer over a value shows no tools, so
+nothing moves as it passes. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
 A press that moves less than six pixels is still a click. Pressing a stepper and dragging further up
 or down scrubs the number, a step every four pixels, shown in place: on release it goes into the open
 field, or is committed once. A stepper keeps the usual cursor until it is dragged. Their tooltip names
@@ -300,21 +306,21 @@ the keys that do the same.
 
 On a one-line element, or a group's header, the steppers and the chevron would cover the next
 property, so where more of the line follows the value, its closing `/>` included, they take room in
-the line, on hover and while a field is open, pushing the rest right until they go. In a sheet's
+the line while shown, pushing the rest right until they go. In a sheet's
 row, or at the end of a line, they are drawn over the gap and nothing moves, and so they are where
 taking room would wrap a line that only just fits. An unset property's row moves its quiet `default`
-aside. After a stepper click commits, they show again on the redrawn reading, so the next click steps
-again, and a case's chevron stays after it closes its popover.
+aside. They stay with the selection through a redrawn reading, so the next click steps again, and a
+case's chevron stays after it closes its popover.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
-with no parameters. A click on a value edits it, as a form's field does, and leaves the selection as
-it was, as a click on its steppers or chevron does: a field opens with the
-caret where the click fell, a boolean toggles, and a case or a color opens its popover. A case shows a
-chevron past it under the pointer, drawn and placed as a value's choices chevron is, room on a line
-included; it stays as the pointer moves onto it, and a click on it opens the popover, or closes it. A click on
+with no parameters. A click on a value edits it, as a form's field does, and selects its property,
+so its steppers, chevron and `⋯` stay once the editor closes: a field opens with the
+caret where the click fell, a boolean toggles, and a case or a color opens its popover. A selected case shows a
+chevron past it, drawn and placed as a value's choices chevron is, room on a line included; a click
+on it opens the popover, or closes it. A click on
 anything else, as a property's name, selects. Enter or F2 opens the selected unit's first value
 with its text selected. Enter or leaving the field commits, Escape cancels, and Tab and Shift+Tab
-commit and open the next or previous value, again leaving the selection as it was. An entry an editor cannot take, such as `12px` in a
+commit and open the next or previous value, selecting its property. An entry an editor cannot take, such as `12px` in a
 number field, stays in the field, marked, and once typing pauses, or at once on Enter, a note beside
 it says why. Fields take the value's own place and popovers open over the reading, so nothing else
 moves. A string's field holds its value without quotes or escapes; a string with an escape other
@@ -325,9 +331,11 @@ backslash they stand for; a string drawn as code, between its own quotes, reads 
 On a selected row whose property has a default or is optional, Delete, or Cmd+Backspace (a Mac
 laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribute, and the element it
 was on is selected. Backspace alone does not, since a reader who meant to change the text would
-press it. A written row shows a quiet `⋯` at its end under the pointer and when selected; it opens a
+press it. A written row shows a quiet `⋯` just past its value (and past its steppers or chevron) under the pointer and when selected; it opens a
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default (with the default, quieter, as `Reset to default  8`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
+A property written on a line has the same menu: a click on its name selects it, and its `⋯` shows
+right after it while it is selected; Delete removes it as it removes a row.
 
 ### Moving and deleting items
 
@@ -407,6 +415,39 @@ viewer.addEventListener(NX_OPEN_EVENT, (event) => showInEditor((event as CustomE
 ```
 
 A host applies edits in the order they fire, each against the text the one before left.
+`createEditQueue` does that for a host whose editor keeps the text, as Monaco does:
+
+```ts
+import { createEditQueue, NX_EDIT_EVENT, type NxEditDetail } from "@nx-lang/viewer";
+
+const queue = createEditQueue(
+  service, // anything with the language service's `sourceEdit`
+  uri,
+  {
+    text: () => model.getValue(),
+    // Every range is in the text as it is now; applied together, as one undo step.
+    apply: (edits) => {
+      editor.pushUndoStop();
+      editor.executeEdits("visual", edits.map(({ range, newText }) => ({ range: toMonacoRange(range), text: newText })));
+      editor.pushUndoStop();
+    },
+    // Optional: shows a live edit at once, outside the undo history. The commit takes the preview
+    // back and applies the whole change with `apply`, as one undo step.
+    preview: (edits) => model.applyEdits(edits.map(({ range, newText }) => ({ range: toMonacoRange(range), text: newText }))),
+  },
+  (text) => showTreeOf(text), // an edit changed the text: read it at once
+  () => (viewer.tree = tree), // refused, unchanged or failed: give the element its tree again
+);
+// A failed edit rejects here too, after onUnchanged has been called.
+viewer.addEventListener(NX_EDIT_EVENT, (event) => void queue((event as CustomEvent<NxEditDetail>).detail).catch(() => undefined));
+// Undo after the edits fired before it, as one pressed while a field's edit is still being asked.
+const undo = () => queue.after(() => editor.trigger("visual", "undo", null));
+```
+
+An answer for text that changed while it was asked is not applied, and a failed edit does not hold
+up the ones after it. A live edit is asked against the text before its change began, so previews
+replace each other; one superseded before its turn is skipped, and an edit of another value, or
+`after`, first records a change still open as one step. Without `preview`, live edits are ignored.
 
 ## Hover cards
 

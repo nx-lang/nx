@@ -473,7 +473,7 @@ describe("moving and deleting in the reading", () => {
     )!;
     assert.ok(mark.classList.contains("shared"));
     assert.equal(mark.parentElement!.parentElement, rendered(element, "pick.value"), "at the end of the line");
-    assert.equal(rendered(element, "pick.value.choices.value[1]").querySelector(".row-menu"), null, "not after the item");
+    assert.ok(!rendered(element, "pick.value.choices.value[1]").contains(mark), "not after the item");
     element.selection = "pick.value.choices.value[1]";
     assert.ok(mark.classList.contains("selected"));
     element.selection = "pick.value.choices.value[0]";

@@ -17,8 +17,7 @@ import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { keyAtRange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
-import { createEditQueue } from "./reading/edits.ts";
+import { createEditQueue, keyAtRange, keyOfChange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
@@ -186,7 +185,11 @@ export function App() {
       createEditQueue(
         languageService,
         MODEL_URI,
-        { text: () => editor.current?.text() ?? null, apply: (edits) => editor.current?.applyEdits(edits) },
+        {
+          text: () => editor.current?.text() ?? null,
+          apply: (edits) => editor.current?.applyEdits(edits),
+          preview: (edits) => editor.current?.previewEdits(edits),
+        },
         (text) => {
           immediateTree.current = text;
         },
@@ -218,8 +221,10 @@ export function App() {
   const visualHistory = (step: "undo" | "redo") => {
     // After any edit still being made, as a field's that pressing the button committed.
     void applyVisualEdit.after(() => {
-      editor.current?.[step]();
+      const span = editor.current?.[step]();
       immediateTree.current = editor.current?.text() ?? null;
+      // What the step changed is selected, and scrolled to, once Visual reads the text it left.
+      changeToSelect.current = span === undefined || immediateTree.current === null ? null : { text: immediateTree.current, ...span };
       // The step can take the text back to what Visual's tree already describes, as Undo does with a
       // field open, whose edit it commits and takes back at once. No newer tree comes then, so Visual
       // gets its tree again, and drops the value it shows as pending.
@@ -228,6 +233,8 @@ export function App() {
   };
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
+  // Where an undo or redo changed the text, until a tree of the text it left can say what that is.
+  const changeToSelect = useRef<{ text: string; start: number; end: number } | null>(null);
   // The selected node's start, carried into Source until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
   // The node the cursor selected on entering Visual: leaving with it still selected leaves the cursor be.
@@ -239,8 +246,22 @@ export function App() {
       cursorToPlace.current = offsetAtPosition(text, detail.range.start);
     }
     setSelection(detail.key);
+    void applyVisualEdit.after(() => undefined);
     setMode("source");
   };
+
+  useEffect(() => {
+    const change = changeToSelect.current;
+    const { tree, text } = reading;
+    if (change === null || tree === null || text === null || text !== change.text) {
+      return;
+    }
+    changeToSelect.current = null;
+    const key = keyOfChange(tree, text, change.start, change.end);
+    if (key !== undefined) {
+      setSelection(key);
+    }
+  }, [reading.tree, reading.text]);
 
   useEffect(() => {
     const offset = cursorToSelect.current;
@@ -270,6 +291,9 @@ export function App() {
       cursorToSelect.current = editor.current?.cursor() ?? null;
       selectedOnEntry.current = undefined;
     } else {
+      // A value still changing in Visual is recorded as one step before Source takes typing or an
+      // undo, which must not meet a preview outside the history.
+      void applyVisualEdit.after(() => undefined);
       const { tree, text } = reading;
       const moved = selection !== selectedOnEntry.current;
       if (moved && selection !== undefined && tree !== null && text !== null && text === source) {
@@ -453,7 +477,10 @@ export function App() {
                 // The field's change was committed, not dropped: Undo takes back its edit.
                 draftDroppedAt.current = Number.NEGATIVE_INFINITY;
                 setEditsInFlight((count) => count + 1);
-                void applyVisualEdit(detail).finally(() => setEditsInFlight((count) => count - 1));
+                void applyVisualEdit(detail)
+                  // A failure is reported through the queue's onUnchanged.
+                  .catch(() => undefined)
+                  .finally(() => setEditsInFlight((count) => count - 1));
               }}
               onDraft={onVisualDraft}
               onOpen={openInSource}

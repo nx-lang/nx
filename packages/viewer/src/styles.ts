@@ -314,7 +314,7 @@ export const styles = `
 .source .fold-declaration.folded { opacity: 0.75; }
 /* A unit of the reading (a group, a group's row, an element on one line, a block written as it is) is
    drawn selected and hovered by the highlights behind it, as a list's rows are, not by its own box. */
-.source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held).selected { background: none; }
+.source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held, .line-property).selected { background: none; }
 .source :is(.sheet, .block-line, .line-element, .tag-line) { cursor: default; }
 .body:has(> .highlights) { position: relative; isolation: isolate; }
 .highlights { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
@@ -399,9 +399,6 @@ export const styles = `
 }
 /* A boolean toggles on a second click, which would otherwise select the mark as a word. */
 .body.editable .edit-boolean { user-select: none; }
-/* A number's name drags sideways to change it. */
-.body.editable .scrub { cursor: ew-resize; user-select: none; }
-.body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 /* An edit made and not yet in the host's tree reads muted, as a stale reading does. */
 .source .pending { opacity: 0.55; }
 /* A field takes its value's own place in the reading, in its font, and grows and wraps with its
@@ -576,8 +573,8 @@ export const styles = `
   padding-left: calc(var(--more-indent, 0) * 1ch);
   white-space: pre;
 }
-/* A written row's menu: a quiet mark just past the row's end, under the pointer and when selected,
-   so it moves nothing. */
+/* A written row's menu: a quiet mark just past its value, or past the tools drawn there, under the
+   pointer and when selected, from a point that takes no room, so it moves nothing. */
 .source .sheet-row[data-key] { position: relative; }
 .source .row-menu {
   position: absolute;
@@ -592,11 +589,21 @@ export const styles = `
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   font-weight: 400;
 }
-.source .sheet-row[data-key]:hover > .row-menu:not(.shared),
-.source .sheet-row.selected > .row-menu:not(.shared),
+.source .row-anchor { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
+.source .row-anchor > .row-menu { left: 0; }
+.source .sheet-row[data-key]:hover > :is(.sheet-value, .sheet-below) > .row-anchor > .row-menu,
+.source .sheet-row.selected > :is(.sheet-value, .sheet-below) > .row-anchor > .row-menu,
 .source .row-menu.shared.selected { visibility: visible; }
-/* While an item that shares the row's line is selected, the row's end shows the item's mark alone. */
-.source .sheet-row:has(> .row-menu.shared.selected) > .row-menu:not(.shared) { visibility: hidden; }
+/* While an item that shares the row's line is selected, the row shows the item's mark alone. */
+.source .sheet-row:has(> .row-menu.shared.selected) > :is(.sheet-value, .sheet-below) > .row-anchor > .row-menu { visibility: hidden; }
+/* An inline property's mark follows it while it is selected, taking room in the line. */
+.source .property-menu { display: none; }
+.source .property-menu:has(> .row-menu.selected) { display: inline-block; position: relative; width: 2.5ch; height: 1lh; vertical-align: top; }
+.source .property-menu > .row-menu { left: 0; margin-left: 0.25ch; }
+/* Where its room would wrap a line that only just fits, it hangs over the gap instead. */
+.source .property-menu.over-gap:has(> .row-menu.selected) { width: 0; }
+/* A line's own mark gives way to the one of a property or an item selected on it, at the same place. */
+.source :has(> .item-menu > .row-menu.shared.selected) > .item-menu > .row-menu:not(.shared) { visibility: hidden; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }
 /* An item's menu hangs past the end of its first line from a point that takes no room. */
 .source .item-menu { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
@@ -792,6 +799,9 @@ export const styles = `
   overflow: hidden;
   background: var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
 }
+/* At the top or bottom edge of what the reading shows, the steppers reach inward from their line. */
+.source .value-tools.at-top .steppers { align-self: flex-start; }
+.source .value-tools.at-bottom .steppers { align-self: flex-end; }
 /* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
 .source .value-tools .stepper {
   position: relative;

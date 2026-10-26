@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import * as monaco from "monaco-editor";
 import type { TextEdit } from "@nx-lang/language-protocol";
+import { spanOfChanges } from "@nx-lang/viewer";
 // Monaco 0.56 maps `monaco-editor/<path>.js` onto `esm/vs/<path>.js` through its exports map.
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
@@ -53,10 +54,29 @@ export interface NxEditorHandle {
    * it does any edit.
    */
   applyEdits(edits: readonly TextEdit[]): void;
-  /** Undoes the last step of the editor's history, wherever it was made. */
-  undo(): void;
-  /** Redoes the step last undone. */
-  redo(): void;
+  /**
+   * Applies `edits` outside the undo history, as a preview of a value Visual is still changing; the
+   * edit that ends the change takes it back first, so the history never holds it.
+   */
+  previewEdits(edits: readonly TextEdit[]): void;
+  /**
+   * Undoes the last step of the editor's history, wherever it was made, and says where in the text
+   * it left the step changed it, in UTF-16 offsets, or nothing when there was no step.
+   */
+  undo(): { start: number; end: number } | undefined;
+  /** Redoes the step last undone, and says where it changed the text, as `undo` does. */
+  redo(): { start: number; end: number } | undefined;
+}
+
+/** Takes a step of `instance`'s history, and says where in the text it left it changed it. */
+function historyStep(instance: monaco.editor.IStandaloneCodeEditor | null, step: "undo" | "redo"): { start: number; end: number } | undefined {
+  let span: { start: number; end: number } | undefined;
+  const listening = instance?.onDidChangeModelContent((event) => {
+    span = spanOfChanges(event.changes) ?? span;
+  });
+  instance?.trigger("nx-visual", step, null);
+  listening?.dispose();
+  return span;
 }
 
 export interface NxEditorProps {
@@ -152,11 +172,23 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       );
       instance.pushUndoStop();
     },
+    previewEdits(edits) {
+      const model = editor.current?.getModel();
+      if (model === null || model === undefined || edits.length === 0) {
+        return;
+      }
+      model.applyEdits(
+        edits.map(({ range: { start, end }, newText }) => ({
+          range: new monaco.Range(start.line + 1, start.character + 1, end.line + 1, end.character + 1),
+          text: newText,
+        })),
+      );
+    },
     undo() {
-      editor.current?.trigger("nx-visual", "undo", null);
+      return historyStep(editor.current, "undo");
     },
     redo() {
-      editor.current?.trigger("nx-visual", "redo", null);
+      return historyStep(editor.current, "redo");
     },
   }));
 

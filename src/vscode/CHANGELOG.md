@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.9.0
 
 ### Editing in Visual (unstable)
 - New language query, `sourceEdit`: the text edits that set a literal or a bare union case that is
@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
   `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it.
 - `<nx-viewer>`'s new `editable` property edits values in place, on a click, with the caret where it
   falls: a field for strings, ids and one-line text, a number field that steps with the arrows and
-  with the property's name dragged sideways, toggles for booleans, a popover of a union's cases with
+  its steppers, toggles for booleans, a popover of a union's cases with
   their docs, and a hex field and color picker for a color. Delete resets a property with a default or clears an optional one. Each
   edit fires `nx-edit` with the node's key and a `sourceEdit` edit for the host to make in its
   source; a value the reading cannot edit, such as an expression, fires `nx-open`.
@@ -36,8 +36,10 @@ All notable changes to this project will be documented in this file.
   numbers edit with ranges and steppers (click, Shift+click, or drag up and down), a number's
   or a string's choices list under its field with the default's row first, unions edit as segmented
   buttons and strings over several lines as their hints say; Shift+Enter breaks a string's line.
-  A value's steppers or chevron show under the pointer, taking room on a one-line element, and a
-  click on a value opens its editor without selecting it.
+  A selected property's value shows its steppers or chevron, taking room on a one-line element, and
+  its `⋯` menu just past them; a click on a value, or Tab, opens its editor and selects its property.
+  A property written on a line is selected by a click on its name, and Delete removes it as it
+  removes a row.
 - Reordering and deleting in Visual: `sourceEdit` has a `move` edit (`{ kind: "move", to }`) for an
   element that is an item of a list (a braced sequence or element content, outside `if` and `for`),
   and `remove` takes such an item too; both keep the list's layout and take the comments directly
@@ -46,6 +48,18 @@ All notable changes to this project will be documented in this file.
   Cmd+Backspace (not the only item of a `+` list), gives it a `⋯` menu (Move up, Move down, Delete,
   Show in Source), and keeps the selection and folds on the moved items in the host's next tree.
 - `@nx-lang/sdk-wasm`'s module ABI version is now 10; the loader refuses a module of another version.
+- `@nx-lang/viewer` exports `createEditQueue`, which makes `<nx-viewer>`'s edits in a host's text in the
+  order they fire, each against the text the one before left, and runs a step such as undo after them.
+  The playground's Visual uses it, as the DrawnUI fiddle's does.
+- Live edits in Visual: while a value is still changing (a stepper, the arrows, the color
+  picker, a pause in typing), `<nx-viewer>` fires `nx-edit` with `live: true`, and the commit or, on
+  Escape, the opening value ends the change. `createEditQueue`'s document takes an optional
+  `preview`, applied outside the undo history, so the canvas follows the value and the whole change is
+  one undo step. A closed number field's stepper clicks commit 500 ms after the last, and a color
+  popover closed by a press elsewhere keeps its color. The playground previews live edits.
+- `@nx-lang/viewer` exports `keyOfChange` and `spanOfChanges`, which find the property or element a
+  change to the text touched; the playground's Undo and Redo select it in Visual, scrolled into view,
+  as the fiddle's do.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,

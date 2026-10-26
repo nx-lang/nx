@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { keyAtRange, rangeOfKey } from "../src/selection.js";
+import { keyAtRange, keyOfChange, rangeOfKey, spanOfChanges } from "../src/selection.js";
 import { treeOf } from "./fixtures.js";
 
 async function tree(source: string) {
@@ -56,5 +56,37 @@ describe("carrying a selection to and from an editor", () => {
   it("selects nothing between declarations", async () => {
     const text = "let a = 1\n\n\nlet b = 2\n";
     assert.equal(keyAtRange(await tree(text), text, 11), undefined);
+  });
+
+  it("finds what a change touched: the property whose value changed, or the element that lost one", async () => {
+    const found = await tree(source);
+    const at = source.indexOf("Hello");
+    const property = keyOfChange(found, source, at, at + 5);
+    assert.equal(found.nodes.find((candidate) => candidate.key === property)!.role, "attribute");
+    // An attribute taken out leaves its place between the element's tag and its end.
+    const removed = 'let root() = <Card  />';
+    const gone = await tree(removed);
+    const place = removed.indexOf("  />") + 1;
+    assert.equal(gone.nodes.find((candidate) => candidate.key === keyOfChange(gone, removed, place))!.role, "element");
+    // An attribute added last and taken out again leaves its place just after the one before it:
+    // the element lost it, not that attribute, on several lines or on one.
+    for (const left of ['let root() = <Card\n    title="Hi"\n    pad=8\n  />', 'let root() = <Card title="Hi" pad=8 />']) {
+      const after = await tree(left);
+      const point = left.indexOf("pad=8") + "pad=8".length;
+      assert.equal(after.nodes.find((candidate) => candidate.key === keyOfChange(after, left, point))!.role, "element", left);
+    }
+  });
+
+  it("spans the changes of one step in the text they left", () => {
+    assert.equal(spanOfChanges([]), undefined);
+    assert.deepEqual(spanOfChanges([{ rangeOffset: 10, rangeLength: 2, text: "abc" }]), { start: 10, end: 13 });
+    // Given in any order, each by the text before them all: the later one moves by the earlier's growth.
+    assert.deepEqual(
+      spanOfChanges([
+        { rangeOffset: 20, rangeLength: 1, text: "x" },
+        { rangeOffset: 5, rangeLength: 0, text: "1234" }
+      ]),
+      { start: 5, end: 25 }
+    );
   });
 });
