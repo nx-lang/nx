@@ -797,6 +797,9 @@ export const styles = `
   overflow: hidden;
   background: var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
 }
+/* At the top or bottom edge of what the reading shows, the steppers reach inward from their line. */
+.source .value-tools.at-top .steppers { align-self: flex-start; }
+.source .value-tools.at-bottom .steppers { align-self: flex-end; }
 /* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
 .source .value-tools .stepper {
   position: relative;

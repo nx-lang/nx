@@ -495,7 +495,12 @@ export class NxViewerElement extends ElementBase {
   readonly #problem: HTMLDivElement;
   #problemTimer: ReturnType<typeof setTimeout> | undefined;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
-  readonly #onDocumentScroll = (): void => this.#closeCard();
+  readonly #onDocumentScroll = (): void => {
+    this.#closeCard();
+    if (this.#tools.isConnected) {
+      this.#edgeTools();
+    }
+  };
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
       this.#closeCard();
@@ -3204,9 +3209,31 @@ export class NxViewerElement extends ElementBase {
     }
     this.#toolsHover = undefined;
     this.#fitRowMark();
+    this.#edgeTools();
     if (inLine || wasInLine) {
       // The line grew or shrank, so its highlight is redrawn to fit it.
       queueMicrotask(() => this.#paintHighlights());
+    }
+  }
+
+  /**
+   * Keeps the steppers, a little taller than their line, inside what the reading shows: at its top
+   * or bottom edge they reach from their line's edge inward rather than past the edge, where they
+   * would be cut off. Nothing scrolls.
+   */
+  #edgeTools(): void {
+    const steppers = this.#tools.querySelector<HTMLElement>(".steppers");
+    this.#tools.classList.remove("at-top", "at-bottom");
+    const line = this.#tools.getBoundingClientRect();
+    const reach = steppers === null ? 0 : (steppers.getBoundingClientRect().height - line.height) / 2;
+    if (line.height === 0 || reach <= 0) {
+      return;
+    }
+    const port = this.#scrollPort();
+    if (line.top - reach < port.top) {
+      this.#tools.classList.add("at-top");
+    } else if (line.bottom + reach > port.top + port.height) {
+      this.#tools.classList.add("at-bottom");
     }
   }
 
