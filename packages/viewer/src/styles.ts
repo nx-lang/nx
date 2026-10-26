@@ -399,9 +399,6 @@ export const styles = `
 }
 /* A boolean toggles on a second click, which would otherwise select the mark as a word. */
 .body.editable .edit-boolean { user-select: none; }
-/* A number's name drags sideways to change it. */
-.body.editable .scrub { cursor: ew-resize; user-select: none; }
-.body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 /* An edit made and not yet in the host's tree reads muted, as a stale reading does. */
 .source .pending { opacity: 0.55; }
 /* A field takes its value's own place in the reading, in its font, and grows and wraps with its
@@ -597,6 +594,10 @@ export const styles = `
 .source .row-menu.shared.selected { visibility: visible; }
 /* While an item that shares the row's line is selected, the row's end shows the item's mark alone. */
 .source .sheet-row:has(> .row-menu.shared.selected) > .row-menu:not(.shared) { visibility: hidden; }
+/* An inline property's mark follows it while it is selected, taking room in the line. */
+.source .property-menu { display: none; }
+.source .property-menu:has(> .row-menu.selected) { display: inline-block; position: relative; width: 2.5ch; height: 1lh; vertical-align: top; }
+.source .property-menu > .row-menu { left: 0; margin-left: 0.25ch; }
 /* A line's own mark gives way to the one of a property or an item selected on it, at the same place. */
 .source :has(> .item-menu > .row-menu.shared.selected) > .item-menu > .row-menu:not(.shared) { visibility: hidden; }
 .source .row-menu:hover { color: var(--nx-viewer-foreground, CanvasText); background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)); }

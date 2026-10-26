@@ -266,7 +266,7 @@ A host that ignores live edits sees only the commits, as before.
 | Value                                              | Editor                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------- |
 | A string, `uitext` or an id                        | A field in the value's place, holding it without quotes or escapes |
-| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; dragging the property's name sideways changes it, committed once on release |
+| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; its steppers step on a click and change it as they are dragged up or down, committed once on release |
 | A boolean                                          | Toggles: a click on its mark, or Space                         |
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
@@ -336,7 +336,7 @@ press it. A written row shows a quiet `⋯` at its end under the pointer and whe
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default (with the default, quieter, as `Reset to default  8`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 A property written on a line has the same menu: a click on its name selects it, and its `⋯` shows
-past the end of the line while it is selected; Delete removes it as it removes a row.
+right after it while it is selected; Delete removes it as it removes a row.
 
 ### Moving and deleting items
 

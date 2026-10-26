@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
   `@nx-lang/language-protocol`, `-core`, `-http` and `-client` answer it.
 - `<nx-viewer>`'s new `editable` property edits values in place, on a click, with the caret where it
   falls: a field for strings, ids and one-line text, a number field that steps with the arrows and
-  with the property's name dragged sideways, toggles for booleans, a popover of a union's cases with
+  its steppers, toggles for booleans, a popover of a union's cases with
   their docs, and a hex field and color picker for a color. Delete resets a property with a default or clears an optional one. Each
   edit fires `nx-edit` with the node's key and a `sourceEdit` edit for the host to make in its
   source; a value the reading cannot edit, such as an expression, fires `nx-open`.
@@ -49,14 +49,14 @@ All notable changes to this project will be documented in this file.
 - `@nx-lang/viewer` exports `createEditQueue`, which makes `<nx-viewer>`'s edits in a host's text in the
   order they fire, each against the text the one before left, and runs a step such as undo after them.
   The playground's Visual uses it, as the DrawnUI fiddle's does.
-- Live edits in Visual: while a value is still changing (a stepper, the arrows, scrubbing, the color
+- Live edits in Visual: while a value is still changing (a stepper, the arrows, the color
   picker, a pause in typing), `<nx-viewer>` fires `nx-edit` with `live: true`, and the commit or, on
   Escape, the opening value ends the change. `createEditQueue`'s document takes an optional
   `preview`, applied outside the undo history, so the canvas follows the value and the whole change is
   one undo step. A closed number field's stepper clicks commit 500 ms after the last, and a color
   popover closed by a press elsewhere keeps its color. The playground previews live edits.
 - `<nx-viewer>`: a property written on a line is selected by a click on its name, and then shows
-  its row's `⋯` menu past the end of the line (Reset to default or Remove, and Show in Source);
+  its row's `⋯` menu right after it (Reset to default or Remove, and Show in Source);
   Delete removes it as it removes a row.
 
 ### Fixes

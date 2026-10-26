@@ -10,7 +10,7 @@ an editor fits it:
 - a string, a `uitext` string or an id: a text field holding the value without quotes or escapes;
 - a number, typed `int`, `float32` or `float64` or by an alias of one, or a numeric literal where no
   type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and whose
-  property name, dragged sideways, changes the value as the pointer moves;
+  steppers step it on a click and change it as they are dragged up or down;
 - a boolean: a toggle, with no field;
 - a bare case of a union: a popover listing the union's cases that hold no properties, each with its
   doc, the current one marked, filtered as the reader types;
@@ -127,7 +127,7 @@ Shift+click by ten steps, within `min` and `max`: into the field while it is ope
 committed once the reader pauses, so a run of clicks is one commit. Pressing a stepper and dragging
 up or down SHALL change the number by a step for every few pixels and show it in place, each step
 going live: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow
-keys, Shift and dragging. Dragging the property's name sideways SHALL still change the number. A
+keys, Shift and dragging. A property's name SHALL NOT drag: a click on it selects the property. A
 case's chevron SHALL show past the value as the choices chevron does, under the same rules for
 hover and for room on a line, SHALL stay while the pointer moves onto it, and a click on it SHALL
 open the case's popover, as a click on the value does, or close it when open.
@@ -202,8 +202,7 @@ for an optional one, and Show in Source for every row; Reset and Remove SHALL fi
 row's value. The menu SHALL open over the reading, move nothing, and close on Escape, a choice or a
 click elsewhere. Dimmed rows SHALL have no menu. A property written on a line SHALL have the same
 menu: a click on its name or its `=` SHALL select the property, drawn just around it, and while it
-is selected its `⋯` SHALL show past the end of its line, as a list's item sharing its line has, and
-Delete SHALL remove it as it removes a row.
+is selected its `⋯` SHALL show right after it, taking room in the line, and Delete SHALL remove it as it removes a row.
 
 #### Scenario: Resetting from the menu
 - **WHEN** the reader opens the menu of the row `size=large` of a `Drink` whose `size` defaults to
@@ -213,7 +212,7 @@ Delete SHALL remove it as it removes a row.
 
 #### Scenario: Removing a property written on a line
 - **WHEN** a `Drink` reads on one line with the optional `color="#6f4e37"`, and the reader clicks
-  `color` and opens the `⋯` shown at the end of the line
+  `color` and opens the `⋯` shown after it
 - **THEN** the menu SHALL list Remove and Show in Source, and Remove SHALL fire `nx-edit` removing
   that attribute
 

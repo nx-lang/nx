@@ -130,15 +130,6 @@ const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "se
 /** How many unwritten properties a selected element lists before a filter field leads them. */
 const MORE_FILTER_PAST = 12;
 
-/** How far the pointer moves sideways, in pixels, for a number's name dragged to step it once. */
-const SCRUB_STEP = 2;
-
-/**
- * How far the pointer moves before a press on a number's name becomes a drag, in pixels: as a
- * stepper's, since a name is clicked to select its property, and a hand rarely keeps still.
- */
-const SCRUB_SLOP = 6;
-
 /**
  * How far the pointer moves before a press on a stepper becomes a drag, in pixels: more than a name's,
  * since a stepper is clicked far more often than dragged, and a hand rarely keeps still on so small a
@@ -296,18 +287,6 @@ const LIVE_TYPING_DELAY = 300;
 /** How long after the last stepper click, with the field closed, the clicks are committed. */
 const STEP_SETTLE_DELAY = 500;
 
-/** A number's name being dragged sideways to change it. */
-interface Scrub {
-  target: EditTarget;
-  name: HTMLElement;
-  readonly pointer: number;
-  readonly x: number;
-  /** The number when the drag began. */
-  readonly from: string;
-  /** The number now, once the press became a drag. */
-  value: string | undefined;
-}
-
 /** A stepper pressed on a number, and dragged up or down once the press became a drag. */
 interface Stepping {
   target: EditTarget;
@@ -461,7 +440,6 @@ export class NxViewerElement extends ElementBase {
   #live: Live | undefined;
   /** The attributes removed since the host last set a tree, shown muted until it does. */
   #removed = new Set<string>();
-  #scrub: Scrub | undefined;
   /** Set when a drag ends, so the click the press makes does not also select. */
   #ignoreClick = false;
   /** The value whose popover a press on it closed, which the click that follows leaves closed. */
@@ -1069,10 +1047,6 @@ export class NxViewerElement extends ElementBase {
       this.#restep = stepping;
       return;
     }
-    // A drag on a number's name goes on with the next tree, on the same number.
-    const scrub = this.#scrub;
-    this.#scrub = undefined;
-    this.#body.classList.remove("scrubbing");
     const index = indexTree(tree, this.#text);
     this.#index = index;
     this.#runs = readingRuns(index);
@@ -1110,9 +1084,6 @@ export class NxViewerElement extends ElementBase {
     if (this.#editable) {
       this.#targets = targets;
       this.#markEditable();
-      if (scrub !== undefined) {
-        this.#resumeScrub(scrub);
-      }
     }
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
     // by the reader or the host, is kept: when it hides the selection, the selection moves to the
@@ -1548,31 +1519,15 @@ export class NxViewerElement extends ElementBase {
 
   // ---- Editing ----------------------------------------------------------------------------
 
-  /**
-   * Marks each value the reading can edit, and the name of each number's property, which drags
-   * sideways to change it; then shows the values edited since the host last set a tree.
-   */
+  /** Marks each value the reading can edit; then shows the values edited since the host last set a tree. */
   #markEditable(): void {
     const index = this.#index!;
-    const names = new Map<string, HTMLElement[]>();
-    for (const name of this.#body.querySelectorAll<HTMLElement>(".sheet-name[data-hover], .line-name[data-hover]")) {
-      const list = names.get(name.dataset["hover"]!) ?? [];
-      list.push(name);
-      names.set(name.dataset["hover"]!, list);
-    }
     for (const element of this.#body.querySelectorAll<HTMLElement>("[data-key]")) {
       const target = this.#targets.get(element.dataset["key"]!);
       if (target === undefined) {
         continue;
       }
       element.classList.add("editable-value", `edit-${target.kind}`);
-      const owner = index.tree.nodes[target.at]!.parent;
-      if (target.kind === "number" && owner !== undefined && index.tree.nodes[owner]!.role === "attribute") {
-        for (const name of names.get(index.tree.nodes[owner]!.key) ?? []) {
-          name.classList.add("scrub");
-          name.dataset["scrubKey"] = target.key;
-        }
-      }
     }
     for (const [key, value] of this.#pending) {
       const target = this.#targets.get(key);
@@ -1595,8 +1550,8 @@ export class NxViewerElement extends ElementBase {
       mark.dataset["menuKey"] = row.dataset["key"]!;
       row.append(mark);
     }
-    // A property written on a line has the same menu, hung past the end of its line while it is
-    // selected, as a list's item sharing its line has, where it covers nothing.
+    // A property written on a line has the same menu, right after it while it is selected, taking
+    // room there, so it shows where the reader clicked.
     for (const property of this.#body.querySelectorAll<HTMLElement>(".line-property[data-key]")) {
       const at = index.byKey.get(property.dataset["key"]!);
       if (at === undefined || index.tree.nodes[at]!.role !== "attribute") {
@@ -1609,15 +1564,10 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-haspopup", "menu");
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[at]!.name ?? "the property"}`);
       mark.dataset["menuKey"] = property.dataset["key"]!;
-      const end = this.#lineEnd(property, "") ?? (property.closest(".sheet-head, .tag-line, .block-line") as HTMLElement | null) ?? property;
-      if (end.matches(".sheet-row")) {
-        end.append(mark);
-      } else {
-        const anchor = this.ownerDocument.createElement("span");
-        anchor.className = "item-menu";
-        anchor.append(mark);
-        end.append(anchor);
-      }
+      const anchor = this.ownerDocument.createElement("span");
+      anchor.className = "property-menu";
+      anchor.append(mark);
+      property.after(anchor);
     }
     this.#markItems(index);
   }
@@ -3747,10 +3697,6 @@ export class NxViewerElement extends ElementBase {
       this.#targets.set(valueKey, target);
       this.#rendered.set(valueKey, value);
       this.#moreKeys.push(valueKey);
-      if (editor.kind === "number") {
-        name.classList.add("scrub");
-        name.dataset["scrubKey"] = valueKey;
-      }
     } else {
       // No editor takes its type, as a record's: Enter or a double-click opens the element in Source.
       row.dataset["opens"] = "true";
@@ -4061,12 +4007,6 @@ export class NxViewerElement extends ElementBase {
       };
       return;
     }
-    const name = (event.target as Element).closest?.(".scrub") as HTMLElement | null | undefined;
-    const target = name === null || name === undefined ? undefined : this.#targets.get(name.dataset["scrubKey"] ?? "");
-    if (target === undefined || target.kind !== "number" || stepNumber(this.#currentOf(target), 0) === undefined) {
-      return;
-    }
-    this.#scrub = { target, name: name!, pointer: event.pointerId, x: event.clientX, from: this.#shownOf(target), value: undefined };
   }
 
   #onPointerMove(event: PointerEvent): void {
@@ -4088,66 +4028,10 @@ export class NxViewerElement extends ElementBase {
       drag.clientX = event.clientX;
       drag.clientY = event.clientY;
       this.#dragTo(drag);
-      return;
-    }
-    const scrub = this.#scrub;
-    if (scrub === undefined || event.pointerId !== scrub.pointer) {
-      return;
-    }
-    const moved = event.clientX - scrub.x;
-    if (scrub.value === undefined) {
-      if (Math.abs(moved) < SCRUB_SLOP) {
-        return;
-      }
-      // The press is a drag now: the pointer is the name's until it lets go.
-      try {
-        scrub.name.setPointerCapture?.(scrub.pointer);
-      } catch {
-        // A pointer the DOM no longer knows ends with its next event.
-      }
-      this.#closeCard();
-      this.#body.classList.add("scrubbing");
-    }
-    event.preventDefault();
-    const steps = Math.trunc(moved / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
-    const value = stepNumber(scrub.from, steps, scrub.target.signed !== false, scrub.target.hints) ?? scrub.from;
-    scrub.value = value;
-    const span = this.#rendered.get(scrub.target.key);
-    if (span !== undefined) {
-      showValue(span, scrub.target, this.#writtenOf(scrub.target), value);
-    }
-    this.#goLive(scrub.target, value, 0);
-  }
-
-  /**
-   * Carries a drag on through a reading drawn again, on the same number's new name, showing the
-   * number it has reached; when the number is gone, or no longer a number, the drag ends.
-   */
-  #resumeScrub(scrub: Scrub): void {
-    const target = this.#targets.get(scrub.target.key);
-    const name = [...this.#body.querySelectorAll<HTMLElement>(".scrub")].find((candidate) => candidate.dataset["scrubKey"] === scrub.target.key);
-    if (target === undefined || target.kind !== "number" || name === undefined) {
-      return;
-    }
-    scrub.target = target;
-    scrub.name = name;
-    this.#scrub = scrub;
-    if (scrub.value === undefined) {
-      return;
-    }
-    this.#body.classList.add("scrubbing");
-    try {
-      name.setPointerCapture?.(scrub.pointer);
-    } catch {
-      // A pointer the DOM no longer knows ends with its next event.
-    }
-    const span = this.#rendered.get(target.key);
-    if (span !== undefined) {
-      showValue(span, target, this.#writtenOf(target), scrub.value);
     }
   }
 
-  /** Ends a drag: its number is committed once, as it was let go, unless the drag was cancelled. */
+  /** Ends an item's drag: it moves where it was let go, unless the drag was cancelled. */
   #onPointerUp(event: PointerEvent, commit: boolean): void {
     const drag = this.#drag;
     if (drag !== undefined && event.pointerId === drag.pointer) {
@@ -4166,20 +4050,7 @@ export class NxViewerElement extends ElementBase {
       if (gap !== undefined) {
         this.#moveItem(drag.key, gap > drag.list.position ? gap - 1 : gap);
       }
-      return;
     }
-    const scrub = this.#scrub;
-    if (scrub === undefined || event.pointerId !== scrub.pointer) {
-      return;
-    }
-    this.#scrub = undefined;
-    if (scrub.value === undefined) {
-      return;
-    }
-    this.#body.classList.remove("scrubbing");
-    this.#ignoreClick = true;
-    setTimeout(() => (this.#ignoreClick = false), 0);
-    this.#endNumberDrag(scrub.target, scrub.from, scrub.value, commit);
   }
 
   #onClick(event: MouseEvent): void {
@@ -4224,7 +4095,7 @@ export class NxViewerElement extends ElementBase {
         // A click anywhere on a dimmed row edits its value, which may be empty, as an optional one is.
         const row = target.closest?.(".dimmed-row, .added-row") as HTMLElement | null | undefined;
         const value = row?.querySelector<HTMLElement>(".editable-value");
-        if (value !== null && value !== undefined && target.closest?.(".scrub") == null) {
+        if (value !== null && value !== undefined) {
           if (this.#session?.target.key !== keyOf(value)) {
             this.#openEditor(keyOf(value)!);
           }
@@ -4408,7 +4279,7 @@ export class NxViewerElement extends ElementBase {
     }
     this.#pointedKey = key;
     clearTimeout(this.#cardOpenTimer);
-    if (this.#session !== undefined || this.#scrub?.value !== undefined) {
+    if (this.#session !== undefined) {
       return;
     }
     if (key !== undefined && key === this.#cardKey) {

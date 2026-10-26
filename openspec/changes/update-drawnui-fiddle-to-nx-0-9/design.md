@@ -162,7 +162,7 @@ type in the unset list, and a written one is never empty for long. The values ab
 
 Testing the fiddle showed a stepper or the color picker changing nothing until its editor closed. The
 viewer now fires `nx-edit` with `live: true` while a value changes (typing after a 300 ms pause, at
-once for steppers, arrows, scrubbing and the picker), and the commit that ends it as before.
+once for steppers, arrows and the picker), and the commit that ends it as before.
 
 - **Viewer.** One live gesture at a time, keyed by the edited value, remembering the target and the
   value it opened on. The commit always fires when a live edit went out, even for the value the

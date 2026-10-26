@@ -638,67 +638,19 @@ describe("editing in place", () => {
     assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
   });
 
-  it("changes a number while its name is dragged sideways, and commits once on release", async (t) => {
+  it("does not drag a number's name: a press and a move on it select the property and change nothing", async (t) => {
     narrow(t, 40);
     const element = show(await fixture("editing"));
     const { edits } = events(element);
-    const name = root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]');
-    assert.ok(name, "the number's name drags");
+    const name = root(element).querySelector<HTMLElement>('.sheet-name[data-hover="latte.value.shots"]')!;
+    assert.ok(!name.classList.contains("scrub"));
     name.dispatchEvent(pointer("pointerdown", 100));
-    name.dispatchEvent(pointer("pointermove", 101));
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "2", "a press is not a drag");
-    name.dispatchEvent(pointer("pointermove", 110));
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "7", "a step to each two pixels");
     name.dispatchEvent(pointer("pointermove", 120));
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "12");
-    assert.deepEqual(edits, [], "nothing is committed while dragging");
+    assert.equal(rendered(element, "latte.value.shots.value").textContent, "2", "the number stays");
     name.dispatchEvent(pointer("pointerup", 120));
     name.click();
-    assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
-    assert.notEqual(element.selection, "latte.value.shots", "the drag's click does not select");
-  });
-
-  it("selects the property when a press on its name moves too little to drag", async (t) => {
-    narrow(t, 40);
-    const element = show(await fixture("editing"));
-    const { edits } = events(element);
-    const name = root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]')!;
-    name.dispatchEvent(pointer("pointerdown", 100));
-    name.dispatchEvent(pointer("pointermove", 104));
-    name.dispatchEvent(pointer("pointerup", 104));
-    name.click();
-    assert.equal(element.selection, "latte.value.shots", "a hand's tremble is still a click");
+    assert.equal(element.selection, "latte.value.shots");
     assert.deepEqual(edits, []);
-  });
-
-  it("carries a drag on through a newer tree", async (t) => {
-    narrow(t, 40);
-    const fixed = await fixture("editing");
-    const element = show(fixed);
-    const { edits } = events(element);
-    const scrubName = (): HTMLElement => root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]')!;
-    scrubName().dispatchEvent(pointer("pointerdown", 100));
-    scrubName().dispatchEvent(pointer("pointermove", 110));
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "7");
-    element.tree = fixed.tree;
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "7", "the number dragged to is still shown");
-    assert.ok(body(element).classList.contains("scrubbing"));
-    scrubName().dispatchEvent(pointer("pointermove", 120));
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "12", "the drag goes on");
-    scrubName().dispatchEvent(pointer("pointerup", 120));
-    assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
-    assert.ok(!body(element).classList.contains("scrubbing"), "the reading reads as before");
-  });
-
-  it("ends a drag cleanly when the number is gone from the newer tree", async (t) => {
-    narrow(t, 40);
-    const fixed = await fixture("editing");
-    const element = show(fixed);
-    const name = root(element).querySelector<HTMLElement>('.scrub[data-hover="latte.value.shots"]')!;
-    name.dispatchEvent(pointer("pointerdown", 100));
-    name.dispatchEvent(pointer("pointermove", 110));
-    element.tree = (await fixture("editingEdges")).tree;
-    assert.ok(!body(element).classList.contains("scrubbing"), "the reading does not stay in a drag");
   });
 
   it("sets a color from a hex field", async (t) => {
@@ -1027,14 +979,14 @@ describe("a row's menu", () => {
     assert.ok(!status.includes("\u22EF"), status);
   });
 
-  it("is a property's on a line too: its name selects it, the mark hangs at the line's end, and Delete removes it", async () => {
+  it("is a property's on a line too: its name selects it, the mark follows it, and Delete removes it", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     const property = rendered(element, "mocha.value.color");
     assert.ok(property.matches(".line-property"), "the drink reads as a line");
     const mark = Array.from(body(element).querySelectorAll<HTMLElement>(".row-menu.shared")).find((candidate) => candidate.dataset["menuKey"] === "mocha.value.color")!;
     assert.ok(mark, "a mark for the property");
-    assert.ok(!property.contains(mark), "past the end of the line, not inside the property");
+    assert.equal(property.nextElementSibling, mark.parentElement, "right after the property, not inside it");
     assert.ok(!mark.classList.contains("selected"), "hidden until the property is selected");
     property.querySelector<HTMLElement>(".line-name")!.click();
     assert.equal(element.selection, "mocha.value.color", "a click on its name selects the property");
