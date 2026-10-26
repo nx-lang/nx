@@ -45,7 +45,7 @@ import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
 export { nodeAtSpan } from "./tree.js";
-export { keyAtRange, rangeOfKey } from "./selection.js";
+export { keyAtRange, keyOfChange, rangeOfKey, spanOfChanges } from "./selection.js";
 export { createEditQueue, type EditedDocument, type EditQueue, type VisualEdit } from "./edits.js";
 export type { NxViewerColor, NxViewerIcons } from "./source.js";
 

@@ -58,6 +58,9 @@ All notable changes to this project will be documented in this file.
 - `<nx-viewer>`: a property written on a line is selected by a click on its name, and then shows
   its row's `⋯` menu right after it (Reset to default or Remove, and Show in Source);
   Delete removes it as it removes a row.
+- `@nx-lang/viewer` exports `keyOfChange` and `spanOfChanges`, which find the property or element a
+  change to the text touched; the playground's Undo and Redo select it in Visual, scrolled into view,
+  as the fiddle's do.
 - `<nx-viewer>`: a selected property shows its value's steppers or chevron without the pointer over
   it, and a row's `⋯` sits just past its value and those tools.
 

@@ -17,7 +17,7 @@ import { OutputPane, type OutputView } from "./output/OutputPane";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { createEditQueue, keyAtRange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
+import { createEditQueue, keyAtRange, keyOfChange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
@@ -221,8 +221,10 @@ export function App() {
   const visualHistory = (step: "undo" | "redo") => {
     // After any edit still being made, as a field's that pressing the button committed.
     void applyVisualEdit.after(() => {
-      editor.current?.[step]();
+      const span = editor.current?.[step]();
       immediateTree.current = editor.current?.text() ?? null;
+      // What the step changed is selected, and scrolled to, once Visual reads the text it left.
+      changeToSelect.current = span === undefined || immediateTree.current === null ? null : { text: immediateTree.current, ...span };
       // The step can take the text back to what Visual's tree already describes, as Undo does with a
       // field open, whose edit it commits and takes back at once. No newer tree comes then, so Visual
       // gets its tree again, and drops the value it shows as pending.
@@ -231,6 +233,8 @@ export function App() {
   };
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
+  // Where an undo or redo changed the text, until a tree of the text it left can say what that is.
+  const changeToSelect = useRef<{ text: string; start: number; end: number } | null>(null);
   // The selected node's start, carried into Source until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
   // The node the cursor selected on entering Visual: leaving with it still selected leaves the cursor be.
@@ -245,6 +249,19 @@ export function App() {
     void applyVisualEdit.after(() => undefined);
     setMode("source");
   };
+
+  useEffect(() => {
+    const change = changeToSelect.current;
+    const { tree, text } = reading;
+    if (change === null || tree === null || text === null || text !== change.text) {
+      return;
+    }
+    changeToSelect.current = null;
+    const key = keyOfChange(tree, text, change.start, change.end);
+    if (key !== undefined) {
+      setSelection(key);
+    }
+  }, [reading.tree, reading.text]);
 
   useEffect(() => {
     const offset = cursorToSelect.current;

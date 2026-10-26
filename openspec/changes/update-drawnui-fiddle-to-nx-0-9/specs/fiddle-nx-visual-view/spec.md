@@ -40,6 +40,12 @@ Showing either view SHALL NOT run, re-run or stop the snippet.
 - **THEN** the editor's text SHALL be what it was before the color was set, and the reading SHALL show
   the old color
 
+#### Scenario: Undo selects what it changed
+- **WHEN** the visitor steps `Spacing` in Visual, scrolls down and selects something else, and presses
+  Undo
+- **THEN** the reading SHALL select the `Spacing` row and scroll it into view, or, when the step took
+  a property out or put one back, the element holding it
+
 #### Scenario: A read-only share
 - **WHEN** a visitor opens someone else's share, read-only, and clicks a value in Visual
 - **THEN** no field SHALL open and the text SHALL be unchanged
