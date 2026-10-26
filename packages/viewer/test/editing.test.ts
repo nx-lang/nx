@@ -1014,6 +1014,26 @@ describe("a row's menu", () => {
     assert.ok(!status.includes("\u22EF"), status);
   });
 
+  it("is a property's on a line too: its name selects it, the mark hangs at the line's end, and Delete removes it", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    const property = rendered(element, "mocha.value.color");
+    assert.ok(property.matches(".line-property"), "the drink reads as a line");
+    const mark = Array.from(body(element).querySelectorAll<HTMLElement>(".row-menu.shared")).find((candidate) => candidate.dataset["menuKey"] === "mocha.value.color")!;
+    assert.ok(mark, "a mark for the property");
+    assert.ok(!property.contains(mark), "past the end of the line, not inside the property");
+    assert.ok(!mark.classList.contains("selected"), "hidden until the property is selected");
+    property.querySelector<HTMLElement>(".line-name")!.click();
+    assert.equal(element.selection, "mocha.value.color", "a click on its name selects the property");
+    assert.ok(mark.classList.contains("selected"), "and shows its mark");
+    mark.click();
+    assert.deepEqual(Array.from(root(element).querySelectorAll(".menu-item")).map(reads), ["Remove", "Show in Source"]);
+    press(root(element).querySelector(".menu-item")!, "Escape");
+    element.selection = "mocha.value.color";
+    press(body(element), "Delete");
+    assert.deepEqual(edits, [{ key: "mocha.value.color", edit: { kind: "remove" } }]);
+  });
+
   it("opens from the keyboard on the selected row", async (t) => {
     narrow(t, 30);
     const element = show(await fixture("adding"));

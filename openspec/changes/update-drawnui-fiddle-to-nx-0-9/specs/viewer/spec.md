@@ -193,6 +193,30 @@ SHALL still fire `nx-open`.
   `Ask` and then Enter
 - **THEN** the element SHALL fire `nx-edit` setting a string holding a line break after `Ask`
 
+### Requirement: A selected row has a menu
+When the host has set `editable`, a written row SHALL show a quiet `⋯` at its end while the pointer is
+over it and while it is selected. Opening it SHALL list Reset to default for a property with a
+default, followed, quieter, by the default as the reading draws it when it is a short literal, Remove
+for an optional one, and Show in Source for every row; Reset and Remove SHALL fire
+`nx-edit` removing the attribute, as Delete does, and Show in Source SHALL fire `nx-open` with the
+row's value. The menu SHALL open over the reading, move nothing, and close on Escape, a choice or a
+click elsewhere. Dimmed rows SHALL have no menu. A property written on a line SHALL have the same
+menu: a click on its name or its `=` SHALL select the property, drawn just around it, and while it
+is selected its `⋯` SHALL show past the end of its line, as a list's item sharing its line has, and
+Delete SHALL remove it as it removes a row.
+
+#### Scenario: Resetting from the menu
+- **WHEN** the reader opens the menu of the row `size=large` of a `Drink` whose `size` defaults to
+  `medium` and chooses Reset to default
+- **THEN** the item SHALL have read `Reset to default` and `medium`, and the element SHALL fire
+  `nx-edit` removing that attribute
+
+#### Scenario: Removing a property written on a line
+- **WHEN** a `Drink` reads on one line with the optional `color="#6f4e37"`, and the reader clicks
+  `color` and opens the `⋯` shown at the end of the line
+- **THEN** the menu SHALL list Remove and Show in Source, and Remove SHALL fire `nx-edit` removing
+  that attribute
+
 ## ADDED Requirements
 
 ### Requirement: Edits go live while the reader changes a value

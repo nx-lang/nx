@@ -314,7 +314,7 @@ export const styles = `
 .source .fold-declaration.folded { opacity: 0.75; }
 /* A unit of the reading (a group, a group's row, an element on one line, a block written as it is) is
    drawn selected and hovered by the highlights behind it, as a list's rows are, not by its own box. */
-.source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held).selected { background: none; }
+.source :is(.sheet, .sheet-row, .line-element, .tag-line, .block-line, .sheet-held, .line-property).selected { background: none; }
 .source :is(.sheet, .block-line, .line-element, .tag-line) { cursor: default; }
 .body:has(> .highlights) { position: relative; isolation: isolate; }
 .highlights { position: absolute; inset: 0; pointer-events: none; z-index: -1; }

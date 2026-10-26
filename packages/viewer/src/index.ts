@@ -181,7 +181,7 @@ const ElementBase = (typeof HTMLElement === "undefined" ? class {} : HTMLElement
 const UNITS = ".sheet-head, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
 
 /** The units as they are drawn selected: a group stands for itself, not through its header. */
-const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line";
+const DRAWN_UNITS = ".sheet, .sheet-row:not(.more), .line-element, .tag-line, .block-line, .line-property";
 
 /** How long the pointer rests on a value before its tools push the rest of its line right. */
 const TOOLS_REST_MS = 300;
@@ -1349,10 +1349,11 @@ export class NxViewerElement extends ElementBase {
       // A block's later lines start further left, at its source indentation; it starts where its
       // first line does.
       const first = from.matches(".block-line") ? from.getClientRects()[0] : undefined;
-      // An element inside a line, as a property's value, ends where it does, unless it wraps, and is
-      // drawn tighter, so it stays clear of the text beside it.
-      const inline = from.matches(".line-element:not(.alone)") ? from.getClientRects() : undefined;
-      const tight = inline?.length === 1 ? inline[0] : undefined;
+      // An element inside a line, as a property's value, or a property on a line, ends where it
+      // does, unless it wraps, and is drawn tighter, so it stays clear of the text beside it.
+      const inline = from.matches(".line-element:not(.alone), .line-property") ? from.getClientRects() : undefined;
+      const onOneLine = inline !== undefined && inline.length > 0 && Array.from(inline).every((rect) => Math.abs(rect.top - inline[0]!.top) < 2);
+      const tight = onOneLine ? from.getBoundingClientRect() : undefined;
       const pad = tight === undefined ? 4 : 1;
       const left = (first ?? start.getBoundingClientRect()).left - frame.left - pad + this.#body.scrollLeft;
       const box = this.ownerDocument.createElement("div");
@@ -1585,6 +1586,30 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
       mark.dataset["menuKey"] = row.dataset["key"]!;
       row.append(mark);
+    }
+    // A property written on a line has the same menu, hung past the end of its line while it is
+    // selected, as a list's item sharing its line has, where it covers nothing.
+    for (const property of this.#body.querySelectorAll<HTMLElement>(".line-property[data-key]")) {
+      const at = index.byKey.get(property.dataset["key"]!);
+      if (at === undefined || index.tree.nodes[at]!.role !== "attribute") {
+        continue;
+      }
+      const mark = this.ownerDocument.createElement("span");
+      mark.className = "row-menu shared";
+      mark.textContent = "\u22EF";
+      mark.setAttribute("role", "button");
+      mark.setAttribute("aria-haspopup", "menu");
+      mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[at]!.name ?? "the property"}`);
+      mark.dataset["menuKey"] = property.dataset["key"]!;
+      const end = this.#lineEnd(property, "") ?? (property.closest(".sheet-head, .tag-line, .block-line") as HTMLElement | null) ?? property;
+      if (end.matches(".sheet-row")) {
+        end.append(mark);
+      } else {
+        const anchor = this.ownerDocument.createElement("span");
+        anchor.className = "item-menu";
+        anchor.append(mark);
+        end.append(anchor);
+      }
     }
     this.#markItems(index);
   }
@@ -2417,7 +2442,7 @@ export class NxViewerElement extends ElementBase {
     const key = this.#selection;
     const at = key === undefined ? undefined : index?.byKey.get(key);
     const row = key === undefined ? undefined : this.#rendered.get(key);
-    if (!this.#editable || index === undefined || at === undefined || row?.matches(".sheet-row") !== true || this.#removed.has(key!)) {
+    if (!this.#editable || index === undefined || at === undefined || row?.matches(".sheet-row, .line-property") !== true || this.#removed.has(key!)) {
       return false;
     }
     if (!isRemovable(index, at)) {
@@ -3295,7 +3320,8 @@ export class NxViewerElement extends ElementBase {
     const selected = this.#selection === undefined ? undefined : this.#rendered.get(this.#selection);
     // The unset properties' rows are the selected element's, though drawn after a one-line element.
     const onSelected =
-      (selected?.contains(value) === true && (this.#unitOf(value) === selected || !selected.matches(DRAWN_UNITS))) ||
+      (selected?.contains(value) === true &&
+        (this.#unitOf(value) === selected || selected.matches(".line-property") || !selected.matches(DRAWN_UNITS))) ||
       this.#moreBlock?.contains(value) === true;
     if (!onSelected && this.#followedOnItsLine(value)) {
       if (this.#tools.isConnected) {
@@ -4225,6 +4251,14 @@ export class NxViewerElement extends ElementBase {
         const at = offsetAtPoint(field, event.clientX, event.clientY);
         this.#placeCaret(field, { start: at, end: at });
       }
+      return;
+    }
+    // A click on the name of a property written on a line chooses the property, as a click on a
+    // sheet's row does, for its menu.
+    const name = this.#editable ? target.closest?.(".line-name, .line-equals") : undefined;
+    const property = name?.closest?.(".line-property[data-key]") as HTMLElement | null | undefined;
+    if (property !== null && property !== undefined && this.#body.contains(property)) {
+      this.#select(keyOf(property), true);
       return;
     }
     // A click chooses the unit it falls in: the element, row or line, not a word in it. Outside

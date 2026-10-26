@@ -55,6 +55,9 @@ All notable changes to this project will be documented in this file.
   `preview`, applied outside the undo history, so the canvas follows the value and the whole change is
   one undo step. A closed number field's stepper clicks commit 500 ms after the last, and a color
   popover closed by a press elsewhere keeps its color. The playground previews live edits.
+- `<nx-viewer>`: a property written on a line is selected by a click on its name, and then shows
+  its row's `⋯` menu past the end of the line (Reset to default or Remove, and Show in Source);
+  Delete removes it as it removes a row.
 
 ### Fixes
 - A record written with a property-list `if` or match, as `<Theme accent="c" if flag { muted="d" } />`,

@@ -50,6 +50,7 @@ Paths under `nx/`, `src/`, `dev/` and `docs/` are in `~/src/DrawnUi.FiddleEngine
 - [x] 8.2 Give `createEditQueue` live edits through an optional `preview`, rebased on the gesture's start, superseded ones skipped, the commit one step, a cancel no step, and an open gesture recorded before another edit or `after`; verify with `edits.test.ts` cases
 - [x] 8.3 Implement `preview` in the playground's editor and the fiddle's view (`model.applyEdits`); verify with `visual.test.ts` cases and the playground's tests, and a browser check that a stepper click in an open field changes the canvas and the color picker's live drag is one Undo
 - [x] 8.4 Update the viewer README, the changelog's 0.9.0 section, `README-NX.md`; rebuild and restart the local fiddle for testing
+- [x] 8.5 Give a property written on a line its row's menu: a click on its name selects it (drawn just around it), its `⋯` hangs past the line's end while selected, and Delete removes it; verify with an `editing.test.ts` case and a browser check in the fiddle
 
 ## 7. Release NX v0.9.0 and repin
 
