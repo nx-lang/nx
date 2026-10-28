@@ -2214,6 +2214,28 @@ impl Interpreter {
         let expr = module.expr(expr_id);
         match expr {
             ast::Expr::Literal(lit) => self.eval_literal(lit),
+            ast::Expr::StandardMath { op, args } => {
+                let values = args
+                    .iter()
+                    .map(|arg| {
+                        let value = self.eval_expr(module, ctx, *arg)?;
+                        match value {
+                            Value::Float(x) => Ok(x),
+                            Value::Int(x) => Ok(x as f64),
+                            Value::Int32(x) => Ok(f64::from(x)),
+                            Value::Float32(x) => Ok(f64::from(x)),
+                            _ => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                                expected: "float64".into(),
+                                actual: value.type_name().into(),
+                                operation: op.name().into(),
+                            })),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, RuntimeError>>()?;
+                nx_value::math::evaluate(*op, &values)
+                    .map(Value::Float)
+                    .map_err(|e| RuntimeError::new(RuntimeErrorKind::Math(e)))
+            }
             ast::Expr::Ident(name) => self.eval_ident(module, ctx, name),
             ast::Expr::Block { stmts, expr, .. } => {
                 self.eval_block(module, ctx, stmts, expr.as_ref())
@@ -2543,7 +2565,7 @@ impl Interpreter {
     fn eval_ident(
         &self,
         module: &LoweredModule,
-        ctx: &ExecutionContext,
+        ctx: &mut ExecutionContext,
         name: &Name,
     ) -> Result<Value, RuntimeError> {
         if let Some(value) = ctx.try_lookup_variable(name.as_str()) {
@@ -2559,6 +2581,17 @@ impl Interpreter {
                 ),
                 name: SmolStr::new(function.name.as_str()),
             });
+        }
+        if let Some((target_module, Item::Value(value))) = self.resolve_item(module, name.as_str())
+        {
+            if !std::ptr::eq(target_module, module) {
+                let mut target_ctx = ctx.fork_isolated();
+                let result = self
+                    .bind_top_level_values(target_module, &mut target_ctx)
+                    .and_then(|()| target_ctx.lookup_variable(value.name.as_str()));
+                ctx.sync_usage_from(&target_ctx);
+                return result;
+            }
         }
         Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
             name: SmolStr::new(name.as_str()),
@@ -4254,6 +4287,16 @@ impl Interpreter {
             }
         }
 
+        if let Some(base_name) = self.flattened_expr_name(module, base_expr) {
+            let qualified = format!("{base_name}.{}", member.as_str());
+            if matches!(
+                self.resolve_item(module, &qualified),
+                Some((_, Item::Function(_) | Item::Value(_)))
+            ) {
+                return self.eval_ident(module, ctx, &Name::new(&qualified));
+            }
+        }
+
         // A union named by a bare or dotted type name — `Status`, `ui.Fit`, `User.Property` —
         // yields its case, or reports that the case does not exist on it.
         if let Some(base_name) = self.flattened_expr_name(module, base_expr) {
@@ -5934,6 +5977,7 @@ mod tests {
             name: Name::new("make"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![],
             return_type: None,
             body,

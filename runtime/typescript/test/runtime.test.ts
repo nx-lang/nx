@@ -2712,6 +2712,26 @@ function hostValueTypes(program: NxPreparedProgram, instance: NxComponentInstanc
 }
 void hostValueTypes;
 
+test("standard math validates its feature, operation, arity and references", () => {
+  const make = (op: number, args: readonly number[], features: readonly string[]) => {
+    const b = new ArtifactBuilder("math-test.nx");
+    b.float(0);
+    b.fn("root", b.node([nodeKinds.standardMath, op, args.length, ...args]));
+    return b.build({ requiredFeatures: features });
+  };
+  for (const [op,args,features] of [
+    [999,[0],["standard-math-v1"]],
+    [0,[],["standard-math-v1"]],
+    [0,[999],["standard-math-v1"]],
+    [0,[0],[]],
+  ] as const) {
+    const result = tryPrepareNxIrModule(make(op,args,features));
+    assertEqual(result.ok,false);
+    if (!result.ok) assertEqual(result.diagnostics[0]!.code,"nx-ir-malformed");
+  }
+  assertEqual(evaluateFunction(prepareNxIrProgram(make(0,[0],["standard-math-v1"])),"root"),0);
+});
+
 let failures = 0;
 for (const [name, run] of tests) {
   try {

@@ -146,7 +146,7 @@ occurrence rules are checked in all three engines, which is why the `{}` pattern
 its own, `occurrence-patterns`.
 
 The size budget lives here too: every image emitted without its debug section is at most six
-times the UTF-8 length of its module's source. The images are marked binary in `.gitattributes`;
+times the UTF-8 length of its module's compiler input: source plus canonical typed runtime-function descriptors when present. Math counts its descriptors alongside its source constants; it is not exempt from the size budget. The images are marked binary in `.gitattributes`;
 read one with `nxlang ir explain`, or read its `.txt` sibling.
 
 To regenerate the expected files after an intended change to the emitter or a program:

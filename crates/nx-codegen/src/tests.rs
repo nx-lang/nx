@@ -3235,3 +3235,16 @@ let root() = { <Theme accent="c" if flag { muted="d" } /> }
             .message()
             .contains("conditional element property fragments")));
 }
+
+#[test]
+fn standard_math_codegen_keeps_authored_same_named_functions() {
+    assert_eq!(
+        execute_generated_javascript_root(
+            r#"import "@nx/math" as math
+let cos(x:float64):float64 = { x + 10.0 }
+let root():float64 = { cos(2.0) + math.cos(0.0) }
+"#
+        ),
+        "13"
+    );
+}

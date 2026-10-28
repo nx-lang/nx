@@ -41,7 +41,7 @@ use smol_str::SmolStr;
 pub use doc::{Doc, DocData, DocLink};
 pub use fnv::Fnv1a64;
 // Re-export lowering function
-pub use lower::lower;
+pub use lower::{lower, lower_with_runtime_functions};
 pub use prepared::{
     binding_specs_for_item, interface_component, interface_function_signature, interface_record,
     interface_type_alias, interface_union, local_definition_id, module_namespace_from_bindings,
@@ -319,6 +319,8 @@ pub struct Function {
     pub visibility: Visibility,
     /// How the parameters were declared
     pub form: FunctionForm,
+    /// Whether the source declares a runtime-provided function with `external`.
+    pub is_external: bool,
     /// Parameter list
     pub params: Vec<Param>,
     /// Return type annotation (None means inferred)
@@ -1656,6 +1658,7 @@ mod tests {
             name: Name::new("test"),
             visibility: Visibility::Export,
             form: crate::FunctionForm::Paren,
+            is_external: false,
             params: Vec::new(),
             return_type: None,
             body: module.alloc_expr(ast::Expr::Literal(ast::Literal::Int(0))),

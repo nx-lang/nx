@@ -1302,6 +1302,24 @@ fn build_expression(
     let ty = type_env.get_expr_type(expr_id).cloned();
     let kind = match expr {
         ast::Expr::Literal(literal) => CodegenExpressionKind::Literal(literal.clone()),
+        ast::Expr::StandardMath { op, args } => CodegenExpressionKind::StandardMath {
+            op: *op,
+            args: args
+                .iter()
+                .map(|arg| {
+                    build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        *arg,
+                        scope,
+                        diagnostics,
+                    )
+                })
+                .collect::<Option<Vec<_>>>()?,
+        },
         // A case already resolved during analysis. The declaration is reached by the origin the
         // node carries, not by looking its union's name back up in the module using it — that name
         // need not be visible here at all.

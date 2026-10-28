@@ -10,6 +10,7 @@
         "handlers",
         "held-records",
         "host-values",
+        "math-library",
         "occurrence-lifting",
         "parameter-defaults",
         "question-flow",
@@ -119,6 +120,7 @@
         "conversions",
         "expressions",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "question-flow",
         "ranges"
@@ -178,6 +180,7 @@
         "held-records",
         "host-values",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -237,6 +240,7 @@
         "handlers",
         "held-records",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "parameter-defaults",
         "question-flow",
@@ -259,6 +263,74 @@
       ],
       "merge": [
         "records"
+      ]
+    },
+    "mathOperations": {
+      "abs": [
+        "math-library"
+      ],
+      "acos": [
+        "math-library"
+      ],
+      "asin": [
+        "math-library"
+      ],
+      "atan": [
+        "math-library"
+      ],
+      "atan2": [
+        "math-library"
+      ],
+      "ceil": [
+        "math-library"
+      ],
+      "clamp": [
+        "math-library"
+      ],
+      "cos": [
+        "math-library"
+      ],
+      "degreesToRadians": [
+        "math-library"
+      ],
+      "floor": [
+        "math-library"
+      ],
+      "hypot": [
+        "math-library"
+      ],
+      "lerp": [
+        "math-library"
+      ],
+      "max": [
+        "math-library"
+      ],
+      "min": [
+        "math-library"
+      ],
+      "radiansToDegrees": [
+        "math-library"
+      ],
+      "round": [
+        "math-library"
+      ],
+      "roundTiesToEven": [
+        "math-library"
+      ],
+      "sign": [
+        "math-library"
+      ],
+      "sin": [
+        "math-library"
+      ],
+      "sqrt": [
+        "math-library"
+      ],
+      "tan": [
+        "math-library"
+      ],
+      "trunc": [
+        "math-library"
       ]
     },
     "nodes": {
@@ -301,6 +373,7 @@
         "held-records",
         "host-values",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
@@ -329,6 +402,7 @@
         "generic-records",
         "held-records",
         "host-values",
+        "math-library",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -437,6 +511,7 @@
         "held-records",
         "host-values",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "occurrences",
         "parameter-defaults",
@@ -484,6 +559,7 @@
         "held-records",
         "host-values",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -509,6 +585,7 @@
         "held-records",
         "host-values",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -517,6 +594,9 @@
         "ranges",
         "records",
         "two-module"
+      ],
+      "standardMath": [
+        "math-library"
       ],
       "string": [
         "agent-library",
@@ -615,6 +695,7 @@
         "held-records",
         "host-values",
         "large-catalog",
+        "math-library",
         "occurrence-lifting",
         "occurrence-patterns",
         "occurrences",
@@ -674,6 +755,7 @@
     "held-records",
     "host-values",
     "large-catalog",
+    "math-library",
     "occurrence-lifting",
     "occurrence-patterns",
     "occurrences",

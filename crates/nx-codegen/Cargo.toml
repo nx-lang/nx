@@ -10,6 +10,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+nx-value.workspace = true
 nx-api = { path = "../nx-api" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 nx-hir = { path = "../nx-hir" }
@@ -24,5 +25,4 @@ smol_str = { workspace = true }
 [dev-dependencies]
 nx-ir-runtime = { path = "../nx-ir-runtime" }
 nx-syntax = { path = "../nx-syntax" }
-nx-value = { workspace = true }
 tempfile = "3"

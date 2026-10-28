@@ -123,13 +123,15 @@ pub(crate) fn item_signature(
     }
 }
 
-/// `let add(count:int): int`, or `let <Panel title:string />` for an element-style function.
-///
-/// <para>Nothing on the HIR item says which of the two it is: both lower to a `Function`, and a
-/// content parameter is optional in either. The kind is what the module projection already
-/// decided, from the `let <` the author wrote, and it is passed in rather than guessed again
-/// here.</para>
+/// A callable signature using its source declaration keyword and calling form.
+/// The projection's kind selects element versus parenthesized rendering; the HIR marker preserves
+/// `external` even for declarations with no registered runtime body.
 fn function_signature(function: &Function, kind: DocumentSymbolKind) -> String {
+    let keyword = if function.is_external {
+        "external"
+    } else {
+        "let"
+    };
     let return_type = function
         .return_type
         .as_ref()
@@ -138,7 +140,7 @@ fn function_signature(function: &Function, kind: DocumentSymbolKind) -> String {
 
     if kind == DocumentSymbolKind::Component {
         return format!(
-            "let {}{}",
+            "{keyword} {}{}",
             tag_signature(
                 function.name.as_str(),
                 function.params.iter().map(|param| (
@@ -164,7 +166,12 @@ fn function_signature(function: &Function, kind: DocumentSymbolKind) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("let {}({}){}", function.name.as_str(), params, return_type)
+    format!(
+        "{keyword} {}({}){}",
+        function.name.as_str(),
+        params,
+        return_type
+    )
 }
 
 /// `component <Panel title:string />`, with the modifiers the declaration carries.

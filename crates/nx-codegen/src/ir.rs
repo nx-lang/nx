@@ -330,6 +330,13 @@ fn module_fingerprint(program: &CodegenProgram, module: &CodegenModule) -> u64 {
 /// The features a runtime must support to run `module`.
 fn required_features(module: &CodegenModule) -> Vec<String> {
     let mut features: Vec<String> = Vec::new();
+    if module.declarations.iter().any(|d| {
+        declaration_contains(d, |e| {
+            matches!(e.kind, CodegenExpressionKind::StandardMath { .. })
+        })
+    }) {
+        features.push(nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1.to_string());
+    }
     if module.declarations.iter().any(|declaration| {
         matches!(
             &declaration.kind,
@@ -533,7 +540,8 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
                 visit_expression(&arg.value, visit);
             }
         }
-        CodegenExpressionKind::IntrinsicCall { args, .. } => visit_expressions(args, visit),
+        CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardMath { args, .. } => visit_expressions(args, visit),
         CodegenExpressionKind::If {
             condition,
             then_branch,
@@ -1000,7 +1008,18 @@ impl<'a> ModuleEmitter<'a> {
     }
 
     fn span(&self, span: TextSpan) -> [i64; 2] {
-        if self.span_module == self.module.id {
+        if self.span_module == self.module.id
+            && !(span.is_empty()
+                && nx_api::standard_library_for_module(&module_identity(self.module)).is_some_and(
+                    |library| {
+                        library.modules.iter().any(|module| {
+                            !module.runtime_functions.is_empty()
+                                && format!("{}/{}", library.root, module.identity)
+                                    == module_identity(self.module)
+                        })
+                    },
+                ))
+        {
             [u32::from(span.start()) as i64, u32::from(span.end()) as i64]
         } else {
             [-1, -1]
@@ -1324,6 +1343,14 @@ impl<'a> ModuleEmitter<'a> {
                 IrItem::list([
                     IrItem::Int(kinds::node::NAMED_CALL),
                     IrItem::Int(callee),
+                    args,
+                ])
+            }
+            CodegenExpressionKind::StandardMath { op, args } => {
+                let args = self.expressions(args);
+                IrItem::list([
+                    IrItem::Int(kinds::node::STANDARD_MATH),
+                    IrItem::Int(*op as i64),
                     args,
                 ])
             }

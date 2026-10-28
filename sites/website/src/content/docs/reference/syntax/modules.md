@@ -82,8 +82,8 @@ See [Ranges](/reference/syntax/types#ranges) for what `Range` means and
 [`for`](/reference/syntax/for#counting-with-a-range) for counting over one.
 
 ## Standard libraries
-A **standard library** is NX source the compiler carries, like the prelude, but in scope only where
-it is imported. It is named by the reserved root `@nx/<name>`:
+A **standard library** contains compiler-owned declarations, expressed in NX source or provided
+by the runtime, and is in scope only where it is imported. It is named by the reserved root `@nx/<name>`:
 
 ```nx
 import "@nx/agent"
@@ -107,6 +107,7 @@ let assistant = <Agent name="support">Be brief.</Agent>
 | Library | Stability | What it holds |
 | --- | --- | --- |
 | [`@nx/agent`](/reference/libraries/agent) | unstable | Types for declaring an AI agent, its documents and its tools |
+| [`@nx/math`](/reference/libraries/math) | unstable | Float64 mathematics, including trigonometry, distances, rounding and interpolation |
 | [`@nx/visualizer`](/reference/libraries/visualizer) | unstable | Records for `visualizer` declarations, which say how a viewer presents a declaration |
 
 An **unstable** library may change incompatibly in any NX release, including a patch release. A

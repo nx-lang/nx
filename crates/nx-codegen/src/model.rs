@@ -351,8 +351,12 @@ pub enum CodegenExpressionKind {
         callee: Box<CodegenExpression>,
         args: Vec<CodegenProperty>,
     },
-    /// A call to one of the update intrinsics, which has no callee declaration: the checker
-    /// resolved the name before any binding, and a runtime supplies the operation.
+    /// A trusted standard-library declaration's numerical body.
+    StandardMath {
+        op: nx_value::math::MathOp,
+        args: Vec<CodegenExpression>,
+    },
+    /// A reserved update intrinsic, resolved by the checker before any ordinary binding.
     IntrinsicCall {
         intrinsic: UpdateIntrinsic,
         args: Vec<CodegenExpression>,

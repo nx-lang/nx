@@ -1,0 +1,6 @@
+module main.nx fingerprint 10820066715230863280
+links @nx/math/math.nx version "87473e7ace259133" fingerprint 14154561969793253313
+entrypoints functions [root] components []
+
+function root(): float64 =
+  (@nx/math/math.nx:sqrt(9.0) add @nx/math/math.nx:round(-3.5))

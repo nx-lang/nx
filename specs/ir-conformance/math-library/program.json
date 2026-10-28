@@ -1,0 +1,5 @@
+{
+  "entry": "main.nx",
+  "emit": ["main.nx", "@nx/math/math.nx"],
+  "entrypoints": [{ "module": "main.nx", "function": "root" }]
+}

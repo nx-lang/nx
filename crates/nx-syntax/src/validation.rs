@@ -70,6 +70,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Validate component declarations that depend on modifier/body combinations.
     validate_component_definitions(&root, file_name, &mut diagnostics);
 
+    // Recognize invalid external shapes without losing the declarations after them.
+    validate_external_function_definitions(&root, file_name, &mut diagnostics);
+
     // Validate union declarations that depend on complete case metadata.
     validate_union_definitions(&root, file_name, &mut diagnostics);
 
@@ -1225,6 +1228,96 @@ fn validate_optional_property_defaults(
             )
             .build(),
     );
+}
+
+fn validate_external_function_definitions(
+    root: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for function in root.children().filter(|node| {
+        node.kind() == SyntaxKind::FUNCTION_DEFINITION && node.child_by_field("external").is_some()
+    }) {
+        let external = function.child_by_field("external").unwrap();
+        let unexpected_let = if external.raw().kind() == "invalid_external_let" {
+            let start = external.start_byte() + external.text().rfind("let").unwrap();
+            Some(TextSpan::new(
+                (start as u32).into(),
+                ((start + 3) as u32).into(),
+            ))
+        } else if !function.has_error() {
+            function
+                .child_by_field("name")
+                .filter(|name| {
+                    name.text() == "let"
+                        && !function
+                            .children_with_tokens()
+                            .any(|child| child.text() == "(")
+                })
+                .filter(|name| {
+                    let gap = &function.text()[external.end_byte() - function.start_byte()
+                        ..name.start_byte() - function.start_byte()];
+                    !gap.contains(['\n', '\r'])
+                })
+                .map(|name| name.span())
+        } else {
+            None
+        };
+        if let Some(unexpected_let) = unexpected_let {
+            diagnostics.push(
+                Diagnostic::error("invalid-external-function-definition")
+                    .with_message("External functions are declared without `let`")
+                    .with_label(
+                        Label::primary(file_name, unexpected_let)
+                            .with_message("remove `let`; write `external name(params):Result`"),
+                    )
+                    .build(),
+            );
+        }
+        if function.has_error() {
+            continue;
+        }
+        let has_parameters = function
+            .children_with_tokens()
+            .any(|child| matches!(child.text(), "(" | "<"));
+        if unexpected_let.is_some() && !has_parameters {
+            continue;
+        }
+        if !has_parameters {
+            diagnostics.push(
+                Diagnostic::error("invalid-external-function-definition")
+                    .with_message("External declarations must be functions")
+                    .with_label(Label::primary(file_name, function.span()).with_message(
+                        "add a function parameter list; external values are not supported",
+                    ))
+                    .build(),
+            );
+            continue;
+        }
+        if function.child_by_field("return_type").is_none() {
+            diagnostics.push(
+                Diagnostic::error("invalid-external-function-definition")
+                    .with_message("An external function requires a result type")
+                    .with_label(
+                        Label::primary(file_name, function.span())
+                            .with_message("add an explicit `: ResultType` after the parameters"),
+                    )
+                    .build(),
+            );
+        }
+        if let Some(body) = function.child_by_field("body") {
+            diagnostics.push(
+                Diagnostic::error("invalid-external-function-definition")
+                    .with_message("An external function cannot have a body")
+                    .with_label(
+                        Label::primary(file_name, body.span()).with_message(
+                            "remove the authored body; the trusted runtime supplies it",
+                        ),
+                    )
+                    .build(),
+            );
+        }
+    }
 }
 
 fn validate_component_definitions(

@@ -1,0 +1,75 @@
+module @nx/math/math.nx fingerprint 14154561969793253313
+requires standard-math-v1
+entrypoints functions [sin cos tan asin acos atan atan2 sqrt hypot abs sign min max clamp floor ceil round roundTiesToEven trunc degreesToRadians radiansToDegrees lerp] components []
+
+value pi: float64 =
+  3.141592653589793
+
+value tau: float64 =
+  6.283185307179586
+
+function sin(x: float64): float64 =
+  math.sin(x)
+
+function cos(x: float64): float64 =
+  math.cos(x)
+
+function tan(x: float64): float64 =
+  math.tan(x)
+
+function asin(x: float64): float64 =
+  math.asin(x)
+
+function acos(x: float64): float64 =
+  math.acos(x)
+
+function atan(x: float64): float64 =
+  math.atan(x)
+
+function atan2(y: float64, x: float64): float64 =
+  math.atan2(y, x)
+
+function sqrt(x: float64): float64 =
+  math.sqrt(x)
+
+function hypot(x: float64, y: float64): float64 =
+  math.hypot(x, y)
+
+function abs(x: float64): float64 =
+  math.abs(x)
+
+function sign(x: float64): float64 =
+  math.sign(x)
+
+function min(a: float64, b: float64): float64 =
+  math.min(a, b)
+
+function max(a: float64, b: float64): float64 =
+  math.max(a, b)
+
+function clamp(value: float64, min: float64, max: float64): float64 =
+  math.clamp(value, min, max)
+
+function floor(x: float64): float64 =
+  math.floor(x)
+
+function ceil(x: float64): float64 =
+  math.ceil(x)
+
+function round(x: float64): float64 =
+  math.round(x)
+
+function roundTiesToEven(x: float64): float64 =
+  math.roundTiesToEven(x)
+
+function trunc(x: float64): float64 =
+  math.trunc(x)
+
+function degreesToRadians(x: float64): float64 =
+  math.degreesToRadians(x)
+
+function radiansToDegrees(x: float64): float64 =
+  math.radiansToDegrees(x)
+
+function lerp(a: float64, b: float64, t: float64): float64 =
+  math.lerp(a, b, t)

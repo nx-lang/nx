@@ -24,10 +24,14 @@ workflows, implemented in C# and backed by the native Rust FFI library.
          │
          ↓
 ┌─────────────────┐
-│ NX Interpreter  │
+│ NX Runtime      │
 │    (Rust)       │
 └─────────────────┘
 ```
+
+Rust and TypeScript are the NX runtime implementations. This SDK calls Rust through the native
+library; it does not implement an independent C# evaluator. C# type generation is separate from
+NX execution and does not imply an executable C# backend.
 
 The managed binding validates the native ABI version at startup. Published package consumers get
 the native SDK library through normal .NET runtime asset restore, build, test, and publish behavior.

@@ -14,6 +14,8 @@ use crate::RuntimeModuleId;
 /// to aid in debugging and error reporting.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeErrorKind {
+    /// A strict standard-math validation failure.
+    Math(nx_value::math::MathError),
     /// Division by zero
     ///
     /// Triggered when attempting to divide or modulo by zero
@@ -130,6 +132,7 @@ pub enum RuntimeErrorKind {
 impl fmt::Display for RuntimeErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            RuntimeErrorKind::Math(error) => write!(f, "{}: {}", error.code, error.message),
             RuntimeErrorKind::DivisionByZero => write!(f, "Division by zero"),
             RuntimeErrorKind::TypeMismatch {
                 expected,

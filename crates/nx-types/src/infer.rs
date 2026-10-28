@@ -709,6 +709,13 @@ impl<'a> InferenceContext<'a> {
         let ty = match expr {
             // Literals have known types
             ast::Expr::Literal(lit) => self.infer_literal(lit),
+            ast::Expr::StandardMath { op, args } => {
+                debug_assert_eq!(op.arity(), args.len());
+                for arg in args {
+                    self.infer_expr(*arg);
+                }
+                Type::float64()
+            }
 
             // A bare name has no context-free type. It carries its own name forward as a pending
             // marker and is resolved at the binding site, which is the only place that knows the
@@ -8726,6 +8733,7 @@ mod tests {
             name: Name::new("declared"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![],
             return_type: Some(TypeRef::name("float64")),
             body: converted_body,
@@ -8736,6 +8744,7 @@ mod tests {
             name: Name::new("inferred"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![],
             return_type: None,
             body: untouched_body,
@@ -8775,6 +8784,7 @@ mod tests {
             name: Name::new("Button"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![param],
             return_type: None,
             body,
@@ -8809,6 +8819,7 @@ mod tests {
             name: Name::new("identity"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: None,
             body,
@@ -8861,6 +8872,7 @@ mod tests {
             name: Name::new("add"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![
                 Param::new(Name::new("a"), TypeRef::name("int"), span),
                 Param::new(Name::new("b"), TypeRef::name("int"), span),
@@ -8885,6 +8897,7 @@ mod tests {
             name: Name::new("double"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: double_body,
@@ -8912,6 +8925,7 @@ mod tests {
             name: Name::new("compute"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![Param::new(Name::new("n"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: compute_body,
@@ -9112,6 +9126,7 @@ mod tests {
             name: Name::new("north"),
             visibility: nx_hir::Visibility::Export,
             form: nx_hir::FunctionForm::Paren,
+            is_external: false,
             params: vec![],
             return_type: None,
             body: member,

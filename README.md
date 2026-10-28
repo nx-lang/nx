@@ -158,6 +158,12 @@ structured metadata, including the logical module name, runtime import specifier
 `NX_JS_RUNTIME_ABI`, program fingerprint, exported function entrypoints, and component/schema
 exports:
 
+Deploy program modules with the JavaScript runtime helper emitted by the same compiler release
+(`nx_codegen::javascript_runtime_helper_source`). Upgrade them together: `NX_JS_RUNTIME_ABI`
+identifies the calling contract, not the set of helper exports available in every older runtime.
+For example, generated math calls require the `nxStandardMath` export, which older runtime helper
+bundles do not provide. The `files` layout includes its matching helper automatically.
+
 ```rust
 let options = nx_codegen::JsProgramModuleOptions {
     logical_module_name: "app/main".to_string(),

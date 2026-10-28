@@ -43,6 +43,7 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
     "export",
     "private",
     "abstract",
+    "external",
     "type",
     "action",
     "component",
@@ -748,6 +749,33 @@ impl WorkspaceSnapshot {
         let ty = analysis.type_env().get_expr_type(id)?;
         if is_unresolved_type(ty) {
             return None;
+        }
+
+        // A module-qualified binding has no inferred runtime receiver type. Follow the
+        // compiler's qualified binding here; inferred receiver members use property hover below.
+        let mut path = Vec::new();
+        let mut root = id;
+        while let nx_hir::ast::Expr::Member { base, member, .. } =
+            analysis.lowered_module().expr(root)
+        {
+            path.push(member.as_str());
+            root = *base;
+        }
+        if let nx_hir::ast::Expr::Ident(name) = analysis.lowered_module().expr(root) {
+            if !analysis.is_local_reference(root)
+                && analysis.type_env().get_expr_type(root).is_none()
+            {
+                path.push(name.as_str());
+                path.reverse();
+                if let Some(declaration) = scope.visible.get(&path.join(".")) {
+                    if matches!(
+                        scope.item(declaration),
+                        Some(Item::Function(_) | Item::Value(_))
+                    ) {
+                        return self.declaration_hover(scope, declaration);
+                    }
+                }
+            }
         }
 
         // `Role.admin` reaches this as a member access, but it names a case rather than a
@@ -2493,15 +2521,32 @@ fn declaration_from_item(
                     DocumentSymbolKind::Function
                 },
                 detail: if is_markup_function {
-                    markup_signature(
-                        function.name.as_str(),
-                        function
-                            .params
-                            .iter()
-                            .map(|param| (param.name.as_str(), param.optional, &param.ty)),
+                    format!(
+                        "{}{}",
+                        if function.is_external {
+                            "external "
+                        } else {
+                            ""
+                        },
+                        markup_signature(
+                            function.name.as_str(),
+                            function.params.iter().map(|param| (
+                                param.name.as_str(),
+                                param.optional,
+                                &param.ty
+                            )),
+                        )
                     )
                 } else {
-                    format!("function {}", function_signature(function))
+                    format!(
+                        "{} {}",
+                        if function.is_external {
+                            "external"
+                        } else {
+                            "function"
+                        },
+                        function_signature(function)
+                    )
                 },
                 properties: if is_markup_function {
                     function
@@ -6060,6 +6105,152 @@ component <SearchBox placeholder:string /> = {
             .completions(&DocumentUri::from(AGENT_URI), position)
             .expect("completions")
             .items
+    }
+
+    #[test]
+    fn standard_math_source_docs_reach_hover_and_completions() {
+        for (source, text) in [
+            (
+                "import \"@nx/math\" as math\nlet root() = { math.si⟨cursor⟩n(0.0) }\n",
+                "measured in radians",
+            ),
+            (
+                "import { atan2 } from \"@nx/math\"\nlet root() = { ata⟨cursor⟩n2(0.0, 1.0) }\n",
+                "Arguments are ordered y, x",
+            ),
+            (
+                "import \"@nx/math\"\nlet root() = { ro⟨cursor⟩und(-3.5) }\n",
+                "ties toward positive infinity",
+            ),
+            (
+                "import \"@nx/math\"\nlet root() = { p⟨cursor⟩i }\n",
+                "half a turn in radians",
+            ),
+            (
+                "import \"@nx/math\"\nlet root() = { ta⟨cursor⟩u }\n",
+                "a full turn in radians",
+            ),
+        ] {
+            let hover = hover_at(source).expect("documented math hover");
+            assert!(hover.contents.contains(text), "{}", hover.contents);
+        }
+        let (source, position) =
+            position_for("import \"@nx/math\"\nlet root() = { s⟨cursor⟩ }\n", CURSOR);
+        let uri = "file:///math-docs.nx";
+        let snapshot = snapshot_for(uri, &source, 1);
+        let completions = snapshot
+            .completions(&DocumentUri::from(uri), position)
+            .unwrap();
+        for (name, text) in [
+            ("sin", "measured in radians"),
+            ("atan2", "Arguments are ordered y, x"),
+            ("round", "ties toward positive infinity"),
+            ("pi", "half a turn"),
+            ("tau", "a full turn"),
+        ] {
+            let item = completions
+                .items
+                .iter()
+                .find(|item| item.label == name)
+                .expect(name);
+            assert!(
+                item.documentation
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains(text),
+                "{item:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn standard_math_aliased_completion_keeps_source_documentation() {
+        let (source, position) = position_for(
+            "import \"@nx/math\" as math\nlet root() = { math.si⟨cursor⟩ }\n",
+            CURSOR,
+        );
+        let uri = "file:///aliased-math-docs.nx";
+        let snapshot = snapshot_for(uri, &source, 1);
+        let completions = snapshot
+            .completions(&DocumentUri::from(uri), position)
+            .unwrap();
+        let item = completions
+            .items
+            .iter()
+            .find(|item| item.label == "math.sin")
+            .expect("aliased sin");
+        assert!(item
+            .documentation
+            .as_deref()
+            .unwrap_or_default()
+            .contains("measured in radians"));
+    }
+
+    #[test]
+    fn incomplete_external_syntax_has_no_misleading_runtime_or_body_diagnostics() {
+        let uri = "file:///typing-external.nx";
+        for head in ["external cos(", "external ", "export external cos(x:"] {
+            let source = format!("{head}\nlet other() = {{ 1 }}\nlet root() = {{ other() }}\n");
+            let snapshot = snapshot_for(uri, &source, 1);
+            let documents = snapshot.diagnostics().unwrap();
+            assert!(documents
+                .iter()
+                .any(|document| !document.diagnostics.is_empty()));
+            for diagnostic in documents.iter().flat_map(|document| &document.diagnostics) {
+                assert!(
+                    !diagnostic.message.contains("runtime implementation"),
+                    "{diagnostic:?}"
+                );
+                assert!(
+                    !diagnostic.message.contains("cannot have a body"),
+                    "{diagnostic:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn external_function_hover_and_completion_use_the_source_keyword() {
+        for (source, expected) in [
+            (
+                "import \"@nx/math\"\nlet root() = { si⟨cursor⟩n(0.0) }",
+                "external sin(",
+            ),
+            ("external co⟨cursor⟩s(x:float64):float64", "external cos("),
+            (
+                "external <Co⟨cursor⟩s x:float64 />:float64",
+                "external <Cos",
+            ),
+            ("let co⟨cursor⟩s(x:float64):float64 = x", "let cos("),
+        ] {
+            let hover = hover_at(source).expect("function hover");
+            assert!(hover.contents.contains(expected), "{}", hover.contents);
+        }
+        let (source, position) =
+            position_for("import \"@nx/math\"\nlet root() = { si⟨cursor⟩ }", CURSOR);
+        let uri = "file:///external-keyword.nx";
+        let snapshot = snapshot_for(uri, &source, 1);
+        let items = snapshot
+            .completions(&DocumentUri::from(uri), position)
+            .unwrap()
+            .items;
+        assert!(items
+            .iter()
+            .find(|item| item.label == "sin")
+            .unwrap()
+            .detail
+            .as_deref()
+            .unwrap()
+            .starts_with("external "));
+    }
+
+    #[test]
+    fn hover_describes_standard_math_signature() {
+        let hover = hover_at("import \"@nx/math\"\nlet root() = { si⟨cursor⟩n(0.0) }\n")
+            .expect("math hover");
+        assert!(hover.contents.contains("sin"), "{}", hover.contents);
+        assert!(hover.contents.contains("float64"), "{}", hover.contents);
+        assert!(hover.contents.contains("@nx/math"), "{}", hover.contents);
     }
 
     #[test]

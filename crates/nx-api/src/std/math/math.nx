@@ -1,0 +1,103 @@
+// NX math standard library. Unstable: declarations may change incompatibly in any NX release.
+// All functions require finite float64 arguments and diagnose invalid domains or result overflow.
+
+/// The nearest float64 value of pi: half a turn in radians.
+export let pi:float64 = 3.141592653589793
+
+/// The nearest float64 value of two times pi: a full turn in radians.
+export let tau:float64 = 6.283185307179586
+
+/// Returns the sine of x, measured in radians. Preserves negative zero.
+/// Rejects non-finite inputs.
+export external sin(x:float64):float64
+
+/// Returns the cosine of x, measured in radians. Either signed zero returns 1.
+/// Rejects non-finite inputs.
+export external cos(x:float64):float64
+
+/// Returns the tangent of x, measured in radians. Preserves negative zero.
+/// Rejects non-finite inputs or results. A floating approximation of pi/2 is not an exact pole.
+export external tan(x:float64):float64
+
+/// Returns the inverse sine of x in radians, between -pi/2 and pi/2.
+/// Requires finite x in [-1, 1] and preserves negative zero.
+export external asin(x:float64):float64
+
+/// Returns the inverse cosine of x in radians, between 0 and pi.
+/// Requires finite x in [-1, 1]. At x = 1 the result is positive zero.
+export external acos(x:float64):float64
+
+/// Returns the inverse tangent of finite x in radians, between -pi/2 and pi/2.
+/// Preserves negative zero.
+export external atan(x:float64):float64
+
+/// Returns the direction of (x, y) in radians, between -pi and pi.
+/// Arguments are ordered y, x. Both must be finite; both-zero coordinates follow signed-zero quadrants.
+export external atan2(
+    /// The vertical coordinate.
+    y:float64,
+    /// The horizontal coordinate.
+    x:float64
+):float64
+
+/// Returns the square root of x. Requires finite x >= 0 and preserves negative zero.
+export external sqrt(x:float64):float64
+
+/// Returns sqrt(x*x + y*y) without avoidable intermediate squaring overflow.
+/// Both arguments must be finite; an unrepresentable result is an overflow error.
+/// Zero inputs return positive zero.
+export external hypot(x:float64, y:float64):float64
+
+/// Returns the magnitude of finite x. Negative zero becomes positive zero.
+export external abs(x:float64):float64
+
+/// Returns -1 for negative x and 1 for positive x, preserving either signed zero.
+/// Rejects non-finite inputs.
+export external sign(x:float64):float64
+
+/// Returns the smaller of two finite values. Comparing signed zeros prefers negative zero.
+export external min(a:float64, b:float64):float64
+
+/// Returns the larger of two finite values. Comparing signed zeros prefers positive zero.
+export external max(a:float64, b:float64):float64
+
+/// Restricts value to the inclusive interval `[min, max]` using `min(max(value, min), max)`.
+/// The min and max functions determine the signed-zero preferences.
+/// All arguments must be finite. Reversed bounds are a domain error; equal bounds are allowed.
+export external clamp(value:float64, min:float64, max:float64):float64
+
+/// Returns the greatest integral float64 less than or equal to finite x.
+/// Preserves negative zero.
+export external floor(x:float64):float64
+
+/// Returns the least integral float64 greater than or equal to finite x.
+/// Preserves negative zero, including when rounding a negative fraction to zero.
+export external ceil(x:float64):float64
+
+/// Returns the nearest integral float64, with ties toward positive infinity, like JavaScript Math.round.
+/// For example, round(-3.5) returns -3.0 and round(-0.5) returns negative zero.
+/// Requires finite x. See [roundTiesToEven] for ties-to-even rounding.
+export external round(x:float64):float64
+
+/// Returns the nearest integral float64, with halfway values rounded to the even integer.
+/// For example, 2.5 returns 2.0 and 3.5 returns 4.0. Preserves negative zero.
+/// Requires finite x. See [round] for JavaScript-compatible rounding.
+export external roundTiesToEven(x:float64):float64
+
+/// Removes the fractional part of finite x, rounding toward zero.
+/// Preserves negative zero, including when a negative fraction becomes zero.
+export external trunc(x:float64):float64
+
+/// Converts finite degrees to radians, preserving either signed zero.
+/// See [radiansToDegrees] for the reverse conversion.
+export external degreesToRadians(x:float64):float64
+
+/// Converts finite radians to degrees, preserving either signed zero.
+/// An unrepresentable result is an overflow error. See [degreesToRadians] for the reverse conversion.
+export external radiansToDegrees(x:float64):float64
+
+/// Interpolates from a to b by t, without clamping t; values outside [0, 1] extrapolate.
+/// Returns a exactly at t = 0 and b exactly at t = 1, including their zero signs.
+/// Equal endpoints otherwise return a. Avoids intermediate overflow for finite representable results.
+/// All arguments must be finite; an unrepresentable final result is an overflow error.
+export external lerp(a:float64, b:float64, t:float64):float64

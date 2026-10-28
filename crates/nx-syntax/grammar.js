@@ -323,31 +323,43 @@ module.exports = grammar({
     // ===== Function Definitions =====
     function_definition: $ => seq(
       optional(field('visibility', $.visibility_modifier)),
-      'let',
       choice(
         seq(
-          '<',
-          field('name', $.element_name),
-          repeat($.property_definition),
-          '/',
-          '>'
+          field('external', choice('external', $.invalid_external_let)),
+          choice($._function_signature, field('name', $.identifier)),
+          optional(seq(':', field('return_type', $.type))),
+          optional(seq('=', field('body', $.rhs_expression))),
         ),
         seq(
-          field('name', $.identifier),
-          '(',
-          optional(seq(
-            $.property_definition,
-            repeat(seq(',', $.property_definition)),
-          )),
-          ')',
+          'let',
+          $._function_signature,
+          optional(seq(':', field('return_type', $.type))),
+          '=',
+          field('body', $.rhs_expression),
         ),
       ),
-      optional(seq(
-        ':',
-        field('return_type', $.type),
-      )),
-      '=',
-      field('body', $.rhs_expression),
+    ),
+
+    // Recovery only: horizontal gaps keep a following line's `let` declaration separate.
+    invalid_external_let: _ => token(seq('external', /[ \t]+/, 'let', /[ \t]+/)),
+
+    _function_signature: $ => choice(
+      seq(
+        '<',
+        field('name', $.element_name),
+        repeat($.property_definition),
+        '/',
+        '>',
+      ),
+      seq(
+        field('name', $.identifier),
+        '(',
+        optional(seq(
+          $.property_definition,
+          repeat(seq(',', $.property_definition)),
+        )),
+        ')',
+      ),
     ),
 
     component_definition: $ => seq(

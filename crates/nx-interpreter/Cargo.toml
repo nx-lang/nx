@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+nx-value.workspace = true
 nx-hir = { path = "../nx-hir" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 nx-types = { path = "../nx-types" }

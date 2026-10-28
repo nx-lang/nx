@@ -28,9 +28,12 @@ pub enum EvalResult {
 }
 
 pub(crate) fn runtime_error_diagnostics(source: &str, error: RuntimeError) -> Vec<NxDiagnostic> {
-    let diag = Diagnostic::error("runtime-error")
-        .with_message(error.to_string())
-        .build();
+    let diag = Diagnostic::error(match error.kind() {
+        nx_interpreter::RuntimeErrorKind::Math(error) => error.code,
+        _ => "runtime-error",
+    })
+    .with_message(error.to_string())
+    .build();
     diagnostics_to_api(&[diag], source)
 }
 
@@ -205,7 +208,11 @@ fn located_runtime_error_diagnostics(
     entry_module_id: RuntimeModuleId,
     error: RuntimeError,
 ) -> Vec<NxDiagnostic> {
-    let mut diag = Diagnostic::error("runtime-error").with_message(error.to_string());
+    let mut diag = Diagnostic::error(match error.kind() {
+        nx_interpreter::RuntimeErrorKind::Math(error) => error.code,
+        _ => "runtime-error",
+    })
+    .with_message(error.to_string());
     if let Some(location) = error.site_in(entry_module_id) {
         diag = diag.with_label(Label::primary(file_name, location));
     }

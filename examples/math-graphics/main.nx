@@ -1,0 +1,32 @@
+// Standalone geometry data: no graphics renderer, UI library or Skia dependency.
+import "@nx/math" as math
+
+type Point = { x:float64 y:float64 }
+type Geometry = { polygon:Point+ star:Point+ arrow:Point+ }
+
+let polar(radius:float64, degrees:float64):Point =
+  <Point x={radius * math.cos(math.degreesToRadians(degrees))}
+         y={radius * math.sin(math.degreesToRadians(degrees))}/>
+
+// Equilateral triangle, with zero degrees on +x and positive angles toward +y.
+let polygon:Point+ = {
+  <polar radius=10.0 degrees=0.0/>
+  <polar radius=10.0 degrees=120.0/>
+  <polar radius=10.0 degrees=240.0/>
+}
+let star:Point+ = {
+  <polar radius=10.0 degrees=0.0/> <polar radius=5.0 degrees=60.0/>
+  <polar radius=10.0 degrees=120.0/> <polar radius=5.0 degrees=180.0/>
+  <polar radius=10.0 degrees=240.0/> <polar radius=5.0 degrees=300.0/>
+}
+// Arrow from the origin toward (3,4), with a two-unit head and one-unit half-width.
+let length:float64 = { math.hypot(3.0, 4.0) }
+let ux:float64 = { 3.0 / length }
+let uy:float64 = { 4.0 / length }
+let arrow:Point+ = {
+  <Point x=0.0 y=0.0/> <Point x=3.0 y=4.0/>
+  <Point x={3.0 - 2.0 * ux - uy} y={4.0 - 2.0 * uy + ux}/>
+  <Point x=3.0 y=4.0/>
+  <Point x={3.0 - 2.0 * ux + uy} y={4.0 - 2.0 * uy - ux}/>
+}
+let root():Geometry = <Geometry polygon={polygon} star={star} arrow={arrow}/>

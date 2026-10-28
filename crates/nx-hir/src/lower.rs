@@ -194,6 +194,9 @@ pub struct LoweringContext {
     rejected_type_parameters: RefCell<Vec<Name>>,
     /// The doc comments of the file, keyed by the start of the node each documents.
     docs: nx_syntax::DocComments,
+    /// Closed implementations supplied only by the compiler-owned module registry.
+    runtime_functions: Vec<nx_value::math::MathOp>,
+    bound_runtime_functions: Vec<nx_value::math::MathOp>,
 }
 
 impl LoweringContext {
@@ -217,6 +220,8 @@ impl LoweringContext {
             type_name_spans: RefCell::new(Vec::new()),
             rejected_type_parameters: RefCell::new(Vec::new()),
             docs: nx_syntax::DocComments::default(),
+            runtime_functions: Vec::new(),
+            bound_runtime_functions: Vec::new(),
         }
     }
 
@@ -2573,14 +2578,6 @@ impl LoweringContext {
             self.lower_type(n)
         });
 
-        // Lower the body expression
-        let body = node
-            .child_by_field("body")
-            .map(|n| self.lower_expr(n))
-            .unwrap_or_else(|| self.error_expr(span));
-
-        self.pop_scope();
-
         let form = if node
             .child_by_field("name")
             .is_some_and(|name| name.kind() == SyntaxKind::IDENTIFIER)
@@ -2590,16 +2587,135 @@ impl LoweringContext {
             FunctionForm::Element
         };
 
+        let body = if node.child_by_field("external").is_some() {
+            self.lower_external_function_body(
+                &name,
+                &params,
+                return_type.as_ref(),
+                form,
+                Self::lower_visibility(node),
+                span,
+            )
+        } else {
+            node.child_by_field("body")
+                .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(span))
+        };
+        self.pop_scope();
+
         Function {
             name,
             visibility: Self::lower_visibility(node),
             form,
+            is_external: node.child_by_field("external").is_some(),
             params,
             return_type,
             body,
             doc: self.doc_for(node),
             span,
         }
+    }
+
+    fn lower_external_function_body(
+        &mut self,
+        name: &Name,
+        params: &[Param],
+        return_type: Option<&TypeRef>,
+        form: FunctionForm,
+        visibility: Visibility,
+        span: TextSpan,
+    ) -> ExprId {
+        let Some(op) = self
+            .runtime_functions
+            .iter()
+            .copied()
+            .find(|op| op.name() == name.as_str())
+        else {
+            self.add_diagnostic(
+                format!(
+                    "No runtime implementation is registered for external function '{}'",
+                    name
+                ),
+                span,
+            );
+            return self.error_expr(span);
+        };
+        let float64 = TypeRef::Name(Name::new("float64"));
+        let mismatch = if form != FunctionForm::Paren {
+            Some(("calling form must use parentheses".to_string(), span))
+        } else if visibility != Visibility::Export {
+            Some(("visibility must be export".to_string(), span))
+        } else if return_type != Some(&float64) {
+            Some((
+                "result type must be float64".to_string(),
+                self.module.annotation_span(span).unwrap_or(span),
+            ))
+        } else if params.len() != op.arity() {
+            Some((
+                format!("expected {} parameters, found {}", op.arity(), params.len()),
+                span,
+            ))
+        } else {
+            params
+                .iter()
+                .zip(op.params())
+                .enumerate()
+                .find_map(|(index, (param, expected))| {
+                    let reason = if param.name.as_str() != *expected {
+                        format!("parameter {} must be named '{}'", index + 1, expected)
+                    } else if param.ty != float64 {
+                        format!("parameter '{}' must have type float64", expected)
+                    } else if param.optional {
+                        format!("parameter '{}' must be required", expected)
+                    } else if param.default.is_some() {
+                        format!("parameter '{}' cannot have a default", expected)
+                    } else if param.is_content {
+                        format!("parameter '{}' cannot be marked content", expected)
+                    } else {
+                        return None;
+                    };
+                    Some((reason, param.span))
+                })
+        };
+        if let Some((reason, location)) = mismatch {
+            let expected = format!(
+                "export external {}({}):float64",
+                op.name(),
+                op.params()
+                    .iter()
+                    .map(|name| format!("{name}:float64"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            self.add_diagnostic(
+                format!(
+                    "External function '{}': {reason}; expected `{expected}`",
+                    name
+                ),
+                location,
+            );
+            return self.error_expr(span);
+        }
+        if self.bound_runtime_functions.contains(&op) {
+            self.add_diagnostic(
+                format!(
+                    "External function '{}' has duplicate runtime declarations",
+                    name
+                ),
+                span,
+            );
+            return self.error_expr(span);
+        }
+        self.bound_runtime_functions.push(op);
+        let args = params
+            .iter()
+            .map(|param| {
+                let id = self.alloc_expr(Expr::Ident(param.name.clone()));
+                self.module.set_expr_span(id, TextSpan::default());
+                id
+            })
+            .collect();
+        self.alloc_expr(Expr::StandardMath { op, args })
     }
 
     /// Recursively extracts element body-content expressions from parsed content nodes.
@@ -3071,6 +3187,17 @@ impl LoweringContext {
                     }
                 }
                 SyntaxKind::FUNCTION_DEFINITION => {
+                    // Recovery may fold the next declaration into an unfinished external one.
+                    // Syntax diagnostics describe those nodes; do not invent runtime bindings
+                    // or zero-parameter functions for rejected external value shapes.
+                    if child.child_by_field("external").is_some()
+                        && (child.has_error()
+                            || !child
+                                .children_with_tokens()
+                                .any(|token| matches!(token.text(), "(" | "<")))
+                    {
+                        continue;
+                    }
                     let func = self.lower_function(child);
                     self.module.add_item(Item::Function(func));
                 }
@@ -3143,6 +3270,7 @@ impl LoweringContext {
                         name: Name::new("root"),
                         visibility: Visibility::Export,
                         form: FunctionForm::Paren,
+                        is_external: false,
                         params: vec![],
                         return_type: None,
                         body,
@@ -3172,9 +3300,40 @@ impl LoweringContext {
 
 /// Lower a CST root node to a HIR LoweredModule.
 pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
+    lower_with_runtime_functions(root, source_id, &[])
+}
+
+/// Lowers compiler-owned source with closed runtime implementations from its module registry.
+/// Every registered operation must have exactly one matching external source declaration.
+pub fn lower_with_runtime_functions(
+    root: SyntaxNode,
+    source_id: SourceId,
+    runtime_functions: &[nx_value::math::MathOp],
+) -> LoweredModule {
     let mut ctx = LoweringContext::new(source_id);
+    ctx.runtime_functions = runtime_functions.to_vec();
     ctx.docs = nx_syntax::doc_comments(&root);
     ctx.lower_module(root);
+    for op in runtime_functions {
+        if !ctx.bound_runtime_functions.contains(op) {
+            ctx.add_diagnostic(
+                format!(
+                    "Registered runtime function '{}' requires a matching external declaration",
+                    op.name()
+                ),
+                ctx.module
+                    .items()
+                    .iter()
+                    .find_map(|item| match item {
+                        Item::Function(function) if function.name.as_str() == op.name() => {
+                            Some(function.span)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| TextSpan::empty(root.span().start())),
+            );
+        }
+    }
     ctx.finish()
 }
 

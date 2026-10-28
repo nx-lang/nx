@@ -140,7 +140,7 @@ fn the_table_holds_the_agent_and_visualizer_libraries() {
         .iter()
         .map(|library| library.root)
         .collect::<Vec<_>>();
-    assert_eq!(roots, [AGENT_ROOT, "@nx/visualizer"]);
+    assert_eq!(roots, [AGENT_ROOT, "@nx/math", "@nx/visualizer"]);
 
     let agent = standard_library_entry(AGENT_ROOT).expect("the agent library");
     assert_eq!(agent.stability, StandardLibraryStability::Unstable);
@@ -630,10 +630,12 @@ static FIXTURE_MODULES: [StandardLibraryModule; 2] = [
     StandardLibraryModule {
         identity: "a.nx",
         source: "export type A = { id:string }\n",
+        runtime_functions: &[],
     },
     StandardLibraryModule {
         identity: "b.nx",
         source: "export type B = { a:A }\n",
+        runtime_functions: &[],
     },
 ];
 
@@ -641,10 +643,12 @@ static FIXTURE_MODULES_EDITED: [StandardLibraryModule; 2] = [
     StandardLibraryModule {
         identity: "a.nx",
         source: "// A comment.\nexport type A = { id:string }\n",
+        runtime_functions: &[],
     },
     StandardLibraryModule {
         identity: "b.nx",
         source: "export type B = { a:A }\n",
+        runtime_functions: &[],
     },
 ];
 
@@ -898,4 +902,189 @@ fn the_reference_page_quotes_the_library_and_the_worked_example_exactly() {
         Some(SUPPORT_AGENT),
         "update the worked example on the reference page"
     );
+}
+
+#[test]
+fn math_standard_library_signatures_identity_and_imports() {
+    let math = standard_library_entry("@nx/math").unwrap();
+    assert_eq!(math.stability, StandardLibraryStability::Unstable);
+    assert!(
+        math.artifact().diagnostics.is_empty(),
+        "{:?}",
+        math.artifact().diagnostics
+    );
+    assert!(Arc::ptr_eq(
+        math.artifact(),
+        standard_library("@nx/math").unwrap()
+    ));
+    let source = "import { sin, pi } from \"@nx/math\"\nlet root() = { sin(pi / 2.0) }";
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    match eval_program_artifact(&artifact) {
+        EvalResult::Ok(value) => assert_eq!(value, NxValue::Float(1.0)),
+        EvalResult::Err(e) => panic!("{e:?}"),
+    }
+    for op in nx_value::math::MathOp::ALL {
+        let schema = crate::program_artifact_function_schema(
+            &artifact,
+            &crate::DeclarationRef::in_module("@nx/math/math.nx", op.name()),
+            &crate::FunctionSchemaOptions::default(),
+        )
+        .unwrap();
+        let value = serde_json::to_value(schema.input_schema.unwrap()).unwrap();
+        for param in op.params() {
+            assert_eq!(value["properties"][param]["type"], "number");
+        }
+        assert_eq!(
+            serde_json::to_value(schema.output_schema.unwrap()).unwrap()["type"],
+            "number"
+        );
+        assert!(op.descriptor("@nx/math/math.nx").contains(op.name()));
+    }
+    let pi = math.artifact().exports.get("pi").unwrap();
+    assert_eq!(pi.module_file, "@nx/math/math.nx");
+    assert!(library_roots(&artifact).contains(&"@nx/math".to_string()));
+    let plain = build_program_artifact_from_source(
+        "let root() = { 1 }",
+        "main.nx",
+        &ProgramBuildContext::empty(),
+    )
+    .unwrap();
+    assert!(!library_roots(&plain).contains(&"@nx/math".to_string()));
+    assert!(!errors(
+        &[("main.nx", "let root() = { sin(1.0) }")],
+        &ProgramBuildContext::empty()
+    )
+    .is_empty());
+    // A host cannot supply any reserved root, including the trusted math identity.
+    assert!(LibraryRegistry::new()
+        .load_library_from_sources(&NxLibrarySource::new(
+            "@nx/math",
+            vec![NxLibraryModule::new(
+                "math.nx",
+                "export let sin(x:float64):float64 = { 0.0 }"
+            )]
+        ))
+        .is_err());
+}
+
+#[test]
+fn standard_library_runtime_descriptors_follow_module_registry_metadata() {
+    use nx_value::math::MathOp;
+    static WITH_RUNTIME: [StandardLibraryModule; 2] = [
+        StandardLibraryModule {
+            identity: "a.nx",
+            source: "export let zero:float64 = 0.0\nexport external cos(x:float64):float64\n",
+            runtime_functions: &[MathOp::Cos],
+        },
+        StandardLibraryModule {
+            identity: "b.nx",
+            source: "export let one:float64 = 1.0\n",
+            runtime_functions: &[],
+        },
+    ];
+    static SOURCE_ONLY: [StandardLibraryModule; 2] = [
+        StandardLibraryModule {
+            identity: "a.nx",
+            source: "export let zero:float64 = 0.0\nexport external cos(x:float64):float64\n",
+            runtime_functions: &[],
+        },
+        StandardLibraryModule {
+            identity: "b.nx",
+            source: "export let one:float64 = 1.0\n",
+            runtime_functions: &[],
+        },
+    ];
+    let library = fixture_library(&WITH_RUNTIME);
+    assert_ne!(library.version(), fixture_library(&SOURCE_ONLY).version());
+    assert_eq!(library.version(), fixture_library(&WITH_RUNTIME).version());
+    assert!(MathOp::Cos
+        .descriptor("@nx/fixture/a.nx")
+        .starts_with("@nx/fixture/a.nx::cos("));
+    let artifact = library.artifact();
+    assert!(artifact.exports.contains_key("cos"));
+    assert!(
+        artifact.diagnostics.is_empty(),
+        "{:?}",
+        artifact.diagnostics
+    );
+}
+
+#[test]
+fn unregistered_external_functions_fail_program_and_host_library_analysis() {
+    let source = "/// Authored declaration, without a trusted binding.\nexport external sin(x:float64):float64\n";
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    assert!(
+        format!("{:?}", artifact.diagnostics).contains("No runtime implementation is registered")
+    );
+    assert!(
+        LibraryRegistry::new()
+            .load_library_from_sources(&NxLibrarySource::new(
+                "libraries/external",
+                vec![NxLibraryModule::new("main.nx", source)]
+            ))
+            .is_err(),
+        "host libraries cannot register implementations"
+    );
+}
+
+#[test]
+fn standard_math_declarations_are_documented_nx_source() {
+    let library = standard_library_entry("@nx/math").unwrap();
+    let module = library.artifact().modules[0]
+        .lowered_module
+        .as_ref()
+        .unwrap();
+    let source = library.modules[0].source;
+    for op in nx_value::math::MathOp::ALL {
+        let function = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                nx_hir::Item::Function(function) if function.name.as_str() == op.name() => {
+                    Some(function)
+                }
+                _ => None,
+            })
+            .expect("every registered math function has an NX declaration");
+        assert!(!function
+            .doc
+            .as_ref()
+            .expect(op.name())
+            .text
+            .trim()
+            .is_empty());
+        assert!(source[usize::from(function.span.start())..].starts_with("export external"));
+        assert!(module.expr_span(function.body).is_empty());
+    }
+    for name in ["pi", "tau"] {
+        let value = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                nx_hir::Item::Value(value) if value.name.as_str() == name => Some(value),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!value.doc.as_ref().expect(name).text.trim().is_empty());
+    }
+}
+
+#[test]
+fn math_doc_links_target_public_functions_without_shadowed_parameter_links() {
+    let math = standard_library_entry("@nx/math").unwrap().artifact();
+    let module = &math.modules[0];
+    assert!(!module.doc_links.is_empty());
+    for link in &module.doc_links {
+        assert!(
+            link.target.member.is_none(),
+            "math links should target functions: {link:?}"
+        );
+        assert!(nx_value::math::MathOp::ALL
+            .iter()
+            .any(|op| op.name() == link.target.declaration.as_str()));
+    }
 }

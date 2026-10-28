@@ -556,6 +556,21 @@ impl<'p> Machine<'p> {
             Node::NamedCall { callee, args } => {
                 self.eval_named_call(cx, frame, index, *callee, args)
             }
+            Node::StandardMath { op, args } => {
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args {
+                    let value = self.eval(cx, frame, *arg)?;
+                    values.push(match value {
+                        Value::Float(x) => x,
+                        Value::Int(x) => x as f64,
+                        _ => return self.fail(cx, index, "nx-math-domain", "expected float64"),
+                    });
+                }
+                match nx_value::math::evaluate(*op, &values) {
+                    Ok(value) => Ok(Value::Float(value)),
+                    Err(error) => self.fail(cx, index, error.code, error.message),
+                }
+            }
             Node::Intrinsic {
                 intrinsic,
                 args,
@@ -1005,6 +1020,7 @@ impl<'p> Machine<'p> {
             cx.depth.saturating_add(1),
             Caller::Program,
         )
+        .map_err(|error| self.math_call_origin(cx, node, error))
     }
 
     /// A call of a function-typed value by name: the arguments are bound to that function's
@@ -1027,6 +1043,21 @@ impl<'p> Machine<'p> {
             cx.depth.saturating_add(1),
             Caller::Program,
         )
+        .map_err(|error| self.math_call_origin(cx, node, error))
+    }
+
+    fn math_call_origin(&self, cx: Cx, node: u32, mut error: NxIrRuntimeError) -> NxIrRuntimeError {
+        let source = self
+            .error(Some(cx), Some(node), "", "")
+            .diagnostics
+            .remove(0)
+            .source;
+        for diagnostic in &mut error.diagnostics {
+            if diagnostic.code.starts_with("nx-math-") && diagnostic.source.is_none() {
+                diagnostic.source = source.clone();
+            }
+        }
+        error
     }
 
     fn function(&self, module: u32, index: u32) -> Result<(&'p Arc<str>, &'p FunctionDecl)> {

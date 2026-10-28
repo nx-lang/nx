@@ -11,6 +11,7 @@
 import { NX_PRELUDE_VERSION } from "./prelude-image.js";
 export declare const NX_IR_SCHEMA_VERSION = 6;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
+export declare const NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1 = "standard-math-v1";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
@@ -102,6 +103,7 @@ export declare const nodeKinds: {
     readonly unary: 7;
     readonly call: 8;
     readonly intrinsic: 9;
+    readonly standardMath: 26;
     readonly if: 10;
     readonly ifIs: 11;
     readonly array: 12;

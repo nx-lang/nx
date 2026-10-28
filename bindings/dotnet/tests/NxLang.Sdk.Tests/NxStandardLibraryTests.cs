@@ -23,6 +23,20 @@ public class NxStandardLibraryTests
         """;
 
     [Fact]
+    public void EvaluateJson_MathUsesNativeRustImplementation()
+    {
+        const string source = """
+            import "@nx/math" as math
+            let root():float64 = { math.sin(math.pi / 2.0) + math.round(-3.5) }
+            """;
+        Assert.Equal(-2.0, NxRuntime.EvaluateJson(source, "main.nx").GetDouble());
+        using NxProgramArtifact artifact = NxProgramArtifact.Build(source, "main.nx");
+        IReadOnlyList<NxGeneratedNxIr> images = artifact.GenerateNxIr(new NxIrEmitOptions { Modules = [] });
+        Assert.Contains(images, image => image.Identity == "@nx/math/math.nx"
+            && image.Metadata.RequiredFeatures.Contains("standard-math-v1"));
+    }
+
+    [Fact]
     public void EvaluateJson_WithAnImportedStandardLibrary_ReturnsTheAgentRecord()
     {
         JsonElement agent = NxRuntime.EvaluateJson(AgentSource, "main.nx");

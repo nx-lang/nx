@@ -88,6 +88,9 @@ agent and its tools.
 
 If present, the final element is the module’s rendered output or default export, depending on the host runtime.
 
+NX's imported [`@nx/math` standard library](/reference/libraries/math) supplies trigonometry,
+distances, rounding, interpolation, angle conversions, and `pi`/`tau` constants.
+
 ## See also (Reference/Grammar)
 - Reference: [Modules](/reference/syntax/modules)
 - Reference: [The agent library](/reference/libraries/agent)

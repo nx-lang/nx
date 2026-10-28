@@ -12,6 +12,7 @@
   "state"
   "type"
   "abstract"
+  "external"
   "extends"
   "import"
   "from"

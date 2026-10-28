@@ -1,0 +1,75 @@
+module @nx/math/math.nx fingerprint 14154561969793253313
+requires standard-math-v1
+entrypoints functions [sin cos tan asin acos atan atan2 sqrt hypot abs sign min max clamp floor ceil round roundTiesToEven trunc degreesToRadians radiansToDegrees lerp] components []
+
+value pi: float64 @5:1-5:42 =
+  3.141592653589793
+
+value tau: float64 @8:1-8:43 =
+  6.283185307179586
+
+function sin(x: float64): float64 @12:1-12:39 =
+  math.sin(x)
+
+function cos(x: float64): float64 @16:1-16:39 =
+  math.cos(x)
+
+function tan(x: float64): float64 @20:1-20:39 =
+  math.tan(x)
+
+function asin(x: float64): float64 @24:1-24:40 =
+  math.asin(x)
+
+function acos(x: float64): float64 @28:1-28:40 =
+  math.acos(x)
+
+function atan(x: float64): float64 @32:1-32:40 =
+  math.atan(x)
+
+function atan2(y: float64, x: float64): float64 @36:1-41:10 =
+  math.atan2(y, x)
+
+function sqrt(x: float64): float64 @44:1-44:40 =
+  math.sqrt(x)
+
+function hypot(x: float64, y: float64): float64 @49:1-49:52 =
+  math.hypot(x, y)
+
+function abs(x: float64): float64 @52:1-52:39 =
+  math.abs(x)
+
+function sign(x: float64): float64 @56:1-56:40 =
+  math.sign(x)
+
+function min(a: float64, b: float64): float64 @59:1-59:50 =
+  math.min(a, b)
+
+function max(a: float64, b: float64): float64 @62:1-62:50 =
+  math.max(a, b)
+
+function clamp(value: float64, min: float64, max: float64): float64 @67:1-67:71 =
+  math.clamp(value, min, max)
+
+function floor(x: float64): float64 @71:1-71:41 =
+  math.floor(x)
+
+function ceil(x: float64): float64 @75:1-75:40 =
+  math.ceil(x)
+
+function round(x: float64): float64 @80:1-80:41 =
+  math.round(x)
+
+function roundTiesToEven(x: float64): float64 @85:1-85:51 =
+  math.roundTiesToEven(x)
+
+function trunc(x: float64): float64 @89:1-89:41 =
+  math.trunc(x)
+
+function degreesToRadians(x: float64): float64 @93:1-93:52 =
+  math.degreesToRadians(x)
+
+function radiansToDegrees(x: float64): float64 @97:1-97:52 =
+  math.radiansToDegrees(x)
+
+function lerp(a: float64, b: float64, t: float64): float64 @103:1-103:62 =
+  math.lerp(a, b, t)

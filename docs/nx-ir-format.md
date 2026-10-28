@@ -153,6 +153,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 23 | exists | `[23, node]` | `x?`: `true` when the operand holds at least one item, `false` when it is the empty value. Requires `occurrence-v1`. |
 | 24 | optionalMember | `[24, node, str]` | `x?.m`: the named member of the base when the base holds a value, and the empty value when the base is empty. Requires `occurrence-v1`. |
 | 25 | coalesce | `[25, node, node]` | `x ?? y`: the left operand when it holds at least one item, otherwise the right, which is evaluated only when the left is empty. Requires `occurrence-v1`. |
+| 26 | standardMath | `[26, operation, [node...]]` | A closed numerical body in a compiler-owned standard function. Requires `standard-math-v1`; see [Standard math bodies](#standard-math-bodies-standard-math-v1) for operation IDs and arities. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
@@ -510,7 +511,8 @@ function reference type (kind `6`) lists `function-reference-type-v1`, so that a
 predates the kind refuses the module by name rather than as malformed, and lists
 `function-values-v1` too only on that feature's own terms; one that contains a `forRange`
 lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
-arm with the `{}` pattern, lists `occurrence-v1`. Constructing a range needs no feature: that is an
+arm with the `{}` pattern, lists `occurrence-v1`; one that contains a `standardMath` node lists
+`standard-math-v1`. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
 needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
 never tests, steps through or falls back from one lists nothing. A runtime that does not know a
@@ -1438,3 +1440,52 @@ and what becomes of what it returns, is the lifecycle a runtime implements (see 
 not a property of the node. Reducers sit in between. Functions, derived update records and the
 update intrinsics express what a reducer does, while no declaration says which function reduces
 which component, so a runtime that wants NX-owned reducers supplies that association itself.
+
+
+## Standard math bodies (`standard-math-v1`)
+
+Node kind **26**, `standardMath`, has the logical layout `[26, operation, [argumentNode...]]`.
+Its flat cells are `[26, operation, argumentCount, argumentNode...]`. Arguments name earlier nodes.
+A module containing this node must declare `standard-math-v1`; an importer retains ordinary
+call/reference encodings. The compiler emits these bodies only in its trusted `@nx/math/math.nx`
+declarations. Hosts supply that module image through ordinary linking. Format readers validate
+operation, exact arity, argument indices, and feature use before execution. Other layouts and schema
+6 are unchanged. Runtimes lacking the feature reject the dependency before evaluation.
+
+| Operation | Name | Arity |
+| --- | --- | --- |
+| 0 | `sin` | 1 |
+| 1 | `cos` | 1 |
+| 2 | `tan` | 1 |
+| 3 | `asin` | 1 |
+| 4 | `acos` | 1 |
+| 5 | `atan` | 1 |
+| 6 | `atan2` | 2 |
+| 7 | `sqrt` | 1 |
+| 8 | `hypot` | 2 |
+| 9 | `abs` | 1 |
+| 10 | `sign` | 1 |
+| 11 | `min` | 2 |
+| 12 | `max` | 2 |
+| 13 | `clamp` | 3 |
+| 14 | `floor` | 1 |
+| 15 | `ceil` | 1 |
+| 16 | `round` | 1 |
+| 17 | `roundTiesToEven` | 1 |
+| 18 | `trunc` | 1 |
+| 19 | `degreesToRadians` | 1 |
+| 20 | `radiansToDegrees` | 1 |
+| 21 | `lerp` | 3 |
+
+Each body node costs one operation in addition to its ordinary argument and function-call costs.
+Evaluation uses float64 arguments/results and diagnoses non-finite inputs, invalid domains and
+non-finite results as `nx-math-non-finite-input`, `nx-math-domain`, and `nx-math-overflow`.
+`round` uses nearest with ties toward positive infinity; `roundTiesToEven` is explicit nearest-even.
+Operation-specific signed zeros are preserved. External declarations retain their NX source spans and documentation. Runtime-provided bodies
+and their synthetic argument reads have no fabricated source span; a failure uses the first available authored call span while retaining its math
+operation identity. The full numeric contract is in the math library reference.
+
+The math library's version extends the existing source hash with each ordered runtime descriptor:
+`@nx/math/math.nx::name(param:float64,...):float64=operation:v1`, encoded as UTF-8 followed by a zero
+byte. Source-only standard-library versions are unchanged. Parameter names/order, operation mapping,
+result type and semantic revision all participate in this deterministic version.

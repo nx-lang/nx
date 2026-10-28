@@ -32,6 +32,38 @@ let currentUser = <User name="Ada" email="ada@example.com" avatarUrl="/ada.png"/
 - An element-style function is called only as an element. `UserCard(currentUser)` is rejected: its
   attributes have no order a caller could rely on.
 
+## External functions
+
+An `external` declaration states a runtime-provided function's signature without an NX body.
+The visibility modifier comes first, and the result type is required:
+
+```nx fragment
+/// Returns the sine of x, measured in radians.
+/// Rejects non-finite inputs and preserves negative zero.
+export external sin(x:float64):float64
+```
+
+An external function is executable only when the compiler's trusted module registry supplies a
+matching implementation. Currently this is used by the built-in [`@nx/math`](/reference/libraries/math)
+library. Writing the same declaration in an application or a host-loaded library reports an
+unregistered-implementation diagnostic; it does not register a callback or an FFI binding.
+
+The compiler checks the registered parameter names, order, types, calling form and result type.
+Registered math parameters are required `float64` values without defaults or content modifiers.
+An external function cannot supply `= expression`; an ordinary function still requires its body.
+The element signature form is also valid syntax, such as `external <Name x:float64 />:float64`,
+but requires its own matching registered implementation.
+
+Put `///` documentation immediately before the declaration, and parameter documentation before
+its parameter in a multiline signature. These comments feed hover and declaration completions.
+Normal calls use the imported declaration:
+
+```nx
+import "@nx/math" as math
+
+let root():float64 = { math.sin(math.pi / 2.0) }
+```
+
 ## Advanced Parameters
 
 ```nx

@@ -25,6 +25,7 @@ Keywords
 - STATE ("state")
 - TYPE ("type")
 - ABSTRACT ("abstract")
+- EXTERNAL ("external")
 - EXTENDS ("extends")
 - LET ("let")
 - IF ("if"), ELSE ("else"), IS ("is")
@@ -366,10 +367,11 @@ UserDefinedType (AST: UserTypeSyntax)
 FunctionDefinition (AST: FunctionDefinitionSyntax is a sum type)
 - FunctionDefinition → ElementFunctionDefinition        (ElementFunctionDefinitionSyntax)
 - FunctionDefinition → ParenFunctionDefinition          (ParenFunctionDefinitionSyntax)
+- FunctionDefinition → ExternalFunctionDefinition       (ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax with isExternal)
 
 ComponentDefinition (AST: ComponentDefinitionSyntax)
-- ComponentDefinition → VisibilityModifier? COMPONENT ComponentSignature EQ ComponentBody
-  - fields: visibility?: "private"|"export", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+- ComponentDefinition → VisibilityModifier? ABSTRACT? EXTERNAL? COMPONENT ComponentSignature (EQ ComponentBody)?
+  - fields: visibility?: "private"|"export", isAbstract: boolean, isExternal: boolean, signature: ComponentSignatureSyntax, body?: ComponentBodySyntax
 
 ComponentSignature (AST: ComponentSignatureSyntax)
 - ComponentSignature → LT ElementName PropertyDefinition* EmitsGroupOpt SLASH GT
@@ -406,11 +408,22 @@ StateGroup (AST: StateGroupSyntax)
 
 ElementFunctionDefinition (AST: ElementFunctionDefinitionSyntax)
 - ElementFunctionDefinition → VisibilityModifier? LET LT ElementName PropertyDefinition* SLASH GT FunctionReturnTypeOpt EQ RhsExpression
-  - fields: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+  - fields: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, isExternal: boolean, body?: ExpressionSyntax
 
 ParenFunctionDefinition (AST: ParenFunctionDefinitionSyntax)
 - ParenFunctionDefinition → VisibilityModifier? LET IDENTIFIER LPAREN ParenParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
-  - fields: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+  - fields: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, isExternal: boolean, body?: ExpressionSyntax
+
+ExternalFunctionDefinition (AST: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax)
+- ExternalFunctionDefinition → VisibilityModifier? EXTERNAL FunctionSignature COLON Type
+  - fields: visibility?: "private"|"export", isExternal: true, name/elementName, parameters: PropertyDefinitionSyntax[], returnType: TypeSyntax, body: absent
+- FunctionSignature → IDENTIFIER LPAREN ParenParameterListOpt RPAREN
+- FunctionSignature → LT ElementName PropertyDefinition* SLASH GT
+  - A runtime binding is required. Return types are mandatory and authored bodies are invalid.
+  - For recovery the parser accepts missing return annotations and authored bodies, then syntax
+    validation diagnoses the external declaration without consuming subsequent declarations.
+  - An external value-shaped declaration is also retained for recovery, but validation rejects it:
+    external declarations must have an explicit function parameter list.
 
 ParenParameterListOpt
 - ParenParameterListOpt → ParenParameterList
@@ -814,9 +827,9 @@ This section lists the AST node types with fields for implementers.
 - FunctionTypeSyntax: params: FunctionTypeParamSyntax[], anyParams: boolean, result: TypeSyntax
 - FunctionTypeParamSyntax: name: string, type: TypeSyntax, isContent: boolean
 - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
-- ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
-- ParenFunctionDefinitionSyntax: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
-- ComponentDefinitionSyntax: visibility?: "private"|"export", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+- ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, isExternal: boolean, body?: ExpressionSyntax
+- ParenFunctionDefinitionSyntax: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, isExternal: boolean, body?: ExpressionSyntax
+- ComponentDefinitionSyntax: visibility?: "private"|"export", isAbstract: boolean, isExternal: boolean, signature: ComponentSignatureSyntax, body?: ComponentBodySyntax
 - PropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax | "type", default?: ExpressionSyntax
 - AppliedTypeSyntax: name: QualifiedNameSyntax, args: TypeArgumentSyntax[]
 - TypeArgumentSyntax: name: string, type: TypeSyntax

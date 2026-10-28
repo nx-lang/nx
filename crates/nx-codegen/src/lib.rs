@@ -60,3 +60,6 @@ mod ir_tests;
 mod prelude_image_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod math_tests;

@@ -510,3 +510,87 @@ describe('NX element-shaped declarations', function () {
     });
   });
 });
+
+describe('NX external function declarations', function () {
+  let grammar: IGrammar;
+  before(async function () { grammar = await loadGrammar(); });
+
+  it('scopes a bodyless parenthesized declaration and its following declaration', function () {
+    const result = tokenizeLines(grammar, [
+      'export external sin(x:float64):float64',
+      'let next(value:int):int = value'
+    ]);
+    expectScopes(scopesAtLine(result, 0, 'external'), 'external modifier').toInclude('storage.modifier.external.nx');
+    expectScopes(scopesAtLine(result, 0, 'sin'), 'function name').toInclude('entity.name.variable.nx');
+    expectScopes(scopesAtLine(result, 0, 'x', -1), 'parameter').toInclude('variable.other.property.nx');
+    expectScopes(scopesAtLine(result, 0, 'float64', -1), 'return type').toInclude('support.type.primitive.nx');
+    expectScopes(scopesAtLine(result, 1, 'next'), 'next declaration').toInclude('entity.name.variable.nx');
+  });
+
+  it('scopes the element form and stops at the next declaration', function () {
+    const result = tokenizeLines(grammar, [
+      'external <Cos x:float64 />:float64',
+      'let next(value:int):int = value'
+    ]);
+    expectScopes(scopesAtLine(result, 0, 'external'), 'external modifier').toInclude('storage.modifier.external.nx');
+    expectScopes(scopesAtLine(result, 0, 'Cos'), 'function name').toInclude('entity.name.type.nx');
+    expectScopes(scopesAtLine(result, 0, 'x', -1), 'parameter').toInclude('variable.other.property.nx');
+    expectScopes(scopesAtLine(result, 0, 'float64', -1), 'return type').toInclude('support.type.primitive.nx');
+    expectScopes(scopesAtLine(result, 1, 'next'), 'next declaration').toInclude('entity.name.variable.nx');
+  });
+
+  it('keeps digits in function names and documentation in multiline signatures', function () {
+    const result = tokenizeLines(grammar, [
+      'export external atan2(',
+      '  /// Vertical coordinate.',
+      '  y:float64,',
+      '  /// Horizontal coordinate.',
+      '  x:float64',
+      '):float64',
+      'let next(value:int):int = value'
+    ]);
+    expectScopes(scopesAtLine(result, 0, 'atan2'), 'whole function name').toInclude('entity.name.variable.nx');
+    expect(tokenTextAt(result, 'atan2', 'atan2')).to.equal('atan2');
+    expectScopes(scopesAtLine(result, 1, 'Vertical'), 'parameter documentation').toInclude('comment.line.documentation.nx');
+    expectScopes(scopesAtLine(result, 2, 'y'), 'first parameter').toInclude('variable.other.property.nx');
+    expectScopes(scopesAtLine(result, 4, 'x'), 'second parameter').toInclude('variable.other.property.nx');
+    expectScopes(scopesAtLine(result, 5, 'float64'), 'return type').toInclude('support.type.primitive.nx');
+    expectScopes(scopesAtLine(result, 6, 'next'), 'next declaration').toInclude('entity.name.variable.nx');
+  });
+});
+
+describe('external remains a contextual declaration keyword', function () {
+  let grammar: IGrammar;
+  before(async function () { grammar = await loadGrammar(); });
+
+  it('keeps optional external fields inside record and component signatures', function () {
+    for (const [start, end] of [['type Link = {', '}'], ['external component <Link', '/>']]) {
+      const result = tokenizeLines(grammar, [start, '  href:string', '  external?:boolean', '  label:string', end]);
+      expectScopes(scopesAtLine(result, 2, 'external'), 'optional external field').toInclude('variable.other.property.nx');
+      expectScopes(scopesAtLine(result, 3, 'label'), 'following field').toInclude('variable.other.property.nx');
+      if (end === '/>') {
+        expectScopes(scopesAtLine(result, 4, '/'), 'signature close').toInclude('punctuation.definition.tag.self-closing.nx');
+      } else {
+        expectScopes(scopesAtLine(result, 4, '}'), 'record close').toInclude('meta.definition.type.record.nx');
+      }
+    }
+  });
+
+  it('keeps a line-leading external identifier inside its function body', function () {
+    const result = tokenizeLines(grammar, ['let f(external:int):int = {', '  external', '}']);
+    expectScopes(scopesAtLine(result, 1, 'external'), 'body identifier').toInclude('meta.values-braced-expression.nx');
+    expectScopes(scopesAtLine(result, 2, '}'), 'body close').toInclude('meta.values-braced-expression.nx');
+  });
+
+  it('does not open a declaration on external prose', function () {
+    const result = tokenizeLines(grammar, ['<p:text>', 'external links open in a new tab', '</p>']);
+    expectScopes(scopesAtLine(result, 1, 'links'), 'prose').toNotInclude('meta.definition.value.nx');
+    expectScopes(scopesAtLine(result, 1, 'links'), 'prose word').toNotInclude('entity.name.variable.nx');
+  });
+
+  it('recovers at a real bare external declaration after an unterminated record', function () {
+    const result = tokenizeLines(grammar, ['type Broken = {', ' x:int', 'export external sin(x:float64):float64']);
+    expectScopes(scopesAtLine(result, 2, 'sin'), 'new external declaration').toInclude('entity.name.variable.nx');
+    expectScopes(scopesAtLine(result, 2, 'sin'), 'record ended').toNotInclude('meta.definition.type.record.nx');
+  });
+});

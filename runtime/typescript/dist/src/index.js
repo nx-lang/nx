@@ -11,6 +11,8 @@
 import { NX_PRELUDE_IMAGE_BASE64, NX_PRELUDE_VERSION } from "./prelude-image.js";
 export const NX_IR_SCHEMA_VERSION = 6;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
+import { nxStandardMath, nxStandardMathNames, nxStandardMathArities } from "./math.js";
+export const NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1 = "standard-math-v1";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
@@ -27,6 +29,7 @@ export const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
  */
 export const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
 const knownFeatures = new Set([
+    NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
@@ -448,6 +451,7 @@ export const nodeKinds = {
     unary: 7,
     call: 8,
     intrinsic: 9,
+    standardMath: 26,
     if: 10,
     ifIs: 11,
     array: 12,
@@ -784,6 +788,7 @@ const layouts = {
         ["node"],
         ["node", "str"],
         ["node", "node"],
+        ["standardMath", { list: NODES }],
     ],
     declarations: [
         ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
@@ -867,6 +872,13 @@ class TableReader {
         }
         if (table === "nodes") {
             this.#validateOccurrenceFeature(entry, kind, what);
+            if (kind === nodeKinds.standardMath) {
+                if (!this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1)) {
+                    this.#fail(`${what} requires standard-math-v1.`);
+                }
+                if (entry[2] !== nxStandardMathArities[entry[1]])
+                    this.#fail(`${what} has wrong standard math arity.`);
+            }
         }
     }
     /**
@@ -932,6 +944,8 @@ class TableReader {
                 return binaryOperators[cell] !== undefined || this.#fail(`${what} uses unknown binary operator ${cell}.`);
             case "unary":
                 return unaryOperators[cell] !== undefined || this.#fail(`${what} uses unknown unary operator ${cell}.`);
+            case "standardMath":
+                return nxStandardMathNames[cell] !== undefined || this.#fail(`${what} uses unknown standard math operation ${cell}.`);
             case "intrinsic":
                 return intrinsicNames[cell] !== undefined || this.#fail(`${what} uses unknown intrinsic ${cell}.`);
             case "str":
@@ -2638,6 +2652,17 @@ function evalNodeKind(index, context) {
         // eslint-disable-next-line no-fallthrough
         case nodeKinds.call:
             return evalCall(context, index, entry);
+        case nodeKinds.standardMath: {
+            const { values } = nodesAt(context, entry, 2);
+            const args = values.map(value => checkedNumber(context, index, value, "standardMath"));
+            try {
+                return nxStandardMath(entry[1], args);
+            }
+            catch (error) {
+                const details = error;
+                fail(details.code, details.message, context, index);
+            }
+        }
         case nodeKinds.intrinsic:
             return evalIntrinsic(context, index, entry);
         case nodeKinds.if:
@@ -2847,7 +2872,12 @@ function evalCall(context, nodeIndex, entry) {
         const node = entry[position];
         args.push(node === NX_IR_NONE ? undefined : evalNode(node, context));
     }
-    return invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1, false);
+    try {
+        return invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1, false);
+    }
+    catch (error) {
+        throw mathCallOrigin(error, context, nodeIndex);
+    }
 }
 /**
  * A call of a function-typed value by name: the callee is a slot or reference holding a function
@@ -2859,7 +2889,12 @@ function evalNamedCall(context, nodeIndex, entry) {
         fail("nx-ir-call", "NX IR named call callee did not evaluate to a function value.", context, nodeIndex);
     }
     const { properties } = propertiesAt(context, entry, 2);
-    return invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1);
+    try {
+        return invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1);
+    }
+    catch (error) {
+        throw mathCallOrigin(error, context, nodeIndex);
+    }
 }
 /**
  * Invokes a function value with arguments by name. The caller supplied every parameter of the
@@ -4140,4 +4175,13 @@ function diagnostic(code, message, context, nodeIndex) {
         }
     }
     return output;
+}
+/** Synthetic math bodies name their operation but use the first available authored call span. */
+function mathCallOrigin(error, context, nodeIndex) {
+    if (!(error instanceof NxIrRuntimeError) || !error.diagnostics.some(item => item.code.startsWith("nx-math-") && item.source === undefined))
+        return error;
+    const source = diagnostic("", "", context, nodeIndex).source;
+    if (source === undefined)
+        return error;
+    return new NxIrRuntimeError(error.diagnostics.map(item => item.code.startsWith("nx-math-") && item.source === undefined ? { ...item, source } : item));
 }

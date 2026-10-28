@@ -1,0 +1,2 @@
+import "@nx/math" as math
+let root():float64 = { math.sqrt(9.0) + math.round(-3.5) }

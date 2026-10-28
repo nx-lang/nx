@@ -240,6 +240,14 @@ ValueDefinition ::=
 FunctionDefinition ::=
     ElementFunctionDefinition
     | ParenFunctionDefinition
+    | ExternalFunctionDefinition
+
+ExternalFunctionDefinition ::=
+    [VisibilityModifier] "external" FunctionSignature ":" TypeDeclaration
+
+FunctionSignature ::=
+    Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")"
+    | "<" ElementName {PropertyDefinition} "/>"
 
 ElementFunctionDefinition ::=
     [VisibilityModifier] "let" "<" ElementName {PropertyDefinition} "/>" [":" TypeDeclaration] "=" RhsExpression
@@ -258,6 +266,10 @@ PropertyType ::=
     | "type"
 ```
 
+External functions require a result type and have no authored body. Their implementation must be
+registered for that compiler-owned module; an application or host-library declaration without a
+binding is diagnosed. `///` comments document external functions and parameters as ordinary declarations.
+
 A property, field, state field, emitted-action field or parameter is `name:T`, `name?:T`,
 `name:T+` or `name?:T+`. The `?` on the name makes the property optional: it may be omitted at
 construction, in which case it is the empty value, and reading it yields `T?` (or `T*` for a
@@ -269,7 +281,7 @@ type, so `name:T?` and `name:T*` are rejected with the `name?:` form as the fix.
 
 ```ebnf
 ComponentDefinition ::=
-    [VisibilityModifier] "component" ComponentSignature "=" ComponentBody
+    [VisibilityModifier] ["abstract"] ["external"] "component" ComponentSignature ["=" ComponentBody]
 
 ComponentSignature ::=
     "<" ElementName {PropertyDefinition} [EmitsGroup] "/>"

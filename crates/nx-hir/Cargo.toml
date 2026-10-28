@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+nx-value.workspace = true
 nx-syntax = { path = "../nx-syntax" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 smol_str.workspace = true

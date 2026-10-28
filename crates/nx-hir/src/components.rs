@@ -1424,6 +1424,11 @@ fn collect_handler_rewrites_in_expr(
     match module.raw_module().expr(expr_id) {
         // `ContextualName` and the resolved case it becomes are leaves: neither carries a
         // sub-expression to rewrite.
+        ast::Expr::StandardMath { args, .. } => {
+            for arg in args {
+                collect_handler_rewrites_in_expr(module, *arg, owner, rewrites);
+            }
+        }
         ast::Expr::Literal(_)
         | ast::Expr::Ident(_)
         | ast::Expr::ContextualName { .. }

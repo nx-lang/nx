@@ -201,6 +201,7 @@ impl Table {
                 node::TEXT => &[Op::Node, Op::Str],
                 node::CALL => &[Op::Node, Op::List(OPT_NODES)],
                 node::NAMED_CALL => &[Op::Node, Op::List(PROPERTY)],
+                node::STANDARD_MATH => &[Op::Code(kinds::standard_math::NAMES), Op::List(NODES)],
                 node::INTRINSIC => &[
                     Op::Code(kinds::intrinsic::NAMES),
                     Op::List(NODES),
@@ -685,6 +686,20 @@ impl<'a> NxIrImage<'a> {
         };
         for (table, cells) in Table::ALL.iter().zip(tables.iter()) {
             validate_table(*table, cells, &bounds)?;
+        }
+        let has_math = (0..tables[2].offsets.count).any(|i| {
+            let (start, end) = tables[2].offsets.range(i).unwrap();
+            tables[2].pool.slice(start, end).and_then(|e| e.get(0))
+                == Some(kinds::node::STANDARD_MATH as u32)
+        });
+        if has_math
+            && !module.features.iter().any(|i| {
+                let (start, end) = strings.offsets.range(i as usize).unwrap();
+                &strings.blob[start..end]
+                    == crate::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1.as_bytes()
+            })
+        {
+            return Err(malformed("standardMath requires standard-math-v1"));
         }
         let debug = directory
             .debug
@@ -1322,7 +1337,17 @@ fn validate_table(
         };
         validate_entry(table, entry, &bounds)
             .and_then(|()| {
-                if table == Table::Types {
+                if table == Table::Nodes && entry.get(0) == Some(kinds::node::STANDARD_MATH as u32)
+                {
+                    let arity = kinds::standard_math::ARITIES
+                        .get(entry.get(1).unwrap() as usize)
+                        .copied()
+                        .ok_or("unknown standardMath operation")?;
+                    if entry.get(2) != Some(arity) {
+                        return Err("wrong standardMath arity".into());
+                    }
+                    Ok(())
+                } else if table == Table::Types {
                     validate_seq_type(cells, entry)
                 } else {
                     Ok(())

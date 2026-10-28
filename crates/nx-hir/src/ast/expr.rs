@@ -192,6 +192,12 @@ pub enum Expr {
     /// Example: `42`, `"hello"`, `true`
     Literal(Literal),
 
+    /// Compiler-synthesized body; never produced by source lowering.
+    StandardMath {
+        op: nx_value::math::MathOp,
+        args: Vec<ExprId>,
+    },
+
     /// Identifier reference.
     ///
     /// Example: `x`, `myVar`
@@ -487,7 +493,9 @@ impl Expr {
     /// Get the source span of this expression.
     pub fn span(&self) -> TextSpan {
         match self {
-            Expr::Literal(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)), // Literals don't track spans yet
+            Expr::StandardMath { .. } | Expr::Literal(_) => {
+                TextSpan::new(TextSize::from(0), TextSize::from(0))
+            } // Literals don't track spans yet
             Expr::Ident(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)),
             Expr::ContextualName { span, .. } => *span,
             Expr::ResolvedUnionCase { span, .. } => *span,

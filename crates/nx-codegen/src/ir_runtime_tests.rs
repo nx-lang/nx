@@ -4089,3 +4089,18 @@ fn emitted_ir_agrees_with_the_interpreter() {
         differences_found.join("\n\n")
     );
 }
+
+#[test]
+fn standard_math_smoke() {
+    let source = "import \"@nx/math\" as math\nlet root() = { math.sin(math.pi / 2.0) }";
+    let program = program(source);
+    assert_eq!(
+        program.evaluate_function("root", &[], &options()).unwrap(),
+        NxValue::Float(1.0)
+    );
+    let legacy = nx_api::eval_program_artifact_function(&artifact(source), "main.nx", "root");
+    match legacy {
+        EvalResult::Ok(value) => assert_eq!(value, NxValue::Float(1.0)),
+        EvalResult::Err(e) => panic!("legacy: {e:?}"),
+    }
+}

@@ -1094,6 +1094,13 @@ fn coverage_of(artifact: &NxIrArtifact) -> BTreeMap<&'static str, BTreeSet<Strin
         if kind == kinds::node::INTRINSIC {
             note("intrinsics", kinds::intrinsic::NAMES, first(node, 1));
         }
+        if kind == kinds::node::STANDARD_MATH {
+            note(
+                "mathOperations",
+                kinds::standard_math::NAMES,
+                first(node, 1),
+            );
+        }
     }
     for ty in &artifact.types {
         note("types", kinds::ty::NAMES, first(ty, 0));
@@ -1113,7 +1120,7 @@ fn coverage_of(artifact: &NxIrArtifact) -> BTreeMap<&'static str, BTreeSet<Strin
 
 #[test]
 fn corpus_covers_every_kind() {
-    let tables: [(&str, &[(i64, &str)]); 7] = [
+    let tables: [(&str, &[(i64, &str)]); 8] = [
         ("nodes", kinds::node::NAMES),
         ("types", kinds::ty::NAMES),
         ("constants", kinds::constant::NAMES),
@@ -1121,6 +1128,7 @@ fn corpus_covers_every_kind() {
         ("binaryOperators", kinds::binary::NAMES),
         ("unaryOperators", kinds::unary::NAMES),
         ("intrinsics", kinds::intrinsic::NAMES),
+        ("mathOperations", kinds::standard_math::NAMES),
     ];
     let mut coverage: BTreeMap<&str, BTreeMap<String, BTreeSet<String>>> = tables
         .iter()
@@ -1203,6 +1211,22 @@ fn corpus_artifacts_fit_the_size_budget() {
                 .or_else(|| program.artifact.source_text(&identity))
                 .unwrap_or_else(|| panic!("{}/{identity}: no source", program.name))
                 .len();
+            // Runtime-provided declarations are compiler input too: count their canonical
+            // descriptors alongside the source constants rather than exempting their image.
+            let descriptor_len = nx_api::standard_library_for_module(&identity)
+                .map(|library| {
+                    library
+                        .modules
+                        .iter()
+                        .filter(|module| {
+                            format!("{}/{}", library.root, module.identity) == identity
+                        })
+                        .flat_map(|module| module.runtime_functions)
+                        .map(|op| op.descriptor(&identity).len() + 1)
+                        .sum::<usize>()
+                })
+                .unwrap_or(0);
+            let source_len = source_len + descriptor_len;
             let ratio = image.len() as f64 / source_len as f64;
             println!(
                 "{}/{}: {} bytes of IR for {} bytes of source, {ratio:.2}x",

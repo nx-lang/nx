@@ -1,14 +1,14 @@
 # standard-libraries Specification
 
 ## Purpose
-Gives NX libraries of its own: NX source the compiler carries and a module imports by a reserved
+Gives NX libraries of its own: compiler-owned source and runtime-provided declarations imported by a reserved
 name, `@nx/<name>`, so that product-neutral declarations more than one host needs are spelled,
 versioned and documented once, and are available in every tool with nothing supplied by the host.
 
 ## Requirements
 
 ### Requirement: Standard libraries are carried by the compiler and imported by name
-The system SHALL carry each standard library as NX source inside the compiler and SHALL make it
+The system SHALL carry each standard library as compiler-owned declarations inside the compiler, using NX source for authored declarations and trusted typed descriptors for runtime-provided standard functions and SHALL make it
 available, under the logical root `@nx/<name>`, to every analysis and build: a single-source build, a
 workspace build or validation, a directory library build, an in-memory library load, a
 language-service snapshot, `typegen`, and every SDK entry point that reaches one of these. No caller
@@ -47,6 +47,12 @@ are not, and its names take part in the ordinary ambiguity and duplicate-import 
 #### Scenario: A standard library is analyzed once
 - **WHEN** one process builds 100 workspaces that each import `@nx/agent`, through any number of registries
 - **THEN** `@nx/agent` SHALL be analyzed once
+
+#### Scenario: Runtime-provided math declarations are ordinary imported functions
+- **WHEN** a module imports @nx/math under an alias
+- **THEN** its runtime-provided functions SHALL expose ordinary typed function signatures and declaration identities
+- **AND** those declarations SHALL be authored as documented `external` signatures in compiler-owned NX source
+- **AND** user code SHALL NOT be able to register or replace those implementations
 
 ### Requirement: A standard library can be an implicit import
 A build context's or a workspace build's implicit imports SHALL accept the root of a standard
@@ -90,7 +96,7 @@ library root joined to the library-relative module identity (`@nx/agent/agent.nx
 references a standard library declaration SHALL list that module in its module table and reference
 the declaration through that slot, and no standard library declaration SHALL be copied into another
 module's image. The version recorded for a standard library module SHALL be derived from the
-identities and source text of every module of that library, SHALL be the same on every platform and
+identities and source text of every module of that library and, when present, canonical typed runtime-function descriptors including operation mappings and semantic revisions, SHALL be the same on every platform and
 in every binding built from the same sources, and SHALL differ whenever any of that text differs.
 
 An emit request SHALL produce a standard library module's image when it names that module's
@@ -125,6 +131,11 @@ A program's fingerprint SHALL depend on the source of every standard library it 
 #### Scenario: A program that imports no standard library is unchanged
 - **WHEN** a program that imports no standard library is built and every module is emitted
 - **THEN** the emitted images SHALL be byte-identical to those emitted before standard libraries existed
+
+#### Scenario: Runtime descriptor changes affect math version
+- **WHEN** a runtime-provided math signature, operation mapping or semantic revision changes
+- **THEN** the math library version SHALL change deterministically across platforms
+- **AND** versions of unchanged source-only libraries SHALL remain unchanged
 
 ### Requirement: A standard library declares its stability
 Each standard library SHALL have a stability, `unstable` or `stable`, stated in its source header, in

@@ -5,14 +5,15 @@ pub fn javascript_runtime_abi() -> &'static str {
 }
 
 pub fn javascript_runtime_helper_source() -> String {
-    javascript_runtime()
+    format!("{}\n{}", javascript_runtime(), standard_math_source(false))
 }
 
 pub fn runtime_helper_source(target: CodegenTarget) -> String {
-    match target {
+    let base = match target {
         CodegenTarget::TypeScript => typescript_runtime(),
         CodegenTarget::JavaScript => javascript_runtime(),
-    }
+    };
+    format!("{base}\n{}", standard_math_source(target.is_typescript()))
 }
 
 fn typescript_runtime() -> String {
@@ -1309,4 +1310,79 @@ export function nxValuesEqual(left, right) {
 }
 "#
     .to_string()
+}
+
+fn replace_math_fragment(source: &str, pattern: &str, replacement: &str, count: usize) -> String {
+    assert_eq!(
+        source.matches(pattern).count(),
+        count,
+        "standard math source transformation must match {pattern:?}"
+    );
+    source.replace(pattern, replacement)
+}
+
+fn standard_math_source(typescript: bool) -> String {
+    let mut source = replace_math_fragment(
+        include_str!("../../../runtime/typescript/src/math.ts"),
+        "throw Object.assign(new Error(`${name ?? op}: ${detail}`), { code });",
+        "throw Object.assign(new NxRuntimeError([{ code, message: `${name ?? op}: ${detail}` }]), { code });",
+        1,
+    );
+    if !typescript {
+        for (pattern, replacement, count) in [
+            (" as const", "", 2),
+            (
+                "op: number, args: readonly number[]): number",
+                "op, args)",
+                1,
+            ),
+            ("code: string, detail: string): never", "code, detail)", 1),
+            ("let result: number", "let result", 1),
+            ("args[0]!", "args[0]", 1),
+            ("args[1]!", "args[1]", 1),
+            ("args[2]!", "args[2]", 1),
+        ] {
+            source = replace_math_fragment(&source, pattern, replacement, count);
+        }
+    }
+    source
+}
+
+#[cfg(test)]
+mod math_helper_tests {
+    #[test]
+    fn standard_math_javascript_helper_parses_and_preserves_error_categories() {
+        let source = super::javascript_runtime_helper_source();
+        let script = format!("{source}\ntry {{ nxStandardMath(7, [-1]); throw new Error('missing domain error'); }} catch (error) {{ if (!(error instanceof NxRuntimeError) || error.code !== 'nx-math-domain' || nxDiagnosticsFromError(error)[0].code !== 'nx-math-domain') throw error; }}");
+        let output = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &script])
+            .output()
+            .expect("Node is needed for generated JavaScript checks");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let math = super::standard_math_source(false);
+        for fragment in [
+            " as const",
+            "args[0]!",
+            "args[1]!",
+            "args[2]!",
+            "op: number",
+            "let result: number",
+        ] {
+            assert!(
+                !math.contains(fragment),
+                "unstripped TypeScript: {fragment}"
+            );
+        }
+        assert!(super::standard_math_source(true).contains("new NxRuntimeError"));
+    }
+
+    #[test]
+    #[should_panic(expected = "standard math source transformation")]
+    fn standard_math_helper_rejects_changed_source_fragments() {
+        super::replace_math_fragment("changed", "expected", "replacement", 1);
+    }
 }

@@ -28,6 +28,9 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "NxResult",
     "NxValue",
     "nxApplyUpdate",
+    "nxStandardMath",
+    "nxStandardMathNames",
+    "nxStandardMathArities",
     "nxAssertRecord",
     "nxAnySchema",
     "nxArraySchema",
@@ -268,7 +271,8 @@ fn collect_expression_source_codegen_diagnostics(
                 collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
             }
         }
-        CodegenExpressionKind::IntrinsicCall { args, .. } => {
+        CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardMath { args, .. } => {
             for arg in args {
                 collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
             }
@@ -2413,7 +2417,8 @@ fn expression_render_return_type(
         CodegenExpressionKind::Call { .. } => referenced_function_return_type(expression, context)
             .as_ref()
             .and_then(|ty| emit_known_type(current_module_id, ty, module, context)),
-        CodegenExpressionKind::IntrinsicCall { .. } => expression
+        CodegenExpressionKind::IntrinsicCall { .. }
+        | CodegenExpressionKind::StandardMath { .. } => expression
             .ty
             .as_ref()
             .and_then(|ty| emit_known_type(current_module_id, ty, module, context)),
@@ -3454,6 +3459,7 @@ fn emit_expression(
                     .join(", ")
             )
         }
+        CodegenExpressionKind::StandardMath { op, args } => format!("nxStandardMath({}, [{}])", *op as u8, args.iter().map(|arg| emit_expression(current_module_id, arg, context)).collect::<Vec<_>>().join(", ")),
         CodegenExpressionKind::IntrinsicCall {
             intrinsic,
             args,
@@ -4672,7 +4678,8 @@ fn collect_expression_value_references(
                 collect_expression_value_references(current_module_id, &arg.value, output);
             }
         }
-        CodegenExpressionKind::IntrinsicCall { args, .. } => {
+        CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardMath { args, .. } => {
             for arg in args {
                 collect_expression_value_references(current_module_id, arg, output);
             }
@@ -5125,6 +5132,12 @@ fn collect_expression_runtime_helpers(
             collect_expression_runtime_helpers(callee, output);
             for arg in args {
                 collect_expression_runtime_helpers(&arg.value, output);
+            }
+        }
+        CodegenExpressionKind::StandardMath { args, .. } => {
+            output.insert("nxStandardMath");
+            for arg in args {
+                collect_expression_runtime_helpers(arg, output);
             }
         }
         CodegenExpressionKind::IntrinsicCall {

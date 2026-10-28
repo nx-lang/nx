@@ -585,6 +585,15 @@ impl<'a> Explainer<'a> {
                     &[],
                 )?
             }
+            kinds::node::STANDARD_MATH => {
+                let op = self.int_operand(entry, 1, "standardMath")?;
+                let name = kinds::name(kinds::standard_math::NAMES, op)
+                    .ok_or_else(|| self.malformed("unknown standard math operation"))?;
+                call_like(
+                    format!("math.{name}"),
+                    self.nodes(self.list_operand(entry, 2, "standardMath")?)?,
+                )
+            }
             kinds::node::INTRINSIC => {
                 let op = self.int_operand(entry, 1, "intrinsic")?;
                 let op = kinds::name(kinds::intrinsic::NAMES, op)

@@ -70,6 +70,11 @@ impl<'tree> AstNode<'tree> for FunctionDef<'tree> {
 }
 
 impl<'tree> FunctionDef<'tree> {
+    /// Whether this is a bodyless runtime-provided function declaration.
+    pub fn is_external(&self) -> bool {
+        self.syntax.child_by_field("external").is_some()
+    }
+
     /// Returns the function signature node.
     pub fn signature(&self) -> Option<SyntaxNode<'tree>> {
         self.syntax.child_by_field("name")

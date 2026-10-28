@@ -546,6 +546,7 @@ fn test_float_in_conditional() {
         name: Name::new("maxf"),
         visibility: nx_hir::Visibility::Export,
         form: nx_hir::FunctionForm::Paren,
+        is_external: false,
         params,
         return_type: None,
         body: if_expr,

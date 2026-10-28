@@ -127,6 +127,9 @@ let spacing = 12
 
 `let` binds any expression to a name; use explicit types when inference isn’t obvious.
 
+NX's imported [`@nx/math` standard library](/reference/libraries/math) supplies trigonometry,
+distances, rounding, interpolation, angle conversions, and `pi`/`tau` constants.
+
 ## See also (Reference/Grammar)
 - Reference: [Functions & Components](/reference/syntax/functions)
 - Reference: [Modules](/reference/syntax/modules)

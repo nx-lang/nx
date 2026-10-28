@@ -897,10 +897,24 @@
     "fields": {
       "body": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      },
+      "external": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "external",
+            "named": false
+          },
+          {
+            "type": "invalid_external_let",
             "named": true
           }
         ]
@@ -2803,6 +2817,10 @@
   },
   {
     "type": "int_literal",
+    "named": true
+  },
+  {
+    "type": "invalid_external_let",
     "named": true
   },
   {

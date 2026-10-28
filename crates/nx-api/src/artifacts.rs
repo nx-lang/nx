@@ -1175,9 +1175,11 @@ impl StandardLibraryStability {
 pub struct StandardLibraryModule {
     pub identity: &'static str,
     pub source: &'static str,
+    /// Closed compiler-owned function bodies belonging to this module.
+    pub runtime_functions: &'static [nx_value::math::MathOp],
 }
 
-/// A library the compiler carries: NX source a module imports as `import "@nx/<name>"`, with
+/// A library of compiler-owned source and runtime declarations imported as `import "@nx/<name>"`, with
 /// nothing supplied, loaded or enabled by the host.
 #[derive(Debug)]
 pub struct StandardLibrary {
@@ -1228,32 +1230,53 @@ impl StandardLibrary {
     /// library-relative identity, a zero byte, its source text and a zero byte. No runtime carries
     /// a copy of a standard library's image, so nothing needs a contract number to compare against;
     /// what matters is that an entry image and the library image it links were compiled from the
-    /// same source, and any edit, a comment included, changes the hash.</para>
+    /// same source, and any edit, a comment included, changes the hash. Runtime declarations append
+    /// canonical descriptors in module/operation order, including their owner identity, signature,
+    /// operation and semantic revision.</para>
     pub fn version(&self) -> String {
         let mut modules = self.modules.to_vec();
         modules.sort_by_key(|module| module.identity);
         let mut hasher = nx_hir::Fnv1a64::new();
-        for module in modules {
+        for module in &modules {
             hasher.write(module.identity.as_bytes());
             hasher.write(&[0]);
             hasher.write(module.source.as_bytes());
             hasher.write(&[0]);
+        }
+        for module in &modules {
+            let owner = format!("{}/{}", self.root, module.identity);
+            for op in module.runtime_functions {
+                hasher.write(op.descriptor(&owner).as_bytes());
+                hasher.write(&[0]);
+            }
         }
         format!("{:016x}", hasher.finish())
     }
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 2] = [
+static STANDARD_LIBRARIES: [StandardLibrary; 3] = [
     StandardLibrary::new(
         "@nx/agent",
         StandardLibraryStability::Unstable,
         &[StandardLibraryModule {
             identity: "agent.nx",
             source: include_str!("std/agent/agent.nx"),
+            runtime_functions: &[],
         }],
         "@nx-lang/agent",
         "NxLang.Agent",
+    ),
+    StandardLibrary::new(
+        "@nx/math",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "math.nx",
+            source: include_str!("std/math/math.nx"),
+            runtime_functions: &nx_value::math::MathOp::ALL,
+        }],
+        "@nx-lang/math",
+        "NxLang.Math",
     ),
     StandardLibrary::new(
         "@nx/visualizer",
@@ -1261,6 +1284,7 @@ static STANDARD_LIBRARIES: [StandardLibrary; 2] = [
         &[StandardLibraryModule {
             identity: "visualizer.nx",
             source: include_str!("std/visualizer/visualizer.nx"),
+            runtime_functions: &[],
         }],
         "@nx-lang/viewer",
         "NxLang.Visualizer",
@@ -1306,7 +1330,13 @@ pub(crate) fn build_standard_library(library: &StandardLibrary) -> LibraryArtifa
             let parse_result = syntax_parse_str(module.source, &file_name);
             let source_id = SourceId::new(parse_result.source_id.as_u32());
             let diagnostics = normalize_diagnostics_file_name(parse_result.errors, &file_name);
-            let preserved_module = parse_result.tree.map(|tree| lower(tree.root(), source_id));
+            let preserved_module = parse_result.tree.map(|tree| {
+                nx_hir::lower_with_runtime_functions(
+                    tree.root(),
+                    source_id,
+                    module.runtime_functions,
+                )
+            });
             LibrarySourceFile {
                 path: PathBuf::from(&file_name),
                 file_name,

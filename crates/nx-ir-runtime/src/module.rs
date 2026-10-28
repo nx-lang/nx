@@ -18,7 +18,8 @@ use nx_ir::{
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 8] = [
+const KNOWN_FEATURES: [&str; 9] = [
+    nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
@@ -344,6 +345,10 @@ pub(crate) enum Node {
         callee: u32,
         args: Properties,
     },
+    StandardMath {
+        op: nx_value::math::MathOp,
+        args: Box<[u32]>,
+    },
     Intrinsic {
         intrinsic: Intrinsic,
         args: Box<[u32]>,
@@ -403,7 +408,9 @@ impl Node {
                 visit(*callee);
                 properties(args, visit);
             }
-            Node::Intrinsic { args, .. } => args.iter().for_each(|node| visit(*node)),
+            Node::StandardMath { args, .. } | Node::Intrinsic { args, .. } => {
+                args.iter().for_each(|node| visit(*node))
+            }
             Node::If {
                 condition,
                 then,
@@ -669,6 +676,15 @@ impl<'a> Decoder<'a> {
                 callee: reader.next()?,
                 args: self.properties(&mut reader)?,
             },
+            node::STANDARD_MATH => {
+                let op = nx_value::math::MathOp::from_code(reader.next()?)
+                    .ok_or("unknown standard math operation")?;
+                let args = self.nodes(&mut reader)?;
+                if args.len() != op.arity() {
+                    return Err("wrong standard math arity".into());
+                }
+                Node::StandardMath { op, args }
+            }
             node::INTRINSIC => {
                 let code = reader.next()?;
                 let intrinsic = match code {

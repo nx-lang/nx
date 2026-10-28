@@ -85,6 +85,15 @@ async function importIrRuntime(): Promise<IrRuntimeModule> {
 }
 
 describe("@nx-lang/sdk-node", () => {
+  it("evaluates standard math through Rust and emits its capability-gated image", () => {
+    const artifact = NxProgramArtifact.buildSource('import "@nx/math" as math\nlet root() = { math.sin(math.pi / 2.0) + math.round(-3.5) }', { fileName: "main.nx" });
+    try {
+      expect(artifact.evaluateJson()).toBe(-2);
+      const images = artifact.generateNxIr({ modules: [] });
+      expect(images.find(image => image.identity === "@nx/math/math.nx")?.metadata.requiredFeatures).toContain("standard-math-v1");
+    } finally { artifact.dispose(); }
+  });
+
   it("validates valid and invalid workspaces with structured diagnostics", () => {
     const { registry, buildContext } = createContext();
     const workspace = validWorkspace();

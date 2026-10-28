@@ -305,6 +305,8 @@ impl From<serde_json::Error> for NxValueIoError {
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+pub mod math;
+
 #[cfg(test)]
 mod tests {
     use super::*;

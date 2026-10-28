@@ -60,6 +60,17 @@ describe("standard libraries", () => {
     host.dispose();
   });
 
+  it("evaluates standard math in Rust/WASM and links the emitted math image", () => {
+    const artifact = host.buildProgramArtifact('import "@nx/math" as math\nlet root():float64 = { math.sin(math.pi / 2.0) + math.round(-3.5) }', { fileName: "main.nx" });
+    try {
+      expect(artifact.evaluateNx().text).toBe("-2.0");
+      const images = artifact.generateNxIr({ modules: [] });
+      const modules = new Map(images.map(image => [image.identity, prepareNxIrModule(image.bytes)]));
+      const linked = linkNxIrProgram(modules.get("main.nx")!, { resolve: identity => modules.get(identity) });
+      expect(evaluateFunction(linked, "root")).toBe(-2);
+    } finally { artifact.dispose(); }
+  });
+
   it("resolves a single source's import with no registry or build context", () => {
     const artifact = host.buildProgramArtifact(source);
     try {

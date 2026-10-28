@@ -10,6 +10,9 @@
 
 pub const NX_IR_SCHEMA_VERSION: u32 = 6;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v2";
+/// Required by a module containing a compiler-owned standard math body.
+pub const NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1: &str = "standard-math-v1";
+
 /// Required by a module that declares a derived update record, so a runtime that predates them
 /// refuses the module rather than normalizing a patch as a whole record.
 pub const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1: &str = "update-records-v1";
@@ -75,6 +78,7 @@ pub mod kinds {
         pub const OPTIONAL_MEMBER: i64 = 24;
         /// `x ?? y`: `[25, left, right]`.
         pub const COALESCE: i64 = 25;
+        pub const STANDARD_MATH: i64 = 26;
 
         pub const NAMES: &[(i64, &str)] = &[
             (BOOL, "bool"),
@@ -102,6 +106,7 @@ pub mod kinds {
             (EXISTS, "exists"),
             (OPTIONAL_MEMBER, "optionalMember"),
             (COALESCE, "coalesce"),
+            (STANDARD_MATH, "standardMath"),
         ];
     }
 
@@ -270,6 +275,37 @@ pub mod kinds {
         pub const NOT: i64 = 1;
 
         pub const NAMES: &[(i64, &str)] = &[(NEG, "neg"), (NOT, "not")];
+    }
+
+    /// Closed numerical operation IDs: the second cell of a `standardMath` node.
+    pub mod standard_math {
+        pub const ARITIES: &[u32] = &[
+            1, 1, 1, 1, 1, 1, 2, 1, 2, 1, 1, 2, 2, 3, 1, 1, 1, 1, 1, 1, 1, 3,
+        ];
+        pub const NAMES: &[(i64, &str)] = &[
+            (0, "sin"),
+            (1, "cos"),
+            (2, "tan"),
+            (3, "asin"),
+            (4, "acos"),
+            (5, "atan"),
+            (6, "atan2"),
+            (7, "sqrt"),
+            (8, "hypot"),
+            (9, "abs"),
+            (10, "sign"),
+            (11, "min"),
+            (12, "max"),
+            (13, "clamp"),
+            (14, "floor"),
+            (15, "ceil"),
+            (16, "round"),
+            (17, "roundTiesToEven"),
+            (18, "trunc"),
+            (19, "degreesToRadians"),
+            (20, "radiansToDegrees"),
+            (21, "lerp"),
+        ];
     }
 
     /// Update intrinsics: the second element of an `intrinsic` node.

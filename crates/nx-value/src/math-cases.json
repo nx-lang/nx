@@ -1,0 +1,1673 @@
+[
+  {
+    "name": "sin-ordinary",
+    "op": "sin",
+    "args": [
+      "0.5"
+    ],
+    "expected": "0.479425538604203",
+    "exact": false
+  },
+  {
+    "name": "cos-ordinary",
+    "op": "cos",
+    "args": [
+      "0.5"
+    ],
+    "expected": "0.8775825618903728",
+    "exact": false
+  },
+  {
+    "name": "tan-ordinary",
+    "op": "tan",
+    "args": [
+      "0.5"
+    ],
+    "expected": "0.5463024898437905",
+    "exact": false
+  },
+  {
+    "name": "asin-ordinary",
+    "op": "asin",
+    "args": [
+      "0.5"
+    ],
+    "expected": "0.5235987755982989",
+    "exact": false
+  },
+  {
+    "name": "acos-ordinary",
+    "op": "acos",
+    "args": [
+      "0.5"
+    ],
+    "expected": "1.0471975511965979",
+    "exact": false
+  },
+  {
+    "name": "atan-ordinary",
+    "op": "atan",
+    "args": [
+      "0.5"
+    ],
+    "expected": "0.4636476090008061",
+    "exact": false
+  },
+  {
+    "name": "sqrt-ordinary",
+    "op": "sqrt",
+    "args": [
+      "0.5"
+    ],
+    "expected": "0.7071067811865476",
+    "exact": false
+  },
+  {
+    "name": "sin-negative-zero",
+    "op": "sin",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "tan-negative-zero",
+    "op": "tan",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "asin-negative-zero",
+    "op": "asin",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "atan-negative-zero",
+    "op": "atan",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "sqrt-negative-zero",
+    "op": "sqrt",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "sign-negative-zero",
+    "op": "sign",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "floor-negative-zero",
+    "op": "floor",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "ceil-negative-zero",
+    "op": "ceil",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "round-negative-zero",
+    "op": "round",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven-negative-zero",
+    "op": "roundTiesToEven",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "trunc-negative-zero",
+    "op": "trunc",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "degreesToRadians-negative-zero",
+    "op": "degreesToRadians",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "radiansToDegrees-negative-zero",
+    "op": "radiansToDegrees",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "cos-zero",
+    "op": "cos",
+    "args": [
+      "0.0"
+    ],
+    "expected": "1.0",
+    "exact": true
+  },
+  {
+    "name": "abs-zero",
+    "op": "abs",
+    "args": [
+      "0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "sign-zero",
+    "op": "sign",
+    "args": [
+      "0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "asin-upper-bound",
+    "op": "asin",
+    "args": [
+      "1.0"
+    ],
+    "expected": "1.5707963267948966",
+    "exact": false
+  },
+  {
+    "name": "acos-upper-bound",
+    "op": "acos",
+    "args": [
+      "1.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "atan-positive-zero",
+    "op": "atan",
+    "args": [
+      "0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "abs-negative-zero",
+    "op": "abs",
+    "args": [
+      "-0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "min-zeros-0.0",
+    "op": "min",
+    "args": [
+      "0.0",
+      "-0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "min-zeros--0.0",
+    "op": "min",
+    "args": [
+      "-0.0",
+      "0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "min-ordinary",
+    "op": "min",
+    "args": [
+      "-2.0",
+      "3.0"
+    ],
+    "expected": "-2.0",
+    "exact": true
+  },
+  {
+    "name": "max-zeros-0.0",
+    "op": "max",
+    "args": [
+      "0.0",
+      "-0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "max-zeros--0.0",
+    "op": "max",
+    "args": [
+      "-0.0",
+      "0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "max-ordinary",
+    "op": "max",
+    "args": [
+      "-2.0",
+      "3.0"
+    ],
+    "expected": "3.0",
+    "exact": true
+  },
+  {
+    "name": "round-2.5",
+    "op": "round",
+    "args": [
+      "2.5"
+    ],
+    "expected": "3.0",
+    "exact": true
+  },
+  {
+    "name": "round-3.5",
+    "op": "round",
+    "args": [
+      "3.5"
+    ],
+    "expected": "4.0",
+    "exact": true
+  },
+  {
+    "name": "round--2.5",
+    "op": "round",
+    "args": [
+      "-2.5"
+    ],
+    "expected": "-2.0",
+    "exact": true
+  },
+  {
+    "name": "round--3.5",
+    "op": "round",
+    "args": [
+      "-3.5"
+    ],
+    "expected": "-3.0",
+    "exact": true
+  },
+  {
+    "name": "round--0.5",
+    "op": "round",
+    "args": [
+      "-0.5"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "round-0.49999999999999994",
+    "op": "round",
+    "args": [
+      "0.49999999999999994"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "round-4503599627370495.5",
+    "op": "round",
+    "args": [
+      "4503599627370495.5"
+    ],
+    "expected": "4503599627370496.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven-2.5",
+    "op": "roundTiesToEven",
+    "args": [
+      "2.5"
+    ],
+    "expected": "2.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven-3.5",
+    "op": "roundTiesToEven",
+    "args": [
+      "3.5"
+    ],
+    "expected": "4.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven--2.5",
+    "op": "roundTiesToEven",
+    "args": [
+      "-2.5"
+    ],
+    "expected": "-2.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven--3.5",
+    "op": "roundTiesToEven",
+    "args": [
+      "-3.5"
+    ],
+    "expected": "-4.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven--0.5",
+    "op": "roundTiesToEven",
+    "args": [
+      "-0.5"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven-0.49999999999999994",
+    "op": "roundTiesToEven",
+    "args": [
+      "0.49999999999999994"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "roundTiesToEven-4503599627370495.5",
+    "op": "roundTiesToEven",
+    "args": [
+      "4503599627370495.5"
+    ],
+    "expected": "4503599627370496.0",
+    "exact": true
+  },
+  {
+    "name": "floor-negative-fraction",
+    "op": "floor",
+    "args": [
+      "-0.1"
+    ],
+    "expected": "-1.0",
+    "exact": true
+  },
+  {
+    "name": "ceil-negative-fraction",
+    "op": "ceil",
+    "args": [
+      "-0.1"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "trunc-negative-fraction",
+    "op": "trunc",
+    "args": [
+      "-0.1"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "sin-huge-angle",
+    "op": "sin",
+    "args": [
+      "1e300"
+    ],
+    "expected": "-0.8178819121159085",
+    "exact": false
+  },
+  {
+    "name": "cos-huge-angle",
+    "op": "cos",
+    "args": [
+      "1e300"
+    ],
+    "expected": "-0.5753861119575491",
+    "exact": false
+  },
+  {
+    "name": "tan-huge-angle",
+    "op": "tan",
+    "args": [
+      "1e300"
+    ],
+    "expected": "1.4214488238747245",
+    "exact": false
+  },
+  {
+    "name": "tan-near-pole",
+    "op": "tan",
+    "args": [
+      "1.5707963267948966"
+    ],
+    "expected": "1.633123935319537e+16",
+    "exact": false
+  },
+  {
+    "name": "atan2-quadrant-1.0,1.0",
+    "op": "atan2",
+    "args": [
+      "1.0",
+      "1.0"
+    ],
+    "expected": "0.7853981633974483",
+    "exact": false
+  },
+  {
+    "name": "atan2-quadrant-1.0,-1.0",
+    "op": "atan2",
+    "args": [
+      "1.0",
+      "-1.0"
+    ],
+    "expected": "2.356194490192345",
+    "exact": false
+  },
+  {
+    "name": "atan2-quadrant--1.0,-1.0",
+    "op": "atan2",
+    "args": [
+      "-1.0",
+      "-1.0"
+    ],
+    "expected": "-2.356194490192345",
+    "exact": false
+  },
+  {
+    "name": "atan2-quadrant--1.0,1.0",
+    "op": "atan2",
+    "args": [
+      "-1.0",
+      "1.0"
+    ],
+    "expected": "-0.7853981633974483",
+    "exact": false
+  },
+  {
+    "name": "atan2-zero-0.0,0.0",
+    "op": "atan2",
+    "args": [
+      "0.0",
+      "0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "atan2-zero--0.0,0.0",
+    "op": "atan2",
+    "args": [
+      "-0.0",
+      "0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "atan2-zero-0.0,-0.0",
+    "op": "atan2",
+    "args": [
+      "0.0",
+      "-0.0"
+    ],
+    "expected": "3.141592653589793",
+    "exact": true
+  },
+  {
+    "name": "atan2-zero--0.0,-0.0",
+    "op": "atan2",
+    "args": [
+      "-0.0",
+      "-0.0"
+    ],
+    "expected": "-3.141592653589793",
+    "exact": true
+  },
+  {
+    "name": "hypot-large",
+    "op": "hypot",
+    "args": [
+      "1e308",
+      "1e308"
+    ],
+    "expected": "1.4142135623730951e+308",
+    "exact": false
+  },
+  {
+    "name": "hypot-zero",
+    "op": "hypot",
+    "args": [
+      "-0.0",
+      "-0.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "hypot-subnormal",
+    "op": "hypot",
+    "args": [
+      "5e-324",
+      "0.0"
+    ],
+    "expected": "5e-324",
+    "exact": true
+  },
+  {
+    "name": "sin-subnormal",
+    "op": "sin",
+    "args": [
+      "5e-324"
+    ],
+    "expected": "5e-324",
+    "exact": true
+  },
+  {
+    "name": "sqrt-subnormal",
+    "op": "sqrt",
+    "args": [
+      "5e-324"
+    ],
+    "expected": "2.2227587494850775e-162",
+    "exact": false
+  },
+  {
+    "name": "degreesToRadians-ordinary",
+    "op": "degreesToRadians",
+    "args": [
+      "90.0"
+    ],
+    "expected": "1.5707963267948966",
+    "exact": false
+  },
+  {
+    "name": "radiansToDegrees-ordinary",
+    "op": "radiansToDegrees",
+    "args": [
+      "90.0"
+    ],
+    "expected": "5156.620156177409",
+    "exact": false
+  },
+  {
+    "name": "degrees-no-intermediate-overflow",
+    "op": "degreesToRadians",
+    "args": [
+      "1e308"
+    ],
+    "expected": "1.7453292519943295e+306",
+    "exact": false
+  },
+  {
+    "name": "lerp--1e308,1e308,0.5",
+    "op": "lerp",
+    "args": [
+      "-1e308",
+      "1e308",
+      "0.5"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "lerp--0.0,1.0,0.0",
+    "op": "lerp",
+    "args": [
+      "-0.0",
+      "1.0",
+      "0.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "lerp-1.0,-0.0,1.0",
+    "op": "lerp",
+    "args": [
+      "1.0",
+      "-0.0",
+      "1.0"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "lerp--0.0,0.0,0.5",
+    "op": "lerp",
+    "args": [
+      "-0.0",
+      "0.0",
+      "0.5"
+    ],
+    "expected": "-0.0",
+    "exact": true
+  },
+  {
+    "name": "lerp-0.0,10.0,1.5",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "10.0",
+      "1.5"
+    ],
+    "expected": "15.0",
+    "exact": true
+  },
+  {
+    "name": "lerp-negative-extrapolation",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "10.0",
+      "-0.5"
+    ],
+    "expected": "-5.0",
+    "exact": true
+  },
+  {
+    "name": "lerp-interior-inexact",
+    "op": "lerp",
+    "args": [
+      "0.1",
+      "0.3",
+      "0.7"
+    ],
+    "expected": "0.24",
+    "exact": false
+  },
+  {
+    "name": "lerp-extrapolation-no-intermediate-overflow",
+    "op": "lerp",
+    "args": [
+      "1.7e308",
+      "1e307",
+      "1.2"
+    ],
+    "expected": "-2.1999999999999992e+307",
+    "exact": false
+  },
+  {
+    "name": "lerp-negative-extrapolation-no-intermediate-overflow",
+    "op": "lerp",
+    "args": [
+      "1e307",
+      "1.7e308",
+      "-1.15"
+    ],
+    "expected": "-1.7399999999999999e+308",
+    "exact": false
+  },
+  {
+    "name": "sign-negative",
+    "op": "sign",
+    "args": [
+      "-2.0"
+    ],
+    "expected": "-1.0",
+    "exact": true
+  },
+  {
+    "name": "sign-positive",
+    "op": "sign",
+    "args": [
+      "2.0"
+    ],
+    "expected": "1.0",
+    "exact": true
+  },
+  {
+    "name": "clamp-low",
+    "op": "clamp",
+    "args": [
+      "-1.0",
+      "0.0",
+      "1.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "clamp-high",
+    "op": "clamp",
+    "args": [
+      "2.0",
+      "0.0",
+      "1.0"
+    ],
+    "expected": "1.0",
+    "exact": true
+  },
+  {
+    "name": "clamp-zero",
+    "op": "clamp",
+    "args": [
+      "-0.0",
+      "0.0",
+      "1.0"
+    ],
+    "expected": "0.0",
+    "exact": true
+  },
+  {
+    "name": "clamp-equal-bounds",
+    "op": "clamp",
+    "args": [
+      "5.0",
+      "2.0",
+      "2.0"
+    ],
+    "expected": "2.0",
+    "exact": true
+  },
+  {
+    "name": "clamp-inclusive-low",
+    "op": "clamp",
+    "args": [
+      "2.0",
+      "2.0",
+      "5.0"
+    ],
+    "expected": "2.0",
+    "exact": true
+  },
+  {
+    "name": "clamp-inclusive-high",
+    "op": "clamp",
+    "args": [
+      "5.0",
+      "2.0",
+      "5.0"
+    ],
+    "expected": "5.0",
+    "exact": true
+  },
+  {
+    "name": "sqrt-domain",
+    "op": "sqrt",
+    "args": [
+      "-1.0"
+    ],
+    "error": "nx-math-domain"
+  },
+  {
+    "name": "asin-domain",
+    "op": "asin",
+    "args": [
+      "1.1"
+    ],
+    "error": "nx-math-domain"
+  },
+  {
+    "name": "acos-domain",
+    "op": "acos",
+    "args": [
+      "-1.1"
+    ],
+    "error": "nx-math-domain"
+  },
+  {
+    "name": "clamp-domain",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "2.0",
+      "1.0"
+    ],
+    "error": "nx-math-domain"
+  },
+  {
+    "name": "hypot-overflow",
+    "op": "hypot",
+    "args": [
+      "1.7e308",
+      "1.7e308"
+    ],
+    "error": "nx-math-overflow"
+  },
+  {
+    "name": "radiansToDegrees-overflow",
+    "op": "radiansToDegrees",
+    "args": [
+      "1e308"
+    ],
+    "error": "nx-math-overflow"
+  },
+  {
+    "name": "lerp-overflow",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "1e308",
+      "2.0"
+    ],
+    "error": "nx-math-overflow"
+  },
+  {
+    "name": "sin-nonfinite-0-NaN",
+    "op": "sin",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sin-nonfinite-0-Infinity",
+    "op": "sin",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sin-nonfinite-0--Infinity",
+    "op": "sin",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "cos-nonfinite-0-NaN",
+    "op": "cos",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "cos-nonfinite-0-Infinity",
+    "op": "cos",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "cos-nonfinite-0--Infinity",
+    "op": "cos",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "tan-nonfinite-0-NaN",
+    "op": "tan",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "tan-nonfinite-0-Infinity",
+    "op": "tan",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "tan-nonfinite-0--Infinity",
+    "op": "tan",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "asin-nonfinite-0-NaN",
+    "op": "asin",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "asin-nonfinite-0-Infinity",
+    "op": "asin",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "asin-nonfinite-0--Infinity",
+    "op": "asin",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "acos-nonfinite-0-NaN",
+    "op": "acos",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "acos-nonfinite-0-Infinity",
+    "op": "acos",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "acos-nonfinite-0--Infinity",
+    "op": "acos",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan-nonfinite-0-NaN",
+    "op": "atan",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan-nonfinite-0-Infinity",
+    "op": "atan",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan-nonfinite-0--Infinity",
+    "op": "atan",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sqrt-nonfinite-0-NaN",
+    "op": "sqrt",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sqrt-nonfinite-0-Infinity",
+    "op": "sqrt",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sqrt-nonfinite-0--Infinity",
+    "op": "sqrt",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "abs-nonfinite-0-NaN",
+    "op": "abs",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "abs-nonfinite-0-Infinity",
+    "op": "abs",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "abs-nonfinite-0--Infinity",
+    "op": "abs",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sign-nonfinite-0-NaN",
+    "op": "sign",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sign-nonfinite-0-Infinity",
+    "op": "sign",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "sign-nonfinite-0--Infinity",
+    "op": "sign",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "floor-nonfinite-0-NaN",
+    "op": "floor",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "floor-nonfinite-0-Infinity",
+    "op": "floor",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "floor-nonfinite-0--Infinity",
+    "op": "floor",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "ceil-nonfinite-0-NaN",
+    "op": "ceil",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "ceil-nonfinite-0-Infinity",
+    "op": "ceil",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "ceil-nonfinite-0--Infinity",
+    "op": "ceil",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "round-nonfinite-0-NaN",
+    "op": "round",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "round-nonfinite-0-Infinity",
+    "op": "round",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "round-nonfinite-0--Infinity",
+    "op": "round",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "roundTiesToEven-nonfinite-0-NaN",
+    "op": "roundTiesToEven",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "roundTiesToEven-nonfinite-0-Infinity",
+    "op": "roundTiesToEven",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "roundTiesToEven-nonfinite-0--Infinity",
+    "op": "roundTiesToEven",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "trunc-nonfinite-0-NaN",
+    "op": "trunc",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "trunc-nonfinite-0-Infinity",
+    "op": "trunc",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "trunc-nonfinite-0--Infinity",
+    "op": "trunc",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "degreesToRadians-nonfinite-0-NaN",
+    "op": "degreesToRadians",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "degreesToRadians-nonfinite-0-Infinity",
+    "op": "degreesToRadians",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "degreesToRadians-nonfinite-0--Infinity",
+    "op": "degreesToRadians",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "radiansToDegrees-nonfinite-0-NaN",
+    "op": "radiansToDegrees",
+    "args": [
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "radiansToDegrees-nonfinite-0-Infinity",
+    "op": "radiansToDegrees",
+    "args": [
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "radiansToDegrees-nonfinite-0--Infinity",
+    "op": "radiansToDegrees",
+    "args": [
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan2-nonfinite-0-NaN",
+    "op": "atan2",
+    "args": [
+      "NaN",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan2-nonfinite-0-Infinity",
+    "op": "atan2",
+    "args": [
+      "Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan2-nonfinite-0--Infinity",
+    "op": "atan2",
+    "args": [
+      "-Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan2-nonfinite-1-NaN",
+    "op": "atan2",
+    "args": [
+      "0.0",
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan2-nonfinite-1-Infinity",
+    "op": "atan2",
+    "args": [
+      "0.0",
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "atan2-nonfinite-1--Infinity",
+    "op": "atan2",
+    "args": [
+      "0.0",
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "hypot-nonfinite-0-NaN",
+    "op": "hypot",
+    "args": [
+      "NaN",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "hypot-nonfinite-0-Infinity",
+    "op": "hypot",
+    "args": [
+      "Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "hypot-nonfinite-0--Infinity",
+    "op": "hypot",
+    "args": [
+      "-Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "hypot-nonfinite-1-NaN",
+    "op": "hypot",
+    "args": [
+      "0.0",
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "hypot-nonfinite-1-Infinity",
+    "op": "hypot",
+    "args": [
+      "0.0",
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "hypot-nonfinite-1--Infinity",
+    "op": "hypot",
+    "args": [
+      "0.0",
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "min-nonfinite-0-NaN",
+    "op": "min",
+    "args": [
+      "NaN",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "min-nonfinite-0-Infinity",
+    "op": "min",
+    "args": [
+      "Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "min-nonfinite-0--Infinity",
+    "op": "min",
+    "args": [
+      "-Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "min-nonfinite-1-NaN",
+    "op": "min",
+    "args": [
+      "0.0",
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "min-nonfinite-1-Infinity",
+    "op": "min",
+    "args": [
+      "0.0",
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "min-nonfinite-1--Infinity",
+    "op": "min",
+    "args": [
+      "0.0",
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "max-nonfinite-0-NaN",
+    "op": "max",
+    "args": [
+      "NaN",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "max-nonfinite-0-Infinity",
+    "op": "max",
+    "args": [
+      "Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "max-nonfinite-0--Infinity",
+    "op": "max",
+    "args": [
+      "-Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "max-nonfinite-1-NaN",
+    "op": "max",
+    "args": [
+      "0.0",
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "max-nonfinite-1-Infinity",
+    "op": "max",
+    "args": [
+      "0.0",
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "max-nonfinite-1--Infinity",
+    "op": "max",
+    "args": [
+      "0.0",
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-0-NaN",
+    "op": "clamp",
+    "args": [
+      "NaN",
+      "0.0",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-0-Infinity",
+    "op": "clamp",
+    "args": [
+      "Infinity",
+      "0.0",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-0--Infinity",
+    "op": "clamp",
+    "args": [
+      "-Infinity",
+      "0.0",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-1-NaN",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "NaN",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-1-Infinity",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-1--Infinity",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "-Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-2-NaN",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "0.0",
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-2-Infinity",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "0.0",
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "clamp-nonfinite-2--Infinity",
+    "op": "clamp",
+    "args": [
+      "0.0",
+      "0.0",
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-0-NaN",
+    "op": "lerp",
+    "args": [
+      "NaN",
+      "0.0",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-0-Infinity",
+    "op": "lerp",
+    "args": [
+      "Infinity",
+      "0.0",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-0--Infinity",
+    "op": "lerp",
+    "args": [
+      "-Infinity",
+      "0.0",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-1-NaN",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "NaN",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-1-Infinity",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-1--Infinity",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "-Infinity",
+      "0.0"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-2-NaN",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "0.0",
+      "NaN"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-2-Infinity",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "0.0",
+      "Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  },
+  {
+    "name": "lerp-nonfinite-2--Infinity",
+    "op": "lerp",
+    "args": [
+      "0.0",
+      "0.0",
+      "-Infinity"
+    ],
+    "error": "nx-math-non-finite-input"
+  }
+]
