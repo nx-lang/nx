@@ -19,6 +19,9 @@
 // document written against both catalogs cannot be type-checked today; declaring them, as here,
 // is fine.
 //
+// See README.md and authoring-and-preview.md for implementation scope and agent tooling.
+// Appendix B records historical compiler observations; recheck them before implementing.
+//
 // These declarations are the shape, not the contract. Ranges, patterns, and counts — `ElementId`'s
 // regex, `opacity` in 0..1, `fontWeight` in 1..1000, "at least two gradient stops" — are invisible
 // to NX's type system and stay in the JSON Schema. Comments marked "NX gap" record where NX cannot
@@ -68,7 +71,7 @@ export type DocumentMetadata = {
 // physical `left`/`right` because the MVP has no bidirectional text policy.
 export type Alignment = start | center | end | stretch
 export type AlignSelf = auto | start | center | end | stretch
-export type Anchor = start | center | end
+export type AxisAlignment = start | center | end
 export type Axis = horizontal | vertical
 export type Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
 export type ObjectFit = contain | cover | fill | none | scaleDown
@@ -129,7 +132,7 @@ export type GradientStop = {
   opacity: float64 = 1              /// 0..1
 }
 
-/// At least two stops, in non-decreasing offset order; renderers clamp offsets but must not reorder.
+/// At least two stops with finite offsets in 0..1, in non-decreasing order; equal offsets preserve order.
 /// Terms and coordinate modes follow SVG gradients.
 export type Paint =
   | none
@@ -178,7 +181,7 @@ export type Shadow = {
   color: Color
   offsetX: float64 = 0
   offsetY: float64 = 0
-  blur: float64 = 0                 /// `>= 0`
+  blur: float64 = 0                 /// Gaussian sigma in local logical units; `>= 0`
 }
 
 // NX gap: a default cannot reference a sibling property, so `scale.y` cannot default to `scale.x`.

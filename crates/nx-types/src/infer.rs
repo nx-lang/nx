@@ -1568,17 +1568,20 @@ impl<'a> InferenceContext<'a> {
             }
         }
 
-        let target_ty = match target.as_ref() {
-            Some(target) => self.type_from_type_ref_in_quietly(
-                None,
-                &ast::TypeRef::name(target.target_type.as_str()),
-            ),
-            None => Type::Error,
-        };
-        let previous = self.visualizer_target.replace((
+        let target_ty = target
+            .as_ref()
+            .and_then(|target| target.target_type.as_ref())
+            .map(|name| {
+                self.type_from_type_ref_in_quietly(None, &ast::TypeRef::name(name.as_str()))
+            })
+            .unwrap_or(Type::Error);
+        // FunctionVisualizer declares no Target. An error binding still suppresses secondary
+        // missing-type-argument errors when a mismatched ElementVisualizer targets a function.
+        let binding = Some((
             target_ty.clone(),
             target.as_ref().map(|target| target.record),
         ));
+        let previous = std::mem::replace(&mut self.visualizer_target, binding);
         let actual = self.infer_expr(visualizer.value);
         self.visualizer_target = previous;
 
@@ -1639,6 +1642,38 @@ impl<'a> InferenceContext<'a> {
             );
             return;
         }
+        if let Some((properties, _)) = self.visualizer_element_parts(visualizer.value) {
+            if let Some(preview) = properties
+                .iter()
+                .find(|property| property.key.as_str() == "preview")
+            {
+                let renderer =
+                    self.visualizer_element_parts(preview.value)
+                        .and_then(|(properties, _)| {
+                            properties
+                                .into_iter()
+                                .find(|property| property.key.as_str() == "renderer")
+                        });
+                let already_reported = self
+                    .module
+                    .raw_module()
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| preview.span.contains_range(diagnostic.span))
+                    || self.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.severity() == nx_diagnostics::Severity::Error
+                            && diagnostic.labels().iter().any(|label| {
+                                label.primary && preview.span.contains_range(label.range)
+                            })
+                    });
+                if let Some(renderer) = renderer.filter(|_| !already_reported) {
+                    if !matches!(self.module.raw_module().expr(renderer.value), ast::Expr::Literal(ast::Literal::String(text)) if !text.trim().is_empty())
+                    {
+                        self.error("preview-renderer-literal", "A preview renderer must be a nonempty string literal in a PreviewVisualizer descriptor".to_string(), renderer.span);
+                    }
+                }
+            }
+        }
         self.check_editor_hints(visualizer.value, target.record, &target_ty);
     }
 
@@ -1656,6 +1691,7 @@ impl<'a> InferenceContext<'a> {
             return;
         };
         match record {
+            nx_hir::VisualizerRecord::Function => {}
             nx_hir::VisualizerRecord::Value => {
                 let kind = self.hint_value_kind(target_ty);
                 self.check_hint_attributes(&properties, kind, None);
@@ -4471,7 +4507,7 @@ impl<'a> InferenceContext<'a> {
         declaring_module: Option<&str>,
     ) {
         let effective_contract = self
-            .effective_component_contract(&component.name)
+            .effective_component_contract(&element.tag)
             .ok()
             .flatten();
         let type_param_names: Vec<Name> = match effective_contract.as_ref() {
@@ -4885,7 +4921,7 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
         declaring_module: Option<&str>,
     ) -> Type {
-        let effective_shape = self.effective_record_shape(&record_def.name).ok().flatten();
+        let effective_shape = self.effective_record_shape(&element.tag).ok().flatten();
         let type_params: Vec<Name> = record_def
             .type_params
             .iter()
@@ -8586,7 +8622,7 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
 /// record outside the library fits anywhere.
 fn visualizer_record_fits(expected: nx_hir::VisualizerRecord, record: &str) -> bool {
     match record {
-        "ElementVisualizer" | "ValueVisualizer" => record == expected.name(),
+        "ElementVisualizer" | "ValueVisualizer" | "FunctionVisualizer" => record == expected.name(),
         "PropertyVisualizer" => expected == nx_hir::VisualizerRecord::Element,
         _ => true,
     }

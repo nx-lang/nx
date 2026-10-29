@@ -542,3 +542,19 @@ the build rather than reaching a site.
 | `test/`         | Loader, SDK, language service, trap, entry-point, schema agreement and Node-SDK parity tests |
 | `test/fixtures/schema/` | The schema corpus: one NX source per mapping, with the documents the export answers and argument cases |
 | `dist/nx.wasm`  | The built module (gitignored; produced by `pnpm run build`)         |
+
+## Experimental graphics preparation
+
+`artifact.prepareGraphics(request)` validates IR-evaluated graphics values using the shared
+`nx-graphics` core and declaration identities resolved from this artifact. Its public unstable
+`NxGraphicsPreparationRequest` / `NxGraphicsPreparation` interfaces describe values, construction
+origins, viewport/resource limits and supplied text measurements. Origins/measurements are trusted
+host reports, not an authentication boundary for arbitrary callers. No Skia is linked into the SDK.
+
+Use `preflight: true` first: it validates identities and geometry/limits and returns deduplicated
+`textRequests` (each with its `request`, first requesting element ID and provenance), with
+`scene: null`. Measure those requests using the destination's supplied-font
+service, then call again with `measurements` to obtain a prepared scene. A preflight never publishes
+a scene with placeholder metrics. Diagnostics carry construction provenance and optional authored
+call sites. Graphics numbers are checked for finiteness before JSON encoding; malformed requests
+throw, and supported-profile preparation failures return structured diagnostics.

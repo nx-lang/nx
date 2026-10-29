@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "profile": "graphics-core-v1",
+  "font": "Fixture",
+  "tasks": [
+    {
+      "id": "icon",
+      "prompt": "Draw a blue five-tip star badge on a 128 by 128 drawing.",
+      "revision": "Change to seven tips without changing center, radii or color."
+    },
+    {
+      "id": "diagram",
+      "prompt": "Draw three labeled process boxes connected by straight filled arrows.",
+      "revision": "Move the middle box down 40 units and revise arrow endpoints."
+    },
+    {
+      "id": "illustration",
+      "prompt": "Draw a geometric flower using polygons, stars and annular sectors.",
+      "revision": "Rotate the petals clockwise by 30 degrees."
+    },
+    {
+      "id": "infographic",
+      "prompt": "Draw a three-value chart with supplied-font labels. Use measured advances to center labels.",
+      "revision": "Replace one label with a longer phrase and preserve centering."
+    }
+  ],
+  "rubric": [
+    "intent fidelity",
+    "visual hierarchy",
+    "spacing and alignment",
+    "legibility",
+    "requested edit fidelity"
+  ],
+  "requiredResultFields": [
+    "task",
+    "variant",
+    "model",
+    "modelVersion",
+    "budget",
+    "seed",
+    "renderer",
+    "fonts",
+    "initialArtifacts",
+    "revisionArtifacts",
+    "renderable",
+    "editSuccess",
+    "outputBytes",
+    "roundTrips",
+    "latencyMs",
+    "rubricScores"
+  ]
+}

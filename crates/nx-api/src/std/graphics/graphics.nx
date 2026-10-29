@@ -1,0 +1,645 @@
+// NX graphics standard library, graphics-core profile.
+// Unstable: declarations may change incompatibly in any NX release. No UI dependency.
+// Geometry uses local user units: x increases to the right and y increases downward.
+// Drawing maps those units into the host viewport; they are not necessarily device pixels.
+// Numeric inputs must be finite and satisfy the renderer's configured resource/range limits.
+// SVG references describe geometry and painting conventions, not full SVG/CSS support.
+// There is no CSS cascade or inherited paint: each shape supplies its own fill and stroke.
+import "@nx/math" as math
+import "@nx/visualizer"
+
+/// A position in the local coordinate system.
+export type Point = {
+  x: float64                      /// Horizontal coordinate, increasing to the right.
+  y: float64                      /// Vertical coordinate, increasing downward.
+}
+
+/// The source rectangle mapped into a Drawing's host-supplied viewport.
+export type ViewBox = {
+  x: float64                      /// Horizontal coordinate of the rectangle's left edge.
+  y: float64                      /// Vertical coordinate of the rectangle's top edge.
+  width: float64                  /// Width in user units; must be positive.
+  height: float64                 /// Height in user units; must be positive.
+}
+
+/// A CSS color string, such as "red", "#336699", or "rgba(0, 0, 0, 0.5)".
+/// Context-dependent CSS values such as currentColor are not supported.
+export type Color = string
+
+/// No paint, or a uniform color. Gradients and patterns are not supported.
+export type Paint = none | solid { color: Color }
+
+/// Determines the interior of a path: nonzero winding or even-odd crossing count, as in SVG.
+export type FillRule = nonzero | evenodd
+
+/// Aligns the start, midpoint, or end of a text run's advance with its x coordinate.
+export type TextAnchor = start | middle | end
+
+/// Requests an upright or italic face from the host's explicitly supplied fonts.
+export type FontStyle = normal | italic
+
+/// Alignment along one viewport axis: its start edge, center, or end edge.
+/// Start means left on the x axis and top on the y axis.
+export type AxisAlignment = start | center | end
+
+/// Positions the fitted viewBox within the viewport; omitted alignment centers both axes.
+export type ContentAlignment = {
+  x: AxisAlignment = center       /// Horizontal alignment: left, center, or right.
+  y: AxisAlignment = center       /// Vertical alignment: top, center, or bottom.
+}
+
+/// Maps the viewBox to the viewport: contain preserves aspect ratio and shows all content;
+/// cover preserves aspect ratio and fills the viewport, cropping overflow; fill stretches each axis.
+export type ViewBoxFit = contain | cover | fill
+
+/// Descriptive metadata for a host to expose through its accessibility interface.
+export type Accessibility = {
+  label?: string                  /// Short accessible name for the drawing or element.
+  description?: string            /// Additional accessible description.
+}
+
+/// Ends an open stroke at its endpoint, with a semicircle, or with a half-width square extension.
+export type LineCap = butt | round | square
+
+/// Joins stroke segments with a pointed miter, a rounded corner, or a straight bevel.
+export type LineJoin = miter | round | bevel
+
+// `name?: T+` here and throughout: omission or `{}` denotes the empty sequence.
+/// Paint and geometry for a shape's outline, using SVG stroke conventions.
+/// Stroke widths and dash lengths scale with transforms; non-scaling strokes are not supported.
+export type Stroke = {
+  paint: Paint                    /// Outline paint; none disables the stroke.
+  width: float64 = 1              /// Outline width in local units; must be nonnegative.
+  lineCap: LineCap = butt         /// Shape of the stroke at open endpoints and dash endpoints.
+  lineJoin: LineJoin = miter      /// Shape of the stroke where path segments meet.
+  miterLimit: float64 = 4         /// Maximum miter-length/stroke-width ratio; must be at least 1.
+  dashArray?: float64+            /// Alternating dash and gap lengths; all must be nonnegative.
+                                  /// Odd-length lists repeat; empty or all-zero lists give a solid stroke.
+  dashOffset: float64 = 0         /// Offset into the repeating dash pattern, in local units.
+}
+
+/// A local affine transform, using SVG transform conventions. Angles are in degrees;
+/// positive rotation is clockwise in the default y-down coordinate system.
+/// A matrix maps (x, y) to (a*x + c*y + e, b*x + d*y + f).
+export type Transform =
+  | translate { x: float64 y: float64 }       /// Horizontal and vertical displacement in local units.
+  | scale { x: float64 y?: float64 }          /// Axis scale factors; omitted y uses x for uniform scaling.
+  | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 } /// Rotation about the local pivot (cx, cy).
+  | skewX { degrees: float64 }                /// Horizontal shear angle.
+  | skewY { degrees: float64 }                /// Vertical shear angle.
+  | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 } /// Six affine coefficients.
+
+/// Base for elements inside a Drawing, with opacity, transforms, clipping, and accessibility.
+export abstract external component <GraphicsElement
+  opacity: float64 = 1.0          /// Opacity of the element and its contents as a whole; must be in 0..1.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the element unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape's fillRule.
+  accessibility?: Accessibility   /// Accessible name and description for the host to expose.
+/>
+
+/// Base for geometric shapes with fill and stroke. Omitted fill is black for closed shapes and Path,
+/// and none for Line/Polyline.
+/// Omitted stroke draws no outline. These defaults are local to each shape, not inherited from groups.
+export abstract external component <Shape extends GraphicsElement
+  fill?: Paint                    /// Interior paint; explicit none disables filling. Line ignores this property.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  fillRule: FillRule = nonzero    /// Rule for deciding which regions of the shape are filled.
+/>
+
+/// A standalone drawing mapped into a host-supplied viewport and clipped to its boundaries.
+/// Like an SVG viewport, it maps a viewBox into an output rectangle. Fit and alignment are
+/// expressed separately here instead of SVG's preserveAspectRatio attribute.
+export external component <Drawing
+  opacity: float64 = 1.0               /// Opacity of the complete drawing as a whole; must be in 0..1.
+  accessibility?: Accessibility        /// Accessible name and description of the drawing.
+  viewBox: ViewBox                     /// Source coordinate rectangle; width and height must be positive.
+  fit: ViewBoxFit = contain            /// How the source rectangle scales to the viewport.
+  contentAlignment?: ContentAlignment  /// Placement after fitting; omission centers both axes.
+  background?: Paint                   /// Paint covering the viewport behind the children; omission is transparent.
+  content children?: Element+          /// Graphical children, painted in sequence; later children appear on top.
+/>
+
+/// Groups children under a shared transform, clip, and opacity, corresponding to SVG `<g>`.
+/// Has no geometry of its own. Group opacity applies to the composited children as a whole.
+export external component <Group extends GraphicsElement
+  content children?: Element+     /// Graphical children, painted in sequence; later children appear on top.
+/>
+
+/// An axis-aligned rectangle with optional rounded corners, corresponding to SVG `<rect>`.
+/// Corner radii are clamped to half the corresponding dimension. Unlike SVG's symmetric
+/// omitted-radius rules, rx defaults to zero here and only an omitted ry copies rx.
+export external component <Rect extends Shape
+  x: float64 = 0                  /// Horizontal coordinate of the left edge.
+  y: float64 = 0                  /// Vertical coordinate of the top edge.
+  width: float64                  /// Width in local units; must be nonnegative.
+  height: float64                 /// Height in local units; must be nonnegative.
+  rx: float64 = 0                 /// Horizontal corner radius; must be nonnegative.
+  ry?: float64                    /// Vertical corner radius; must be nonnegative. Omission uses rx.
+/>
+
+/// A circle centered at (cx, cy), corresponding to SVG `<circle>`.
+/// The center and radius must be supplied explicitly.
+export external component <Circle extends Shape
+  cx: float64                     /// Horizontal coordinate of the center.
+  cy: float64                     /// Vertical coordinate of the center.
+  r: float64                      /// Radius in local units; must be nonnegative.
+/>
+
+/// An ellipse centered at (cx, cy), corresponding to SVG `<ellipse>`.
+/// The center and both radii must be supplied explicitly; SVG's auto radii are not supported.
+export external component <Ellipse extends Shape
+  cx: float64                     /// Horizontal coordinate of the center.
+  cy: float64                     /// Vertical coordinate of the center.
+  rx: float64                     /// Horizontal radius in local units; must be nonnegative.
+  ry: float64                     /// Vertical radius in local units; must be nonnegative.
+/>
+
+/// A straight segment between two endpoints, corresponding to SVG `<line>`.
+/// Only the stroke is painted; the inherited fill property has no effect.
+export external component <Line extends Shape
+  x1: float64                     /// Horizontal coordinate of the starting point.
+  y1: float64                     /// Vertical coordinate of the starting point.
+  x2: float64                     /// Horizontal coordinate of the ending point.
+  y2: float64                     /// Vertical coordinate of the ending point.
+/>
+
+/// Connected straight segments, corresponding to SVG `<polyline>`.
+/// The stroke remains open. An explicit fill closes the interior with a straight segment
+/// from the last vertex to the first, as in SVG; unlike SVG, the default fill here is none.
+export external component <Polyline extends Shape
+  points: Point+                  /// Vertices in path order; at least two are required.
+/>
+
+/// A closed sequence of straight segments, corresponding to SVG `<polygon>`.
+/// The closing segment from the last vertex to the first is implicit.
+export external component <Polygon extends Shape
+  points: Point+                  /// Vertices in path order; at least three are required.
+/>
+
+/// A shape described by SVG path data, corresponding to SVG `<path>`.
+/// Supports M/L/H/V/C/S/Q/T/A/Z commands in absolute or relative form.
+/// The renderer validates path syntax, numeric ranges, command counts, and rendered bounds.
+export external component <Path extends Shape
+  data: string                    /// SVG path commands, corresponding to SVG's d attribute; empty means no geometry.
+/>
+
+/// A single line of positioned text, corresponding to a restricted SVG `<text>`.
+/// Uses an alphabetic baseline and zero letter spacing. Fonts must be supplied explicitly
+/// by the host; supported families, weights, and styles depend on those supplied fonts.
+/// Text stroke, effects, wrapping, and embedded line breaks are unsupported.
+export external component <Text extends GraphicsElement
+  x: float64 = 0                  /// Horizontal anchor position, interpreted using textAnchor.
+  y: float64 = 0                  /// Vertical position of the alphabetic baseline.
+  fontFamily: string              /// Name of a font family explicitly supplied by the host.
+  fontSize: float64 = 16          /// Font size in local units; must be positive.
+  fontWeight: float64 = 400       /// Requested font weight; must be an integer in 1..1000.
+  fontStyle: FontStyle = normal   /// Requested upright or italic font face.
+  textAnchor: TextAnchor = start  /// Aligns the run's start, midpoint, or end with x using its advance width.
+  fill?: Paint                    /// Text paint; omission uses solid black and none disables painting.
+  content text: string            /// Text to shape and paint as one line.
+/>
+
+
+// Public angles are clockwise degrees in y-down coordinates. Reduce periodic start/rotation
+// angles before converting; retain the signed sweep separately, including full circles.
+// Remainder avoids cancellation in degrees - 360*floor(degrees/360) for large finite angles.
+// A comparison on x-x rejects both NaN and infinities without calling a math intrinsic.
+let isFinite(value:float64):boolean = { value - value == 0.0 }
+/// Produces an invalid Path carrying a diagnostic for a nonfinite helper argument.
+let <invalidFinite
+  helper: string                  /// Name of the graphics helper reported in the diagnostic.
+  parameter: string               /// Name of the parameter that requires a finite value.
+/>: Element =
+  <Path data={"nx-graphics-invalid: " + helper + " " + parameter + " must be finite"}/>
+/// Reduces degrees modulo 360, preserving the sign of negative angles.
+let normalizeDegrees(degrees:float64):float64 = { degrees % 360.0 }
+/// Converts periodic degree angles to radians for the math library.
+let toPeriodicRadians(degrees:float64):float64 = { math.degreesToRadians(normalizeDegrees(degrees)) }
+/// Constructs a point around a center, using clockwise degrees in y-down coordinates.
+let pointOnCircle(cx:float64, cy:float64, radius:float64, degrees:float64):Point =
+  <Point x={cx + radius * math.cos(toPeriodicRadians(degrees))} y={cy + radius * math.sin(toPeriodicRadians(degrees))}/>
+
+/// A regular polygon with pointCount equally spaced vertices around (cx, cy); produces a Polygon.
+/// Inspired by [Figma's polygon shape](https://developers.figma.com/docs/plugins/api/PolygonNode/).
+/// Uses an explicit center and radius and produces NX geometry, not a retained Figma polygon node.
+/// Fill, stroke, transform, opacity, and clipping have the same meaning as on Polygon.
+export let <RegularPolygon
+  cx: float64                     /// Horizontal coordinate of the center.
+  cy: float64                     /// Vertical coordinate of the center.
+  radius: float64                 /// Center-to-vertex distance in local units; must be nonnegative.
+  pointCount: int                 /// Number of vertices; must be in 3..4096.
+  rotation: float64 = 0           /// Clockwise angle of the first vertex from the positive x axis, in degrees.
+  fill?: Paint                    /// Interior paint; omission uses solid black and none disables filling.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element = {
+  if {
+    !isFinite(cx) => <invalidFinite helper="RegularPolygon" parameter="cx"/>
+    !isFinite(cy) => <invalidFinite helper="RegularPolygon" parameter="cy"/>
+    !isFinite(radius) => <invalidFinite helper="RegularPolygon" parameter="radius"/>
+    !isFinite(rotation) => <invalidFinite helper="RegularPolygon" parameter="rotation"/>
+    !isFinite(cx+radius) || !isFinite(cx-radius) || !isFinite(cy+radius) || !isFinite(cy-radius) =>
+      <invalidFinite helper="RegularPolygon" parameter="center +/- radius coordinates"/>
+    else => {
+      if pointCount >= 3 && pointCount <= 4096 && radius >= 0 {
+        <Polygon
+          fill={fill}
+          stroke={stroke}
+          transform={transform}
+          opacity={opacity}
+          clipPath={clipPath}
+          clipRule={clipRule}
+          points={
+            pointOnCircle(cx,cy,radius,rotation)
+            for i in 1..pointCount { pointOnCircle(cx,cy,radius,normalizeDegrees(rotation)+360.0*i/pointCount) }
+          }
+        />
+      } else {
+        <Path
+          data={
+            if pointCount < 3 || pointCount > 4096 {
+              "nx-graphics-invalid: RegularPolygon pointCount must be in 3..4096; received " + pointCount
+            } else {
+              "nx-graphics-invalid: RegularPolygon radius must be nonnegative; received " + radius
+            }
+          }
+        />
+      }
+    }
+  }
+}
+
+/// A closed star with alternating outer tips and inner vertices around (cx, cy); produces a Polygon.
+/// Inspired by [Figma's star shape](https://developers.figma.com/docs/plugins/api/StarNode/).
+/// Uses explicit inner and outer radii in local units, rather than Figma's normalized inner-radius ratio.
+/// Fill, stroke, transform, opacity, and clipping have the same meaning as on Polygon.
+export let <Star
+  cx: float64                     /// Horizontal coordinate of the center.
+  cy: float64                     /// Vertical coordinate of the center.
+  outerRadius: float64            /// Distance from the center to the outer vertices; must be nonnegative.
+  innerRadius: float64            /// Distance from the center to the inner vertices; must be in 0..outerRadius.
+  pointCount: int                 /// Number of outer tips; must be in 3..4096.
+  rotation: float64 = 0           /// Clockwise angle of the first outer tip from the positive x axis, in degrees.
+  fill?: Paint                    /// Interior paint; omission uses solid black and none disables filling.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element = {
+  if {
+    !isFinite(cx) => <invalidFinite helper="Star" parameter="cx"/>
+    !isFinite(cy) => <invalidFinite helper="Star" parameter="cy"/>
+    !isFinite(outerRadius) => <invalidFinite helper="Star" parameter="outerRadius"/>
+    !isFinite(innerRadius) => <invalidFinite helper="Star" parameter="innerRadius"/>
+    !isFinite(rotation) => <invalidFinite helper="Star" parameter="rotation"/>
+    !isFinite(cx+outerRadius) || !isFinite(cx-outerRadius) || !isFinite(cy+outerRadius) || !isFinite(cy-outerRadius) =>
+      <invalidFinite helper="Star" parameter="center +/- radius coordinates"/>
+    else => {
+      if pointCount >= 3 && pointCount <= 4096 && innerRadius >= 0 && outerRadius >= innerRadius {
+        <Polygon
+          fill={fill}
+          stroke={stroke}
+          transform={transform}
+          opacity={opacity}
+          clipPath={clipPath}
+          clipRule={clipRule}
+          points={
+            pointOnCircle(cx,cy,outerRadius,rotation)
+            pointOnCircle(cx,cy,innerRadius,normalizeDegrees(rotation)+180.0/pointCount)
+            for i in 1..pointCount {
+              pointOnCircle(cx,cy,outerRadius,normalizeDegrees(rotation)+360.0*i/pointCount)
+              pointOnCircle(cx,cy,innerRadius,normalizeDegrees(rotation)+360.0*(i+0.5)/pointCount)
+            }
+          }
+        />
+      } else {
+        <Path
+          data={
+            if pointCount < 3 || pointCount > 4096 {
+              "nx-graphics-invalid: Star pointCount must be in 3..4096; received " + pointCount
+            } else {
+              if innerRadius < 0 { "nx-graphics-invalid: Star innerRadius must be nonnegative" }
+              else { "nx-graphics-invalid: Star innerRadius exceeds outerRadius" }
+            }
+          }
+        />
+      }
+    }
+  }
+}
+
+// Validate before normalizing; hypot avoids overflow from squaring the endpoint differences.
+/// A straight filled arrow from (x1, y1) to the tip at (x2, y2); produces a closed Polygon.
+/// Inspired by the arrow tool in [Figma's shape tools](https://help.figma.com/hc/en-us/articles/360040450133).
+/// Defines a filled polygon with explicit shaft and head dimensions, rather than a line with an arrowhead.
+/// Shaft and head widths are measured perpendicular to the shaft, in local units.
+/// Fill, stroke, transform, opacity, and clipping have the same meaning as on Polygon.
+export let <Arrow
+  x1: float64                     /// Horizontal coordinate of the starting point.
+  y1: float64                     /// Vertical coordinate of the starting point.
+  x2: float64                     /// Horizontal coordinate of the arrow tip; endpoints must be distinct.
+  y2: float64                     /// Vertical coordinate of the arrow tip.
+  shaftWidth: float64 = 2         /// Full shaft width in local units; must be nonnegative.
+  headWidth: float64 = 6          /// Full arrowhead width; must be at least shaftWidth.
+  headLength: float64 = 8         /// Arrowhead length along the shaft; must be in 0..endpoint distance.
+  fill?: Paint                    /// Interior paint; omission uses solid black and none disables filling.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element = {
+  if {
+    !isFinite(x1) => <invalidFinite helper="Arrow" parameter="x1"/>
+    !isFinite(y1) => <invalidFinite helper="Arrow" parameter="y1"/>
+    !isFinite(x2) => <invalidFinite helper="Arrow" parameter="x2"/>
+    !isFinite(y2) => <invalidFinite helper="Arrow" parameter="y2"/>
+    !isFinite(shaftWidth) => <invalidFinite helper="Arrow" parameter="shaftWidth"/>
+    !isFinite(headWidth) => <invalidFinite helper="Arrow" parameter="headWidth"/>
+    !isFinite(headLength) => <invalidFinite helper="Arrow" parameter="headLength"/>
+    !isFinite(x2-x1) || !isFinite(y2-y1) =>
+      <invalidFinite helper="Arrow" parameter="endpoint differences"/>
+    !isFinite(math.hypot((x2-x1)/2.0,(y2-y1)/2.0)*2.0) =>
+      <invalidFinite helper="Arrow" parameter="endpoint distance"/>
+    !isFinite(x1+headWidth) || !isFinite(x1-headWidth) || !isFinite(y1+headWidth) || !isFinite(y1-headWidth) ||
+    !isFinite(x2+headWidth+headLength) || !isFinite(x2-headWidth-headLength) ||
+    !isFinite(y2+headWidth+headLength) || !isFinite(y2-headWidth-headLength) =>
+      <invalidFinite helper="Arrow" parameter="outline coordinates"/>
+    else => {
+      <arrowChecked
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        length={math.hypot(x2-x1,y2-y1)}
+        shaftWidth={shaftWidth}
+        headWidth={headWidth}
+        headLength={headLength}
+        fill={fill}
+        stroke={stroke}
+        transform={transform}
+        opacity={opacity}
+        clipPath={clipPath}
+        clipRule={clipRule}
+      />
+    }
+  }
+}
+
+/// Validates arrow dimensions before normalizing the endpoint direction.
+let <arrowChecked
+  x1: float64                     /// Horizontal coordinate of the starting point.
+  y1: float64                     /// Vertical coordinate of the starting point.
+  x2: float64                     /// Horizontal coordinate of the arrow tip.
+  y2: float64                     /// Vertical coordinate of the arrow tip.
+  length: float64                 /// Distance between the endpoints, used to validate the arrow dimensions.
+  shaftWidth: float64             /// Full shaft width perpendicular to its direction, in local units.
+  headWidth: float64              /// Full arrowhead width perpendicular to the shaft, in local units.
+  headLength: float64             /// Arrowhead length measured back from the tip along the shaft.
+  fill?: Paint                    /// Interior paint; omission uses solid black and none disables filling.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element = {
+  if length > 0 && shaftWidth >= 0 && headWidth >= shaftWidth && headLength >= 0 && headLength <= length {
+    <arrowPoints
+      x1={x1}
+      y1={y1}
+      x2={x2}
+      y2={y2}
+      ux={(x2-x1)/length}
+      uy={(y2-y1)/length}
+      shaftWidth={shaftWidth}
+      headWidth={headWidth}
+      headLength={headLength}
+      fill={fill}
+      stroke={stroke}
+      transform={transform}
+      opacity={opacity}
+      clipPath={clipPath}
+      clipRule={clipRule}
+    />
+  } else {
+    <Path
+      data={
+        if length == 0 { "nx-graphics-invalid: Arrow endpoints coincide" }
+        else {
+          if shaftWidth < 0 || headWidth < shaftWidth || headLength < 0 {
+            "nx-graphics-invalid: Arrow requires nonnegative dimensions and headWidth >= shaftWidth"
+          } else {
+            "nx-graphics-invalid: Arrow headLength " + headLength + " exceeds endpoint distance " + length
+          }
+        }
+      }
+    />
+  }
+}
+/// Constructs the arrow polygon from validated dimensions and a unit direction.
+let <arrowPoints
+  x1: float64                     /// Horizontal coordinate of the starting point.
+  y1: float64                     /// Vertical coordinate of the starting point.
+  x2: float64                     /// Horizontal coordinate of the arrow tip.
+  y2: float64                     /// Vertical coordinate of the arrow tip.
+  ux: float64                     /// Horizontal component of the unit vector from the start to the tip.
+  uy: float64                     /// Vertical component of the unit vector from the start to the tip.
+  shaftWidth: float64             /// Full shaft width perpendicular to its direction, in local units.
+  headWidth: float64              /// Full arrowhead width perpendicular to the shaft, in local units.
+  headLength: float64             /// Arrowhead length measured back from the tip along the shaft.
+  fill?: Paint                    /// Interior paint; omission uses solid black and none disables filling.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element =
+  <Polygon
+    fill={fill}
+    stroke={stroke}
+    transform={transform}
+    opacity={opacity}
+    clipPath={clipPath}
+    clipRule={clipRule}
+    points={
+      <Point x={x1-uy*shaftWidth/2.0} y={y1+ux*shaftWidth/2.0}/>
+      <Point x={x2-headLength*ux-uy*shaftWidth/2.0} y={y2-headLength*uy+ux*shaftWidth/2.0}/>
+      <Point x={x2-headLength*ux-uy*headWidth/2.0} y={y2-headLength*uy+ux*headWidth/2.0}/>
+      <Point x={x2} y={y2}/>
+      <Point x={x2-headLength*ux+uy*headWidth/2.0} y={y2-headLength*uy-ux*headWidth/2.0}/>
+      <Point x={x2-headLength*ux+uy*shaftWidth/2.0} y={y2-headLength*uy-ux*shaftWidth/2.0}/>
+      <Point x={x1+uy*shaftWidth/2.0} y={y1-ux*shaftWidth/2.0}/>
+    }
+  />
+
+let arcTail(radius:float64,b:Point,c:Point,clockwise:int):string = {
+  "A " + radius + " " + radius + " 0 0 " + clockwise + " " + b.x + " " + b.y +
+    " A " + radius + " " + radius + " 0 0 " + clockwise + " " + c.x + " " + c.y
+}
+let arcStart(a:Point,tail:string):string = { "M " + a.x + " " + a.y + " " + tail }
+let arcCommands(cx:float64,cy:float64,radius:float64,startAngle:float64,sweepAngle:float64):string = {
+  arcTail(
+    radius,
+    pointOnCircle(cx,cy,radius,normalizeDegrees(startAngle)+sweepAngle/2.0),
+    pointOnCircle(cx,cy,radius,normalizeDegrees(startAngle)+sweepAngle),
+    (if sweepAngle >= 0 { 1 } else { 0 })
+  )
+}
+let arcPathData(cx:float64,cy:float64,radius:float64,startAngle:float64,sweepAngle:float64):string = {
+  arcStart(pointOnCircle(cx,cy,radius,startAngle),arcCommands(cx,cy,radius,startAngle,sweepAngle))
+}
+
+/// An open circular arc around (cx, cy); produces an unfilled Path using SVG arc commands.
+/// Inspired by [Figma's ellipse arc controls](https://developers.figma.com/docs/plugins/api/ArcData/).
+/// Exposes an open circular path with start and sweep angles in degrees, rather than Figma's
+/// ellipse arc data with starting and ending angles in radians.
+/// Angles use y-down coordinates: positive sweeps run clockwise, negative sweeps counterclockwise.
+/// Zero sweep is empty; either full sweep draws a complete circle.
+/// Omitted stroke paints nothing. Transform, opacity, and clipping have the same meaning as on Path.
+export let <Arc
+  cx: float64                     /// Horizontal coordinate of the center.
+  cy: float64                     /// Vertical coordinate of the center.
+  radius: float64                 /// Radius of the circular arc in local units; must be nonnegative.
+  startAngle: float64 = 0         /// Starting angle from the positive x axis, in clockwise degrees.
+  sweepAngle: float64 = 90        /// Signed sweep in degrees, in -360..360; positive is clockwise and zero is empty.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element = {
+  if {
+    !isFinite(cx) => <invalidFinite helper="Arc" parameter="cx"/>
+    !isFinite(cy) => <invalidFinite helper="Arc" parameter="cy"/>
+    !isFinite(radius) => <invalidFinite helper="Arc" parameter="radius"/>
+    !isFinite(startAngle) => <invalidFinite helper="Arc" parameter="startAngle"/>
+    !isFinite(sweepAngle) => <invalidFinite helper="Arc" parameter="sweepAngle"/>
+    !isFinite(cx+radius) || !isFinite(cx-radius) || !isFinite(cy+radius) || !isFinite(cy-radius) =>
+      <invalidFinite helper="Arc" parameter="center +/- radius coordinates"/>
+    else => {
+      if radius >= 0 && math.abs(sweepAngle) <= 360 {
+        <Path
+          data={if sweepAngle == 0 { "" } else { arcPathData(cx,cy,radius,startAngle,sweepAngle) }}
+          fill=none
+          stroke={stroke}
+          transform={transform}
+          opacity={opacity}
+          clipPath={clipPath}
+          clipRule={clipRule}
+        />
+      } else {
+        <Path
+          data={
+            if radius < 0 {
+              "nx-graphics-invalid: Arc radius must be nonnegative"
+            } else {
+              "nx-graphics-invalid: Arc sweepAngle must be in -360..360"
+            }
+          }
+        />
+      }
+    }
+  }
+}
+let ringSectorPathData(outer:string,inner:string,tail:string,p:Point,q:Point,full:boolean,solid:boolean):string = {
+  if full {
+    if solid { outer + " Z" } else { outer + " Z " + inner + " Z" }
+  } else {
+    outer + " L " + p.x + " " + p.y + " " + tail + " L " + q.x + " " + q.y + " Z"
+  }
+}
+/// A filled sector of a circular ring around (cx, cy); produces a Path with an even-odd hole.
+/// Inspired by [Figma's ellipse arc controls](https://developers.figma.com/docs/plugins/api/ArcData/).
+/// Uses explicit circular radii in local units and start/sweep angles in degrees; Figma uses
+/// a normalized inner-radius ratio and starting/ending angles in radians.
+/// Angles use y-down coordinates: positive sweeps run clockwise, negative sweeps counterclockwise.
+/// Zero sweep is empty. A full sweep forms a ring; partial sweeps join the arcs with radial edges.
+/// Fill, stroke, transform, opacity, and clipping have the same meaning as on Path.
+export let <RingSector
+  cx: float64                     /// Horizontal coordinate of the center.
+  cy: float64                     /// Vertical coordinate of the center.
+  outerRadius: float64            /// Outer radius in local units; must be at least innerRadius.
+  innerRadius: float64 = 0        /// Inner radius in 0..outerRadius; zero gives a solid sector.
+  startAngle: float64 = 0         /// Starting angle from the positive x axis, in clockwise degrees.
+  sweepAngle: float64 = 90        /// Signed sweep in degrees, in -360..360; positive is clockwise and zero is empty.
+  fill?: Paint                    /// Interior paint; omission uses solid black and none disables filling.
+  stroke?: Stroke                 /// Outline paint and style; omission draws no stroke.
+  transform?: Transform+          /// SVG-style transform list: the last entry acts on coordinates first.
+  opacity: float64 = 1            /// Opacity of the complete shape; must be in 0..1.
+  clipPath?: string               /// SVG path data in local coordinates; omission leaves the shape unclipped.
+  clipRule: FillRule = nonzero    /// Interior rule for clipPath, independent of the shape fill rule.
+/>: Element = {
+  if {
+    !isFinite(cx) => <invalidFinite helper="RingSector" parameter="cx"/>
+    !isFinite(cy) => <invalidFinite helper="RingSector" parameter="cy"/>
+    !isFinite(outerRadius) => <invalidFinite helper="RingSector" parameter="outerRadius"/>
+    !isFinite(innerRadius) => <invalidFinite helper="RingSector" parameter="innerRadius"/>
+    !isFinite(startAngle) => <invalidFinite helper="RingSector" parameter="startAngle"/>
+    !isFinite(sweepAngle) => <invalidFinite helper="RingSector" parameter="sweepAngle"/>
+    !isFinite(cx+outerRadius) || !isFinite(cx-outerRadius) || !isFinite(cy+outerRadius) || !isFinite(cy-outerRadius) =>
+      <invalidFinite helper="RingSector" parameter="center +/- radius coordinates"/>
+    else => {
+      if innerRadius >= 0 && outerRadius >= innerRadius && math.abs(sweepAngle) <= 360 {
+        <Path
+          fill={fill}
+          stroke={stroke}
+          transform={transform}
+          opacity={opacity}
+          clipPath={clipPath}
+          clipRule={clipRule}
+          fillRule=evenodd
+          data={
+            if sweepAngle == 0 { "" }
+            else {
+              ringSectorPathData(
+                arcPathData(cx,cy,outerRadius,startAngle,sweepAngle),
+                arcPathData(cx,cy,innerRadius,normalizeDegrees(startAngle)+sweepAngle,-sweepAngle),
+                arcCommands(cx,cy,innerRadius,normalizeDegrees(startAngle)+sweepAngle,-sweepAngle),
+                pointOnCircle(cx,cy,innerRadius,normalizeDegrees(startAngle)+sweepAngle),
+                pointOnCircle(cx,cy,innerRadius,startAngle),
+                math.abs(sweepAngle) == 360,
+                innerRadius == 0
+              )
+            }
+          }
+        />
+      } else {
+        <Path
+          data={
+            if innerRadius < 0 { "nx-graphics-invalid: RingSector innerRadius must be nonnegative" }
+            else {
+              if outerRadius < innerRadius { "nx-graphics-invalid: RingSector innerRadius exceeds outerRadius" }
+              else { "nx-graphics-invalid: RingSector sweepAngle must be in -360..360" }
+            }
+          }
+        />
+      }
+    }
+  }
+}
+
+// Presentation follows familiar design-tool layer symbols, using the host's Lucide icon set.
+visualizer Drawing = <ElementVisualizer
+  icon="frame"
+  preview=<PreviewVisualizer renderer="nx.graphics"/>
+/>
+visualizer Group = <ElementVisualizer icon="group"/>
+visualizer Rect = <ElementVisualizer icon="rectangle-horizontal"/>
+visualizer Circle = <ElementVisualizer icon="circle"/>
+visualizer Ellipse = <ElementVisualizer icon="ellipse"/>
+visualizer Line = <ElementVisualizer icon="minus"/>
+visualizer Polyline = <ElementVisualizer icon="waypoints"/>
+visualizer Polygon = <ElementVisualizer icon="pentagon"/>
+visualizer Path = <ElementVisualizer icon="spline"/>
+visualizer Text = <ElementVisualizer icon="type"/>
+visualizer RegularPolygon = <FunctionVisualizer icon="hexagon"/>
+visualizer Star = <FunctionVisualizer icon="star"/>
+visualizer Arrow = <FunctionVisualizer icon="move-right"/>
+visualizer Arc = <FunctionVisualizer icon="radius"/>
+visualizer RingSector = <FunctionVisualizer icon="donut"/>

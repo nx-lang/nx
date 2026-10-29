@@ -119,6 +119,7 @@ export class NxValueElement extends ElementBase {
   #themes: NxValueThemes = DEFAULT_THEMES;
   #rendered: RenderedValue | undefined;
   #hovered: number | undefined;
+  #selected: readonly number[] = [];
   #hoverTimer: ReturnType<typeof setTimeout> | undefined;
   #hoverRequest = 0;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -202,6 +203,7 @@ export class NxValueElement extends ElementBase {
   }
 
   set value(value: NxValueText | undefined) {
+    if (value !== this.#value) this.#selected = [];
     this.#value = value;
     this.#render();
   }
@@ -298,6 +300,28 @@ export class NxValueElement extends ElementBase {
     summary.hidden = !folded;
   }
 
+  /** Highlights every rendering selected by the host and reveals the first, without navigation events.
+   * Indices belong to the current value; replacing it clears selection. */
+  selectNodes(indices: readonly number[], reveal = true): void {
+    this.#selected = [...new Set(indices)].filter(index => this.#value?.nodes[index] !== undefined);
+    this.#applySelection(reveal);
+  }
+
+  #applySelection(reveal: boolean): void {
+    const selected = new Set(this.#selected);
+    this.#rendered?.elements.forEach((element, index) => element.classList.toggle("selected", selected.has(index)));
+    if (!reveal) return;
+    for (const index of this.#selected) {
+      let parent = this.#value?.nodes[index]?.parent;
+      while (parent !== undefined) {
+        this.setFolded(parent, false);
+        parent = this.#value?.nodes[parent]?.parent;
+      }
+    }
+    const first = this.#selected[0];
+    if (first !== undefined) this.#rendered?.elements[first]?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }
+
   /** Whether the node at `index` is folded. */
   isFolded(index: number): boolean {
     const element = this.#rendered?.elements[index];
@@ -342,6 +366,7 @@ export class NxValueElement extends ElementBase {
         : { byNode: value.nodes.map((node, index) => actions(node, index, value)), disabled: this.stale }
     );
     this.#pre.append(this.#rendered.root);
+    this.#applySelection(false);
     for (const index of folded) {
       this.setFolded(index, true);
     }

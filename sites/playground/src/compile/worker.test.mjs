@@ -17,7 +17,9 @@ function named(name, message) {
 }
 
 test("a crashed compiler says it restarted and that editing continues", () => {
-  const message = compileFailureMessage(named("NxHostCrashedError", "trap in nx_wasm_program_build"));
+  const message = compileFailureMessage(
+    named("NxHostCrashedError", "trap in nx_wasm_program_build"),
+  );
   assert.match(message, /crashed/);
   assert.match(message, /restarted/);
 });
@@ -32,7 +34,10 @@ test("a deadline keeps the channel's own wording and says the next compile will 
 
 test("a module that would not load asks for a reload", () => {
   const message = compileFailureMessage(
-    named("NxModuleLoadError", "The compiler could not be loaded: Failed to fetch"),
+    named(
+      "NxModuleLoadError",
+      "The compiler could not be loaded: Failed to fetch",
+    ),
   );
   assert.match(message, /could not be loaded/);
   assert.match(message, /Reload the page/);
@@ -47,22 +52,36 @@ test("a worker that stopped says it will be started again", () => {
 
 test("recursion too deep for the browser says what to look for, and is not retried", async () => {
   const message = compileFailureMessage(
-    named("NxStackOverflowError", "The program recursed deeper than the browser can run."),
+    named(
+      "NxStackOverflowError",
+      "The program recursed deeper than the browser can run.",
+    ),
   );
   assert.match(message, /recursed deeper/);
   assert.match(message, /calls itself/);
   let attempts = 0;
   const compile = retrying(() => {
     attempts += 1;
-    return Promise.reject(named("NxStackOverflowError", "The program recursed deeper than the browser can run."));
+    return Promise.reject(
+      named(
+        "NxStackOverflowError",
+        "The program recursed deeper than the browser can run.",
+      ),
+    );
   });
   await assert.rejects(compile("let root() = { 1 }"), /recursed deeper/);
   assert.equal(attempts, 1);
 });
 
 test("anything else is still readable", () => {
-  assert.match(compileFailureMessage(new Error("something odd")), /The compiler failed: something odd/);
-  assert.match(compileFailureMessage("not an error"), /The compiler failed: not an error/);
+  assert.match(
+    compileFailureMessage(new Error("something odd")),
+    /The compiler failed: something odd/,
+  );
+  assert.match(
+    compileFailureMessage("not an error"),
+    /The compiler failed: not an error/,
+  );
 });
 
 test("a recoverable fault is retried once, so the output shows without another keystroke", async () => {
@@ -70,7 +89,9 @@ test("a recoverable fault is retried once, so the output shows without another k
   const compile = retrying((source) => {
     attempts.push(source);
     return attempts.length === 1
-      ? Promise.reject(named("TimeoutError", "The compiler did not answer within 10s."))
+      ? Promise.reject(
+          named("TimeoutError", "The compiler did not answer within 10s."),
+        )
       : Promise.resolve({ diagnostics: [], outcome: { kind: "noRoot" } });
   });
 
@@ -84,10 +105,19 @@ test("a fault that will not get better is not retried", async () => {
   let attempts = 0;
   const compile = retrying(() => {
     attempts += 1;
-    return Promise.reject(named("NxModuleLoadError", "The compiler could not be loaded: Failed to fetch"));
+    return Promise.reject(
+      named(
+        "NxModuleLoadError",
+        "The compiler could not be loaded: Failed to fetch",
+      ),
+    );
   });
 
-  await assert.rejects(compile("let root() = { 42 }"), /Reload the page/);
+  await assert.rejects(compile("let root() = { 42 }"), (error) => {
+    assert.equal(error.name, "NxModuleLoadError");
+    assert.match(compileFailureMessage(error), /Reload the page/);
+    return true;
+  });
   assert.equal(attempts, 1);
 });
 
@@ -95,9 +125,49 @@ test("a fault that repeats is reported rather than retried again", async () => {
   let attempts = 0;
   const compile = retrying(() => {
     attempts += 1;
-    return Promise.reject(named("NxHostCrashedError", "trap in nx_wasm_program_build"));
+    return Promise.reject(
+      named("NxHostCrashedError", "trap in nx_wasm_program_build"),
+    );
   });
 
-  await assert.rejects(compile("let root() = { 42 }"), /crashed/);
+  await assert.rejects(compile("let root() = { 42 }"), (error) => {
+    assert.equal(error.name, "NxHostCrashedError");
+    assert.match(compileFailureMessage(error), /crashed/);
+    return true;
+  });
   assert.equal(attempts, 2);
+});
+
+test("RF30 source retries preserve error classification so the UI formats failures exactly once", async () => {
+  for (const error of [
+    named(
+      "NxStackOverflowError",
+      "The program recursed deeper than the browser can run.",
+    ),
+    named("TimeoutError", "The compiler took too long."),
+    named("NxHostCrashedError", "trap"),
+    named("NxModuleLoadError", "Failed to fetch"),
+    new Error("boom"),
+  ]) {
+    let attempts = 0;
+    const send = retrying(async () => {
+      attempts++;
+      throw error;
+    });
+    let message;
+    try {
+      await send("source");
+    } catch (received) {
+      assert.equal(received, error);
+      message = compileFailureMessage(received);
+    }
+    assert.equal(message, compileFailureMessage(error));
+    assert.equal(
+      attempts,
+      ["TimeoutError", "NxHostCrashedError"].includes(error.name) ? 2 : 1,
+    );
+    assert.ok(!message.includes("The compiler failed: The compiler"));
+    if (error.name === "NxStackOverflowError")
+      assert.ok(!message.startsWith("The compiler failed:"));
+  }
 });

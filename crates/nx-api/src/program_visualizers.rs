@@ -270,6 +270,8 @@ pub fn duplicate_visualizer_diagnostics(
 pub struct VisualizerValue {
     /// Which visualizer record the value is.
     pub record: VisualizerRecord,
+    /// Logical renderer ID from the optional PreviewVisualizer descriptor.
+    pub preview: Option<String>,
     /// The attributes, in source order.
     pub attributes: Vec<(String, VisualizerAttribute)>,
     /// The `PropertyVisualizer`s of an `ElementVisualizer`, in source order.
@@ -364,6 +366,7 @@ pub fn read_visualizer_value(module: &LoweredModule, value: ExprId) -> Option<Vi
     let record = match tag.as_str() {
         "ElementVisualizer" => VisualizerRecord::Element,
         "ValueVisualizer" => VisualizerRecord::Value,
+        "FunctionVisualizer" => VisualizerRecord::Function,
         _ => return None,
     };
     let children = content
@@ -377,14 +380,46 @@ pub fn read_visualizer_value(module: &LoweredModule, value: ExprId) -> Option<Vi
         .collect();
     let choices = match record {
         VisualizerRecord::Value => choices_of(module, &content),
-        VisualizerRecord::Element => Vec::new(),
+        VisualizerRecord::Element | VisualizerRecord::Function => Vec::new(),
     };
+    let preview = preview_renderer(module, value);
     Some(VisualizerValue {
         record,
+        preview,
         attributes,
         children,
         choices,
     })
+}
+
+fn preview_renderer(module: &LoweredModule, expr: ExprId) -> Option<String> {
+    let value = match module.expr(expr) {
+        Expr::Element { element, .. } => {
+            module
+                .element(*element)
+                .properties
+                .iter()
+                .find(|property| property.key.as_str() == "preview")?
+                .value
+        }
+        Expr::RecordLiteral { properties, .. } => {
+            properties
+                .iter()
+                .find(|property| property.name.as_str() == "preview")?
+                .value
+        }
+        _ => return None,
+    };
+    let (tag, attributes, _) = element_parts(module, value)?;
+    if tag != "PreviewVisualizer" {
+        return None;
+    }
+    match attribute(&attributes, "renderer") {
+        Some(VisualizerAttribute::Text(renderer)) if !renderer.trim().is_empty() => {
+            Some(renderer.clone())
+        }
+        _ => None,
+    }
 }
 
 /// The `ValueChoice`s among `content`, in order, leaving out one whose value is neither a number nor
@@ -438,7 +473,13 @@ fn element_parts(module: &LoweredModule, expr: ExprId) -> Option<ElementParts> {
                 })
                 .collect();
             Some((
-                element.tag.as_str().to_string(),
+                element
+                    .tag
+                    .as_str()
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
                 attributes,
                 element.content.clone(),
             ))
@@ -446,7 +487,7 @@ fn element_parts(module: &LoweredModule, expr: ExprId) -> Option<ElementParts> {
         Expr::RecordLiteral {
             record, properties, ..
         } => Some((
-            record.as_str().to_string(),
+            record.as_str().rsplit('.').next().unwrap_or("").to_string(),
             properties
                 .iter()
                 .filter_map(|property| {

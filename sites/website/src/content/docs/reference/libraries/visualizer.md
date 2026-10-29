@@ -31,7 +31,8 @@ visualizer declarations from the language service and decides how to draw them.
 
 ## The `Target` parameter
 
-Every record in the library takes the declaration it describes as its type parameter `Target`, and
+`ElementVisualizer`, `PropertyVisualizer` and `ValueVisualizer` take the declaration they describe
+as their type parameter `Target`, and
 names that declaration's properties through `Target.Property`, so `title=label` is checked against
 the target's fields. Inside a `visualizer` declaration, `Target` is bound for you: write
 `<ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice title=label />`. For a component,
@@ -54,6 +55,7 @@ Which record a visualizer declaration takes depends on its target:
 | --- | --- |
 | A record, an action, an inline emitted action, or a component | `ElementVisualizer` |
 | An alias of a primitive type | `ValueVisualizer` |
+| An element-style function | `FunctionVisualizer` |
 
 A union cannot have a visualizer yet.
 
@@ -61,7 +63,9 @@ A union cannot have a visualizer yet.
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, content `properties?: PropertyVisualizer+` | `title` and `id` each name a property of the target. |
+| `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, `preview?: PreviewVisualizer`, content `properties?: PropertyVisualizer+` | `title` and `id` each name a property of the target. |
+| `PreviewVisualizer` | `renderer: string` | Nonempty literal host renderer ID; see [Preview descriptors](#preview-descriptors). |
+| `FunctionVisualizer` | `icon?: string` | Presentation-only icon for element-style function invocations. |
 | `IdPosition` | `start`, `end` | Where the element's id reads. |
 | `PropertyVisualizer` | `property`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
 
@@ -176,6 +180,45 @@ as `editor-hint-range`, and so is a range that only merging empties: with `Spaci
 above, `<PropertyVisualizer property=gap min=100 />` warns at `min=100`.
 Warnings, because a hint never changes what a program means.
 
+## Preview descriptors
+
+A nominal element type can request a rendered preview alongside its Visual presentation:
+
+```nx
+import "@nx/visualizer"
+
+external component <Survey title:string/>
+
+visualizer Survey = <ElementVisualizer
+  title=title
+  icon="list"
+  preview=<PreviewVisualizer renderer="app.survey"/>
+/>
+```
+
+`PreviewVisualizer` has one required property, `renderer`, a nonempty string literal naming a host
+implementation. The host decides which IDs it supports. An unsupported ID leaves the ordinary
+structured Output available. The descriptor runs no code and does not install or load plugins.
+Preview descriptors merge through inheritance and program/host overrides like other visualizer hints.
+This first profile attaches previews to nominal element types; primitive aliases retain their
+existing ValueVisualizer formats and editors.
+
+## Element-function icons
+
+An element-style function may use a `FunctionVisualizer` with an optional Lucide `icon`:
+
+```nx
+import "@nx/visualizer"
+
+let <Badge text:string/> = <Label text={text}/>
+visualizer Badge = <FunctionVisualizer icon="badge"/>
+```
+
+This marks the authored invocation. The returned value keeps its own type and determines its
+preview. FunctionVisualizer has no Target parameter, property hints or preview descriptor.
+Paren-style functions cannot be visualizer targets. This profile supports source-bearing element
+functions; function targets carried only by an interface without source are not supported yet.
+
 ## The library source
 
 ```nx
@@ -185,7 +228,8 @@ Warnings, because a hint never changes what a program means.
 // UNSTABLE. These declarations may change incompatibly in any NX release, including a patch
 // release. See https://nxlang.org/reference/libraries/visualizer.
 //
-// Each record takes the declaration it describes as its type parameter `Target`. Inside a
+// ElementVisualizer, PropertyVisualizer and ValueVisualizer take the declaration they describe
+// as their type parameter `Target`. Inside a
 // `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
 // <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
 // component, `Target` is its props record, so property names are its props.
@@ -205,8 +249,23 @@ export type ElementVisualizer = {
   /// The name of the icon that marks the element where it starts, from the Lucide set
   /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
   icon?: string
+  preview?: PreviewVisualizer     /// Host-rendered view, inherited and overridden like other hints.
+                                  /// Unsupported renderer IDs leave structured Output available.
+
   /// How individual properties read.
   content properties?: <PropertyVisualizer Target=Target/>+
+}
+
+/// A rendered presentation requested by a type; the host supplies the implementation.
+/// Unknown renderer IDs leave the ordinary structured output available. This descriptor loads no code.
+export type PreviewVisualizer = {
+  renderer: string             /// Logical renderer ID registered by the host, such as "nx.graphics".
+}
+
+/// How a viewer marks an authored element-style function invocation.
+/// Previews are selected from the function's result type, independently of this invocation icon.
+export type FunctionVisualizer = {
+  icon?: string                /// Lucide icon name for the invocation, such as "star".
 }
 
 /// Where an element's id reads.

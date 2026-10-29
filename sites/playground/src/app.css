@@ -742,3 +742,11 @@ nx-value.panel-value {
     border-top: 1px solid var(--sl-color-hairline);
   }
 }
+
+/* Prepared drawings keep their logical aspect ratio; the checkerboard distinguishes transparency. */
+.drawing-surface { padding: 1rem; }
+.drawing-canvas { display: block; max-width: 100%; height: auto; margin: auto; background: repeating-conic-gradient(#e5e7eb 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
+.drawing-info { padding: 0 1rem 1rem; font-size: var(--sl-text-sm); }
+.drawing-info select { max-width: 100%; margin: 0.5rem; }
+.drawing-info pre { max-height: 18rem; overflow: auto; font-size: var(--sl-text-xs); }
+.drawing-info .quiet { overflow-wrap: anywhere; }

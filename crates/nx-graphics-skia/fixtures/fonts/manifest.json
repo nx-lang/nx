@@ -1,0 +1,11 @@
+[
+  {
+    "family": "Fixture",
+    "weight": 400,
+    "italic": false,
+    "sha256": "ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280",
+    "license": "LICENSE.txt",
+    "upstream": "DejaVu fonts, Sans 2.37",
+    "path": "DejaVuSans.ttf"
+  }
+]

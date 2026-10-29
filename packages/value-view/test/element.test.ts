@@ -525,3 +525,20 @@ describe("a host can attach actions to nodes", () => {
     assert.equal(navigated, 0);
   });
 });
+
+describe("host selection", () => {
+  it("selects multiple renderings without navigating, preserves selection on recolor, and clears on a new value", () => {
+    const element = show(person);
+    let navigated = false;
+    element.addEventListener(NX_VALUE_NAVIGATE_EVENT, () => { navigated = true; });
+    element.selectNodes([0, 1, 1, 999]);
+    assert.equal(shadow(element).querySelectorAll('.node.selected').length, 2);
+    assert.equal(navigated, false);
+    element.actions = () => [];
+    assert.equal(shadow(element).querySelectorAll('.node.selected').length, 2);
+    element.themes = { light: "github-light", dark: "github-dark" };
+    assert.equal(shadow(element).querySelectorAll('.node.selected').length, 2);
+    element.value = user;
+    assert.equal(shadow(element).querySelectorAll('.node.selected').length, 0);
+  });
+});

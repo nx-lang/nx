@@ -97,6 +97,8 @@ export interface SourceTreeRequest extends LanguageQuery {
 
 /** Which visualizer declarations a source-tree request resolves. */
 export interface SourceTreeVisualizersOption {
+  /** Also list loaded visualizer targets not directly referenced by the document. */
+  includeUnreferencedDeclarations?: boolean;
   /**
    * Further visualizer modules the host supplies, by module identity, applied after the program's
    * own visualizer declarations in the order named.
@@ -503,6 +505,8 @@ export interface SourceVisualizer {
   idPosition?: "start" | "end";
   /** The name of the Lucide icon that marks the element where it starts. */
   icon?: string;
+  /** Requested rendered presentation; the host decides whether its implementation is available. */
+  preview?: { renderer: string };
   /** Every property, those the visualizer names first. */
   properties?: SourcePropertyVisualizer[];
   /** How an alias's string values are shown. */

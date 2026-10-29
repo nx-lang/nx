@@ -1,6 +1,6 @@
 ---
 title: 'Visualizer Declarations'
-description: 'How a visualizer declaration tells a viewer, such as the NX reading view, how to present a record, action, component or alias.'
+description: 'How a visualizer declaration tells a viewer, such as the NX reading view, how to present a record, action, component, alias or element-style function.'
 ---
 
 A **visualizer declaration** tells a viewer how to present one declaration. A viewer is a tool that
@@ -46,8 +46,9 @@ Which record the value takes depends on what the target is:
 | --- | --- |
 | A record, an action, an inline emitted action, or a component, concrete, abstract or external | `ElementVisualizer` |
 | An alias of a primitive type | `ValueVisualizer` |
+| An element-style function (`let <Name …/>`) | `FunctionVisualizer` |
 
-Anything else cannot have a visualizer: a union, a function, a value, an alias of anything but a
+Anything else cannot have a visualizer: a union, a paren-style function, a value, an alias of anything but a
 primitive type, a generic record or component, and a derived declaration such as `User.Update`,
 `User.Property` or `Card.Props`.
 
@@ -146,7 +147,7 @@ visualizer Choice = <ElementVisualizer icon={prefix} />   // error: a visualizer
 ## What a reading shows
 
 The source tree a viewer reads carries each declaration's resolved visualizer: the properties bound
-to `title` and `id`, where the id reads, its icon, and each property's format and editor hints. A visualizer
+to `title` and `id`, where the id reads, its icon, optional preview renderer descriptor, and each property's format and editor hints. A visualizer
 declaration changes how source reads, never what it means. The playground's Visual view uses it this
 way:
 

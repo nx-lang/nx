@@ -594,6 +594,29 @@ function admitsMany(ty) {
 function isObjectType(ty) {
     return ty.kind === "primitive" && ty.name === "object";
 }
+/**
+ * Resolves a record's construction site to its declaration in the linked program. Returns undefined
+ * for untyped elements, missing debug metadata, or expressions that do not directly construct a type.
+ * Call-site ancestry is deliberately ignored: callers do not determine nominal type identity.
+ */
+export function declarationAtOrigin(program, origin) {
+    const linked = program.modulesByIdentity.get(origin.module);
+    if (linked === undefined) {
+        return undefined;
+    }
+    const image = linked.module.artifact;
+    for (let index = 0; index < image.entryCount("nodes"); index += 1) {
+        const span = image.nodeSpan(index);
+        if (span?.[0] !== origin.start || span[1] !== origin.end) {
+            continue;
+        }
+        const entry = image.entry("nodes", index);
+        if (entry[0] === nodeKinds.record || entry[0] === nodeKinds.component || entry[0] === nodeKinds.unionCase) {
+            return linked.slots[entry[1]].module.declarationsByName.get(image.string(entry[2]));
+        }
+    }
+    return undefined;
+}
 /** The default of {@link NxRuntimeOptions.maxCallDepth}. */
 export const NX_DEFAULT_MAX_CALL_DEPTH = 100;
 /** The default of {@link NxRuntimeOptions.maxRangeLength}. */
@@ -1682,7 +1705,10 @@ const instanceOrigins = new WeakMap();
 function originated(record, context, nodeIndex) {
     const evaluation = context.evaluation;
     if (evaluation.recording) {
-        evaluation.origins.set(record, { linked: context.linked, node: nodeIndex });
+        evaluation.origins.set(record, {
+            linked: context.linked, node: nodeIndex,
+            ...(evaluation.callSites === undefined ? {} : { callSites: evaluation.callSites.slice().reverse() }),
+        });
     }
     return record;
 }
@@ -1745,6 +1771,7 @@ function evaluate(options, input, run) {
         origins: origins === undefined ? undefined : new WeakMap(),
         recording: origins !== undefined,
         entries: [],
+        callSites: origins?.includeCallSites === true ? [] : undefined,
     };
     let inputSize;
     try {
@@ -1844,6 +1871,9 @@ function clearedOrigins(origins) {
     }
     catch {
         fail("nx-ir-options", "The origins option must be an object the runtime can write to: its entries could not be set.");
+    }
+    if (sink.includeCallSites !== undefined && typeof sink.includeCallSites !== "boolean") {
+        fail("nx-ir-options", "The origins includeCallSites option must be a boolean.");
     }
     return sink;
 }
@@ -2860,6 +2890,19 @@ function evalReference(context, slot, name, nodeIndex) {
     }
     fail("nx-ir-reference", `Declaration '${name}' cannot be used as a value.`, context, nodeIndex);
 }
+/** Keep caller attribution separate from the node used to resolve a constructed declaration. */
+function withOriginCall(context, nodeIndex, run) {
+    const sites = context.evaluation.callSites;
+    if (sites === undefined)
+        return run();
+    sites.push({ linked: context.linked, node: nodeIndex });
+    try {
+        return run();
+    }
+    finally {
+        sites.pop();
+    }
+}
 function evalCall(context, nodeIndex, entry) {
     const callee = evalNode(entry[1], context);
     if (!isFunctionReference(callee)) {
@@ -2873,7 +2916,7 @@ function evalCall(context, nodeIndex, entry) {
         args.push(node === NX_IR_NONE ? undefined : evalNode(node, context));
     }
     try {
-        return invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1, false);
+        return withOriginCall(context, nodeIndex, () => invokeFunction(context.program, callee.linked, callee.declaration, args, context.evaluation, context.depth + 1, false));
     }
     catch (error) {
         throw mathCallOrigin(error, context, nodeIndex);
@@ -2890,7 +2933,7 @@ function evalNamedCall(context, nodeIndex, entry) {
     }
     const { properties } = propertiesAt(context, entry, 2);
     try {
-        return invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1);
+        return withOriginCall(context, nodeIndex, () => invokeFunctionByName(context.program, callee, properties, context.evaluation, context.depth + 1));
     }
     catch (error) {
         throw mathCallOrigin(error, context, nodeIndex);
@@ -3143,7 +3186,12 @@ function canonicalizeRendered(value, generation, payer, report) {
             const span = origin?.linked.module.artifact.nodeSpan(origin.node);
             if (origin !== undefined && span !== undefined) {
                 const pointer = path.map((segment) => `/${typeof segment === "number" ? segment : pointerToken(segment)}`).join("");
-                report.entries.push({ path: pointer, module: origin.linked.module.identity, start: span[0], end: span[1] });
+                const callSites = origin.callSites?.flatMap(site => {
+                    const span = site.linked.module.artifact.nodeSpan(site.node);
+                    return span === undefined ? [] : [{ module: site.linked.module.identity, start: span[0], end: span[1] }];
+                });
+                report.entries.push({ path: pointer, module: origin.linked.module.identity, start: span[0], end: span[1],
+                    ...(callSites === undefined ? {} : { callSites }) });
             }
         }
         // Keys are visited in sorted order so the numbering matches, and written back in their own

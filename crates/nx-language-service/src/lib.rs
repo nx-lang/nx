@@ -13,8 +13,9 @@ mod visualizers;
 pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
     SourceCase, SourceChoice, SourceDeclaration, SourceDeclarationKind, SourceEditorHints,
-    SourceFlag, SourceNode, SourceNumber, SourceProperty, SourcePropertyVisualizer, SourceRole,
-    SourceTree, SourceTreeOptions, SourceTreeVisualizers, SourceVisualizer,
+    SourceFlag, SourceNode, SourceNumber, SourcePreviewVisualizer, SourceProperty,
+    SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
+    SourceVisualizer,
 };
 
 use nx_api::{

@@ -1,0 +1,52 @@
+import "@nx/graphics"
+
+let blue: Paint = <Paint.solid color="#2563eb"/>
+let outline: Stroke = <Stroke
+  paint=<Paint.solid color="#0f172a"/>
+  width=2
+/>
+
+<Drawing
+  viewBox=<ViewBox x=0 y=0 width=400 height=240/>
+  background=<Paint.solid color="white"/>
+>
+  <RegularPolygon
+    cx=55 cy=55
+    radius=35
+    pointCount=6
+    fill={blue}
+  />
+  <Star
+    cx=150 cy=55
+    outerRadius=36 innerRadius=17
+    pointCount=5
+    rotation=-90
+    fill={blue}
+  />
+  <Arrow
+    x1=210 y1=55
+    x2=285 y2=55
+    shaftWidth=8
+    headWidth=24 headLength=20
+    fill={blue}
+  />
+  <Arc
+    cx=340 cy=55
+    radius=32
+    startAngle=0 sweepAngle=270
+    stroke={outline}
+  />
+  <RingSector
+    cx=70 cy=160
+    outerRadius=40 innerRadius=22
+    sweepAngle=360
+    fill={blue}
+  />
+  <Group opacity=0.5>
+    <Rect x=140 y=130 width=60 height=60 fill={blue}/>
+    <Circle cx=200 cy=160 r=30 fill={blue}/>
+  </Group>
+  <Text x=250 y=165 fontFamily="Fixture" fontSize=18>
+    NX graphics
+  </Text>
+</Drawing>

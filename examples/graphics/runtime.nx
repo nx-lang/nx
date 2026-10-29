@@ -1,0 +1,22 @@
+import "@nx/math" as math
+import "@nx/graphics" as g
+export let polygon() = <g.RegularPolygon cx=0 cy=0 radius=10 pointCount=3/>
+export let star() = <g.Star cx=0 cy=0 outerRadius=10 innerRadius=5 pointCount=5 rotation=-90/>
+export let revisedStar() = <g.Star cx=0 cy=0 outerRadius=10 innerRadius=5 pointCount=7 rotation=-90/>
+export let arrow() = <g.Arrow x1=0 y1=0 x2=30 y2=40 shaftWidth=2 headWidth=6 headLength=10/>
+export let invalidArrow() = <g.Arrow x1=0 y1=0 x2=0 y2=0/>
+export let ring() = <g.RingSector cx=0 cy=0 outerRadius=10 innerRadius=5 sweepAngle=360/>
+export let arc() = <g.Arc cx=0 cy=0 radius=10 sweepAngle=-360/>
+export let zeroArc() = <g.Arc cx=0 cy=0 radius=10 sweepAngle=0/>
+export let numericalFailure() = <g.Circle cx=0 cy=0 r={gRadius()}/>
+let gRadius():float64 = { badRadius(-1.0) }
+let badRadius(x:float64):float64 = { math.sqrt(x) }
+let identity(v:g.ViewBox):g.ViewBox = { v }
+export let aliasedValue() = { identity(<g.ViewBox x=1 y=2 width=3 height=4/>) }
+
+export let largeRotation() = <g.RegularPolygon cx=0 cy=0 radius=10 pointCount=3 rotation=1.0e100/>
+export let periodicRotation() = <g.RegularPolygon cx=0 cy=0 radius=10 pointCount=3 rotation=450/>
+export let periodicArc() = <g.Arc cx=0 cy=0 radius=10 startAngle=1.0e100 sweepAngle=360/>
+
+export let nonfiniteArc() = <g.Arc cx=0 cy=0 radius={1.0e309 - 1.0e309}/>
+export let nonfiniteRing() = <g.RingSector cx=0 cy=0 outerRadius=1.0e309/>

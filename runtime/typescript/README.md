@@ -441,6 +441,12 @@ replaces `entries` with an empty list when a call begins and fills it when the c
 call that throws, and every other call, leaves it empty. Nothing is collected for a call given no
 report, so a host that never asks pays nothing and a record built during such a call has no origin
 later. Neither does a record the host passes in, even one the runtime handed it in a state earlier.
+Hosts that need to map helper expansion back to authored calls can opt into
+`origins: { includeCallSites: true }`. Each entry then also has a `callSites` array of source locations,
+innermost first. Its original `module/start/end` still identifies construction; callers must not use
+call sites to resolve the constructed declaration. Default reports are unchanged. This optional
+TypeScript host feature does not change values, IR encoding or charged evaluation operations.
+
 A record rebuilt from another keeps its origin in every call, so an instance keeps the origins of
 its state through every dispatch, reported or not. The report changes neither a call's operation
 count nor its value, and records with origins are equal to records without. As with `usage`, the
@@ -734,3 +740,9 @@ reports for the request.
 | `bench/core.mjs` | The steps the performance harness times; runs in any JavaScript engine |
 | `bench/run.mjs`, `bench/compare.mjs` | The Node drivers behind `bench` and `bench:compare`, with `measure.mjs`, `sample.mjs`, `worker.mjs`, `corpus.mjs`, `report.mjs` and `verdict.mjs`, the rule a step is named by |
 | `bench/core.test.mjs` | Runs every step once against the committed build and checks the counts the corpus records, that the corpus's generated catalog is what its script writes, and the rule a step is named by |
+
+`declarationAtOrigin(program, origin)` resolves a reported construction span to its nominal
+declaration in the linked program, when debug metadata is present. It follows the constructor's
+module slot, so aliases and same-name declarations remain distinct. Untyped elements and sites
+that do not directly construct a nominal type return `undefined`; call-site ancestry is not used
+for type identity. Hosts can use this metadata to select type-specific renderers.

@@ -156,18 +156,16 @@ fn standard_math_images_are_gated_validated_and_independent() {
         let mut malformed = math.clone();
         malformed.nodes[position] = bad;
         // Writers validate the same structure as readers; either stage must reject it.
-        match write_nx_ir_image(&malformed) {
-            Ok(bytes) => assert!(PreparedModule::prepare(bytes).is_err()),
-            Err(_) => {}
+        if let Ok(bytes) = write_nx_ir_image(&malformed) {
+            assert!(PreparedModule::prepare(bytes).is_err());
         }
     }
     let mut no_feature = math.clone();
     no_feature
         .required_features
         .retain(|f| f != "standard-math-v1");
-    match write_nx_ir_image(&no_feature) {
-        Ok(bytes) => assert!(PreparedModule::prepare(bytes).is_err()),
-        Err(_) => {}
+    if let Ok(bytes) = write_nx_ir_image(&no_feature) {
+        assert!(PreparedModule::prepare(bytes).is_err());
     }
     let mut future = math.clone();
     future.required_features.push("standard-math-v999".into());
@@ -202,8 +200,10 @@ fn standard_math_images_are_gated_validated_and_independent() {
 #[test]
 fn standard_math_respects_operation_budget() {
     let program = program("import \"@nx/math\"\nlet root() = { sin(0.0) }");
-    let mut options = RuntimeOptions::default();
-    options.max_operations = Some(1);
+    let options = RuntimeOptions {
+        max_operations: Some(1),
+        ..RuntimeOptions::default()
+    };
     assert_eq!(
         program
             .evaluate_function("root", &[], &options)

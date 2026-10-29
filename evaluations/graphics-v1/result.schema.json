@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task",
+    "variant",
+    "model",
+    "modelVersion",
+    "budget",
+    "seed",
+    "renderer",
+    "fonts",
+    "initialArtifacts",
+    "revisionArtifacts",
+    "renderable",
+    "editSuccess",
+    "outputBytes",
+    "roundTrips",
+    "latencyMs",
+    "rubricScores"
+  ],
+  "properties": {
+    "task": {
+      "enum": [
+        "icon",
+        "diagram",
+        "illustration",
+        "infographic"
+      ]
+    },
+    "variant": {
+      "enum": [
+        "primitives",
+        "helpers"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "modelVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "budget": {
+      "type": "object"
+    },
+    "seed": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "renderer": {
+      "type": "string"
+    },
+    "fonts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "initialArtifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "revisionArtifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "renderable": {
+      "type": "boolean"
+    },
+    "editSuccess": {
+      "type": "boolean"
+    },
+    "outputBytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "roundTrips": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "latencyMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "rubricScores": {
+      "type": "object"
+    }
+  }
+}

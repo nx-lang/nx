@@ -16,6 +16,8 @@ crate-type = ["cdylib", "rlib"]
 debug-trap = []
 
 [dependencies]
+nx-graphics = { path = "../../../crates/nx-graphics" }
+nx-value.workspace = true
 nx-api = { path = "../../../crates/nx-api" }
 nx-codegen = { path = "../../../crates/nx-codegen" }
 nx-ir = { workspace = true }

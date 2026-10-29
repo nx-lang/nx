@@ -33,24 +33,5 @@ export type Outcome =
   /** Evaluating `root` failed at run time, or its value has no NX spelling. */
   | { readonly kind: "error"; readonly diagnostics: readonly Diagnostic[] };
 
-export interface EvaluateResult {
-  /**
-   * What compiling reported: why the program did not compile when `outcome` is null, and otherwise
-   * the warnings, info and hints of a program that did.
-   */
-  readonly diagnostics: readonly Diagnostic[];
-  /** What evaluating came to, or null when the program did not compile. */
-  readonly outcome: Outcome | null;
-}
-
-/**
- * The one seam between authoring and evaluation.
- *
- * Evaluation happens in the browser, in a worker over the WebAssembly build of the compiler.
- * Everything upstream of this interface — the editor and the output pane — is written against the
- * interface alone and knows nothing of where the compiler runs.
- */
-export type Evaluate = (source: string) => Promise<EvaluateResult>;
-
 /** The raw diagnostic shape the SDK reports, re-exported for the classifier. */
 export type SdkDiagnostic = NxDiagnostic;

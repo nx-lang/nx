@@ -4,7 +4,7 @@
  * <para>Kept apart from React so the transitions can be tested under Node: a first source that does
  * not compile, a broken edit after a good one, a compiler that failed.</para>
  */
-import type { Diagnostic, EvaluateResult, Outcome } from "./compile";
+import type { Diagnostic, Outcome } from "./compile";
 
 /** The output pane's state, and the diagnostics the editor marks. */
 export interface Evaluation {
@@ -27,65 +27,6 @@ export interface Evaluation {
   readonly evaluating: boolean;
 }
 
-export const initialEvaluation: Evaluation = {
-  outcome: null,
-  outcomeSource: null,
-  stale: false,
-  diagnostics: [],
-  diagnosticsSource: null,
-  failure: null,
-  evaluating: true,
-};
-
-/** What can happen to an evaluation. */
-export type EvaluationEvent =
-  /** The source changed, so a new evaluation is on its way. */
-  | { readonly kind: "started" }
-  /** The worker answered for `source`. */
-  | { readonly kind: "answered"; readonly source: string; readonly result: EvaluateResult }
-  /** The compiler failed, with a message for the visitor. */
-  | { readonly kind: "failed"; readonly message: string };
-
-export function reduceEvaluation(state: Evaluation, event: EvaluationEvent): Evaluation {
-  switch (event.kind) {
-    case "started":
-      return { ...state, evaluating: true };
-    case "failed":
-      return {
-        ...state,
-        stale: state.outcome !== null,
-        diagnostics: [],
-        diagnosticsSource: null,
-        failure: event.message,
-        evaluating: false,
-      };
-    case "answered": {
-      const { result, source } = event;
-      if (result.outcome === null) {
-        // It does not compile: the last output stands, marked out of date.
-        return {
-          ...state,
-          stale: state.outcome !== null,
-          diagnostics: result.diagnostics,
-          diagnosticsSource: source,
-          failure: null,
-          evaluating: false,
-        };
-      }
-      return {
-        outcome: result.outcome,
-        outcomeSource: source,
-        stale: false,
-        diagnostics:
-          result.outcome.kind === "error" ? [...result.diagnostics, ...result.outcome.diagnostics] : result.diagnostics,
-        diagnosticsSource: source,
-        failure: null,
-        evaluating: false,
-      };
-    }
-  }
-}
-
 /** What the output pane says in place of a value, when it has none to show. */
 export type OutputNotice =
   /** The first evaluation has not answered yet. */
@@ -100,4 +41,16 @@ export function outputNotice(state: Evaluation): OutputNotice {
     return "none";
   }
   return state.diagnostics.length > 0 ? "doesNotCompile" : "evaluating";
+}
+
+/** Both raw Output and component Preview classify formatting separately from evaluation. */
+export function outputErrorHeading(diagnostics: readonly Diagnostic[]): string {
+  switch (diagnostics[0]?.code) {
+    case "nx-text-unspellable":
+      return "The value has no NX spelling";
+    case "nx-output-format":
+      return "The value could not be displayed";
+    default:
+      return "Evaluating root failed";
+  }
 }

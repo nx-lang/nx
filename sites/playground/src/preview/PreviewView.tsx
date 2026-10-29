@@ -1,3 +1,4 @@
+import { outputErrorHeading } from "../evaluation.ts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { NxHostRecord } from "@nx-lang/ir-runtime";
 import "@nx-lang/value-view";
@@ -10,14 +11,24 @@ import {
   type NxValueElement,
   type NxValueNavigateDetail,
 } from "@nx-lang/value-view";
+import { FILE_NAME } from "../compile/policy.ts";
+import { selectedTargets, type SourceSelection } from "./selection.ts";
 import type { Diagnostic } from "../compile";
 import { EDITOR_THEMES } from "../theme.ts";
 import { actionFrom, initialInput, type FieldInput } from "./fields.ts";
-import type { PreviewAction, PreviewField, PreviewSessionView, PreviewStep, PreviewValue } from "./protocol.ts";
+import type {
+  PreviewAction,
+  PreviewField,
+  PreviewSessionView,
+  PreviewRenderedOutput,
+  PreviewStep,
+  PreviewValue,
+} from "./protocol.ts";
 import type { Preview } from "./usePreview.ts";
 
 export interface PreviewViewProps {
   readonly preview: Preview;
+  readonly sourceSelection: SourceSelection | null;
   /** The source does not compile and never has, so there is nothing to run. */
   readonly doesNotCompile: boolean;
   /** The editor holds source the session does not run: an edit broke compilation or the props. */
@@ -37,7 +48,14 @@ interface OpenForm {
  * One component of the visitor's source, running: its output with a button on every handler, the
  * timeline of steps, and its state and what it emitted.
  */
-export function PreviewView({ preview, doesNotCompile, stale, describe, onNavigate }: PreviewViewProps) {
+export function PreviewView({
+  preview,
+  sourceSelection,
+  doesNotCompile,
+  stale,
+  describe,
+  onNavigate,
+}: PreviewViewProps) {
   const { state, notice, failure } = preview;
   const session = state?.session ?? null;
   const [form, setForm] = useState<OpenForm | null>(null);
@@ -60,7 +78,8 @@ export function PreviewView({ preview, doesNotCompile, stale, describe, onNaviga
   };
 
   const problem = state?.problem ?? null;
-  const dispatchFailure = problem?.kind === "dispatchFailed" ? problem.diagnostics : null;
+  const dispatchFailure =
+    problem?.kind === "dispatchFailed" ? problem.diagnostics : null;
 
   return (
     <div className="preview">
@@ -82,33 +101,45 @@ export function PreviewView({ preview, doesNotCompile, stale, describe, onNaviga
               ))}
             </select>
           </label>
-          {session !== null && <Timeline session={session} onGoTo={preview.goTo} />}
+          {session !== null && (
+            <Timeline session={session} onGoTo={preview.goTo} />
+          )}
         </div>
       )}
       {failure !== null && (
         <div className="output-message fault" role="alert">
           <p>{failure}</p>
-          <button type="button" className="preview-button" onClick={preview.retry}>
+          <button
+            type="button"
+            className="preview-button"
+            onClick={preview.retry}
+          >
             Start again
           </button>
         </div>
       )}
-      {state === null && failure === null && !doesNotCompile && <p className="output-message quiet">Starting…</p>}
-      {(doesNotCompile || problem?.kind === "doesNotCompile") && session === null && (
-        <p className="output-message">
-          The program does not compile yet, so there is nothing to preview. The problems are listed under the
-          source.
-        </p>
+      {state === null && failure === null && !doesNotCompile && (
+        <p className="output-message quiet">Starting…</p>
       )}
+      {(doesNotCompile || problem?.kind === "doesNotCompile") &&
+        session === null && (
+          <p className="output-message">
+            The program does not compile yet, so there is nothing to preview.
+            The problems are listed under the source.
+          </p>
+        )}
       {problem?.kind === "noComponent" && (
         <p className="output-message">
           There is no component to preview. Declare one, such as{" "}
-          <code>component &lt;Counter /&gt; = &#123; … &#125;</code>, and Preview runs it here, with buttons for
-          its handlers.
+          <code>component &lt;Counter /&gt; = &#123; … &#125;</code>, and
+          Preview runs it here, with buttons for its handlers.
         </p>
       )}
       {problem?.kind === "programFailed" && (
-        <Failure heading="The program could not be prepared to run" diagnostics={problem.diagnostics} />
+        <Failure
+          heading="The program could not be prepared to run"
+          diagnostics={problem.diagnostics}
+        />
       )}
       {problem?.kind === "startFailed" && (
         <Failure
@@ -117,17 +148,21 @@ export function PreviewView({ preview, doesNotCompile, stale, describe, onNaviga
           note={
             problem.missingProp ? (
               <>
-                End the program with the component's element, with its props, such as{" "}
-                <code>&lt;{state?.component ?? "Counter"} … /&gt;</code>, and Preview runs it with them.
+                End the program with the component's element, with its props,
+                such as <code>&lt;{state?.component ?? "Counter"} … /&gt;</code>
+                , and Preview runs it with them.
               </>
             ) : undefined
           }
         />
       )}
-      {notice !== null && <ReloadNotice notice={notice} steps={session?.path.length ?? 0} />}
+      {notice !== null && (
+        <ReloadNotice notice={notice} steps={session?.path.length ?? 0} />
+      )}
       {stale && session !== null && (
         <p className="output-message quiet">
-          The preview runs the last program that compiled and rendered; it updates when the source does.
+          The preview runs the last program that compiled and rendered; it
+          updates when the source does.
         </p>
       )}
       {form !== null && (
@@ -139,23 +174,36 @@ export function PreviewView({ preview, doesNotCompile, stale, describe, onNaviga
           diagnostics={dispatchFailure}
         />
       )}
-      {form === null && dispatchFailure !== null && <Failure heading="The step failed" diagnostics={dispatchFailure} />}
+      {form === null && dispatchFailure !== null && (
+        <Failure heading="The step failed" diagnostics={dispatchFailure} />
+      )}
       {session !== null && (
         <SessionOutput
           session={session}
+          sourceSelection={
+            sourceSelection?.source === state?.source ? sourceSelection : null
+          }
           stale={stale}
           describe={describe}
           onPress={press}
           onNavigate={onNavigate}
         />
       )}
-      {session !== null && <SessionState session={session} stale={stale} describe={describe} />}
+      {session !== null && (
+        <SessionState session={session} stale={stale} describe={describe} />
+      )}
     </div>
   );
 }
 
 /** The steps from the start to the current one, with Back and Forward and a way into each branch. */
-function Timeline({ session, onGoTo }: { session: PreviewSessionView; onGoTo: (tick: number) => void }) {
+function Timeline({
+  session,
+  onGoTo,
+}: {
+  session: PreviewSessionView;
+  onGoTo: (tick: number) => void;
+}) {
   const { path, current, forward } = session;
   const parent = path.length > 1 ? path[path.length - 2]!.id : null;
   const strip = useRef<HTMLOListElement>(null);
@@ -255,14 +303,18 @@ function TimelineStep({
 }
 
 /** The current output, with a button on each handler. */
-function SessionOutput({
+export function SessionOutput({
   session,
+  sourceSelection,
   stale,
   describe,
   onPress,
   onNavigate,
+  interactive = true,
 }: {
-  session: PreviewSessionView;
+  interactive?: boolean;
+  session: PreviewRenderedOutput;
+  sourceSelection: SourceSelection | null;
   stale: boolean;
   describe: NxValueDescribe;
   onPress: (handler: string, type: string) => void;
@@ -272,18 +324,32 @@ function SessionOutput({
   const latest = useRef({ onPress, onNavigate, session });
   latest.current = { onPress, onNavigate, session };
 
-  const handlers = useMemo(() => new Map(session.handlers.map((entry) => [entry.pointer, entry.action])), [session]);
+  const handlers = useMemo(
+    () =>
+      new Map(session.handlers.map((entry) => [entry.pointer, entry.action])),
+    [session],
+  );
   const actions = useMemo<NxValueActions>(
     () => (node) => {
-      const type = node.role === "record" && node.pointer !== undefined ? handlers.get(node.pointer) : undefined;
+      const type =
+        node.role === "record" && node.pointer !== undefined
+          ? handlers.get(node.pointer)
+          : undefined;
       const action = type === undefined ? undefined : session.actions[type];
       return action === undefined
         ? undefined
-        : [{ id: type!, label: action.label, title: `Send ${action.type} to this handler` }];
+        : [
+            {
+              id: type!,
+              label: action.label,
+              title: `Send ${action.type} to this handler`,
+            },
+          ];
     },
     [handlers, session],
   );
 
+  const selectionKey = useRef<string | undefined>(undefined);
   useEffect(() => {
     const target = element.current;
     if (target === null) {
@@ -297,7 +363,10 @@ function SessionOutput({
     };
     const onNavigateEvent = (event: Event) => {
       const detail = (event as CustomEvent<NxValueNavigateDetail>).detail;
-      latest.current.onNavigate(detail, latest.current.session.built.includes(detail.index));
+      latest.current.onNavigate(
+        detail,
+        latest.current.session.built.includes(detail.index),
+      );
     };
     target.addEventListener(NX_VALUE_ACTION_EVENT, onAction);
     target.addEventListener(NX_VALUE_NAVIGATE_EVENT, onNavigateEvent);
@@ -307,9 +376,33 @@ function SessionOutput({
     };
   });
 
+  useEffect(() => {
+    if (stale || "diagnostics" in session.output) {
+      element.current?.selectNodes([]);
+      return;
+    }
+    const targets = session.selectionTargets;
+    element.current?.selectNodes(
+      selectedTargets(targets, sourceSelection, FILE_NAME).map(Number),
+      selectionKey.current !== JSON.stringify(sourceSelection),
+    );
+    selectionKey.current = JSON.stringify(sourceSelection);
+  }, [
+    session,
+    stale,
+    sourceSelection?.source,
+    sourceSelection?.start,
+    sourceSelection?.end,
+  ]);
+
   const { output } = session;
   if ("diagnostics" in output) {
-    return <Failure heading="The output has no NX spelling" diagnostics={output.diagnostics} />;
+    return (
+      <Failure
+        heading={outputErrorHeading(output.diagnostics)}
+        diagnostics={output.diagnostics}
+      />
+    );
   }
   return (
     <nx-value
@@ -318,14 +411,22 @@ function SessionOutput({
       truncated={output.truncated}
       stale={stale}
       describe={describe}
-      actions={actions}
+      actions={interactive ? actions : undefined}
       themes={EDITOR_THEMES}
     />
   );
 }
 
 /** The current step's state, and what it emitted to its host. */
-function SessionState({ session, stale, describe }: { session: PreviewSessionView; stale: boolean; describe: NxValueDescribe }) {
+function SessionState({
+  session,
+  stale,
+  describe,
+}: {
+  session: PreviewSessionView;
+  stale: boolean;
+  describe: NxValueDescribe;
+}) {
   return (
     <div className="preview-panels">
       <section className="preview-panel" aria-label="State">
@@ -339,16 +440,33 @@ function SessionState({ session, stale, describe }: { session: PreviewSessionVie
       <section className="preview-panel" aria-label="Emitted">
         <h3>Emitted</h3>
         {session.emitted.length === 0 ? (
-          <p className="preview-empty">This step emitted nothing to the host.</p>
+          <p className="preview-empty">
+            This step emitted nothing to the host.
+          </p>
         ) : (
-          session.emitted.map((value, index) => <PanelValue key={index} value={value} stale={stale} describe={describe} />)
+          session.emitted.map((value, index) => (
+            <PanelValue
+              key={index}
+              value={value}
+              stale={stale}
+              describe={describe}
+            />
+          ))
         )}
       </section>
     </div>
   );
 }
 
-function PanelValue({ value, stale, describe }: { value: PreviewValue; stale: boolean; describe: NxValueDescribe }) {
+function PanelValue({
+  value,
+  stale,
+  describe,
+}: {
+  value: PreviewValue;
+  stale: boolean;
+  describe: NxValueDescribe;
+}) {
   return (
     <nx-value
       className="panel-value"
@@ -375,9 +493,14 @@ function ActionForm({
 }) {
   const { action } = form;
   const [inputs, setInputs] = useState<Record<string, FieldInput>>(() =>
-    Object.fromEntries(action.fields.map((field) => [field.name, initialInput(field)])),
+    Object.fromEntries(
+      action.fields.map((field) => [field.name, initialInput(field)]),
+    ),
   );
-  const [invalid, setInvalid] = useState<{ field: string; message: string } | null>(null);
+  const [invalid, setInvalid] = useState<{
+    field: string;
+    message: string;
+  } | null>(null);
 
   const submit = () => {
     const made = actionFrom(action.type, action.fields, inputs);
@@ -407,7 +530,9 @@ function ActionForm({
           field={field}
           value={inputs[field.name] ?? initialInput(field)}
           invalid={invalid?.field === field.name}
-          onChange={(value) => setInputs((previous) => ({ ...previous, [field.name]: value }))}
+          onChange={(value) =>
+            setInputs((previous) => ({ ...previous, [field.name]: value }))
+          }
         />
       ))}
       {invalid !== null && (
@@ -415,7 +540,9 @@ function ActionForm({
           {invalid.message}
         </p>
       )}
-      {diagnostics !== null && <Failure heading="The step failed" diagnostics={diagnostics} />}
+      {diagnostics !== null && (
+        <Failure heading="The step failed" diagnostics={diagnostics} />
+      )}
       <div className="action-form-buttons">
         <button type="submit" className="preview-button primary">
           Send
@@ -450,7 +577,12 @@ function FieldInputRow({
     case "boolean":
       return (
         <label className="field field-check">
-          <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} {...common} />
+          <input
+            type="checkbox"
+            checked={value === true}
+            onChange={(event) => onChange(event.target.checked)}
+            {...common}
+          />
           {label}
         </label>
       );
@@ -458,7 +590,11 @@ function FieldInputRow({
       return (
         <label className="field">
           {label}
-          <select value={String(value)} onChange={(event) => onChange(event.target.value)} {...common}>
+          <select
+            value={String(value)}
+            onChange={(event) => onChange(event.target.value)}
+            {...common}
+          >
             {!field.required && <option value="">(its default)</option>}
             {field.cases.map((name) => (
               <option key={name} value={name}>
@@ -500,14 +636,25 @@ function FieldInputRow({
       return (
         <label className="field">
           {label}
-          <input type="text" value={String(value)} onChange={(event) => onChange(event.target.value)} {...common} />
+          <input
+            type="text"
+            value={String(value)}
+            onChange={(event) => onChange(event.target.value)}
+            {...common}
+          />
         </label>
       );
   }
 }
 
 /** What the last reload did, when it did more than keep the state. */
-function ReloadNotice({ notice, steps }: { notice: NonNullable<Preview["notice"]>; steps: number }) {
+function ReloadNotice({
+  notice,
+  steps,
+}: {
+  notice: NonNullable<Preview["notice"]>;
+  steps: number;
+}) {
   if (notice.kind === "failed") {
     return (
       <Failure

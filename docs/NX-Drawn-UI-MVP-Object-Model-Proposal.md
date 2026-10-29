@@ -2,9 +2,11 @@
 
 **Proposal status:** Draft for discussion  
 **Working title superseded:** “NX Drawn UI” — see “Names and terminology” in §1  
-**Research current through:** August 20, 2026  
+**Research checked:** October 27, 2026 (primary sources; release status is a snapshot)<br>
 **Scope:** Level 1 graphics and Level 2 generic, read-only UI  
 **Explicitly excluded from this MVP:** input controls, actions/events, application state/data binding, animation, and Level 3 semantic/data UI  
+**Before compatibility stabilization:** [future design decisions](NX-Drawn-UI-MVP-Object-Model-Future.md)
+
 **Consolidated NX source:** [drawnui-proposal/](drawnui-proposal/) — the whole proposed model as NX and nothing else, for reading without the prose around it
 
 ## Executive recommendation
@@ -13,14 +15,18 @@ NX should define a small, declarative, renderer-neutral UI document that an LLM 
 
 - a flat, ID-addressed element map, inspired by [A2UI](https://a2ui.org/specification/v0.9.1-a2ui/) and [json-render](https://json-render.dev/docs/specs);
 - namespaced, versioned component catalogs (`nx.ui` for layout-positioned UI, `nx.graphics` for coordinate-positioned graphics);
-- familiar UI names (`HStack`, `VStack`, `ZStack`, `Grid`, `Scroll`, `Text`, `Image`, `Icon`);
+- familiar UI names (`Row`, `Column`, `ZStack`, `Grid`, `Scroll`, `Text`, `Image`, `Icon`);
 - SVG vocabulary and data formats for portable drawing (`Rect`, `Circle`, `Ellipse`, `Line`, `Polyline`, `Polygon`, `Path`, SVG path data, fill/stroke, transforms);
 - a clean evolution path from DrawnUI for .NET rather than a wire-level copy of its MAUI/Skia API.
+
+**Delivery priority:** graphics first. A standalone `nx.graphics.Drawing` must work before the Level 2 UI catalog or A2UI conversion is implemented; §9.6 gives the initial change sequence.
+
+**Rendering recommendation:** support both direct rendering and an optional NX-defined display list through a small, pluggable host drawing interface. Ship the Skia direct path first and prove recording/replay against the same interface in the MVP prototype. Direct rendering must not require constructing an NX display list. The retained document, drawing interface, and recorded output are three distinct contracts; §9.1–§9.5 define their boundaries.
 
 The initial catalog proposed here contains:
 
 - **Level 1 — graphics:** `Drawing`, `Group`, `Rect`, `Circle`, `Ellipse`, `Line`, `Polyline`, `Polygon`, `Path`, `Text`, `Image`.
-- **Level 2 — output/layout:** `HStack`, `VStack`, `ZStack`, `Grid`, `Scroll`, `Box`, `Card`, `Divider`, `Text`, `Image`, `Icon`. (`nx.graphics.Drawing` is also embeddable as Level 2 content.)
+- **Level 2 — output/layout:** `Row`, `Column`, `ZStack`, `Grid`, `Scroll`, `List`, `Box`, `Card`, `Divider`, `Text`, `Image`, `Icon`. (`nx.graphics.Drawing` is also embeddable as Level 2 content.)
 
 The two namespaces intentionally allow both `nx.graphics.Text` and `nx.ui.Text`. The former is positioned glyph content in drawing coordinates; the latter is measured, wrapped UI text. That distinction avoids a deceptively complex “one Text does everything” object.
 
@@ -34,6 +40,7 @@ The two namespaces intentionally allow both `nx.graphics.Text` and `nx.ui.Text`.
 4. **Familiar.** Prefer established SVG, CSS, MAUI, and GenUI terms where their meanings transfer cleanly.
 5. **Streamable and patchable later.** Stable IDs and a flat element map permit incremental additions and replacements without making streaming part of the MVP protocol.
 6. **An evolution of DrawnUI.** Preserve its compositional strengths while removing renderer-specific implementation details from the portable model.
+7. **A2UI semantic coverage over time.** Target eventual Basic component/runtime coverage and selected richer catalogs, with versioned import/export profiles and explicit limits on NX → A2UI conversion (§4.6).
 
 ### MVP non-goals
 
@@ -57,7 +64,7 @@ One naming rule governs the rest: **no word that names a renderer object appears
 | `nx.graphics` | catalog | Coordinate-positioned graphics: the document places geometry in a view box. |
 | `Drawing` | component | The retained graphical artifact — root of a graphics subtree and its embedding point in UI. |
 | `Group`, `Shape` | component | A transform/clip/opacity scope, and the filled-or-stroked geometry family within a `Drawing`. |
-| `HStack`, `VStack`, `ZStack` | component | The three `nx.ui` layout containers, named for the axis they arrange along; see §7. |
+| `Row`, `Column`, `ZStack` | component | Linear horizontal/vertical containers and a z-order overlay container; see §7. |
 | **Canvas** | renderer | A renderer's drawing surface: DrawnUI's `Canvas`, MAUI's `ICanvas`, HTML `<canvas>`. Never a component type in this model. |
 | **draw**, **paint** | renderer | Operations a renderer performs. Used in prose (“paint order”), never as a type or catalog name. |
 | **NX DrawnUI Renderer** | implementation | The renderer that targets DrawnUI/Skia. “DrawnUI” names that dependency and nothing else. |
@@ -85,6 +92,52 @@ Three choices in that table are worth their reasoning.
 
 This is not a market-share ranking. It is a relevance ranking for NX's object-model design. A2UI and json-render are the closest architectural precedents; the other systems demonstrate integration, distribution, and generation patterns that NX should interoperate with rather than duplicate.
 
+### Research update — October 27, 2026
+
+The sources below reinforce the catalog model while sharpening the rendering recommendation. These are observed capabilities, not claims that the projects implement NX semantics or that all their backends have feature parity.
+
+- **A2UI:** the [official site](https://a2ui.org/) still identifies v0.9.1 as current and v1.0 as candidate. Separately, AndroidX published its first [A2UI `1.0.0-alpha01` libraries on September 23, 2026](https://developer.android.com/jetpack/androidx/releases/a2ui). Its latest listed libraries are `1.0.0-alpha02`, released October 21, 2026. Android library versioning must not be confused with protocol stability. This strengthens the case for adapters and exact catalog versions rather than making NX depend on a candidate protocol.
+- **json-render:** its [current spec documentation](https://json-render.dev/docs/specs) explicitly describes the framework as schema-agnostic; `root` + `elements` is the React schema's normalized shape, rather than a universal requirement. Its [changelog](https://json-render.dev/docs/changelog) documents image output, multiple framework renderers, and MCP Apps integration. Adopt the separation of catalog, schema, and renderer; do not assume a shared envelope guarantees portable component semantics.
+- **AnyRender:** the [project](https://github.com/dioxuslabs/anyrender) provides a Rust 2D drawing abstraction with multiple backends, including Skia and Vello implementations, plus an `anyrender_serialize` crate listed in its [compatibility table](https://raw.githubusercontent.com/DioxusLabs/anyrender/main/README.md). It is a particularly close precedent for an interface with both direct and recorded implementations. Study its operation boundaries and resource handling; do not introduce Rust or its API as an NX dependency.
+- **Linebender:** its [April 2026 update](https://linebender.org/blog/tmil-25/) describes Vello Hybrid at roughly beta quality and explains the difficulty of building one unified low-level renderer API. It points to AnyRender and `imaging` as abstractions with different priorities. The [current AnyRender compatibility table](https://raw.githubusercontent.com/DioxusLabs/anyrender/main/README.md) records the upstream rename from `vello_hybrid` to `vello_gpu` in its 0.14 line; the adapter still uses the hybrid name. Consult [Vello releases](https://github.com/linebender/vello/releases) for backend capabilities rather than treating April’s maturity assessment as a current release guarantee. NX should keep its interface bounded by MVP semantics and validate it with a second backend before promising universal graphics portability.
+- **Skia and Flutter:** [`SkPictureRecorder`](https://api.skia.org/classSkPictureRecorder.html) records through an `SkCanvas`; this is a useful example of a drawing API serving direct and recorded targets. Flutter's [Impeller FAQ](https://flutter.googlesource.com/mirrors/engine/+/HEAD/impeller/docs/faq.md) describes display-list dispatchers for different rendering packages and separates rasterization from text shaping. NX can adopt that separation without making Flutter's mandatory display-list route its own requirement. A Skia picture remains a backend cache, not the NX interchange format.
+- **MAUI Graphics:** [`ICanvas` and `IDrawable`](https://learn.microsoft.com/en-us/dotnet/maui/user-interface/graphics/?view=net-maui-10.0) demonstrate a familiar .NET drawing boundary. Evaluate that API as an adapter target, especially for platform hosts; adopting it wholesale would couple NX's graphics contract to its operation and text semantics.
+
+The design conclusion is a recommendation derived from these sources: retain semantic documents for generation and accessibility, expose backend-neutral drawing operations to trusted runtime code, and make recording an optional destination for those operations.
+
+### Agent-generated graphics: authoring, rendering, and feedback
+
+Most NX graphics are expected to be authored and revised by AI agents. Optimize for compact expressions of design intent, predictable edits, and fast visual feedback, while keeping the rendering contract small. A schema-valid drawing is not necessarily a good design.
+
+Keep three layers distinct:
+
+| Layer | Contract | Initial direction |
+|---|---|---|
+| Portable graphics | Literal, validated scene geometry and rendering semantics | Existing SVG-shaped primitives; direct backend dispatch. |
+| NX authoring library | Ordinary reusable NX components/functions that expand into graphics | Regular polygons, stars, arrows, arc/ring sectors; shared dimensions and styles. |
+| Agent/host tooling | Render, inspect, measure, diagnose, and revise | PNG previews plus element bounds, text metrics, revision IDs, and structured diagnostics. |
+
+A convenience shape does not imply a new backend opcode. Keep `Polygon` as explicit vertices, and provide a separately named `RegularPolygon` helper; keep `Path` as an escape hatch. Initial helper contracts and angle/coordinate conventions are in [authoring-and-preview.md](drawnui-proposal/authoring-and-preview.md). Use NX composition and expressions to compute geometry before rendering; generated portable documents remain literal data and cannot inject drawing callbacks. Helpers must be evaluated against end-to-end authoring/revision tasks rather than accepted solely because their API looks elegant.
+
+Prioritize named groups, local coordinates, reusable components, measured text, alignment helpers, and inspectable bounds over a large catalog of backend effects. Begin with explicit layout calculations and library helpers; a general constraint solver is not part of the initial graphics runtime. The first agent tool cycle is author → validate → render → inspect → revise. Return full-scene previews and ID-addressed geometry/ink/visible bounds, text metrics, unsupported-feature/resource errors, and clipping warnings. Overlap and empty space are often intentional; keep subjective design suggestions separate from objective validation failures.
+
+The first change must include a bounded shaped-text profile and measurement from the same layout used to paint, even though multiline, rich text, and comprehensive fallback remain later work. A model cannot reliably place labels from guessed string lengths. Fonts and renderer configuration are supplied by the host; tools report their identities so the agent can reproduce the result.
+
+Use repeatable tasks spanning icons, diagrams, geometric illustrations, and infographics. Measure renderability, successful requested revisions, output size, tool/model round trips, latency, and visual quality under a documented human/automated rubric. Compare raw primitives with helper-assisted authoring using the same model, assets, and budget. Model trials are development evaluations, not nondeterministic build tests. Rendering feedback research motivates this workflow but does not guarantee improvement for every agent or task: [IntroSVG](https://arxiv.org/abs/2603.09312) and [Render-in-the-Loop](https://yukinonooo.github.io/RenderInTheLoopProject/).
+
+### Graphics precedents and chosen conventions
+
+Use **SVG's established 2D imaging model for declarative authoring**, **Skia/Canvas 2D for familiar drawing operations**, and **AnyRender for modern backend abstraction**. These serve different contracts; none should be copied wholesale.
+
+| Precedent | Adopt or study | Boundary |
+|---|---|---|
+| [SVG](https://www.w3.org/TR/SVG2/) | Geometry names, path data, view boxes, affine transforms, fill/stroke, clip rules, gradients, paint order. Best interchange baseline for illustrations, diagrams, and icons. | NX is a bounded typed scene model, not the SVG DOM, CSS cascade, scripting, or an unrestricted SVG importer. |
+| [Canvas 2D](https://html.spec.whatwg.org/multipage/canvas.html#2dcontext) and [Skia](https://skia.org/docs/user/api/skcanvas_overview/) | Familiar fill/stroke/path/image operations, transforms and scoped state. Skia is the initial direct backend. | Do not inherit Canvas's entire mutable style/path state or expose Skia/GPU types in portable contracts. Backend defaults must not decide NX semantics. |
+| [AnyRender `PaintScene`](https://docs.rs/anyrender/latest/anyrender/trait.PaintScene.html) | Explicit brushes, geometry and transforms, separate clipping/compositing scopes, positioned glyph output, and direct/recorded destinations. | A useful API precedent and possible Rust adapter dependency after evaluation, not NX's serialized object model or a guaranteed portability solution. |
+| [PixiJS Graphics](https://pixijs.com/8.x/guides/components/scene-objects/graphics) | Separation of scene objects from reusable graphics contexts and resource ownership. Useful for later repeated graphics and browser integration. | Its retained graphics commands and game-oriented lifecycle need not become a mandatory NX display list. |
+
+Modern practice here means explicit semantics, immutable/shareable geometry and paint descriptions, isolated compositing, shaped text, predictable resource lifetimes, and backend capability tests. GPU implementation details stay behind the adapter. Reusable parsed geometry belongs in host caches initially; it does not require public scene instancing in the first version. Keep SVG path strings as the initial authoring form, parse once per changed resource, and provide parametric helpers now and consider a typed path builder later for programmatic generation. Do not ask models to emit triangles or backend command buffers.
+
 ## 3. Architectural shape
 
 ```text
@@ -111,11 +164,11 @@ NX describes intent and structure. It does not prescribe whether `nx.graphics.Re
 
 ### Why a flat element map
 
-A normalized map gives every component a stable identity and makes partial generation, validation, replacement, and future JSON Patch streaming straightforward. Both A2UI and json-render use ID-addressed/flat representations. Recursive authoring syntax may be offered as sugar, but the canonical interchange form should be flat.
+A normalized map gives every component a stable identity and makes partial generation, validation, replacement, and future JSON Patch streaming straightforward. A2UI uses ID-addressed component updates, and json-render’s React schema uses a flat element map. Recursive authoring syntax may be offered as sugar, but the canonical interchange form should be flat.
 
 ### Why explicit component types instead of DrawnUI-style `Type` enums
 
-DrawnUI uses one `SkiaLayout` with `Type="Row|Column|Grid|Absolute|Wrap"` and one `SkiaShape` with `Type="Rectangle|Circle|Ellipse|Path|..."`. NX should use `nx.ui.HStack`, `nx.ui.Grid`, `nx.graphics.Rect`, and so on because:
+DrawnUI uses one `SkiaLayout` with `Type="Row|Column|Grid|Absolute|Wrap"` and one `SkiaShape` with `Type="Rectangle|Circle|Ellipse|Path|..."`. NX should use `nx.ui.Row`, `nx.ui.Grid`, `nx.graphics.Rect`, and so on because:
 
 - each component receives a smaller, clearer property schema;
 - invalid combinations become harder to generate;
@@ -207,11 +260,11 @@ type DocumentMetadata = {
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| `type` | `ComponentType` | yes | Namespaced catalog type, such as `nx.ui.VStack` or `nx.graphics.Path`. |
+| `type` | `ComponentType` | yes | Namespaced catalog type, such as `nx.ui.Column` or `nx.graphics.Path`. |
 | `props` | component-specific object | yes | Literal properties validated against that component's catalog schema. Use `{}` when empty. |
 | `children` | `ElementId[]` | conditional | Ordered child IDs. Allowed only by components documented as containers. |
 
-There is no `Element` record to declare in NX source, because NX has no envelope: an element *is* an `external component` invocation, and the `type`/`props`/`children` envelope is what a compiler produces from it. `<ui.VStack gap={12.0}> ... </ui.VStack>` names the component, binds props by name, and binds body content to the component's `content` property. That is inherently the nested authoring form this section calls sugar, and NX cannot write the flat map at all — see Appendix B — so NX is the authoring surface over this model while the flat map remains its interchange and validation form.
+There is no `Element` record to declare in NX source, because NX has no envelope: an element *is* an `external component` invocation, and the `type`/`props`/`children` envelope is what a compiler produces from it. `<ui.Column gap={12.0}> ... </ui.Column>` names the component, binds props by name, and binds body content to the component's `content` property. That is inherently the nested authoring form this section calls sugar, and NX cannot write the flat map at all — see Appendix B — so NX is the authoring surface over this model while the flat map remains its interchange and validation form.
 
 `ElementId` matches `^[A-Za-z_][A-Za-z0-9_.-]{0,63}$` and is unique within a document. Constraining the charset keeps IDs usable as RFC 6901 JSON Pointer tokens for post-MVP patch streaming, keeps them safe as debug/accessibility identifiers, and rules out empty or whitespace-only IDs. `ComponentType` is a non-empty `<catalog>.<Component>` name whose catalog ID appears in `catalogs`. MVP elements do **not** have `state`, `visible` expressions, `repeat`, `slots`, `on`, or `watch`; those are useful json-render precedents for post-MVP work.
 
@@ -228,6 +281,41 @@ There is no `Element` record to declare in NX source, because NX has no envelope
 - Unknown enum values fail validation. A newer optional property can be ignored only after a schema-version policy explicitly permits it.
 - All text, URIs, data sizes, element counts, and path complexity are subject to host limits.
 
+### 4.6 A2UI interoperability and eventual coverage
+
+**Long-term goal:** NX should be able to represent the semantics of the versioned A2UI Basic Catalog and its interaction/data runtime, then selected richer catalogs, while retaining NX-only graphics and layout. This is a semantic coverage goal, not a promise to reproduce every arbitrary third-party catalog or to embed untrusted HTML in the core model.
+
+The conversion directions impose different requirements. A semantic superset makes **A2UI → NX** import feasible. **NX → A2UI** export is lossless only for a declared target-compatible subset, or when the receiving host implements a negotiated NX-specific A2UI catalog. A host that understands only Basic cannot render arbitrary NX vector graphics, overlapping layers, or grid constraints just because NX understands Basic. Matching component names helps authoring; it does not establish matching behavior.
+
+Define an adapter profile by A2UI protocol version, exact catalog identity/schema revision, supported functions/actions, theme conventions, and host resource/accessibility policy. The initial target is Basic v0.9.1, including Android's Compose implementation; test the v1.0 candidate independently. Keep catalog IDs as published: the v0.9.1 Basic schema currently retains the v0.9 catalog ID. Pin the schema revision in adapter fixtures rather than inferring its contents solely from the URL.
+
+A conversion returns the output plus element-ID-linked diagnostics. Classify each construct as exact, equivalent lowering under stated conditions, explicitly lossy fallback, or unsupported. Strict export rejects the last two. Never silently flatten headings, remove input actions, replace native content with screenshots, or drop unsupported geometry. Raster fallback may be an opt-in preview, with declared loss of semantics, scalability, and interaction. A display list is renderer output and cannot substitute for semantic A2UI components.
+
+#### Coverage plan for Basic
+
+The [v0.9.1 Basic schema](https://raw.githubusercontent.com/a2ui-project/a2ui/main/specification/v0_9_1/catalogs/basic/catalog.json) supplies the baseline below; the [v1.0 candidate schema](https://raw.githubusercontent.com/a2ui-project/a2ui/main/catalogs/basic/v1/catalog.json) must be tracked separately. These are planned mappings, not implemented converter support.
+
+| A2UI components | NX destination | Coverage milestone |
+|---|---|---|
+| `Row`, `Column`, `Card`, `Divider` | Same-named `nx.ui` components | Read-only subset; reconcile sizing, theme spacing, and decoration. |
+| `Text`, `Image`, `Icon` | Same-named `nx.ui` components | Read-only subset; reconcile typography, resource policy, and alternatives. |
+| `List` | Static `nx.ui.List`; later collection templates | Explicit children now; dynamic lists after runtime work. |
+| `Video`, `AudioPlayer` | Future media catalog | Playback, controls, resource loading, accessibility, and lifecycle. |
+| `Tabs`, `Modal` | Future interaction/navigation components | Local state, dismissal/focus, trigger/content roles, named child slots. |
+| `Button`, `TextField`, `CheckBox`, `ChoicePicker`, `Slider`, `DateTimeInput` | Future `nx.input` catalog | Typed values, two-way binding, checks, actions, and accessibility. |
+
+The read-only adapter must explicitly resolve these differences: A2UI `weight` versus NX growth/shrink rules; A2UI main-axis `stretch`; host-default spacing versus NX `gap`/insets; `Image.fit` default `fill` versus NX `contain`; optional image descriptions versus required NX `alt`; A2UI icon path data versus NX graphics; and version-specific text variants. Import must request or apply a documented policy when required accessibility information is absent, never assume an unlabeled image is decorative. Converting an inline icon path to a `Drawing` preserves it on import; exporting an NX Drawing still requires target capability support. Primitive decomposition is conditional on equivalent layout and accessibility semantics, not automatically exact.
+
+#### Catalog scope and runtime roadmap
+
+A2UI's [catalog architecture](https://a2ui.org/concepts/catalogs/) permits custom catalogs; Basic is a starting point. Android's [Material 3 implementation](https://developer.android.com/develop/ui/compose/agentic) renders Basic using Material components. The separate [Material catalog documented for Gemini Enterprise](https://docs.cloud.google.com/gemini/enterprise/docs/a2ui-agents/a2ui-component-gallery-reference) is richer and host-specific. Its tables, badges, progress, disclosure, and richer selection controls motivate later semantic NX components, not a duplicate `Material*` core namespace. Prioritize `Badge`, `Progress`, and `DataTable` for the next read-only catalog. Charts, maps, MCP Apps, and enterprise-specific components need separate profiles; they are not implied by Basic coverage.
+
+After the static subset, add runtime capabilities deliberately: typed local data, literal-or-bound values, JSON Pointer addressing, reactive updates, collection scope/templates and stable instance IDs, catalog-declared functions, validation checks, and typed action dispatch with context resolved at interaction time. Map A2UI's client-side function semantics explicitly rather than evaluating arbitrary generated code. Support named slots (`trigger`, `content`, tab panels) without forcing all references into ordered `children`; future templates and reusable definitions will also require revisiting the MVP's strict-tree/reachability rules. These capabilities require later document/catalog versions and remain excluded from the read-only MVP.
+
+For NX → A2UI, pure NX expressions can become literals when exporting a snapshot; continuing NX behavior requires supported bindings/functions or a retained NX runtime behind the adapter. Sending an evaluated snapshot must not be described as preserving reactive behavior. Transport streaming likewise needs revision/order, atomic updates, and disposal rules beyond renaming envelope fields.
+
+Acceptance should grow in stages: (1) validate and round-trip static Basic fixtures while preserving IDs, text/alternative semantics, order, defaults, and resources; (2) replay input and update traces to compare values, validation, and emitted actions; (3) add individually negotiated Material/media/chart/custom profiles. Exercise a web renderer and Android Compose for Basic. Mark unsupported cases in a machine-readable capability matrix and test failures, not only successful screenshots. Catalog coverage is complete only when both components and their behavioral dependencies pass.
+
 ## 5. Shared MVP value types
 
 ### 5.1 Geometry and sizing types
@@ -235,7 +323,7 @@ There is no `Element` record to declare in NX source, because NX has no envelope
 ```nx
 type Alignment = start | center | end | stretch
 type AlignSelf = auto | start | center | end | stretch
-type Anchor = start | center | end
+type AxisAlignment = start | center | end
 type Axis = horizontal | vertical
 type Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
 
@@ -318,9 +406,19 @@ type Paint =
 
 Use the portable subset of [CSS Color 4](https://www.w3.org/TR/css-color-4/) for `Color`: named colors, `transparent`, hex, `rgb()`/`rgba()`, and `hsl()`/`hsla()`. Renderers must normalize colors; unsupported CSS-wide keywords and environment-dependent values are invalid.
 
-`stops` must contain at least two entries with `offset` values in non-decreasing order; renderers clamp offsets to 0..1 and must not reorder them.
+`stops` must contain at least two entries with finite offsets in 0..1 in non-decreasing order; out-of-range offsets are validation errors, not backend-dependent clamping. Equal offsets are allowed for hard transitions and retain authored order. Gradient extension is pad (endpoint colors extend beyond the stop range).
+
+Gradient coordinates are evaluated in the painted geometry's local space before the node transform. For `objectBoundingBox`, use its geometric bounds excluding stroke/shadow; map the unit square to that box, so a radial circle can become elliptical. Zero-width or zero-height geometric bounds disable an object-bounding-box gradient; producers drawing stroked lines should use `userSpaceOnUse`. A coincident linear start/end or zero radial radius paints the last stop's color; negative radius is invalid. Omitted focal coordinates use the center; the initial profile requires the focal point inside or on the outer circle and rejects an outside focus rather than relying on different backend adjustments. These rules deliberately constrain the broader SVG imaging model.
+
+The MVP rendering profile uses sRGB colors and source-over compositing. Interpolate gradient stop colors in encoded sRGB with premultiplied alpha; the effective stop alpha is color alpha multiplied by stop opacity. Backends must select equivalent behavior explicitly, including for transparent colored stops. Wider-gamut/HDR colors, alternate interpolation spaces, and blend modes require later profiles. Round-trip SVG export must state NX's gradient interpolation contract instead of assuming every SVG renderer chooses the same one.
 
 Gradient terms and coordinate modes intentionally follow [SVG gradients](https://www.w3.org/TR/SVG2/pservers.html). DrawnUI's [`SkiaGradient`](https://github.com/DrawnUi/DrawnUi.Net/blob/main/src/Shared/DrawnUi/Draw/SkiaGradient.cs) already carries the same information in parallel arrays — `Colors` plus `ColorPositions` — so an adapter zips those into ordered `stops` without loss. Its `StartXRatio`/`StartYRatio`/`EndXRatio`/`EndYRatio` are ratios of the painted bounds, which is exactly NX's default `objectBoundingBox` mode; that is independent evidence for the default chosen in §12.4. DrawnUI's `TileMode` (gradient spread) and `GradientType.Sweep`/`Conical` have no MVP equivalent and are deferred in §11.
+
+#### Theme and content-color inheritance
+
+Omitted `nx.ui.Text.color` and `nx.ui.Icon.color` inherit the nearest host-provided content foreground, with the document theme as the root fallback. A themed surface such as `Card` establishes its matching foreground and background as a pair; nested surfaces resolve through the same host theme. Explicit colors override inheritance. Implementations must not hard-code black for UI leaves or independently choose a foreground that loses contrast on the host surface. Graphics fill defaults remain those specified by the graphics catalog.
+
+This host theme behavior is required for the MVP. Named semantic color tokens and image presentation presets (`avatar`, `header`, and similar hints) are useful next extensions, but their portable encodings and override precedence need a separate schema decision. `Color` remains a CSS-color subset, not an implicit token language. An A2UI adapter must preserve image hints as explicit resolved properties or a declared theme profile, rather than dropping them.
 
 ### 5.3 Stroke, shadow, transform, border
 
@@ -342,7 +440,7 @@ type Shadow = {
   color: Color
   offsetX: float64 = 0
   offsetY: float64 = 0
-  blur: float64 = 0        // >= 0
+  blur: float64 = 0        // Gaussian standard deviation in local logical units; >= 0
 }
 
 type Transform =
@@ -362,6 +460,12 @@ type Border = {
 `Transform` is the case NX models best: a closed set of variants with per-variant payloads is exactly what a discriminated union is for, and the hand-written `type` field disappears. The one thing it cannot carry is `scale.y` defaulting to `scale.x`, since an NX default is a literal or a constant expression and cannot reference a sibling property; `y` is therefore nullable, with null meaning uniform scale.
 
 Stroke terminology follows [SVG painting](https://www.w3.org/TR/SVG2/painting.html). Transform names and the six-value affine matrix follow [SVG/CSS Transforms](https://www.w3.org/TR/css-transforms-1/). The array is equivalent to an SVG `transform` list read left to right: matrices are concatenated in array order, so the *last* entry is the one applied first to the node's own geometry. `rotate` uses positive degrees clockwise in NX's y-down coordinate space, matching SVG. A stroke is scaled by the transforms in effect, as in SVG; there is no MVP equivalent of `vector-effect: non-scaling-stroke`. DrawnUI's `StrokeColor`, `StrokeWidth`, `StrokeCap`, dash path, gradients, and multiple shadows map directly to these portable objects.
+
+#### Stroke and shadow rules
+
+Stroke width must be finite and non-negative; zero means no stroke, never a backend-specific device-pixel hairline. Miter limit must be at least 1. Dash entries must be finite and non-negative; an omitted/empty array is solid, an odd-length array repeats to form an even-length pattern, and an all-zero pattern is solid. Dash offset is finite and follows SVG dash phase semantics. Strokes are centered on geometry and scale with its transform. A future hairline or non-scaling-stroke option must be explicit.
+
+Paint order is shadows, fill, then stroke. Each shadow is generated from the combined fill/stroke alpha silhouette before node opacity, blurred with Gaussian standard deviation `blur`, offset in local logical units, colored by its own color/alpha, and painted behind the source. Multiple shadows paint in array order, with later ones above earlier ones. Then apply the node's clip and composite the result at its opacity; ancestor clips remain in effect. This is NX's defined drop-shadow profile, not a promise that CSS `box-shadow`, Canvas `shadowBlur`, and Skia blur parameters are interchangeable. Approximation tolerances for blur must be documented. Offscreen allocations must include effect bounds and respect host limits.
 
 ### 5.4 Image source and accessibility
 
@@ -387,13 +491,14 @@ The graphics catalog is an SVG-shaped, retained-mode scene tree, and it is the h
 
 ### 6.1 Shared graphics properties
 
-Every node inside a `Drawing` accepts `GraphicsCommonProps`, declared in NX as an abstract external component that concrete components extend:
+Every node inside a `Drawing` inherits the `GraphicsElement` properties, declared in NX by an abstract external component that concrete components extend:
 
 ```nx
-abstract external component <GraphicsCommon
+abstract external component <GraphicsElement
   opacity: float64 = 1
   transform: Transform[]?
   clipPath: string?
+  clipRule: FillRule = nonzero
   accessibility: Accessibility?
 />
 ```
@@ -403,18 +508,19 @@ abstract external component <GraphicsCommon
 | `opacity` | `float64` (0..1) | `1` | Group opacity: the node and its descendants are composited as one layer, then that layer is blended at this alpha. |
 | `transform` | `Transform[]?` | `[]` | Ordered local transforms. |
 | `clipPath` | `string?` | none | SVG path-data geometry used as a local clip, in the node's own coordinate system. |
+| `clipRule` | `FillRule` | `nonzero` | Clip interior rule, independent of the painted shape's `fillRule`; ignored when no clip is present. |
 | `accessibility` | `Accessibility?` | derived | Optional accessible name/description or decorative status. |
 
-`opacity` is deliberately specified as group opacity rather than a per-descendant multiplier: the two differ visibly wherever descendants overlap, and SVG, Skia, and Canvas 2D all provide the group form.
+`opacity` is deliberately specified as group opacity rather than a per-descendant multiplier: the two differ visibly wherever descendants overlap, and SVG and Skia provide isolated group compositing; a Canvas 2D adapter may need an offscreen surface. Multiplying `globalAlpha` per child is not equivalent.
 
-`clipPath` geometry is interpreted in the node's local coordinate system — the space established *after* the node's own `transform` is applied — and clips the node and all of its descendants. It uses the `nonzero` rule regardless of `fillRule`. It is purposefully a small MVP subset of SVG clipping; referenced clip trees, masks, and filter regions are deferred.
+`clipPath` geometry is interpreted in the node's local coordinate system — the space established *after* the node's own `transform` is applied — and clips the node and all of its descendants. It uses `clipRule`, independently of the shape's `fillRule`, so even-odd holes are expressible without masks. It is purposefully a small MVP subset of SVG clipping; referenced clip trees, masks, and filter regions are deferred.
 
-Every filled/stroked geometry accepts `ShapeProps` in addition to its own properties. NX allows only one base per component, so `ShapeProps` is expressed as a link in a chain rather than as a second mixin — which works here because everything that takes shape properties also takes graphics properties:
+Every filled/stroked geometry inherits the `Shape` properties in addition to its own. `Shape` extends `GraphicsElement`, so shapes inherit both sets of properties through one base-type chain:
 
 ```nx
 type FillRule = nonzero | evenodd
 
-abstract external component <ShapeCommon extends GraphicsCommon
+abstract external component <Shape extends GraphicsElement
   fill: Paint?
   stroke: Stroke?
   fillRule: FillRule = nonzero
@@ -431,11 +537,11 @@ abstract external component <ShapeCommon extends GraphicsCommon
 
 `fill` is nullable rather than defaulted because the default is component-specific and NX has no way to override an inherited default in a derived component — declaring `fill` again on `Line` would be rejected as a duplicate property. The renderer resolves null per component type.
 
-The default fill is `Paint.none` for `Line` and `Polyline`, and black for closed shapes and `Path`. Closed-shape behavior matches SVG's initial `fill: black`. `Polyline` is a deliberate divergence: SVG also fills a polyline by default, which surprises nearly everyone and produces a wrong-looking region whenever a model draws an open multi-segment stroke. §12 tracks whether `Path` should diverge the same way.
+The default fill is `Paint.none` for `Line` and `Polyline`, and black for closed shapes and `Path`. Closed-shape behavior matches SVG's initial `fill: black`. `Polyline` is a deliberate divergence: SVG also fills a polyline by default, which surprises nearly everyone and produces a wrong-looking region whenever a model draws an open multi-segment stroke. Path retains SVG-compatible black fill; stroke-only paths must explicitly disable fill.
 
 ### 6.2 `nx.graphics.Drawing`
 
-Root drawing surface and bridge into Level 2 UI. Accepts ordered drawing children.
+Root drawing surface and bridge into Level 2 UI. Accepts ordered drawing children. A Drawing is also a valid standalone document root: a host supplies a logical viewport, device scale, surface, and resource services directly. This path needs no Row/Column/Grid measurement engine. Shared sizing declarations may be linked for type checking without requiring a UI renderer; non-default properties requiring parent layout are rejected diagnostically by a standalone host. Surface background, clipping, opacity, and accessibility still apply.
 
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
@@ -448,8 +554,8 @@ Root drawing surface and bridge into Level 2 UI. Accepts ordered drawing childre
 type ViewBoxFit = contain | cover | fill
 
 type ContentAlignment = {
-  x: Anchor = center
-  y: Anchor = center
+  x: AxisAlignment = center
+  y: AxisAlignment = center
 }
 ```
 
@@ -463,7 +569,7 @@ Groups ordered drawing children without drawing its own geometry.
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps` | see §6.1 | no | Shared opacity, transform, clip, and accessibility. |
+| all `GraphicsElement` properties | see §6.1 | no | Shared opacity, transform, clip, and accessibility. |
 
 Rationale: equivalent to SVG [`g`](https://www.w3.org/TR/SVG2/struct.html#Groups) and a Skia save/restore scope. Grouping avoids repeating transforms or opacity.
 
@@ -471,7 +577,7 @@ Rationale: equivalent to SVG [`g`](https://www.w3.org/TR/SVG2/struct.html#Groups
 
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared drawing and paint properties. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared drawing and paint properties. |
 | `x` | `float64` | no | `0`; left coordinate. |
 | `y` | `float64` | no | `0`; top coordinate. |
 | `width` | `float64` | yes | Non-negative width. |
@@ -479,13 +585,13 @@ Rationale: equivalent to SVG [`g`](https://www.w3.org/TR/SVG2/struct.html#Groups
 | `rx` | `float64` | no | `0`; horizontal corner radius. |
 | `ry` | `float64?` | no | `rx`; vertical corner radius. NX cannot spell this default; see Appendix B. |
 
-Rationale: names and radius behavior follow SVG [`rect`](https://www.w3.org/TR/SVG2/shapes.html#RectElement). DrawnUI `Rectangle` + `CornerRadius` maps here; adapters may approximate unequal radii if necessary.
+Rationale: names and radius behavior follow SVG [`rect`](https://www.w3.org/TR/SVG2/shapes.html#RectElement). DrawnUI `Rectangle` + `CornerRadius` maps here; resolve omitted `ry` to `rx`, clamp `rx` to half the width and `ry` to half the height, and reject negative radii. A zero dimension yields no painted rectangle; unequal radii must be supported or reported as unsupported, not silently replaced by uniform rounding.
 
 ### 6.5 `nx.graphics.Circle`
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared properties. |
 | `cx` | `float64` | yes | Center x. |
 | `cy` | `float64` | yes | Center y. |
 | `r` | `float64` | yes | Non-negative radius. |
@@ -496,7 +602,7 @@ Rationale: matches SVG [`circle`](https://www.w3.org/TR/SVG2/shapes.html#CircleE
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared properties. |
 | `cx` | `float64` | yes | Center x. |
 | `cy` | `float64` | yes | Center y. |
 | `rx` | `float64` | yes | Non-negative horizontal radius. |
@@ -508,7 +614,7 @@ Rationale: matches SVG [`ellipse`](https://www.w3.org/TR/SVG2/shapes.html#Ellips
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties; `fill` has no effect. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared properties; `fill` has no effect. |
 | `x1` | `float64` | yes | Start x. |
 | `y1` | `float64` | yes | Start y. |
 | `x2` | `float64` | yes | End x. |
@@ -520,14 +626,14 @@ Rationale: follows SVG [`line`](https://www.w3.org/TR/SVG2/shapes.html#LineEleme
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared properties. |
 | `points` | `Point[]` | yes | Two or more ordered vertices; path remains open. |
 
 ### 6.9 `nx.graphics.Polygon`
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared properties. |
 | `points` | `Point[]` | yes | Three or more ordered vertices; closing segment is implicit. |
 
 Rationale for both: follows SVG [`polyline` and `polygon`](https://www.w3.org/TR/SVG2/shapes.html#PolylineElement) and maps directly from DrawnUI `Points`. DrawnUI's non-standard `SmoothPoints` is deferred; smooth geometry should use an explicit `Path` in the MVP.
@@ -536,18 +642,18 @@ Rationale for both: follows SVG [`polyline` and `polygon`](https://www.w3.org/TR
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` and `Shape` properties | see §6.1 | no | Shared properties. |
 | `data` | `string` | yes | SVG path-data string. |
 
-`data` uses the standard SVG command grammar (`M/L/H/V/C/S/Q/T/A/Z`, absolute or relative) from [SVG Paths](https://www.w3.org/TR/SVG2/paths.html). This is already the format of DrawnUI `SkiaShape.PathData`, so it is the strongest direct compatibility point. Renderers must impose command-count, numeric-range, and rendered-bounds limits.
+`data` uses the standard SVG command grammar (`M/L/H/V/C/S/Q/T/A/Z`, absolute or relative) from [SVG Paths](https://www.w3.org/TR/SVG2/paths.html). This is already the format of DrawnUI `SkiaShape.PathData`, so it is the strongest direct compatibility point. Parse the complete string before painting; malformed path data fails validation rather than rendering a backend-specific valid prefix. Use one tested SVG-path parser/normalizer for direct and recorded paths, including elliptical arc conversion. Preserve subpath boundaries and open/closed status; filling an open subpath uses implicit closure while stroking it does not. Impose command-count, numeric-range, and rendered-bounds limits. Closed-path fill remains SVG-compatible black by default; authors of stroke-only paths should specify `fill: none` explicitly.
 
 ### 6.11 `nx.graphics.Text`
 
-Single-line or explicitly line-broken text positioned in drawing coordinates. It does not perform UI box layout.
+Single-line or explicitly line-broken text positioned in drawing coordinates. It does not perform UI box layout. Shape each line through the host text service, including script shaping, bidirectional ordering, fallback fonts, and glyph positioning; drawing Unicode code points one by one is not conforming. The first line uses the stated anchor/baseline, subsequent baselines advance by `fontSize * lineHeight`; apply `textAnchor` independently to each line's shaped advance. `auto` baseline means the alphabetic baseline. Font selection is host-resolved and must match measurement and paint; exact cross-host metrics require pinned font resources.
 
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` properties | see §6.1 | no | Shared properties. |
 | `x` | `float64` | yes | Text anchor x. |
 | `y` | `float64` | yes | Baseline y. |
 | `text` | `string` | yes | Literal text; `\n` requests explicit line breaks. |
@@ -558,6 +664,7 @@ Single-line or explicitly line-broken text positioned in drawing coordinates. It
 | `textAnchor` | `TextAnchor` | no | `start`. |
 | `dominantBaseline` | `DominantBaseline` | no | `auto`. |
 | `letterSpacing` | `float64` | no | `0`. |
+| `lineHeight` | `float64` (> 0) | no | `1.2`; baseline advance as a multiplier of `fontSize` for explicit line breaks. |
 | `fill` | `Paint?` | no | Black. |
 | `stroke` | `Stroke?` | no | None. |
 | `shadows` | `Shadow[]?` | no | `[]`. |
@@ -568,7 +675,7 @@ Rationale: positioning and anchor terms follow [SVG text](https://www.w3.org/TR/
 
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
-| all `GraphicsCommonProps` | see §6.1 | no | Shared properties. |
+| all `GraphicsElement` properties | see §6.1 | no | Shared properties. |
 | `x` | `float64` | no | `0`. |
 | `y` | `float64` | no | `0`. |
 | `width` | `float64` | yes | Non-negative destination width. |
@@ -587,17 +694,11 @@ This catalog is the half of the model where **the layout engine decides position
 
 The duplicate pairs follow from that axis rather than working around it. `nx.ui.Text` and `nx.graphics.Text` are the same content under two positioning models — one measured and wrapped into a box the parent sized, one anchored at a baseline the document chose — and the same is true of `nx.ui.Image` versus `nx.graphics.Image`, and of `Box` versus `Rect`. A single merged component would have to carry both models and silently ignore half its properties depending on its parent.
 
-#### Why `HStack` / `VStack` / `ZStack`
+#### Why `Row` / `Column` / `ZStack`
 
-The three layout containers are named for the axis they arrange along, following SwiftUI's `HStack`/`VStack`/`ZStack` and Tamagui's `XStack`/`YStack`/`ZStack`. Three properties of that scheme matter here.
+Use `Row` and `Column` as the canonical linear containers, with no aliases in the MVP. They match A2UI, [Flutter](https://docs.flutter.dev/ui/layout), and [Jetpack Compose](https://developer.android.com/develop/ui/compose/layouts/basics). React itself provides no layout components; common libraries vary: [MUI](https://mui.com/material-ui/react-stack/) uses `Stack` with a row/column direction, [Radix Themes](https://www.radix-ui.com/themes/docs/components/flex) uses `Flex` with that direction, and [Chakra](https://chakra-ui.com/docs/components/stack) offers axis-prefixed stacks. Row/column is the shared directional vocabulary, even when it is a property rather than a component name.
 
-*It is one family.* The alternative under consideration was `Row`/`Column` for linear flow plus a third name for overlay, but every candidate third name (`Stack`, `Overlay`, `Layer`) reads as a different kind of word than `Row` and `Column`, leaving the catalog with two naming conventions for one concept. An axis prefix names all three the same way.
-
-*It keeps “row” and “column” meaning grid structure.* §7.4 `Grid` gives children `gridRow`, `gridColumn`, `rowSpan`, and `columnSpan`, and takes `rows`, `columns`, `rowGap`, and `columnGap`. Had the linear containers also been called `Row` and `Column`, a document could read `{"type": "Row", "gridRow": 2}`, and a generating model carrying [Bootstrap](https://getbootstrap.com/docs/5.3/layout/grid/) or [Ant Design](https://ant.design/components/grid) priors — where `row`/`col` are *mandatory* grid parts, not standalone containers — could reasonably emit `Column` children inside a `Grid` to make cells. Flutter avoids the same collision by never letting the words meet: its `GridView` takes `crossAxisCount`/`mainAxisSpacing` rather than row and column counts, and its `Wrap` coins “run” for a wrapped line, reserving `row`/`column` for linear containers and for `Table`. NX cannot use that escape hatch, because its `Grid` is a [CSS Grid](https://www.w3.org/TR/css-grid-2/) derivative and CSS Grid vocabulary is the most valuable prior a generating model has for two-dimensional placement. Renaming the containers is the cheaper side of the trade.
-
-*It resolves an inversion against the render target.* DrawnUI's own `SkiaStack` is `LayoutType.Column`, and OpenUI's default library, MUI, Fluent UI, Mantine, Atlassian, Braid, IBM Carbon, Shopify Polaris (`BlockStack`), WPF's `StackPanel`, .NET MAUI's `StackLayout`, and `UIStackView` all use an unprefixed “stack” to mean *linear*, almost always vertical by default. An unprefixed `Stack` meaning overlay would therefore have been the one genuinely wrong choice, and `nx.ui.Stack → SkiaLayer` beside `nx.ui.Column → SkiaStack` would have inverted the word across §9's own mapping table. `VStack → SkiaStack` and `ZStack → SkiaLayer` read correctly.
-
-The cost is accepted rather than denied: `Row`/`Column` is what [A2UI's](https://a2ui.org/specification/v1.0-a2ui/) basic catalog uses, along with Flutter, Jetpack Compose, and Qt Quick, so NX gives up name-level alignment with the GenUI peer it otherwise tracks most closely. Catalogs are per-application in A2UI and interoperability needs a mapping rather than matching identifiers, so the loss is in generator familiarity only — and `HStack`/`VStack` carry a large prior of their own from SwiftUI. §12.3 records this as a decision to test rather than to assume.
+Keep `ZStack` for overlay. The explicit Z distinguishes overlap from linear flow, whereas bare `Stack` means linear layout in several ecosystems, including DrawnUI's vertical `SkiaStack`. Naming symmetry is less valuable than recognizable meaning. `Grid` continues to use rows and columns for its tracks; a `Row` or `Column` child is a container placed in a cell, not a track declaration. No evidence currently justifies avoiding these familiar names to prevent hypothetical grid confusion.
 
 ### 7.1 `UiCommonProps`
 
@@ -640,8 +741,8 @@ abstract external component <UiCommon
 | `padding` | `Insets?` | `0` | Space between border and content. |
 | `alignSelf` | `AlignSelf` | `auto` | Override the parent-assigned alignment on the block (vertical) axis. |
 | `justifySelf` | `AlignSelf` | `auto` | Override the parent-assigned alignment on the inline (horizontal) axis. |
-| `grow` | `float64` | `0` | Share of positive free space in an `HStack` or `VStack`. |
-| `shrink` | `float64` | `1` | Relative shrink factor in an `HStack` or `VStack`. |
+| `grow` | `float64` | `0` | Share of positive free space in a `Row` or `Column`. |
+| `shrink` | `float64` | `1` | Relative shrink factor in a `Row` or `Column`. |
 | `gridColumn`, `gridRow` | `int?` (>= 0) | auto-placement | Zero-based grid position. Set both or neither. |
 | `columnSpan`, `rowSpan` | `int` (>= 1) | `1` | Grid cell span. |
 | `background` | `Paint` | `none` | Background inside the border. |
@@ -656,8 +757,8 @@ abstract external component <UiCommon
 
 | Parent | `justifySelf` (horizontal) | `alignSelf` (vertical) |
 |---|---|---|
-| `HStack` | ignored; use `justify` on the parent plus `grow`/`shrink` | overrides the parent's `align` |
-| `VStack` | overrides the parent's `align` | ignored; use `justify` on the parent plus `grow`/`shrink` |
+| `Row` | ignored; use `justify` on the parent plus `grow`/`shrink` | overrides the parent's `align` |
+| `Column` | overrides the parent's `align` | ignored; use `justify` on the parent plus `grow`/`shrink` |
 | `Grid`, `ZStack` | overrides `justifyItems` | overrides `alignItems` |
 | `Scroll`, `Box`, `Card` | positions the single child in the content box | positions the single child in the content box |
 
@@ -665,7 +766,7 @@ A property that a parent ignores is valid but has no effect; it is a diagnostic,
 
 These are constraints and portable appearance, not a CSS passthrough. Names balance CSS flex/grid familiarity with DrawnUI/MAUI's width request, margin/padding, alignment, background, clipping, and grid row/column concepts. Layout engines must document deterministic treatment of over-constrained values; where `width` conflicts with `minWidth`/`maxWidth`, the minimum wins, matching CSS.
 
-### 7.2 `nx.ui.HStack`
+### 7.2 `nx.ui.Row`
 
 Horizontal flow container; accepts zero or more UI children.
 
@@ -677,7 +778,7 @@ Horizontal flow container; accepts zero or more UI children.
 | `align` | `Alignment` | `stretch` | Alignment on the vertical cross axis. |
 | `wrap` | `boolean` | `false` | Wrap children into additional lines. |
 
-### 7.3 `nx.ui.VStack`
+### 7.3 `nx.ui.Column`
 
 Vertical flow container; accepts zero or more UI children.
 
@@ -691,7 +792,7 @@ Vertical flow container; accepts zero or more UI children.
 
 `justify` distributes only the free space that remains after `grow` has been applied, so a child with `grow > 0` and a `spaceBetween` parent is not double-counted. When `wrap` is `true`, `gap` separates both adjacent children and adjacent lines, and lines are packed toward the cross-axis start; per-line distribution (CSS `align-content`) is deferred.
 
-Rationale: A2UI's basic catalog defines the same two containers (as `Row` and `Column`) with exactly these `justify` (`start`/`center`/`end`/`spaceBetween`/`spaceAround`/`spaceEvenly`) and `align` (`start`/`center`/`end`/`stretch`) enums, defaulting to `start` and `stretch` as NX does, and expresses proportional sizing as a `weight` on the child; CSS Flexbox supplies the behavioral model. NX adds `gap`, which A2UI leaves to the host theme but DrawnUI exposes as `Spacing`. `grow`/`shrink` replace both A2UI's single `weight` and DrawnUI's sizing idiom, because a shrink factor is needed once `wrap` is false and content overflows.
+Rationale: A2UI's basic catalog defines the same two containers (as `Row` and `Column`) with similar `justify` (`start`/`center`/`end`/`spaceBetween`/`spaceAround`/`spaceEvenly`) and `align` (`start`/`center`/`end`/`stretch`) enums, defaulting to `start` and `stretch` as NX does, and expresses proportional sizing as a `weight` on the child. A2UI additionally accepts main-axis `justify: stretch`; NX does not equate that with cross-axis stretch or `spaceBetween`. Its import requires a specified sizing rule or a diagnostic. CSS Flexbox supplies the NX behavioral model. NX adds `gap`, which A2UI leaves to the host theme but DrawnUI exposes as `Spacing`. `grow`/`shrink` replace both A2UI's single `weight` and DrawnUI's sizing idiom, because a shrink factor is needed once `wrap` is false and content overflows.
 
 ### 7.4 `nx.ui.Grid`
 
@@ -795,11 +896,11 @@ Measured, wrapping output text; accepts no children.
 | `maxLines` | `int?` (>= 1) | no | Unlimited. |
 | `overflow` | `TextOverflow` | no | `clip`; applies when constrained/maxLines is reached. |
 
-`variant` is a semantic role, not only a type ramp: renderers must expose `h1`, `h2`, and `h3` as platform heading elements at the corresponding level, and `code` with a monospace face and a code role where the platform has one. Nothing else in the read-only MVP conveys document structure to assistive technology, so a model that reaches for `fontSize` instead of `variant` silently produces a flat, unnavigable document.
+`variant` is a semantic role, not only a type ramp: renderers must expose `h1` through `h6` as platform heading elements at the corresponding level, and `code` with a monospace face and a code role where the platform has one. Nothing else in the read-only MVP conveys document structure to assistive technology, so a model that reaches for `fontSize` instead of `variant` silently produces a flat, unnavigable document.
 
 When `format` is `"markdown"`, `variant` sets the *baseline* role for the block and Markdown structure nests below it; heading syntax inside a `caption` must not escape its container's typography scale.
 
-Rationale: A2UI `Text` combines simple Markdown with typography variants (`h1`–`h5`, `body`, `caption`); DrawnUI `SkiaLabel` supplies detailed text properties (`FontFamily`, `FontSize`, `FontWeight`, `LineHeight`, `CharacterSpacing`, `MaxLines`, `LineBreakMode`, stroke and drop shadow). NX keeps the useful intersection and makes semantic `variant` preferable to low-level overrides. Hosts must sanitize Markdown, disallow raw HTML by default, and apply a link policy. Rich spans, `TextTransform`, and `AutoSize`-style shrink-to-fit are deferred.
+Rationale: A2UI v0.9.1 `Text` combines simple Markdown with typography variants (`h1`–`h5`, `body`, `caption`); DrawnUI `SkiaLabel` supplies detailed text properties (`FontFamily`, `FontSize`, `FontWeight`, `LineHeight`, `CharacterSpacing`, `MaxLines`, `LineBreakMode`, stroke and drop shadow). NX preserves explicit heading semantics through level 6 and makes semantic `variant` preferable to low-level overrides. The current A2UI v1.0 candidate Basic schema permits only `body` and `caption`; an exporter must check the selected catalog rather than assume v0.9.1 heading variants survive unchanged. Hosts must sanitize Markdown, disallow raw HTML by default, and apply a link policy. Rich spans, `TextTransform`, and `AutoSize`-style shrink-to-fit are deferred.
 
 ### 7.11 `nx.ui.Image`
 
@@ -831,6 +932,23 @@ Host-provided symbolic icon; accepts no children.
 
 Rationale: A2UI's `Icon.name` is primarily a predefined enum of system icon names, with an escape hatch (`{ "svgPath": ... }`) for supplying path data directly. NX takes the enumerated half and drops the escape hatch: a model that needs custom vector art already has `nx.graphics`, where the geometry is validated, bounded, and composable, so admitting a second, unmeasured path-data channel through `Icon` would add attack surface for no new capability. Use common `accessibility.label` for a meaningful icon or `accessibility.hidden: true` for a decorative one. A catalog capability exchange must enumerate supported names; unknown icons use a documented fallback glyph.
 
+### 7.13 `nx.ui.List`
+
+A scrollable, ordered sequence of zero or more explicitly listed UI children. This is ordinary read-only content, not a data-bound item generator.
+
+| Property | Type | Default | Meaning |
+|---|---|---:|---|
+| all `UiCommonProps` | see §7.1 | — | Shared constraints and appearance. |
+| `direction` | `Axis` | `vertical` | Sequence and scrolling axis. |
+| `gap` | `float64` | `0` | Non-negative space between adjacent items. |
+| `align` | `Alignment` | `stretch` | Alignment across the sequence axis. |
+| `scrollbar` | `ScrollbarVisibility` | `auto` | Host scrollbar presentation hint. |
+| `children` | `ElementId[]` | empty | Explicit ordered items; no templates or bindings in MVP. |
+
+A List owns its viewport and scrolls along `direction`; items are measured unbounded along that axis and constrained across it. It requires a bounded viewport from its parent, like `Scroll`. Default margins/padding remain zero. It is equivalent to a `Scroll` containing a non-wrapping `Column` or `Row` with the specified `gap` and `align`; item growth along the scroll axis has no finite free space to consume. Expose list/item semantics and reading order to accessibility, without fabricating selection or focus behavior. Item positions are sibling order, not alphabetical or data sort order.
+
+This gives A2UI's static `List` a direct semantic counterpart without introducing state. Dynamic child templates, stable data-item keys, recycling/virtualization guarantees, and selection remain post-MVP. A2UI export still has to account for target spacing and viewport conventions.
+
 ## 8. Minimal example
 
 ```json
@@ -849,7 +967,7 @@ Rationale: A2UI's `Icon.name` is primarily a predefined enum of system icon name
       "children": ["content"]
     },
     "content": {
-      "type": "nx.ui.VStack",
+      "type": "nx.ui.Column",
       "props": { "gap": 12 },
       "children": ["title", "graphic", "caption"]
     },
@@ -912,12 +1030,12 @@ The JSON above is the interchange form. The same document authored in NX is the 
 
 ```nx
 import "../core"
-import { Card as ui.Card, VStack as ui.VStack, Text as ui.Text } from "../ui"
+import { Card as ui.Card, Column as ui.Column, Text as ui.Text } from "../ui"
 import "../graphics" as gfx
 
 <ui.Card width=<Length.px value=360.0 />
          padding=<Insets top=20.0 right=20.0 bottom=20.0 left=20.0 /> >
-  <ui.VStack gap=12.0>
+  <ui.Column gap=12.0>
     <ui.Text: variant=h2>NX UI</ui.Text>
     <gfx.Drawing
       height=<Length.px value=140.0 />
@@ -935,7 +1053,7 @@ import "../graphics" as gfx
       <gfx.Circle cx=300.0 cy=35.0 r=7.0 fill=<Paint.solid color="white" /> />
     </gfx.Drawing>
     <ui.Text: variant=caption>Portable layout above; portable drawing below.</ui.Text>
-  </ui.VStack>
+  </ui.Column>
 </ui.Card>
 ```
 
@@ -955,11 +1073,11 @@ Text reads better. `<ui.Text: ...>NX UI</ui.Text>` uses NX's text-element form, 
 |---|---|---|
 | `Canvas` + `SkiaControl` base capabilities | `NxUiDocument`, `Element`, `UiCommonProps` | Separate portable document semantics from renderer lifecycle, invalidation, cache, and GPU configuration. DrawnUI's `Canvas` hosts an entire drawn UI tree, so it corresponds to the document host — not to `nx.graphics.Drawing`, which is an embeddable element. That mismatch is why the portable model does not reuse the word `Canvas`; see §1. |
 | no direct equivalent | `nx.graphics.Drawing` | DrawnUI has no embeddable coordinate-space element; an adapter synthesizes one as an `Absolute` `SkiaLayout` sized to the surface, with the view-box mapping applied as a transform on its children. |
-| `SkiaLayout Type="Row"` / `SkiaRow` | `nx.ui.HStack` | Explicit catalog type; `Spacing` becomes `gap`; MAUI alignment maps to `align`/`justify`/`alignSelf`. |
-| `SkiaLayout Type="Column"` / `SkiaStack` alias | `nx.ui.VStack` | DrawnUI’s `SkiaStack` is a `Column`; the axis prefix makes the direction explicit instead of implied. |
+| `SkiaLayout Type="Row"` / `SkiaRow` | `nx.ui.Row` | Explicit catalog type; `Spacing` becomes `gap`; MAUI alignment maps to `align`/`justify`/`alignSelf`. |
+| `SkiaLayout Type="Column"` / `SkiaStack` alias | `nx.ui.Column` | DrawnUI’s `SkiaStack` is a `Column`; the canonical name makes the vertical direction explicit. |
 | `SkiaLayout Type="Grid"` / `SkiaGrid` | `nx.ui.Grid` | Preserve rows, columns, gaps, placement, and spans in a smaller typed subset. |
 | `SkiaLayout Type="Absolute"` / `SkiaLayer` | `nx.ui.ZStack` for overlay; `nx.graphics.Drawing` for coordinates | Separate ordinary layering from coordinate-based graphics. |
-| `SkiaLayout Type="Wrap"` / `SkiaWrap` | `HStack` or `VStack` with `wrap: true` | Avoid another component when flex-like wrapping is enough. |
+| `SkiaLayout Type="Wrap"` / `SkiaWrap` | `Row` or `Column` with `wrap: true` | Avoid another component when flex-like wrapping is enough. |
 | `ContentLayout` | `nx.ui.Box` | Neutral single-child decoration/layout primitive. |
 | `SkiaShape Type="Rectangle\|Circle\|Ellipse\|Line\|Polygon\|Path"` | corresponding `nx.graphics.*` types | Smaller schemas, SVG-standard names, direct validation. |
 | `SkiaShape` hosting content/clipping | `nx.ui.Box`/`Card` for UI; `Drawing` + `clipPath` for graphics | Preserve the capability while separating UI content layout from shape geometry. |
@@ -973,6 +1091,93 @@ Text reads better. `<ui.Text: ...>NX UI</ui.Text>` uses NX's text-element form, 
 | gestures, commands, binding, controls | post-MVP interaction/state catalogs | Strictly excluded from the read-only initial MVP. |
 
 DrawnUI source links for adapter work: [`SkiaShape.cs`](https://github.com/DrawnUi/DrawnUi.Net/blob/main/src/Shared/DrawnUi/Draw/SkiaShape.cs), [`SkiaLabel.cs`](https://github.com/DrawnUi/DrawnUi.Net/blob/main/src/Shared/DrawnUi/Draw/Text/SkiaLabel.cs), [`SkiaImage.cs`](https://github.com/DrawnUi/DrawnUi.Net/blob/main/src/Shared/DrawnUi/Draw/Images/SkiaImage.cs), and [`SkiaScroll.cs`](https://github.com/DrawnUi/DrawnUi.Net/blob/main/src/Shared/DrawnUi/Draw/Scroll/SkiaScroll.cs).
+
+### 9.1 Three contracts and two execution paths
+
+A **retained NX UI document** describes component identity, layout constraints, graphics geometry, and accessibility. An **NX drawing context** is a trusted host API invoked after validation, resource resolution, text measurement, and layout. An **NX display list** is optional, immutable, ordered paint output returned to a host for later replay. It contains resolved drawing operations, not UI components or layout instructions. Neither the context nor the display list adds executable callbacks to generated documents.
+
+```text
+validated document + viewport + theme + approved resources
+                         |
+                measure / arrange / shape text
+                         |
+                 resolved paint traversal
+                         |
+                  NX drawing context
+                   /              \
+          direct backend       NX recorder
+          Skia first               |
+               |             NX display list
+          host surface       returned to host
+                                   |
+                            replay to a backend
+```
+
+The host selects the destination before painting. In **direct mode**, each context operation invokes the selected backend API immediately, with no intermediate standard NX command buffer. Skia may still buffer GPU commands internally; immediate here describes NX's API dispatch, not synchronous pixel presentation. Backend-native caches, including Skia pictures, are permitted implementation choices.
+
+In **recorded mode**, the same traversal writes an NX-defined display list and returns it with its resource manifest and semantic companion data. The receiving host replays it through a compatible backend. Recording is useful for separating producers from presentation threads/processes, repeated replay, inspection, and transport. It has allocation, serialization, and resource costs and should not be imposed on an in-process DrawnUI host without measurements.
+
+A DOM/SVG renderer may map the semantic document directly to platform elements. It need not consume this drawing interface or a display list. The graphics interface is a portability boundary for painted renderers, not a replacement for every renderer architecture.
+
+### 9.2 Pluggable immediate drawing contract
+
+Use a small NX-owned interface (working name `INxDrawingContext`) with no `SKCanvas`, `SKPaint`, MAUI, DOM, or GPU types in its public contract. Register implementations through trusted host configuration. The first implementation wraps a host-supplied Skia canvas; a recorder implements the same operations. Keep layout independent of concrete backend types.
+
+The initial operation families should cover:
+
+| Family | Required semantics |
+|---|---|
+| State and transforms | Balanced save/restore; concatenated affine transforms with §5.3 ordering; rectangular/path clipping; host-established root device scale. |
+| Compositing | Begin/end isolated opacity layers. Group opacity applies once to the composited subtree, not independently to each child's paint. |
+| Geometry | Rectangles/rounded rectangles, ellipses, paths, fills, strokes, gradients, and the MVP shadow semantics. Lines and polygons may lower to paths. |
+| Content | Images with resolved source/destination rectangles and clipping; shaped text runs positioned using the same metrics used for layout. |
+
+Prefer explicit paint values per draw operation over a large mutable paint state machine. Parsed paths, images, and fonts can use host-local opaque handles, with ownership and lifetime specified; these handles must never leak into portable serialized output. A context is frame-scoped, used on its backend's permitted thread, and restores the host canvas state on completion or failure. The host owns the surface, device scale, scheduling, invalidation, and presentation.
+
+Text measurement/shaping and resource resolution are companion services, not incidental canvas methods. A text layout result must retain the font selection, fallback runs, glyph positioning, and metrics that painting actually uses. A Skia implementation may initially use Skia text services, but their types stay behind adapters. Pluggable rasterization does not by itself provide portable text layout.
+
+This is a host integration API, not a new public imperative NX language feature. An application-facing imperative graphics API can be considered separately after this contract proves useful.
+
+### 9.3 NX display-list profile
+
+Define a separately versioned output profile, provisionally `nx-display-list@0.1.0`, rather than adding commands to `nx.graphics` or putting a rendering-mode property on `NxUiDocument`. A recorder and replay implementation should prove these requirements before the output format is frozen:
+
+- **Self-contained frame description:** format/profile version, logical viewport, device-scale assumptions, explicit color space (MVP sRGB), command sequence, resource manifest, and the rendering-environment fingerprint. Theme and layout choices are already resolved. Begin with full-frame lists; partial-list updates are deferred.
+- **Bounded command vocabulary:** save/restore, affine transforms, clips, isolated opacity layers, geometry, images, and glyph runs. Document root state, coordinate units, stroke scaling, clip intersection, and compositing order. Preserve source element IDs in a side table for diagnostics, rather than turning every command into a retained element.
+- **Portable resources:** versioned IDs resolve to approved immutable image/font/path data or a host-negotiated resource table. No native pointers, GPU texture handles, platform font handles, arbitrary callbacks, or Skia picture bytes. The list retains resources until the host releases it; a transmitted list must declare how its receiver obtains and authorizes every resource.
+- **Text replay without reflow:** record glyph runs with font-resource identity, glyph IDs, positions, and necessary rendering attributes. The receiver must have the matching font bytes/face/variation identity, including fallback fonts. Specify handling for color glyphs; use a declared raster fallback or reject unsupported runs. Replacing a font or reshaping plain strings is not equivalent replay. Resource packaging is a rendering requirement even though author-selected font resources remain deferred from the document catalog.
+- **Independent validation:** check versions, opcode payloads, finite values, resource references, balanced stacks, byte/command counts, layer depth/area, and glyph/path complexity before replay. Validating the source document does not validate a list received across a trust boundary. Unknown required operations fail explicitly.
+
+The first representation can be an in-memory typed command sequence with a readable diagnostic encoding. A portable serialized representation needs its own schema and resource protocol before cross-process interoperability is claimed; choosing JSON versus binary should follow measurements. A list requiring undeclared local resources is only a local recording, not a transportable artifact.
+
+Return accessibility/semantic nodes and their arranged bounds alongside a frame, linked by element ID and document revision. Paint commands alone cannot recover heading roles, image alternatives, reading order, or scroll structure. The host installs the semantic tree atomically with the corresponding frame; lists do not replace the source document's semantics. Internal arranged bounds needed for accessibility are required now; a public graphics geometry/hit-testing API remains deferred.
+
+### 9.4 DrawnUI migration and capability policy
+
+The requested `~/src/DrawnUI.Fiddle` checkout was not present under that exact name during this review. The available related checkout is `~/src/DrawnUi.FiddleEngine`; its `src/DrawnUi.Fiddle/FiddlePresets.cs`, `Paint` preset, obtains `ctx.Context.Canvas` and calls `DrawCircle` directly from `WhenPaint`. Its `README-NX.md` also documents an existing NX-to-DrawnUi.React integration backed by a generated DrawnUI catalog. That is a valuable migration reference, though it exposes DrawnUI controls rather than the portable catalog proposed here. The paint example confirms direct Skia dispatch; it does not establish that every DrawnUI cache path avoids recording.
+
+Keep that direct integration viable. Initially the adapter can map NX documents to existing DrawnUI controls. A shared NX paint traversal can then target the Skia drawing context and the recorder. Wrapping existing controls is a migration technique, not proof of a portable backend: controls that take raw Skia objects must be adapted or bypassed before recording can share the same traversal. Avoid maintaining separate, subtly different layout algorithms solely for the two output modes.
+
+Backend registration declares supported operations, text/resource services, and output profiles. The host selects a compatible backend before painting; it must not silently ignore clipping, opacity isolation, or other required semantics. A documented equivalent software/offscreen fallback is acceptable. Explicitly lossy fallback requires host policy and a diagnostic; it is not full conformance. Generated content cannot select or load a backend plugin.
+
+### 9.5 Delivery recommendation
+
+1. Specify the bounded drawing interface and implement direct Skia rendering. Preserve the current low-overhead host path.
+2. In the same MVP prototype, add an NX recorder and replay it through Skia. Validate the operation semantics and resource lifetime before promising a stable display-list format.
+3. Exercise a second immediate backend (for example Canvas 2D) with the shared traversal and a representative graphics corpus. This is the portability gate; a second Skia wrapper or a DOM-only renderer does not prove the drawing interface is independent of Skia.
+4. Stabilize the portable display-list encoding and resource packaging when a host actually needs returned lists. Ship it as an optional output profile; hosts may support direct mode, recorded mode, or both and must declare which.
+
+Recommend **both paths, with direct Skia as the first production path and recording as an optional output profile**. Do not make a stable cross-process graphics protocol a prerequisite for the read-only UI MVP. Conversely, do not claim display-list interoperability until independent validation, resource transfer, and matching semantic output are demonstrated.
+
+### 9.6 Initial graphics-first OpenSpec changes
+
+First implement and verify [the math standard library](../openspec/changes/archive/2026-10-28-add-math-standard-library/proposal.md), including its cross-runtime numeric contract. Graphics authoring helpers then use `@nx/math`, with explicit degree-to-radian conversion, instead of private numerical approximations. The first graphics deliverable is an NX-authored standalone drawing rendered directly to Skia. A2UI conversion and Level 2 UI layout are later work. Keep each implementation profile explicit: supporting a small primitive subset is not full `nx.graphics@0.1.0` conformance.
+
+1. **`add-nx-graphics-core-and-direct-skia` — first vertical slice.** Add unstable graphics declarations and the shared types they actually need, plus lowering/validation from evaluated NX external-component values into a host-neutral prepared scene. Support standalone Drawing, Group, Rect, Circle, Ellipse, Line, Polyline, Polygon, Path, and a bounded single-line Text profile; solid fills, strokes, both fill rules, affine transforms, path clips, isolated opacity, and root view-box fit/clip. Publish an explicitly unstable `graphics-core` implementation profile. Include host-supplied font selection, shaped single-line text, and consistent measurement; unsupported multiline/text features fail with diagnostics. Add ordinary NX helpers for regular polygons, stars, filled arrows, and arc/ring sectors. Include an agent preview host returning PNG, revision-linked element bounds, text metrics, and diagnostics; no model/API connection is required to run it. Validate and resolve the entire scene before painting, preserve declaration identity through imports, and reuse existing compiler/runtime APIs; do not change generic NX value serialization to match the UI wire envelope. The prepared scene retains semantic nodes and cached parsed geometry; it is not a flattened NX display list. Traverse it directly to invoke the backend. Introduce the bounded drawing-context contract and a direct Skia adapter, with host-owned surfaces/resources and state restored on failure. A surface can be supplied offscreen for deterministic fixtures or by an in-repository preview host; DrawnUI host integration can then consume the same adapter API. Keep Skia bindings outside compiler/type-system crates; choose the adapter package/language to match the existing host, rather than forcing SkiaSharp types into Rust APIs. This change is done only when an NX example produces an actual image and is rendered by the in-repository preview host, not when declarations alone type-check. Other catalog features must fail explicitly in this profile.
+2. **`add-nx-graphics-text-images-and-paints` — complete useful content.** Add linear/radial gradients, resolved image resources, expanded positioned text support (multiline and broader font fallback), and the specified shadows. Extend the host services for fonts, decoding, immutable resource caching, and disposal. Test missing/delayed resources, non-Latin scripts, fallback, effect bounds, and transparent gradients. Resource preparation is asynchronous if needed; painting consumes a prepared snapshot. Unresolved content must follow explicit placeholder/failure policy, and a newly available font may require re-preparation. This milestone covers the proposed graphics catalog without implementing general UI layout.
+3. **`add-nx-graphics-recording-and-portability` — prove the abstraction.** Implement an optional typed in-memory NX recorder and replay through the same drawing context; compare against direct Skia. Add a genuinely independent backend, preferably Canvas 2D, using offscreen isolation where required. The second backend may begin on the core profile, with full-catalog portability claimed only after text/paint/resource coverage also passes. Keep full-frame recording immutable with explicit resource lifetimes and semantic companion data. Stabilizing a transportable encoding is a later task, conditional on a concrete host need.
+
+The first change's fixtures must exercise transform order (a translated/scaled shape with known expected coordinates), view-box letterboxing/cropping, even-odd path and clip holes, overlapping children under group opacity, rounded rectangles, scaled/dashed strokes, arc paths, malformed geometry, standalone execution with pinned fonts, measured text, parametric-helper edits, and host canvas-state restoration. Check structural/coordinate invariants as well as same-backend image comparisons. Use a small SVG reference corpus for established semantics, documenting deliberate NX differences. Later fixtures compare direct versus replay and two independent backends with stated raster/font tolerances. The acceptance gate also includes editing star point count, arrow endpoints, and arc sweep without hand-editing a path, and revising label placement from measured text bounds. A recorder-only or SVG-only implementation must not be reported as completion of the first direct-Skia milestone.
 
 ## 10. Rendering, conformance, and safety requirements
 
@@ -993,6 +1198,8 @@ Conformance should be semantic, not pixel-perfect. A conforming renderer must pr
 
 ## 11. Deliberately deferred features
 
+See [the future design register](NX-Drawn-UI-MVP-Object-Model-Future.md) for changes to resolve before broad evangelism. Some require early decisions but do not belong in the first implementation.
+
 ### Post-MVP input and interaction components
 
 - `Button`, `Link`, `TextField`, `TextArea`, `CheckBox`, `RadioGroup`, `Select`, `Slider`, `Switch`, `DateTimeInput`, `FilePicker`
@@ -1001,13 +1208,13 @@ Conformance should be semantic, not pixel-perfect. A conforming renderer must pr
 
 ### Post-MVP Level 3 semantic/data UI
 
-- `Metric`, `Badge`, `Progress`, `Chart` families, `DataTable`, `List`, `Tree`, `Timeline`, `Map`
+- `Metric`, `Badge`, `Progress`, `Chart` families, `DataTable`, data-bound lists/collections, `Tree`, `Timeline`, `Map`
 - `Form`, `Detail`, `Comparison`, `Gallery`, `Calendar`, `Schedule`
 - domain catalogs such as `ContactCard`, `ProductCard`, `OrderSummary`, `FlightOption`
 
 ### Post-MVP drawing and media
 
-- arcs as a convenience primitive; continuous-corner “squircle” rounding (both exist as DrawnUI `ShapeType` values); rounded/smoothed polylines; compound/reusable geometry definitions; inheritable paint on `Group`
+- native arc opcodes (authoring helpers lower arcs to paths in the first change); continuous-corner “squircle” rounding (both exist as DrawnUI `ShapeType` values); rounded/smoothed polylines; compound/reusable geometry definitions; inheritable paint on `Group`
 - rich text spans, text-on-path, advanced shaping controls, font resources, text decoration and transform, wrapped text inside drawing coordinates
 - masks, arbitrary clip trees, blend/compositing modes, filters, blur/glow, inner shadows
 - conic gradients, gradient spread modes, patterns, nine-patch images, tint/color filters
@@ -1018,7 +1225,7 @@ Conformance should be semantic, not pixel-perfect. A conforming renderer must pr
 ### Post-MVP GenUI/runtime capabilities
 
 - literal-or-bound property values, state model, JSON Pointer references, conditions, repeats, templates, and named slots
-- actions/events and AG-UI/A2UI/MCP transport adapters
+- actions/events and live AG-UI/A2UI/MCP transport adapters (the static A2UI conversion prototype is specified in §4.6)
 - incremental surface operations and RFC 6902 JSON Patch streaming
 - catalog negotiation, custom catalogs, themes/design tokens, capability fallbacks, migrations
 - localization, bidirectional text policy, logical (`start`/`end`) insets, responsive breakpoints, environment values
@@ -1026,18 +1233,26 @@ Conformance should be semantic, not pixel-perfect. A conforming renderer must pr
 
 ## 12. Decisions to validate in a prototype
 
+The graphics-first implementation profile is specified by [the initial OpenSpec change](../openspec/changes/archive/2026-10-29-add-nx-graphics-core-and-direct-skia/proposal.md). The complete catalog below remains a design target, not a claim that every effect ships in that change. The consolidated NX listings are illustrative proposal declarations; production declarations must use current NX syntax and pass the actual compiler tests. The initial `@nx/graphics` library must not import `@nx/ui`: sharing types must not require importing UI declarations or a layout engine.
+
+
 1. **Flat canonical form:** measure generation error rate and streaming ergonomics against nested authoring syntax.
 2. **Component count:** confirm `Box` and `Card` both earn their place; `Card` is the likelier convenience component to retain because GenUI models recognize it well.
-3. **Layout container naming:** measure generation accuracy for `HStack`/`VStack`/`ZStack` (see §7) against the `Row`/`Column`/`Overlay` alternative, on prompts that mix linear layout with `Grid` placement. Two specific errors are worth counting, because the naming was chosen to prevent them: linear containers emitted as `Grid` children in place of cell content, and `ZStack` used where a `VStack` was meant. The A2UI-alignment cost is real, so if `Row`/`Column` measurably wins on ordinary layout prompts and the `Grid` confusion does not appear, the decision should be revisited — renaming three catalog entries is cheap while the format is pre-1.0.
+3. **Layout naming and containment:** use canonical `Row`/`Column` and retain `ZStack`; test generation with nested grids and verify that models treat row/column containers as cell content, not track declarations. Do not introduce aliases without evidence of a usability need.
 4. **Gradient coordinates:** verify that `objectBoundingBox` defaults produce the most intuitive model output across Skia and SVG.
 5. **Text parity:** quantify layout differences between Skia/DrawnUI and web/native renderers, especially `lineHeight`, weight, and ellipsis.
 6. **Path safety:** establish practical complexity and bounds limits without rejecting normal illustrations.
-7. **Path fill default:** SVG's black default fill is the single most common generation error in hand-written path art — an open stroked curve arrives filled. Measure whether `nx.graphics.Path` should default to `fill: "none"` and diverge from SVG, as `Polyline` already does.
-8. **Common-property surface:** `UiCommonProps` puts roughly twenty properties on every Level 2 component, including leaves. A2UI's `ComponentCommon` carries only `id`, `accessibility`, and `weight`, leaving all decoration to the host theme. Measure whether decoration (`background`, `border`, `cornerRadius`, `shadows`, `clip`) belongs on every component or only on the containers — `Box`, `Card`, `HStack`, `VStack`, `ZStack`, `Grid`, `Drawing` — with leaves keeping only sizing, spacing, alignment, opacity, and accessibility.
-9. **Semantic color roles:** decide whether the MVP needs a small set of theme roles (surface, onSurface, muted, accent) usable anywhere a `Color` is accepted, so that generated content survives a dark theme. Read-only documents are the easiest place to get this right and the easiest place to accidentally hard-code a palette.
+7. **Path compatibility:** retain SVG-compatible black Path fill; test explicit `fill: none`, subpath closure, arc normalization, dash behavior, and clip fill rules against reference fixtures. Reconsider defaults only with generation evidence.
+8. **Common-property surface:** `UiCommonProps` puts roughly twenty properties on every Level 2 component, including leaves. A2UI's `ComponentCommon` carries only `id`, `accessibility`, and `weight`, leaving all decoration to the host theme. Measure whether decoration (`background`, `border`, `cornerRadius`, `shadows`, `clip`) belongs on every component or only on the containers — `Box`, `Card`, `Row`, `Column`, `ZStack`, `Grid`, `Drawing` — with leaves keeping only sizing, spacing, alignment, opacity, and accessibility.
+9. **Theme contrast:** verify inherited text/icon foregrounds, explicit foreground/background overrides, dark themes, and nested cards. Keep named color tokens/design-token serialization as the next theme extension; do not overload CSS color strings with undocumented token names.
 10. **Encoding cost:** the flat map repeats an ID for every element and pays JSON's punctuation everywhere. OpenUI Lang's premise is that this is expensive enough to justify a purpose-built surface syntax. Measure NX's tokens-per-rendered-element against a nested form and against a compact form before the flat map is locked in as the canonical *wire* representation; it can remain the canonical *validation* representation regardless.
 11. **Catalog schemas:** publish JSON Schema for `nx.ui@0.1.0` and `nx.graphics@0.1.0`, then run constrained-generation evals.
-12. **DrawnUI adapter:** implement the example document through a thin NX-to-DrawnUI mapping before adding any new component.
+12. **DrawnUI adapter:** implement the standalone graphics-first milestone in §9.6 before the mixed UI example; use a supplied host surface without requiring Level 2 layout.
+13. **Drawing interface:** compare direct Skia with record/replay using the same layout and resources. Measure frame time, allocations, retained resource memory, list size, and replay cost on text-heavy cards, repeated paths, and nested clips/opacity layers. Include recording and serialization costs in the comparison.
+14. **Backend independence:** implement the representative graphics corpus on a second immediate backend and identify missing semantics before freezing the interface.
+15. **Replay environment:** establish font/image packaging, cache invalidation keys, and semantic-tree synchronization. A viewport, theme, font fallback, resource revision, or device-scale change must invalidate affected layout/recordings; replay is not responsive relayout.
+
+16. **A2UI adapter profile:** implement static Basic v0.9.1 fixtures and diagnostic cases from §4.6; include a negative export of NX graphics to a Basic-only host. Keep full interaction/catalog coverage as a later acceptance milestone.
 
 ## 13. Recommended MVP acceptance test
 
@@ -1046,7 +1261,9 @@ The MVP is credible when one unchanged validated document can render through bot
 - a DrawnUI/Skia renderer; and
 - a web renderer using normal layout plus SVG or Canvas for `nx.graphics`.
 
-The test corpus should include a text/image card, grid dashboard shell, layered composition, clipped image, gradient/shadow illustration, multi-segment path, and accessible decorative/informative images. It should also include intentionally invalid documents for every validation rule.
+For painted output, additionally compare direct Skia with NX-recorded output replayed through Skia using identical fonts and resources. Test overlapping children under group opacity, nested clips/transforms, fallback text, resource disposal, malformed lists, and cancellation/state restoration. Demonstrate the graphics subset on a second immediate backend before declaring the drawing interface portable. Cross-process output acceptance additionally requires portable resource resolution and a synchronized semantic companion tree. These gates are separate from the two semantic-document renderers above.
+
+The test corpus should include a static List in both directions, all six heading levels, a dark-themed nested card with inherited foregrounds, a text/image card, grid dashboard shell, layered composition, clipped image, gradient/shadow illustration, multi-segment path, and accessible decorative/informative images. It should also include intentionally invalid documents for every validation rule.
 
 ## 14. Primary references
 
@@ -1061,6 +1278,13 @@ The test corpus should include a text/image card, grid dashboard shell, layered 
 - [MCP Apps overview](https://modelcontextprotocol.io/extensions/apps/overview) and [MCP Apps specification site](https://apps.extensions.modelcontextprotocol.io/)
 - [Thesys C1 overview](https://docs.thesys.dev/guides/what-is-thesys-c1) and [`C1Component`](https://docs.thesys.dev/react-reference/c1-component)
 - [OpenUI Lang](https://www.openui.com/docs/openui-lang) and its [React component libraries](https://www.openui.com/docs/api-reference/react-ui)
+
+### Rendering interfaces and recorded output
+
+- [AnyRender](https://github.com/dioxuslabs/anyrender), [Linebender Q1 2026 update](https://linebender.org/blog/tmil-25/), and [Vello releases](https://github.com/linebender/vello/releases)
+- [Skia picture recording](https://api.skia.org/classSkPictureRecorder.html) and [Flutter Impeller architecture FAQ](https://flutter.googlesource.com/mirrors/engine/+/HEAD/impeller/docs/faq.md)
+- [.NET MAUI Graphics](https://learn.microsoft.com/en-us/dotnet/maui/user-interface/graphics/?view=net-maui-10.0)
+- [AndroidX A2UI release notes](https://developer.android.com/jetpack/androidx/releases/a2ui) (library releases, distinct from A2UI protocol versions)
 
 ### Drawing, layout, and accessibility standards
 
@@ -1103,7 +1327,7 @@ export type ElementId = string      // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
 
 export type Alignment = start | center | end | stretch
 export type AlignSelf = auto | start | center | end | stretch
-export type Anchor = start | center | end
+export type AxisAlignment = start | center | end
 export type Axis = horizontal | vertical
 export type Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
 export type ObjectFit = contain | cover | fill | none | scaleDown
@@ -1220,7 +1444,7 @@ export type ScrollAxis = horizontal | vertical | both
 export type ScrollbarVisibility = auto | visible | hidden
 export type CardVariant = outlined | elevated | filled
 export type TextFormat = plain | markdown
-export type TextVariant = h1 | h2 | h3 | title | body | caption | code
+export type TextVariant = h1 | h2 | h3 | h4 | h5 | h6 | title | body | caption | code
 export type TextAlign = start | center | end | justify
 export type TextOverflow = clip | ellipsis
 
@@ -1255,7 +1479,7 @@ export abstract external component <UiCommon
   accessibility: Accessibility?
 />
 
-export external component <HStack extends UiCommon
+export external component <Row extends UiCommon
   gap: float64 = 0
   justify: Distribution = start
   align: Alignment = stretch
@@ -1263,7 +1487,7 @@ export external component <HStack extends UiCommon
   content children: Element[]?
 />
 
-export external component <VStack extends UiCommon
+export external component <Column extends UiCommon
   gap: float64 = 0
   justify: Distribution = start
   align: Alignment = stretch
@@ -1337,6 +1561,15 @@ export external component <Icon extends UiCommon
   size: float64?
   color: Color?
 />
+
+// §7.13 — static sequence; template/data binding support is post-MVP.
+export external component <List extends UiCommon
+  direction: Axis = vertical
+  gap: float64 = 0
+  align: Alignment = stretch
+  scrollbar: ScrollbarVisibility = auto
+  content children: Element[] = []
+/>
 ```
 
 ### `nx/graphics/catalog.nx`
@@ -1351,18 +1584,19 @@ export type TextAnchor = start | middle | end
 export type DominantBaseline = auto | middle | hanging
 
 export type ContentAlignment = {
-  x: Anchor = center
-  y: Anchor = center
+  x: AxisAlignment = center
+  y: AxisAlignment = center
 }
 
-export abstract external component <GraphicsCommon
+export abstract external component <GraphicsElement
   opacity: float64 = 1
   transform: Transform[]?
   clipPath: string?
+  clipRule: FillRule = nonzero
   accessibility: Accessibility?
 />
 
-export abstract external component <ShapeCommon extends GraphicsCommon
+export abstract external component <Shape extends GraphicsElement
   fill: Paint?
   stroke: Stroke?
   fillRule: FillRule = nonzero
@@ -1376,11 +1610,11 @@ export external component <Drawing extends UiCommon
   content children: Element[]?
 />
 
-export external component <Group extends GraphicsCommon
+export external component <Group extends GraphicsElement
   content children: Element[]?
 />
 
-export external component <Rect extends ShapeCommon
+export external component <Rect extends Shape
   x: float64 = 0
   y: float64 = 0
   width: float64
@@ -1389,39 +1623,39 @@ export external component <Rect extends ShapeCommon
   ry: float64?                          // null means "same as rx"
 />
 
-export external component <Circle extends ShapeCommon
+export external component <Circle extends Shape
   cx: float64
   cy: float64
   r: float64
 />
 
-export external component <Ellipse extends ShapeCommon
+export external component <Ellipse extends Shape
   cx: float64
   cy: float64
   rx: float64
   ry: float64
 />
 
-export external component <Line extends ShapeCommon
+export external component <Line extends Shape
   x1: float64
   y1: float64
   x2: float64
   y2: float64
 />
 
-export external component <Polyline extends ShapeCommon
+export external component <Polyline extends Shape
   points: Point[]
 />
 
-export external component <Polygon extends ShapeCommon
+export external component <Polygon extends Shape
   points: Point[]
 />
 
-export external component <Path extends ShapeCommon
+export external component <Path extends Shape
   data: string
 />
 
-export external component <Text extends GraphicsCommon
+export external component <Text extends GraphicsElement
   x: float64
   y: float64
   fontFamily: string?
@@ -1431,13 +1665,14 @@ export external component <Text extends GraphicsCommon
   textAnchor: TextAnchor = start
   dominantBaseline: DominantBaseline = auto
   letterSpacing: float64 = 0
+  lineHeight: float64 = 1.2
   fill: Paint?
   stroke: Stroke?
   shadows: Shadow[]?
   content text: string
 />
 
-export external component <Image extends GraphicsCommon
+export external component <Image extends GraphicsElement
   x: float64 = 0
   y: float64 = 0
   width: float64
@@ -1456,7 +1691,7 @@ suggested enhancements; this appendix states them from the object model's point 
 
 NX turns out to fit this proposal better than expected in one important respect and worse in another, and the two are worth separating.
 
-The fit is `external component`. A catalog entry is precisely a component signature with no NX body, rendered by a host — which is what `external component` already means, down to `abstract external component` for shared property bundles and `extends` for reuse. The `UiCommonProps`/`GraphicsCommonProps`/`ShapeProps` structure in §6.1 and §7.1 was designed before this was known and maps onto it without adjustment. NX also gets the `content` property right: the wire format's `children` is a declared property with a declared type, so a container that accepts many children (`content children: Element[]?`) and one that accepts exactly one (`content child: Element`) are different signatures rather than a prose rule.
+The fit is `external component`. A catalog entry is precisely a component signature with no NX body, rendered by a host — which is what `external component` already means, down to `abstract external component` for shared property bundles and `extends` for reuse. The `UiCommonProps`/`GraphicsElement`/`Shape` structure in §6.1 and §7.1 was designed before this was known and maps onto it without adjustment. NX also gets the `content` property right: the wire format's `children` is a declared property with a declared type, so a container that accepts many children (`content children: Element[]?`) and one that accepts exactly one (`content child: Element`) are different signatures rather than a prose rule.
 
 The misfit is the shape of the data. What follows are the specific gaps, in rough order of how much they cost.
 
@@ -1472,7 +1707,7 @@ A case that declares no fields, in a union that declares no base, is the excepti
 
 **Nullable is the only way to say "optional."** NX has no absent-versus-null distinction, so a property with no meaningful default is written `T?` and the renderer resolves null. Most of the `?` marks in §6 and §7 exist for this reason rather than because null is a meaningful value.
 
-**A derived component cannot override an inherited default.** Redeclaring an inherited property is rejected as a duplicate. §6.1 wants `fill` to default to `Paint.none` on `Line` and `Polyline` and to black on closed shapes; that is not expressible, so `fill` is nullable on `ShapeCommon` and the per-component default becomes renderer prose.
+**A derived component cannot override an inherited default.** Redeclaring an inherited property is rejected as a duplicate. §6.1 wants `fill` to default to `Paint.none` on `Line` and `Polyline` and to black on closed shapes; that is not expressible, so `fill` is nullable on `Shape` and the per-component default becomes renderer prose.
 
 **A default cannot reference a sibling property.** `Transform.scale.y` defaulting to `x`, and `nx.graphics.Rect.ry` defaulting to `rx`, both become nullable with the relationship stated in a comment. (Component `state` defaults *can* read props; property defaults cannot.)
 
@@ -1484,7 +1719,7 @@ A case that declares no fields, in a union that declares no base, is the excepti
 
 **A union case cannot be reached through a wildcard import alias.** With `import "../ui" as ui`, the type `ui.TextVariant` resolves but `ui.TextVariant.h2` fails with *"Member access not yet implemented"* — the third qualifying segment is not supported. This no longer bites at a typed site: contextual literal binding lets `variant=h2` resolve against the property's declared type without naming the union at all, so §8.1 uses the same import style for both catalogs. The limitation remains for a case named inside a braced expression, where `ui.TextVariant.h2` is still the only spelling and still fails.
 
-**Qualification is one segment deep.** `import "../ui" as ui` takes a single identifier, and the selective form is validated to contain *exactly* one dot; `import "../ui" as nx.ui` is a syntax error and `import { VStack as nx.ui.VStack } from "../ui"` is rejected with "Selective import alias must contain exactly one dot." A two-segment catalog prefix is therefore not reachable in NX source. `nx.ui.VStack` remains the catalog type name in the document format; in NX it is written under a one-segment local alias, and the mapping from alias to catalog ID is the `catalogs` list.
+**Qualification is one segment deep.** `import "../ui" as ui` takes a single identifier, and the selective form is validated to contain *exactly* one dot; `import "../ui" as nx.ui` is a syntax error and `import { Column as nx.ui.Column } from "../ui"` is rejected with "Selective import alias must contain exactly one dot." A two-segment catalog prefix is therefore not reachable in NX source. `nx.ui.Column` remains the catalog type name in the document format; in NX it is written under a one-segment local alias, and the mapping from alias to catalog ID is the `catalogs` list.
 
 **Structure is nested, and cannot be flat.** This follows from the first gap but is worth stating on its own: NX has no way to write the canonical flat element map, so NX is an authoring syntax that a compiler lowers into it. §3 already anticipated a recursive authoring form as sugar over the flat model; NX is that form.
 
@@ -1501,4 +1736,14 @@ Finally, one convention clash worth a decision rather than a fix: NX documents `
 
 ### Short form of the proposal
 
-Use a cataloged flat document, borrow structure from A2UI/json-render, borrow graphics vocabulary and data formats from SVG, preserve DrawnUI's composability, and keep renderer mechanics out of the generated model. Ship read-only layout/content plus a compact vector scene graph first; add state, interaction, semantic components, and richer effects as separately versioned layers.
+Use a cataloged flat document, borrow structure from A2UI/json-render, borrow graphics vocabulary and data formats from SVG, preserve DrawnUI's composability, and keep renderer mechanics out of the generated model. Ship read-only layout/content plus a compact vector scene graph with pluggable direct drawing first; prove optional NX recording/replay through the same interface, then stabilize portable recorded output when its resource and text contracts are ready. Add state, interaction, semantic components, and richer effects as separately versioned layers.
+
+
+## Delivered graphics-core profile
+
+The unstable standalone `@nx/graphics` subset, math-backed helpers and direct Skia preview are
+implemented for Rust and TypeScript IR runtimes. See the
+[production graphics reference](../sites/website/src/content/docs/reference/libraries/graphics.md)
+for supported declarations, commands, defaults, limits and explicit unsupported features. The
+larger catalog in this proposal remains a future design. The legacy HIR interpreter will not be
+updated for graphics support; its retirement is a separate change.

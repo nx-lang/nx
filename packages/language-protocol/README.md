@@ -196,7 +196,7 @@ Optional properties of a node or a declaration are absent rather than `null` whe
 
 A request with `visualizers: {}` (or `visualizers: { modules: [...] }`, naming further visualizer
 modules the host supplies) also resolves visualizer declarations: each declaration that has one
-carries a `visualizer`, with its title, id and icon, its properties in the order to show them, and,
+carries a `visualizer`, with its title, id and icon, optional `preview: { renderer: string }`, its properties in the order to show them, and,
 for each property or alias, a `format` and an `editor`. `editor` holds the editor hints that fit the
 type: `kind` (`field`, `dropdown` or `segmented`), `min`, `max`, `step`, `multiline`,
 `placeholder` and `choices`. Each choice's `value` is typed as a `sourceEdit` `setValue` value, so a
@@ -291,3 +291,8 @@ An HTTP implementation answers a failed query with the JSON body
 where `code` is one of `unsupported-query`, `unknown-query`, `method-not-allowed`,
 `invalid-request`, `payload-too-large`, `internal-error`. `isLanguageServiceErrorBody` recognizes
 the shape.
+
+Source-tree callers can set `visualizers: { includeUnreferencedDeclarations: true }` to include
+loaded visualizer targets and inherited presentation metadata even when the entry source does not
+reference them directly. The default keeps the declaration table bounded to the source tree.
+Unknown preview renderer IDs remain metadata; hosts activate only their supported implementations.

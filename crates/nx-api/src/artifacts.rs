@@ -120,7 +120,57 @@ pub struct ProgramSourceEntry<'a> {
     pub version: Option<&'a str>,
 }
 
+/// The linked declaration constructed at one debug source location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstructedDeclaration {
+    pub module: String,
+    pub declaration: String,
+}
+
 impl ProgramArtifact {
+    /// Indexes constructing element spans once, resolving aliases through linked declaration tables.
+    /// Call sites and host value display names are deliberately not part of identity resolution.
+    pub fn construction_declarations(
+        &self,
+    ) -> std::collections::BTreeMap<(String, usize, usize), ConstructedDeclaration> {
+        let mut result = std::collections::BTreeMap::new();
+        for module in self.resolved_program.modules() {
+            let identity = module.prepared_module_identity();
+            for (_, element) in module.lowered_module.elements() {
+                let Some(target) = self
+                    .resolved_program
+                    .local_item(module.id, element.tag.as_str())
+                    .or_else(|| {
+                        self.resolved_program
+                            .imported_item(module.id, element.tag.as_str())
+                    })
+                else {
+                    continue;
+                };
+                let Some(owner) = self.resolved_program.module(target.module_id) else {
+                    continue;
+                };
+                let Some(item) = owner
+                    .lowered_module
+                    .item_by_definition(target.definition_id)
+                else {
+                    continue;
+                };
+                result
+                    .entry((
+                        identity.clone(),
+                        usize::from(element.span.start()),
+                        usize::from(element.span.end()),
+                    ))
+                    .or_insert_with(|| ConstructedDeclaration {
+                        module: owner.prepared_module_identity(),
+                        declaration: item.name().as_str().into(),
+                    });
+            }
+        }
+        result
+    }
+
     /// Looks up preserved source text by normalized source-provider identity.
     pub fn source_text(&self, identity: &str) -> Option<&str> {
         self.source_map.get(identity).map(|source| source.as_ref())
@@ -1255,7 +1305,7 @@ impl StandardLibrary {
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 3] = [
+static STANDARD_LIBRARIES: [StandardLibrary; 4] = [
     StandardLibrary::new(
         "@nx/agent",
         StandardLibraryStability::Unstable,
@@ -1266,6 +1316,17 @@ static STANDARD_LIBRARIES: [StandardLibrary; 3] = [
         }],
         "@nx-lang/agent",
         "NxLang.Agent",
+    ),
+    StandardLibrary::new(
+        "@nx/graphics",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "graphics.nx",
+            source: include_str!("std/graphics/graphics.nx"),
+            runtime_functions: &[],
+        }],
+        "@nx-lang/graphics",
+        "NxLang.Graphics",
     ),
     StandardLibrary::new(
         "@nx/math",

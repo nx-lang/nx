@@ -1,3 +1,4 @@
+import type { NxGraphicsPreparation, NxGraphicsPreparationRequest } from "./graphics.js";
 import type {
   CompletionList,
   DiagnosticReport,
@@ -226,6 +227,11 @@ export interface NxProgramBuildContext {
  * A reusable analyzed NX program that can emit deterministic NX IR.
  */
 export interface NxProgramArtifact {
+  /** Prepares graphics from trusted IR values/origins and supplied text metrics through the
+   * shared neutral graphics core. This unstable data contract follows nx-graphics Config and
+   * TextRequest/TextRun. Returns { scene, diagnostics }; never evaluates the HIR interpreter. */
+  prepareGraphics(request: NxGraphicsPreparationRequest): NxGraphicsPreparation;
+
   /**
    * Emits NX IR for the modules `options` names, the entry module alone by default: one image per
    * module with its metadata, without a debug section unless asked.
@@ -705,6 +711,21 @@ class WasmProgramArtifact implements NxProgramArtifact {
       )
     );
     return readNxIrBundle(operation, bundle);
+  }
+
+  prepareGraphics(request: NxGraphicsPreparationRequest): NxGraphicsPreparation {
+    const handle = this.#live();
+    const bytes = encoder.encode(JSON.stringify(request, (_key, value: unknown) => {
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new NxWasmError("Graphics preparation requires finite numbers before JSON encoding.");
+      }
+      return value;
+    }));
+    return this.#host.callWithBytes<NxGraphicsPreparation>(
+      "nx_wasm_program_graphics_prepare",
+      (exports, pointer, length) => exports.nx_wasm_program_graphics_prepare(handle, pointer, length),
+      bytes,
+    );
   }
 
   evaluateNx(): NxValueText {

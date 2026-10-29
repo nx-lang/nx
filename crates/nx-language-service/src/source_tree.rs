@@ -67,6 +67,9 @@ pub struct SourceTreeOptions {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceTreeVisualizers {
+    /// Also list loaded visualizer targets that the document does not reference directly.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_unreferenced_declarations: bool,
     /// Further visualizer modules the host supplies, by module identity, applied after the
     /// program's own visualizer declarations in the order named.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -278,6 +281,9 @@ pub struct SourceVisualizer {
     /// The name of the Lucide icon that marks the element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Optional rendered presentation, supplied by a host implementation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<SourcePreviewVisualizer>,
     /// Every property, those the visualizer names first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<SourcePropertyVisualizer>,
@@ -287,6 +293,12 @@ pub struct SourceVisualizer {
     /// How an alias's values are edited: its resolved editor hints that fit its type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor: Option<SourceEditorHints>,
+}
+
+/// The library's requested renderer; implementation availability is a host decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourcePreviewVisualizer {
+    pub renderer: String,
 }
 
 /// How one property of a declaration reads.
@@ -455,6 +467,11 @@ impl WorkspaceSnapshot {
                 self.build_context(),
                 &request.modules,
             );
+            if request.include_unreferenced_declarations {
+                for target in visualizers.targets(&workspace) {
+                    builder.entry(&target);
+                }
+            }
             builder.attach_visualizers(&visualizers);
             missing_visualizer_modules = visualizers.missing;
         }
@@ -2159,6 +2176,9 @@ impl<'a> TreeBuilder<'a> {
                 .map(|_| resolved.id_position.unwrap_or_else(|| "start".to_string())),
             id: resolved.id,
             icon: resolved.icon,
+            preview: resolved
+                .preview
+                .map(|renderer| SourcePreviewVisualizer { renderer }),
             properties,
             ..SourceVisualizer::default()
         })
@@ -2545,6 +2565,7 @@ pub(crate) fn merged_range_warnings(
             continue;
         };
         match visualizer.value.record {
+            nx_hir::VisualizerRecord::Function => {}
             nx_hir::VisualizerRecord::Value => {
                 let Some(Item::TypeAlias(alias)) = item_at(workspace, origin) else {
                     continue;

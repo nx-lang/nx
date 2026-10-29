@@ -38,8 +38,11 @@ test("a node's declared name is found for records, properties, cases, payload ca
     'let root() = { <Task title="a" status=active load=<Load.failed message="m" /> /> <Button label="b" /> }',
   ].join("\n");
   const host = createNxHost(await loadNxModule());
-  const artifact = host.buildProgramArtifact(source);
-  const value = artifact.evaluateNx();
+  const artifact = host.buildProgramArtifact(source, { fileName: "main.nx" });
+  const { evaluateFunction } = await import("@nx-lang/ir-runtime");
+  const { programFromImages } = await import("@nx-lang/previewer");
+  const program = programFromImages(artifact.generateNxIr({ debug: true, modules: [] }), "main.nx");
+  const value = artifact.formatValue(evaluateFunction(program, "root"));
   artifact.dispose();
   host.dispose();
 

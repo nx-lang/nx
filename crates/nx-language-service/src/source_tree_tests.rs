@@ -1454,6 +1454,7 @@ fn with_visualizers(snapshot: &WorkspaceSnapshot, modules: &[&str]) -> SourceTre
             &DocumentUri::from(URI),
             &SourceTreeOptions {
                 visualizers: Some(SourceTreeVisualizers {
+                    include_unreferenced_declarations: false,
                     modules: modules.iter().map(|module| module.to_string()).collect(),
                 }),
             },
@@ -2335,4 +2336,138 @@ visualizer Box = <ElementVisualizer>
     );
     assert_eq!(warnings.len(), 1, "analysis's alone: {warnings:?}");
     assert_eq!(warnings[0].0, "min=20");
+}
+
+#[test]
+fn preview_metadata_resolves_inheritance_and_entry_overrides() {
+    let source = "import \"@nx/visualizer\"\nabstract external component <Base/>\nexternal component <Derived extends Base/>\nvisualizer Base = <ElementVisualizer icon=\"frame\" preview=<PreviewVisualizer renderer=\"base.renderer\"/>/>\nvisualizer Derived = <ElementVisualizer icon=\"circle\"/>\n<Derived/>";
+    let snapshot = snapshot_for(source);
+    assert!(snapshot
+        .diagnostics()
+        .unwrap()
+        .iter()
+        .flat_map(|report| &report.diagnostics)
+        .all(|d| d.severity != nx_api::NxSeverity::Error.into()));
+    let tree = with_visualizers(&snapshot, &[]);
+    assert_eq!(
+        visualizer(&tree, "Derived")
+            .preview
+            .as_ref()
+            .unwrap()
+            .renderer,
+        "base.renderer"
+    );
+    assert_eq!(visualizer(&tree, "Derived").icon.as_deref(), Some("circle"));
+}
+
+#[test]
+fn unreferenced_library_previews_are_opt_in_and_helper_icons_are_library_owned() {
+    let snapshot = snapshot_for("import \"@nx/graphics\" as g\nlet root() = 42");
+    let plain = with_visualizers(&snapshot, &[]);
+    assert!(!plain.declarations.iter().any(|d| d.name == "Drawing"));
+    let tree = snapshot
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                visualizers: Some(SourceTreeVisualizers {
+                    include_unreferenced_declarations: true,
+                    ..SourceTreeVisualizers::default()
+                }),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        visualizer(&tree, "Drawing")
+            .preview
+            .as_ref()
+            .unwrap()
+            .renderer,
+        "nx.graphics"
+    );
+    assert_eq!(visualizer(&tree, "Star").icon.as_deref(), Some("star"));
+    assert_eq!(
+        visualizer(&tree, "Rect").icon.as_deref(),
+        Some("rectangle-horizontal")
+    );
+    assert_eq!(
+        serde_json::from_value::<SourceTree>(serde_json::to_value(&tree).unwrap()).unwrap(),
+        tree
+    );
+}
+
+#[test]
+fn entry_preview_metadata_overrides_the_library_without_losing_its_icon() {
+    let snapshot = snapshot_for("import \"@nx/graphics\" as g\nimport \"@nx/visualizer\"\nvisualizer g.Drawing = <ElementVisualizer preview=<PreviewVisualizer renderer=\"other.renderer\"/>/>\n<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=10 height=10/>/>");
+    let tree = with_visualizers(&snapshot, &[]);
+    assert_eq!(
+        visualizer(&tree, "Drawing")
+            .preview
+            .as_ref()
+            .unwrap()
+            .renderer,
+        "other.renderer"
+    );
+    assert_eq!(visualizer(&tree, "Drawing").icon.as_deref(), Some("frame"));
+}
+
+#[test]
+fn inherited_preview_targets_built_inside_an_imported_helper_are_included() {
+    let snapshot = WorkspaceSnapshot::from_documents(Option::<PathBuf>::None, vec![
+        DocumentInput::new(URI, "import \"./shapes.nx\"\nlet root() = { makeSquare() }"),
+        DocumentInput::new("nx://tenant/shapes.nx", "import \"@nx/visualizer\"\nexport abstract type Shape = {}\nexport type Square extends Shape = { size:int }\nvisualizer Shape = <ElementVisualizer preview=<PreviewVisualizer renderer=\"app.shapes\"/>/>\nexport let makeSquare():Square = <Square size=2/>"),
+    ]).unwrap();
+    let tree = snapshot
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                visualizers: Some(SourceTreeVisualizers {
+                    include_unreferenced_declarations: true,
+                    ..SourceTreeVisualizers::default()
+                }),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        visualizer(&tree, "Square")
+            .preview
+            .as_ref()
+            .unwrap()
+            .renderer,
+        "app.shapes"
+    );
+    assert_eq!(entry(&tree, "Square").module, "tenant/shapes.nx");
+}
+
+#[test]
+fn unreferenced_host_visualizers_do_not_add_unloaded_library_targets() {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![
+            DocumentInput::new(URI, "42").with_version(1),
+            DocumentInput::new(
+                "nx://tenant/host.nx",
+                r#"import "@nx/graphics" as g
+import "@nx/visualizer"
+visualizer g.Drawing = <ElementVisualizer icon="host-frame"/>
+visualizer g.Rect = <ElementVisualizer icon="host-rect"/>"#,
+            )
+            .with_version(1),
+        ],
+    )
+    .unwrap();
+    let tree = snapshot
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                visualizers: Some(SourceTreeVisualizers {
+                    include_unreferenced_declarations: true,
+                    modules: vec!["tenant/host.nx".into()],
+                }),
+            },
+        )
+        .unwrap();
+    assert!(!tree
+        .declarations
+        .iter()
+        .any(|d| d.module.starts_with("@nx/graphics/")));
 }

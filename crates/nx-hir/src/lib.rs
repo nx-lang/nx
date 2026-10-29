@@ -1603,6 +1603,11 @@ impl LoweredModule {
         &mut self.elements[id]
     }
 
+    /// Immutable access to every element in the arena, in allocation order.
+    pub fn elements(&self) -> impl Iterator<Item = (ElementId, &Element)> + '_ {
+        self.elements.iter()
+    }
+
     /// Mutable access to every element in the arena, in allocation order.
     pub fn elements_mut(&mut self) -> impl Iterator<Item = (ElementId, &mut Element)> + '_ {
         self.elements.iter_mut()

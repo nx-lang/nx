@@ -8,6 +8,7 @@
 import type { NxHostRecord } from "@nx-lang/ir-runtime";
 import type { NxTextSpan, NxValueText } from "@nx-lang/sdk-wasm";
 
+import type { PreviewSelectionTarget } from "./selection.ts";
 import type { Diagnostic } from "../compile/types.ts";
 
 /** A request to the worker's preview. */
@@ -16,13 +17,27 @@ export type PreviewCall =
    * Starts a session on the build of `source`: for `component` when given, otherwise for the
    * component `root` returns an element of, otherwise for the first component the source declares.
    */
-  | { readonly op: "start"; readonly source: string; readonly component?: string }
+  | {
+      readonly op: "start";
+      readonly source: string;
+      readonly component?: string;
+      /** Opening a different document clears the previous document even if compilation fails. */
+      readonly reset?: boolean;
+    }
   /** Dispatches `action` to the handler at `handler`, a JSON pointer into the current output. */
-  | { readonly op: "dispatch"; readonly handler: string; readonly action: NxHostRecord }
+  | {
+      readonly op: "dispatch";
+      readonly handler: string;
+      readonly action: NxHostRecord;
+    }
   /** Makes the tick `tick` current. Nothing runs. */
   | { readonly op: "goTo"; readonly tick: number }
   /** Reloads the session with the build of `source`, following new props from `root`. */
-  | { readonly op: "reload"; readonly source: string }
+  | {
+      readonly op: "reload";
+      readonly source: string;
+      readonly component?: string;
+    }
   /** Drops the session. */
   | { readonly op: "stop" };
 
@@ -33,11 +48,21 @@ export type PreviewProblem =
   /** The source declares no component to run, or only external ones. */
   | { readonly kind: "noComponent" }
   /** The program's NX IR would not prepare or link, with the runtime's diagnostics. */
-  | { readonly kind: "programFailed"; readonly diagnostics: readonly Diagnostic[] }
+  | {
+      readonly kind: "programFailed";
+      readonly diagnostics: readonly Diagnostic[];
+    }
   /** The component would not start, with the runtime's diagnostics; `missingProp` when a prop is required. */
-  | { readonly kind: "startFailed"; readonly diagnostics: readonly Diagnostic[]; readonly missingProp: boolean }
+  | {
+      readonly kind: "startFailed";
+      readonly diagnostics: readonly Diagnostic[];
+      readonly missingProp: boolean;
+    }
   /** The last dispatch failed and added no step. */
-  | { readonly kind: "dispatchFailed"; readonly diagnostics: readonly Diagnostic[] };
+  | {
+      readonly kind: "dispatchFailed";
+      readonly diagnostics: readonly Diagnostic[];
+    };
 
 /** What the last reload did, when it was not simply keeping the state. */
 export type PreviewReloadNotice =
@@ -45,7 +70,12 @@ export type PreviewReloadNotice =
    * The state no longer fit, so the run was replayed under the edit: `steps` steps, and when it did
    * not complete, the next one failed with `diagnostics`.
    */
-  | { readonly kind: "replayed"; readonly completed: boolean; readonly steps: number; readonly diagnostics: readonly Diagnostic[] }
+  | {
+      readonly kind: "replayed";
+      readonly completed: boolean;
+      readonly steps: number;
+      readonly diagnostics: readonly Diagnostic[];
+    }
   /** The new program could not render the current props: the old one is still running. */
   | { readonly kind: "failed"; readonly diagnostics: readonly Diagnostic[] };
 
@@ -61,11 +91,37 @@ export interface PreviewStep {
 
 /** One field of an action's form, from the action's input schema. */
 export type PreviewField =
-  | { readonly name: string; readonly required: boolean; readonly kind: "string"; readonly default?: string }
-  | { readonly name: string; readonly required: boolean; readonly kind: "integer" | "number"; readonly default?: number }
-  | { readonly name: string; readonly required: boolean; readonly kind: "boolean"; readonly default?: boolean }
-  | { readonly name: string; readonly required: boolean; readonly kind: "cases"; readonly cases: readonly string[]; readonly default?: string }
-  | { readonly name: string; readonly required: boolean; readonly kind: "json"; readonly default?: unknown };
+  | {
+      readonly name: string;
+      readonly required: boolean;
+      readonly kind: "string";
+      readonly default?: string;
+    }
+  | {
+      readonly name: string;
+      readonly required: boolean;
+      readonly kind: "integer" | "number";
+      readonly default?: number;
+    }
+  | {
+      readonly name: string;
+      readonly required: boolean;
+      readonly kind: "boolean";
+      readonly default?: boolean;
+    }
+  | {
+      readonly name: string;
+      readonly required: boolean;
+      readonly kind: "cases";
+      readonly cases: readonly string[];
+      readonly default?: string;
+    }
+  | {
+      readonly name: string;
+      readonly required: boolean;
+      readonly kind: "json";
+      readonly default?: unknown;
+    };
 
 /** An action the output's handlers take, and what its form asks for. */
 export interface PreviewAction {
@@ -90,21 +146,43 @@ export interface PreviewSessionView {
   /** The step Forward goes to: the child last left, or the newest child; null at the end. */
   readonly forward: number | null;
   /** The current output, or why it has no spelling. */
-  readonly output: PreviewValue | { readonly diagnostics: readonly Diagnostic[] };
+  readonly output:
+    | PreviewValue
+    | { readonly diagnostics: readonly Diagnostic[] };
   /** Indices of the output's record nodes whose `declaration` is where the record was built. */
   readonly built: readonly number[];
+  /** Rendered IDs (value-node indices here) associated with authored source sites. */
+  readonly selectionTargets: readonly PreviewSelectionTarget[];
   /** The state, one `name=value` line per field, or null for a component that keeps none. */
   readonly state: PreviewValue | null;
   /** What the current step's handlers returned for the host. */
   readonly emitted: readonly PreviewValue[];
   /** Each handler in the output, by pointer, and the action it takes. */
-  readonly handlers: readonly { readonly pointer: string; readonly action: string }[];
+  readonly handlers: readonly {
+    readonly pointer: string;
+    readonly action: string;
+  }[];
   /** The actions those handlers take, by type. */
   readonly actions: Readonly<Record<string, PreviewAction>>;
 }
 
+/** A renderer-independent structured output, without component state or a timeline. */
+export type PreviewRenderedOutput = Pick<
+  PreviewSessionView,
+  "output" | "built" | "handlers" | "actions" | "selectionTargets"
+>;
+
 /** Everything the page draws for the preview. */
 export interface PreviewState {
+  /** Registered presentation of the current value, independent of preparation success. */
+  readonly renderer?: string | null;
+  /** Whether the evaluated document has a root; false distinguishes component-only inspection. */
+  readonly hasRoot?: boolean;
+  readonly drawing?: import("../graphics/protocol.ts").DrawingResult | null;
+  readonly diagnostics?: readonly Diagnostic[];
+  readonly diagnosticsSource?: string | null;
+  /** Root structured value when there is no runnable component. */
+  readonly structured?: PreviewRenderedOutput | null;
   /** The source whose build runs the current step; spans index it. Null with no build. */
   readonly source: string | null;
   /** The components a preview can run, in declaration order. */

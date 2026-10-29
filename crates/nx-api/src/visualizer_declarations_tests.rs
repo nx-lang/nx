@@ -11,9 +11,11 @@ use nx_value::NxValue;
 
 const VISUALIZER_ROOT: &str = "@nx/visualizer";
 
-const VISUALIZER_TYPES: [&str; 7] = [
+const VISUALIZER_TYPES: [&str; 9] = [
     "ElementVisualizer",
+    "FunctionVisualizer",
     "IdPosition",
+    "PreviewVisualizer",
     "PropertyVisualizer",
     "ValueChoice",
     "ValueEditor",
@@ -68,7 +70,7 @@ fn assert_error(body: &str, code: Option<&str>, fragments: &[&str]) {
 // --- The library ------------------------------------------------------------------------------
 
 #[test]
-fn the_visualizer_library_exports_exactly_its_seven_types() {
+fn the_visualizer_library_exports_its_documented_types() {
     let library = standard_library(VISUALIZER_ROOT).expect("the visualizer library");
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
     let mut exported = library
@@ -751,5 +753,59 @@ fn an_unloaded_modules_visualizer_does_not_count() {
             .iter()
             .all(|diagnostic| diagnostic.code.as_deref() != Some("duplicate-visualizer")),
         "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn preview_descriptors_are_typed_literal_metadata() {
+    assert_clean("type Survey = { title:string }\nvisualizer Survey = <ElementVisualizer preview=<PreviewVisualizer renderer=\"app.survey\"/>/>");
+    assert_error("type Survey = { title:string }\nvisualizer Survey = <ElementVisualizer preview=\"app.survey\"/>", None, &["PreviewVisualizer"]);
+    for (renderer, code) in [
+        ("\"\"", "preview-renderer-literal"),
+        ("\"   \"", "preview-renderer-literal"),
+        ("{\"app.\" + \"survey\"}", "lowering-error"),
+        ("{id}", "lowering-error"),
+        ("id", "contextual-name-requires-nominal-type"),
+    ] {
+        let source = format!("let id = \"app.survey\"\ntype Survey = {{ title:string }}\nvisualizer Survey = <ElementVisualizer preview=<PreviewVisualizer renderer={renderer}/>/>" );
+        let errors = visualizer_diagnostics(&source)
+            .into_iter()
+            .filter(|d| d.severity == NxSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{source}: {errors:#?}");
+        assert_eq!(errors[0].code.as_deref(), Some(code));
+    }
+    for descriptor in ["<PreviewVisualizer/>", "{p}"] {
+        let source = format!("let p = <PreviewVisualizer renderer=\"app.survey\"/>\ntype Survey = {{ title:string }}\nvisualizer Survey = <ElementVisualizer preview={descriptor}/>" );
+        let errors = visualizer_diagnostics(&source)
+            .into_iter()
+            .filter(|d| d.severity == NxSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{source}: {errors:#?}");
+    }
+}
+
+#[test]
+fn element_function_visualizers_only_describe_invocation_icons() {
+    assert_clean(
+        "let <Star count:int/> = <Panel/>\nvisualizer Star = <FunctionVisualizer icon=\"star\"/>",
+    );
+    assert_error(
+        "let ordinary(x:int) = { x }\nvisualizer ordinary = <FunctionVisualizer icon=\"star\"/>",
+        Some("visualizer-target-not-allowed"),
+        &["function"],
+    );
+    let diagnostics = visualizer_diagnostics(
+        "let <Star count:int/> = <Panel/>\nvisualizer Star = <ElementVisualizer icon=\"star\"/>",
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        diagnostics[0].code.as_deref(),
+        Some("visualizer-record-mismatch")
+    );
+    assert_error(
+        "let <Star count:int/> = <Panel/>\nvisualizer Star = <FunctionVisualizer title=count/>",
+        None,
+        &["title"],
     );
 }

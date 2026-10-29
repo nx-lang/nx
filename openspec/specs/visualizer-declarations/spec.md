@@ -2,8 +2,8 @@
 
 ## Purpose
 Defines visualizer declarations: `visualizer Target = <…Visualizer …/>` module members, written beside a
-type or in any module that can see it, that tell a viewer how to present a record, action, component or
-alias. Covers which targets can have one, how the value is checked against `@nx/visualizer`, how
+type or in any module that can see it, that tell a viewer how to present a record, action, component,
+alias or element-style function. Covers which targets can have one, how the value is checked against `@nx/visualizer`, how
 declarations merge along inheritance and across the program and the host's modules, and their diagnostics.
 ## Requirements
 ### Requirement: A `visualizer` declaration presents one declaration
@@ -37,8 +37,8 @@ The target of a visualizer declaration SHALL resolve, through the module's ordin
 a declaration the module can see, and the declaration's value SHALL have the visualizer record of the
 target's kind as its type: `ElementVisualizer` for a record, an action (an inline emitted action
 included) or a component, concrete, abstract or external; and `ValueVisualizer` for an alias of a
-primitive type. Any other target SHALL be a diagnostic naming the target and saying it cannot have a
-visualizer: a union, a function, a value, an alias of a non-primitive type, a generic record or
+primitive type; and `FunctionVisualizer` for an element-style function. Any other target SHALL be a diagnostic naming the target and saying it cannot have a
+visualizer: a union, a paren-style function, a value, an alias of a non-primitive type, a generic record or
 component, and a derived declaration (`T.Update`, `T.Property`, `T.State` and its companions, `T.Props` and its
 companions). A target that does not resolve SHALL be reported as an unknown name.
 
@@ -61,6 +61,11 @@ companions). A target that does not resolve SHALL be reported as an unknown name
 #### Scenario: An emitted action is a target
 - **WHEN** a module declares `component <Form emits { Submitted { email:string } } /> = { <Panel /> }` and `visualizer Form.Submitted = <ElementVisualizer title=email />`
 - **THEN** analysis SHALL accept the visualizer
+
+#### Scenario: Element functions have presentation-only visualizers
+- **WHEN** an element function declares a FunctionVisualizer icon
+- **THEN** analysis SHALL accept it and reject ElementVisualizer for that function
+- **AND** a paren-style function SHALL remain an unsupported visualizer target
 
 ### Requirement: A visualizer declaration binds its visualizer records' `Target`
 The system SHALL bind `Target` for every construction of an `@nx/visualizer` record in a visualizer
@@ -250,4 +255,3 @@ program means.
 #### Scenario: A range that merging empties
 - **WHEN** `Spacing` is hinted `min=0 max=64` and `Card`'s visualizer has `<PropertyVisualizer property=padding min=100 />`, where `padding` is typed `Spacing`
 - **THEN** the language service's diagnostics SHALL include `editor-hint-range` at `min=100`, and the resolved `padding` SHALL have neither a minimum nor a maximum
-

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Unstable graphics-core-v1 preview manifest or failure",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "revision",
+        "profile",
+        "renderer",
+        "image",
+        "diagnostics",
+        "scene"
+      ],
+      "properties": {
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "profile": {
+          "const": "graphics-core-v1"
+        },
+        "renderer": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "scene": {
+          "type": "object",
+          "required": [
+            "revision",
+            "profile",
+            "config",
+            "root"
+          ],
+          "properties": {
+            "revision": {
+              "type": "string"
+            },
+            "profile": {
+              "const": "graphics-core-v1"
+            },
+            "config": {
+              "type": "object",
+              "required": [
+                "width",
+                "height",
+                "scale",
+                "program_revision",
+                "graphics_version",
+                "renderer",
+                "fonts",
+                "limits"
+              ]
+            },
+            "root": {
+              "$ref": "#/$defs/node"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "status",
+        "requestRevision",
+        "diagnostics"
+      ],
+      "properties": {
+        "status": {
+          "const": "error"
+        },
+        "requestRevision": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "bounds": {
+      "type": "object",
+      "required": [
+        "rect",
+        "conservative"
+      ],
+      "properties": {
+        "rect": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "conservative": {
+          "type": "boolean"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "parent",
+        "order",
+        "identity",
+        "provenance",
+        "geometry",
+        "painted",
+        "visible",
+        "children"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "identity": {
+          "type": "object",
+          "required": [
+            "module",
+            "version",
+            "declaration"
+          ]
+        },
+        "geometry": {
+          "$ref": "#/$defs/bounds"
+        },
+        "painted": {
+          "$ref": "#/$defs/bounds"
+        },
+        "visible": {
+          "$ref": "#/$defs/bounds"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      }
+    }
+  }
+}

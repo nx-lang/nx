@@ -1,68 +1,144 @@
-/**
- * The output pane's state: what each answer does to it, and what the pane says without a value.
- */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { initialEvaluation, outputNotice, reduceEvaluation } from "./evaluation.ts";
+import { initialPreview, reducePreview, callFor } from "./preview/model.ts";
+import { outputEvaluation } from "./output/evaluation.ts";
+import { outputErrorHeading, outputNotice } from "./evaluation.ts";
 
-const error = (message) => ({ severity: "error", message, origin: "source", span: null });
-const value = (text) => ({ kind: "value", value: { text, nodes: [] }, truncated: false });
-
-const answer = (state, source, result) =>
-  reduceEvaluation(reduceEvaluation(state, { kind: "started" }), { kind: "answered", source, result });
-
-test("before the first answer, the pane says it is evaluating", () => {
-  assert.equal(outputNotice(initialEvaluation), "evaluating");
+test("worker failures retain the last value and renderer, then reload the retained session", () => {
+  const state = {
+    source: "good",
+    renderer: "component",
+    diagnostics: [],
+    problem: null,
+    session: { output: { value: { text: "42", nodes: [] }, truncated: false } },
+  };
+  const good = { ...initialPreview, state, asked: "good" };
+  const failed = reducePreview(good, {
+    kind: "failed",
+    message: "The compiler crashed.",
+  });
+  const output = outputEvaluation(failed, "broken");
+  assert.equal(failed.state, state);
+  assert.equal(output.outcome.value.text, "42");
+  assert.equal(output.stale, true);
+  assert.equal(output.failure, "The compiler crashed.");
+  assert.equal(outputNotice(output), "none");
+  assert.deepEqual(callFor(failed, true, "fixed"), {
+    op: "reload",
+    source: "fixed",
+  });
 });
 
-test("a first source that does not compile says so, rather than evaluating forever", () => {
-  const state = answer(initialEvaluation, "broken", { diagnostics: [error("Syntax error")], outcome: null });
-  assert.equal(state.evaluating, false);
-  assert.equal(state.outcome, null);
-  assert.equal(outputNotice(state), "doesNotCompile");
-  assert.equal(state.diagnosticsSource, "broken");
+test("pending component interactions are not stale", () => {
+  const model = {
+    ...initialPreview,
+    asked: "good",
+    state: { source: "good", diagnostics: [], session: null, problem: null },
+    pending: { op: "goTo", tick: 1 },
+  };
+  assert.equal(outputEvaluation(model, "good").stale, false);
+  assert.equal(outputEvaluation(model, "good").evaluating, true);
+  assert.equal(outputEvaluation(model, "edited").stale, false);
+  const failedEdit = {
+    ...model,
+    state: { ...model.state, diagnosticsSource: "edited" },
+    asked: "edited",
+    pending: null,
+  };
+  assert.equal(outputEvaluation(failedEdit, "edited").stale, true);
+  const typing = {
+    ...failedEdit,
+    asked: "still broken",
+    pending: { op: "reload", source: "still broken" },
+  };
+  assert.equal(outputEvaluation(typing, "still broken").stale, true);
+  assert.equal(outputEvaluation(typing, "still broken").evaluating, true);
 });
 
-test("a value is shown, and a broken edit after it keeps it, marked stale", () => {
-  const good = answer(initialEvaluation, "good", { diagnostics: [], outcome: value("42") });
-  assert.equal(outputNotice(good), "none");
-  assert.equal(good.outcomeSource, "good");
-
-  const broken = answer(good, "good + ", { diagnostics: [error("Syntax error")], outcome: null });
-  assert.equal(broken.stale, true);
-  assert.deepEqual(broken.outcome, value("42"));
-  assert.equal(broken.outcomeSource, "good", "hover still reads the source the value came from");
-  assert.equal(broken.diagnosticsSource, "good + ", "markers are placed in the source that was checked");
-
-  const fixed = answer(broken, "good", { diagnostics: [], outcome: value("42") });
-  assert.equal(fixed.stale, false);
-  assert.deepEqual(fixed.diagnostics, []);
+test("opening a failing document clears the previous session before the worker answers", () => {
+  const old = {
+    ...initialPreview,
+    state: { source: "old", renderer: "component", session: {} },
+  };
+  const loading = reducePreview(old, {
+    kind: "asked",
+    call: { op: "start", source: "new", reset: true },
+  });
+  const failed = reducePreview(loading, {
+    kind: "failed",
+    message: "Worker stopped",
+  });
+  assert.equal(failed.state, null);
+  assert.equal(failed.notice, null);
+  assert.equal(outputEvaluation(failed, "new").outcome, null);
 });
 
-test("a runtime error's diagnostics are the ones the editor marks", () => {
-  const diagnostics = [error("Division by zero")];
-  const state = answer(initialEvaluation, "1 / 0", { diagnostics: [], outcome: { kind: "error", diagnostics } });
-  assert.deepEqual(state.diagnostics, diagnostics);
-  assert.equal(outputNotice(state), "none");
+test("reload carries a picked component for a replacement worker", () => {
+  const old = {
+    ...initialPreview,
+    picked: "B",
+    state: { source: "old" },
+    asked: "old",
+  };
+  assert.deepEqual(callFor(old, true, "new"), {
+    op: "reload",
+    source: "new",
+    component: "B",
+  });
 });
 
-test("a warning beside a value or a runtime error is marked too", () => {
-  const warning = { severity: "warning", message: "Doc link `[Missing]` does not name a visible declaration", origin: "source", span: null };
-  const withValue = answer(initialEvaluation, "good", { diagnostics: [warning], outcome: value("42") });
-  assert.deepEqual(withValue.diagnostics, [warning]);
-  assert.equal(outputNotice(withValue), "none");
-
-  const runtime = [error("Division by zero")];
-  const withError = answer(initialEvaluation, "1 / 0", { diagnostics: [warning], outcome: { kind: "error", diagnostics: runtime } });
-  assert.deepEqual(withError.diagnostics, [warning, ...runtime]);
+test("formatting and evaluation headings stay consistent across presentations", () => {
+  assert.equal(
+    outputErrorHeading([{ code: "nx-output-format" }]),
+    "The value could not be displayed",
+  );
+  assert.equal(
+    outputErrorHeading([{ code: "nx-text-unspellable" }]),
+    "The value has no NX spelling",
+  );
+  assert.equal(
+    outputErrorHeading([{ code: "nx-ir-runtime" }]),
+    "Evaluating root failed",
+  );
 });
 
-test("a compiler failure is reported, keeping the last value stale", () => {
-  const good = answer(initialEvaluation, "good", { diagnostics: [], outcome: value("42") });
-  const failed = reduceEvaluation(good, { kind: "failed", message: "The compiler crashed." });
-  assert.equal(failed.failure, "The compiler crashed.");
-  assert.equal(failed.stale, true);
-  assert.equal(outputNotice(failed), "none");
-  const firstFailed = reduceEvaluation(initialEvaluation, { kind: "failed", message: "Could not load." });
-  assert.equal(outputNotice(firstFailed), "none");
+test("late action replies and failures cannot restore a document after reset", () => {
+  const old = {
+    ...initialPreview,
+    state: { source: "old", session: {} },
+    asked: "old",
+  };
+  const reset = reducePreview(old, {
+    kind: "asked",
+    call: { op: "start", source: "new", reset: true },
+  });
+  assert.equal(reset.epoch, 1);
+  const reply = {
+    kind: "answered",
+    epoch: 0,
+    call: { op: "dispatch", handler: "h", action: {} },
+    state: old.state,
+  };
+  assert.equal(reducePreview(reset, reply), reset);
+  const failed = reducePreview(reset, {
+    kind: "failed",
+    epoch: 1,
+    message: "New document failed",
+  });
+  assert.equal(reducePreview(failed, reply), failed);
+  assert.equal(
+    reducePreview(failed, {
+      kind: "failed",
+      epoch: 0,
+      message: "Old request failed",
+    }),
+    failed,
+  );
+  const fresh = reducePreview(reset, {
+    kind: "answered",
+    epoch: 1,
+    call: { op: "start", source: "new" },
+    state: { source: "new" },
+  });
+  assert.equal(reducePreview(fresh, reply), fresh);
 });

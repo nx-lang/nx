@@ -32,14 +32,14 @@ describe("the preview model", () => {
     assert.deepEqual(callFor(model, true, "b"), { op: "reload", source: "b" });
   });
 
-  test("starts again, for the component picked, when no session runs", () => {
+  test("reloads the workbench when a component was picked but no session runs", () => {
     let model = reducePreview(initialPreview, { kind: "asked", call: { op: "start", source: "a", component: "Stepper" } });
     model = reducePreview(model, {
       kind: "answered",
       call: { op: "start", source: "a", component: "Stepper" },
       state: { ...running("a"), session: null, problem: { kind: "noComponent" } }
     });
-    assert.deepEqual(callFor(model, true, "b"), { op: "start", source: "b", component: "Stepper" });
+    assert.deepEqual(callFor(model, true, "b"), { op: "reload", source: "b", component: "Stepper" });
   });
 
   test("keeps a reload's notice until the next start or reload", () => {

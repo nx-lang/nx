@@ -188,16 +188,16 @@ as unstable until a later change commits to its shape.
 
 ### Requirement: The answer carries resolved visualizer declarations when asked
 A `sourceTree` request SHALL accept an optional `visualizers` option, holding an optional list of host
-visualizer module identities. When the option is absent the answer SHALL carry no visualizers and SHALL be
+visualizer module identities and an optional includeUnreferencedDeclarations boolean, defaulting to false. When the option is absent the answer SHALL carry no visualizers and SHALL be
 unchanged from an answer without this feature. When it is present, the answer SHALL resolve the
 program's visualizer declarations and the named host visualizer modules, as the visualizer-declarations capability defines, and
 SHALL attach to each declaration entry with a resolved visualizer a `visualizer` value:
 
-- for a record, an action or a component: its `title`, `id` and `icon` when set, its `idPosition`
+- for a record, an action or a component: its `title`, `id`, `icon` and `preview` descriptor when set, its `idPosition`
   when it has an `id`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the visualizer lists, then the rest in declaration order), each with
   its name and its resolved `format` when set;
-- for an element function (`let <Name … />`), which a visualizer cannot target: a `properties` list
+- for an element function (`let <Name … />`): its FunctionVisualizer icon when set and a `properties` list
   holding each of its properties once, in declaration order, each with its name and the `format` its
   type gives it when set;
 - for an alias: its `format`.
@@ -243,6 +243,12 @@ and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through J
 - **WHEN** a client asks with `visualizers` naming a module identity the snapshot does not hold
 - **THEN** the answer SHALL list that identity as missing and SHALL carry the program's own visualizers
 
+#### Scenario: A result type is constructed inside an imported helper
+- **WHEN** a host asks for visualizers with includeUnreferencedDeclarations=true
+- **THEN** the declaration table SHALL also contain loaded visualizer targets not directly referenced
+by the document, including derived kinds that only inherit a visualizer, with the same resolved inheritance/override metadata
+- **AND** the default query SHALL retain its existing bounded declaration-table behavior
+
 ### Requirement: A resolved visualizer carries its editor hints
 Each property in a declaration's `visualizer` `properties` list SHALL carry, when a `sourceTree`
 request asks for `visualizers`, besides its name and format, an `editor` value holding its resolved
@@ -287,4 +293,3 @@ this way SHALL NOT bring the types of its own properties.
   `<Card title="Hi" />`, where `Card.size` is typed `Size`, a union `small | medium | large` that no
   node of the document refers to
 - **THEN** the declaration table SHALL list `Size` with its three cases
-

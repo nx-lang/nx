@@ -1,50 +1,30 @@
-import { nxWorkerChannel } from "../worker/index.ts";
-
-import type { Evaluate, EvaluateResult } from "./types.ts";
-
 /**
  * The faults a fresh worker can answer: the channel has already discarded the one that failed.
  *
  * A module that would not load is not among them — the browser refused it or the network did, and
  * asking again in the same breath would fail the same way.
  */
-const recoverable = new Set(["TimeoutError", "WorkerStoppedError", "NxHostCrashedError"]);
+const recoverable = new Set([
+  "TimeoutError",
+  "WorkerStoppedError",
+  "NxHostCrashedError",
+]);
 
 /**
- * Evaluates in the browser, in the app's compiler worker.
- *
- * <para>Everything a failure here can be is an application fault: a module that would not load, a
- * compiler that crashed, or one that overran its deadline. An authoring error is not a failure —
- * it comes back in the result. So a rejection is passed through with a readable message and the
- * editor view reports it as a fault.</para>
- *
- * <para>A recoverable fault is retried once, against the replacement worker the channel starts, so
- * a crash that a fresh compiler answers shows the output without waiting for the visitor's next
- * keystroke. Once only: a crash or a runaway recursion the source itself causes is reproducible,
- * and a second failure is the visitor's to read.</para>
+ * Retries recoverable worker failures once, preserving the original error for the caller to
+ * classify. Source builds can retry safely; action dispatches must never use this wrapper.
  */
-export const evaluateInBrowser: Evaluate = retrying(
-  (source) => nxWorkerChannel().send({ kind: "evaluate", source }) as Promise<EvaluateResult>
-);
-
-/**
- * Wraps one attempt in the retry, over whatever makes the attempt.
- *
- * Exported so a test can drive the retry without a worker; the site has one implementation.
- */
-export function retrying(attempt: (source: string) => Promise<EvaluateResult>): Evaluate {
-  return async (source: string): Promise<EvaluateResult> => {
+export function retrying<T>(
+  attempt: (source: string) => Promise<T>,
+): (source: string) => Promise<T> {
+  return async (source: string): Promise<T> => {
     try {
       return await attempt(source);
     } catch (error) {
       if (!(error instanceof Error) || !recoverable.has(error.name)) {
-        throw new Error(compileFailureMessage(error));
+        throw error;
       }
-      try {
-        return await attempt(source);
-      } catch (retried) {
-        throw new Error(compileFailureMessage(retried));
-      }
+      return await attempt(source);
     }
   };
 }

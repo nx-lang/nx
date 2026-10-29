@@ -140,7 +140,10 @@ fn the_table_holds_the_agent_and_visualizer_libraries() {
         .iter()
         .map(|library| library.root)
         .collect::<Vec<_>>();
-    assert_eq!(roots, [AGENT_ROOT, "@nx/math", "@nx/visualizer"]);
+    assert_eq!(
+        roots,
+        [AGENT_ROOT, "@nx/graphics", "@nx/math", "@nx/visualizer"]
+    );
 
     let agent = standard_library_entry(AGENT_ROOT).expect("the agent library");
     assert_eq!(agent.stability, StandardLibraryStability::Unstable);
@@ -1053,7 +1056,7 @@ fn standard_math_declarations_are_documented_nx_source() {
         assert!(!function
             .doc
             .as_ref()
-            .expect(op.name())
+            .unwrap_or_else(|| panic!("{}", op.name()))
             .text
             .trim()
             .is_empty());
@@ -1086,5 +1089,116 @@ fn math_doc_links_target_public_functions_without_shadowed_parameter_links() {
         assert!(nx_value::math::MathOp::ALL
             .iter()
             .any(|op| op.name() == link.target.declaration.as_str()));
+    }
+}
+
+#[test]
+fn graphics_standard_library_is_standalone_and_links_math() {
+    let graphics = standard_library_entry("@nx/graphics").unwrap();
+    assert_eq!(graphics.stability, StandardLibraryStability::Unstable);
+    assert!(
+        graphics.artifact().diagnostics.is_empty(),
+        "{:?}",
+        graphics.artifact().diagnostics
+    );
+    let source = r#"import "@nx/graphics" as g
+let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/> >
+  <g.Rect width=20 height=30 opacity=0.5/>
+</g.Drawing>"#;
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    assert!(library_roots(&artifact).contains(&"@nx/graphics".to_string()));
+    assert!(library_roots(&artifact).contains(&"@nx/math".to_string()));
+}
+
+#[test]
+fn graphics_alias_checks_use_the_imported_contract_despite_local_decoy() {
+    let diagnostics = errors(
+        &[(
+            "main.nx",
+            r#"import "@nx/graphics" as g
+external component <Rect unrelated:string />
+let root() = <g.Rect width=20 height=30 opacity=0.5/>
+"#,
+        )],
+        &ProgramBuildContext::empty(),
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn constructing_declaration_index_distinguishes_aliases_and_spoofs() {
+    let source = "import \"@nx/graphics\" as g\nexternal component <Rect width:float64 height:float64/>\nlet root() = { <g.Rect width=1 height=2/> <Rect width=1 height=2/> }";
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    assert!(
+        artifact.diagnostics.is_empty(),
+        "{:?}",
+        artifact.diagnostics
+    );
+    let declarations = artifact.construction_declarations();
+    for (tag, expected_module) in [
+        ("<g.Rect", "@nx/graphics/graphics.nx"),
+        ("<Rect width=1", "main.nx"),
+    ] {
+        let start = source.find(tag).unwrap();
+        let end = start + source[start..].find("/>").unwrap() + 2;
+        let identity = declarations.get(&("main.nx".into(), start, end)).unwrap();
+        assert_eq!(identity.module, expected_module);
+        assert_eq!(identity.declaration, "Rect");
+    }
+}
+
+#[test]
+fn graphics_domain_names_and_point_count_are_the_public_authoring_contract() {
+    let source = r#"import "@nx/graphics" as g
+external component <CustomShape extends g.Shape/>
+external component <CustomGraphic extends g.GraphicsElement/>
+let axis:g.AxisAlignment = center
+<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>
+  contentAlignment=<g.ContentAlignment x={axis} y=end/>>
+  <g.RegularPolygon cx=25 cy=25 radius=10 pointCount=4/>
+  <g.Star cx=75 cy=75 outerRadius=10 innerRadius=5 pointCount=5/>
+  <CustomShape fill=<g.Paint.solid color="blue"/> opacity=0.5/>
+  <CustomGraphic opacity=0.5/>
+</g.Drawing>"#;
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty());
+    assert!(artifact.is_ok(), "{:?}", artifact.err());
+    for helper in [
+        "RegularPolygon cx=0 cy=0 radius=10",
+        "Star cx=0 cy=0 outerRadius=10 innerRadius=5",
+    ] {
+        let source = format!("import \"@nx/graphics\" as g\n<g.{helper} count=5/>");
+        let diagnostics = errors(&[("main.nx", &source)], &ProgramBuildContext::empty());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("has no property 'count'")),
+            "{diagnostics:?}"
+        );
+    }
+    for (body, expected) in [
+        (
+            "external component <Old extends g.GraphicsCommon/>",
+            "could not be resolved",
+        ),
+        (
+            "external component <Old extends g.ShapeCommon/>",
+            "could not be resolved",
+        ),
+        ("let axis:g.Anchor = center", "not a visible type"),
+    ] {
+        let source = format!(
+            r#"import "@nx/graphics" as g
+{body}"#
+        );
+        let diagnostics = errors(&[("main.nx", &source)], &ProgramBuildContext::empty());
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains(expected)),
+            "{diagnostics:?}"
+        );
     }
 }

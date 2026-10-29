@@ -8,15 +8,14 @@
 import type { SnapshotLanguageService } from "@nx-lang/language-core";
 import type { LanguageQueryName } from "@nx-lang/language-protocol";
 import {
-  NxEvaluationError,
   NxHostCrashedError,
   createLanguageService,
   createNxHost,
-  type NxHost
+  type NxHost,
 } from "@nx-lang/sdk-wasm";
 
-import { FILE_NAME, evaluateSource } from "../compile/evaluate.ts";
-import type { EvaluateResult } from "../compile/types.ts";
+import { FILE_NAME } from "../compile/policy.ts";
+import { previewDeclarations } from "../preview/metadata.ts";
 import { PreviewWorkbench } from "../preview/workbench.ts";
 import type { WorkerRequest } from "./protocol.ts";
 
@@ -44,18 +43,11 @@ export function createNxSession(options: NxSessionOptions): NxSession {
   let host: NxHost = createHost(options.module);
   let language: SnapshotLanguageService = createLanguageService(host);
   let replacements = 0;
-  // The preview builds a source itself when it holds no build of it: in a fresh worker, or for a
-  // step an edit has since replaced.
-  const preview = new PreviewWorkbench((source) => {
-    try {
-      return host.buildProgramArtifact(source, { fileName: FILE_NAME });
-    } catch (error) {
-      if (error instanceof NxEvaluationError) {
-        return undefined;
-      }
-      throw error;
-    }
-  });
+  // The IR workbench owns compilation and caches builds for the current document and timeline.
+  const preview = new PreviewWorkbench(
+    (source) => host.buildProgramArtifact(source, { fileName: FILE_NAME }),
+    (source) => previewDeclarations(host, source),
+  );
 
   /**
    * Abandons the crashed host and starts a fresh one from the module already compiled.
@@ -75,12 +67,14 @@ export function createNxSession(options: NxSessionOptions): NxSession {
     async answer(request: WorkerRequest): Promise<unknown> {
       try {
         switch (request.kind) {
-          case "evaluate":
-            return evaluateSource(host, request.source, (artifact) => preview.keepBuild(request.source, artifact)) satisfies EvaluateResult;
           case "preview":
-            return preview.answer(request.call);
+            return await preview.render(preview.answer(request.call), request.scale);
           case "language":
-            return await answerLanguage(language, request.query, request.request);
+            return await answerLanguage(
+              language,
+              request.query,
+              request.request,
+            );
         }
       } catch (error) {
         // A trap ended the instance. The caller is told what happened to its request, and the next
@@ -102,7 +96,7 @@ export function createNxSession(options: NxSessionOptions): NxSession {
       preview.dispose();
       language.dispose();
       host.dispose();
-    }
+    },
   };
 }
 
@@ -112,12 +106,17 @@ export function createNxSession(options: NxSessionOptions): NxSession {
  * measured with can still reach the engine's limit, and the browser names that as it throws.
  */
 export function isStackOverflow(cause: unknown): boolean {
-  return cause instanceof Error && /call stack|too much recursion/i.test(cause.message);
+  return (
+    cause instanceof Error &&
+    /call stack|too much recursion/i.test(cause.message)
+  );
 }
 
 /** A crash that was the program recursing too deeply: not the compiler's fault, and not retried. */
 function stackOverflowError(): Error {
-  const error = new Error("The program recursed deeper than the browser can run.");
+  const error = new Error(
+    "The program recursed deeper than the browser can run.",
+  );
   error.name = "NxStackOverflowError";
   return error;
 }
@@ -125,24 +124,36 @@ function stackOverflowError(): Error {
 function answerLanguage(
   service: SnapshotLanguageService,
   query: LanguageQueryName,
-  request: unknown
+  request: unknown,
 ): Promise<unknown> {
   switch (query) {
     case "hover":
-      return service.hover(request as Parameters<SnapshotLanguageService["hover"]>[0]);
+      return service.hover(
+        request as Parameters<SnapshotLanguageService["hover"]>[0],
+      );
     case "completions":
-      return service.completions(request as Parameters<SnapshotLanguageService["completions"]>[0]);
+      return service.completions(
+        request as Parameters<SnapshotLanguageService["completions"]>[0],
+      );
     case "diagnostics":
-      return service.diagnostics(request as Parameters<SnapshotLanguageService["diagnostics"]>[0]);
+      return service.diagnostics(
+        request as Parameters<SnapshotLanguageService["diagnostics"]>[0],
+      );
     case "documentSymbols":
       return service.documentSymbols(
-        request as Parameters<SnapshotLanguageService["documentSymbols"]>[0]
+        request as Parameters<SnapshotLanguageService["documentSymbols"]>[0],
       );
     case "sourceTree":
-      return service.sourceTree(request as Parameters<SnapshotLanguageService["sourceTree"]>[0]);
+      return service.sourceTree(
+        request as Parameters<SnapshotLanguageService["sourceTree"]>[0],
+      );
     case "sourceEdit":
-      return service.sourceEdit(request as Parameters<SnapshotLanguageService["sourceEdit"]>[0]);
+      return service.sourceEdit(
+        request as Parameters<SnapshotLanguageService["sourceEdit"]>[0],
+      );
     default:
-      return Promise.reject(new Error(`Unknown language query '${String(query)}'.`));
+      return Promise.reject(
+        new Error(`Unknown language query '${String(query)}'.`),
+      );
   }
 }

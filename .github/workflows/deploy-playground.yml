@@ -28,13 +28,31 @@ on:
       - pnpm-lock.yaml
       - .github/workflows/deploy-playground.yml
       - .github/actions/setup-rust-node/action.yaml
+  pull_request:
+    paths:
+      - sites/playground/**
+      - packages/**
+      - bindings/wasm/**
+      - runtime/typescript/**
+      - crates/**
+      - src/vscode/**
+      # The wasm build fetches the WASI sysroot by the version and checksum pinned here.
+      - scripts/fetch-wasi-sysroot.mjs
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - package.json
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-playground.yml
+      - .github/actions/setup-rust-node/action.yaml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-playground
+  group: deploy-playground-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'production' }}
   cancel-in-progress: false
 
 env:
@@ -65,6 +83,9 @@ jobs:
       - name: Typecheck the site
         run: pnpm --filter @nx-lang/playground typecheck
 
+      - name: Check Canvas drawing in Chrome
+        run: NX_PLAYGROUND_PREVIEW=1 CHROME_PATH="$(command -v google-chrome || command -v chromium)" pnpm --dir sites/playground test:graphics-browser
+
       # What the deploy job uploads, so it deploys exactly the files these tests ran against.
       - name: Keep the built site
         uses: actions/upload-artifact@v4
@@ -75,6 +96,7 @@ jobs:
           retention-days: 7
 
   deploy:
+    if: github.event_name != 'pull_request'
     name: Deploy to Cloudflare
     needs: validate
     runs-on: ubuntu-latest

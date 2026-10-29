@@ -1,7 +1,7 @@
 /**
  * The preview as the worker runs it, driven under Node through the worker's session with the module
- * the browser loads: evaluating keeps the build, and each preview call answers with what the page
- * draws.
+ * the browser loads: each preview call compiles as needed, evaluates IR, and answers with what
+ * the page draws.
  */
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
@@ -18,16 +18,8 @@ const counter = readFileSync(new URL("../examples/nx/counter.nx", import.meta.ur
 const encoder = new TextEncoder();
 
 let id = 0;
-const evaluate = (source) => session.answer({ kind: "evaluate", id: ++id, source });
 const preview = (call) => session.answer({ kind: "preview", id: ++id, call });
-
-/** Evaluates `source`, as the page does before it asks the preview to run it, then calls. */
-async function run(call) {
-  if (call.source !== undefined) {
-    await evaluate(call.source);
-  }
-  return preview(call);
-}
+const run = preview;
 
 const labels = (state) => state.session.path.map((step) => step.label);
 const text = (value) => value.value.text;
@@ -147,9 +139,9 @@ describe("a preview of the counter example", () => {
     let state = await run({ op: "start", source: counter });
     state = await press(state, "Add one");
     const broken = `${counter}\nlet broken = `;
-    assert.equal((await evaluate(broken)).outcome, null);
     state = await preview({ op: "reload", source: broken });
-    assert.equal(state.problem, null);
+    assert.equal(state.problem.kind, "doesNotCompile");
+    assert.ok(state.diagnostics.length > 0);
     assert.equal(state.source, counter);
     assert.deepEqual(labels(state), ["Start", "Tapped"]);
   });
@@ -181,7 +173,7 @@ component <Limits /> = {
       }
     };
     try {
-      // A fresh worker: asked to start before any evaluation, it builds the source itself.
+      // The workbench compiles the initial source and must rebuild it after the host loses builds.
       const workbench = new PreviewWorkbench(compile);
       let state = workbench.answer({ op: "start", source: counter });
       assert.equal(state.problem, null, JSON.stringify(state.problem));
@@ -270,11 +262,13 @@ component <Needy name:string /> = { <Label text={name} /> }
     assert.match(state.problem.diagnostics[0].message, /name/);
   });
 
-  test("says when there is no component, or only external ones", async () => {
+  test("shows ordinary values in Output without a previewer", async () => {
     for (const source of ["let root() = 1", "external component <Button label:string />\nlet root() = 1"]) {
       const state = await run({ op: "start", source });
-      assert.deepEqual(state.problem, { kind: "noComponent" });
+      assert.equal(state.problem, null);
       assert.equal(state.session, null);
+      assert.equal(state.renderer, null);
+      assert.equal(text(state.structured.output), "1");
     }
   });
 
@@ -332,4 +326,32 @@ component <Looper /> = {
     }
     assert.equal(PREVIEW_LIMITS.maxCallDepth, 200);
   });
+});
+
+test("a static survey root previews structured Question and Choice records with source origins", async () => {
+  const source = 'type Choice = { label:string }\ntype Question = { label:string choices:Choice+ }\nlet root() = <Question label="Which?" choices={<Choice label="A"/><Choice label="B"/>}/>';
+  const state = await run({ op: "start", source });
+  assert.equal(state.problem, null);
+  assert.equal(state.session, null);
+  assert.ok(state.structured);
+  const { output, built } = state.structured;
+  assert.ok("value" in output);
+  const records = built.map((index) => output.value.nodes[index]);
+  assert.equal(records.length, 3);
+  for (const record of records) {
+    assert.ok(record.declaration);
+    assert.ok(source.slice(record.declaration.startByte, record.declaration.endByte).startsWith("<"));
+  }
+});
+
+test("the shipped survey has a structured IR preview with selectable Question and Choice origins", async () => {
+  const source = readFileSync(new URL("../examples/nx/survey.nx", import.meta.url), "utf8");
+  const state = await run({ op: "start", source });
+  assert.equal(state.problem, null);
+  assert.ok(state.structured);
+  const { output, selectionTargets } = state.structured;
+  assert.ok("value" in output);
+  const records = selectionTargets.map((target) => output.value.nodes[Number(target.id)]);
+  assert.ok(records.some((node) => node.type === "SelectQuestion"));
+  assert.ok(records.some((node) => node.type === "Choice"));
 });

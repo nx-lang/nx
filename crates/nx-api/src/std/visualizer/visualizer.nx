@@ -4,7 +4,8 @@
 // UNSTABLE. These declarations may change incompatibly in any NX release, including a patch
 // release. See https://nxlang.org/reference/libraries/visualizer.
 //
-// Each record takes the declaration it describes as its type parameter `Target`. Inside a
+// ElementVisualizer, PropertyVisualizer and ValueVisualizer take the declaration they describe
+// as their type parameter `Target`. Inside a
 // `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
 // <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
 // component, `Target` is its props record, so property names are its props.
@@ -24,8 +25,23 @@ export type ElementVisualizer = {
   /// The name of the icon that marks the element where it starts, from the Lucide set
   /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
   icon?: string
+  preview?: PreviewVisualizer     /// Host-rendered view, inherited and overridden like other hints.
+                                  /// Unsupported renderer IDs leave structured Output available.
+
   /// How individual properties read.
   content properties?: <PropertyVisualizer Target=Target/>+
+}
+
+/// A rendered presentation requested by a type; the host supplies the implementation.
+/// Unknown renderer IDs leave the ordinary structured output available. This descriptor loads no code.
+export type PreviewVisualizer = {
+  renderer: string             /// Logical renderer ID registered by the host, such as "nx.graphics".
+}
+
+/// How a viewer marks an authored element-style function invocation.
+/// Previews are selected from the function's result type, independently of this invocation icon.
+export type FunctionVisualizer = {
+  icon?: string                /// Lucide icon name for the invocation, such as "star".
 }
 
 /// Where an element's id reads.

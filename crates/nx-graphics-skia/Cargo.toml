@@ -1,0 +1,31 @@
+[package]
+name = "nx-graphics-skia"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+skia-safe = { optional = true, version = "=0.153.3", default-features = false, features = ["binary-cache", "textlayout", "embed-icudtl"] }
+nx-graphics = { path = "../nx-graphics" }
+kurbo = "0.11"
+sha2 = "0.10"
+serde_json.workspace = true
+serde.workspace = true
+nx-api = { path = "../nx-api", optional = true }
+nx-codegen = { path = "../nx-codegen", optional = true }
+nx-ir-runtime = { path = "../nx-ir-runtime", optional = true }
+
+[features]
+default = []
+native = ["dep:skia-safe"]
+preview = ["native", "dep:nx-api", "dep:nx-codegen", "dep:nx-ir-runtime"]
+
+[[bin]]
+name = "nx-graphics-preview"
+path = "src/bin/preview.rs"
+required-features = ["preview"]
+
+[dev-dependencies]
+roxmltree = "0.20"
+svgtypes = "0.15"

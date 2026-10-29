@@ -83,3 +83,5 @@ export type {
   WorkspaceDiagnostic,
   WorkspaceDiagnosticLabel
 } from "@nx-lang/language-protocol";
+
+export type * from "./graphics.js";

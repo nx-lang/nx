@@ -184,3 +184,11 @@ pnpm --filter @nx-lang/value-view test
 ```
 
 The tests run the element under jsdom with `node --test`.
+
+### Host-driven selection
+
+Call `element.selectNodes(indices)` to highlight all matching nodes of the current `value`. It
+unfolds their ancestors and scrolls the first match into view, without firing navigation events.
+Pass `false` as the second argument to update highlighting without scrolling. Selection survives
+recoloring and is cleared when `value` is replaced. Hosts should scope indices to their current
+output and source snapshot; source/provenance matching belongs to the host's preview adapter.

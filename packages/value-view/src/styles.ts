@@ -63,6 +63,7 @@ code { font: inherit; }
 .u { text-decoration: underline; }
 .node { position: relative; border-radius: 2px; }
 .node.hovered, .node:focus { background: var(--nx-value-hover-background, light-dark(#0969da1a, #388bfd26)); outline: none; }
+.node.selected { outline: 2px solid var(--nx-value-selection-color, #b45309); background: light-dark(#f59e0b1a, #f59e0b26); }
 .node.declared.hovered { cursor: pointer; }
 .fold {
   position: absolute;

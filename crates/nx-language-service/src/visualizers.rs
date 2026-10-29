@@ -17,6 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// The visualizer declarations that apply to one document's program, by target.
 #[derive(Debug, Default)]
 pub(crate) struct ProgramVisualizers {
+    loaded_modules: FxHashSet<String>,
     /// Each target's visualizer declarations from the program, the declaring module's first.
     program: FxHashMap<DeclarationOrigin, Vec<ProgramVisualizer>>,
     /// Each target's visualizer declarations from the host's visualizer modules, in the order
@@ -58,7 +59,13 @@ impl ProgramVisualizers {
             .map(|(origin, _)| origin)
             .collect::<FxHashSet<_>>();
 
-        let mut gathered = ProgramVisualizers::default();
+        let mut gathered = ProgramVisualizers {
+            loaded_modules: modules
+                .iter()
+                .map(|module| module.identity.clone())
+                .collect(),
+            ..ProgramVisualizers::default()
+        };
         // The declaring module's visualizer declaration applies before any other module's.
         let (declaring, others): (Vec<_>, Vec<_>) = visualizers
             .into_iter()
@@ -101,6 +108,33 @@ impl ProgramVisualizers {
             }
         }
         gathered
+    }
+
+    /// All program/host targets, including targets not referenced directly by the entry document.
+    pub fn targets(&self, workspace: &WorkspaceDeclarations) -> Vec<DeclarationOrigin> {
+        let mut targets: Vec<_> = self
+            .program
+            .keys()
+            .chain(self.host.keys())
+            .filter(|origin| self.loaded_modules.contains(&origin.0))
+            .cloned()
+            .collect();
+        targets.extend(
+            workspace
+                .by_origin
+                .keys()
+                .filter(|origin| {
+                    self.loaded_modules.contains(&origin.0)
+                        && crate::source_tree::base_chain(workspace, origin)
+                            .iter()
+                            .chain(std::iter::once(*origin))
+                            .any(|step| self.of(step).next().is_some())
+                })
+                .cloned(),
+        );
+        targets.sort_by_key(|(module, id)| (module.clone(), id.as_u32()));
+        targets.dedup();
+        targets
     }
 
     /// The program's visualizer declarations that apply and that `module` holds, each with its
@@ -160,6 +194,7 @@ pub(crate) struct ResolvedVisualizer {
     pub id: Option<String>,
     pub id_position: Option<String>,
     pub icon: Option<String>,
+    pub preview: Option<String>,
     pub format: Option<String>,
     /// Every editor hint the `ValueVisualizer`s write, by name, as text, the latest first: a reader
     /// takes the first of a name that fits the value, so a later hint that does not fit leaves an
@@ -231,7 +266,11 @@ impl ResolvedVisualizer {
                 *slot = Some(value);
             }
         }
+        if let Some(preview) = &value.preview {
+            self.preview = Some(preview.clone());
+        }
         match value.record {
+            VisualizerRecord::Function => {}
             VisualizerRecord::Element => {
                 // The later visualizer's property visualizers come first, in its order; the earlier
                 // ones it does not name follow in theirs. Two of one property in one visualizer

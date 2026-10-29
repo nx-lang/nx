@@ -22,7 +22,7 @@ undo history, so Source shows them and the title bar's Undo and Redo, or Ctrl or
 back and forth in either view; the reading's next tree is asked for at once. Double-clicking an expression, which Visual cannot edit,
 switches to Source with the cursor at its start.
 
-The output pane's Output and Preview switch runs a component instead. Preview starts a preview
+When a component can run, the optional Preview tab starts a preview
 session of [`@nx-lang/previewer`](../../packages/previewer/README.md) in the worker, on the IR
 runtime: for the component whose element `root` returns, with that element's props, or for the
 first component the source declares, and a picker lists the rest. Every action handler in the
@@ -50,17 +50,19 @@ Every part of that runs in the visitor's browser. The compiler and the language 
 WebAssembly module, loaded into a Web Worker when the page mounts; nothing is compiled on a server.
 
 ```
-NX source ──▶ @nx-lang/sdk-wasm ──▶ root's value as annotated NX text ──▶ @nx-lang/value-view
-   editor        (worker)                                                   (output pane)
-     │
+NX source ──▶ sdk-wasm compiler ──▶ TypeScript IR workbench ──▶ current value + origins
+   editor          (worker)                 (worker)                  │
+     │                                                ┌───────────────┴──────────────┐
+     │                                                ▼                              ▼
+     │                                        structured Output            registered Preview
+     │                                        (@nx-lang/value-view)        (graphics / component)
      └── hover / completion ──▶ @nx-lang/language-core ──▶ sdk-wasm language snapshot
-           (@nx-lang/monaco)          (worker)                    (worker)
 ```
 
 One worker, one host: evaluating and answering hover share an instance, so a diagnostic and a hover
 range land on the same line of the visitor's text. A request that traps or overruns its deadline
 costs that one request — the worker is replaced and the editor stays live. Runaway recursion and
-endless loops end sooner, at the interpreter's own limits, as runtime errors. In the browser, calls
+endless loops end sooner, at the IR runtime's own limits, as runtime errors. In the browser, calls
 nest at most 200 deep, a limit set below what a browser worker's stack can hold. Preview runs every
 call under the IR runtime's limits, the same depth and a budget of operations, so a handler that
 never stops ends with the runtime's message and the session is unchanged.
@@ -119,7 +121,7 @@ npx wrangler@4.141.0 dev              # http://localhost:8787/play
 
 ```bash
 pnpm run typecheck       # tsc over the site
-pnpm test                # Worker, route, share, evaluate, worker and dev-shell tests, then every example
+pnpm test                # Worker, route, share, policy, IR session and dev-shell tests, then every example
 pnpm run check-examples  # every example evaluates to its committed output
 ```
 
@@ -166,7 +168,7 @@ pnpm run check-examples               # fails on a diagnostic, a changed value o
 ```
 
 `--update` is also how a deliberate language change updates every example; review the diff it
-leaves. The check evaluates through the same module and the same `evaluateSource` the browser uses,
+leaves. The check evaluates through the same module and the same IR workbench the browser uses,
 so what is checked is what ships, and it keeps the set between 10 and 20 examples. The larger
 examples, under "Larger examples", and "Visual test cases", under "Test cases", are not counted. The
 test cases hold one or two of every reading and editing case Visual has, each with a comment saying
@@ -183,7 +185,7 @@ what to try, for checking Visual by hand after a change.
 | `scripts/check-examples.mjs` | one check over the whole example set |
 | `src/paths.ts`, `src/routes.ts` | the prefix as the client sees it, and the address scheme under it |
 | `src/share/` | the `#code=` encoding and its shared fixture |
-| `src/compile/` | the evaluate seam: NX source → diagnostics and root's value, with the site's input and output limits |
+| `src/compile/` | shared source/output limits, diagnostic types/classification and compiler-failure recovery; evaluation lives in the IR workbench |
 | `src/worker/` | the compiler worker: its module load, its session, and the main thread's channel to it |
 | `src/language/` | the language service the editor and the output's hover ask |
 | `src/editor/` | Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) |
@@ -217,3 +219,87 @@ request at a time, but that thread is a Web Worker in the visitor's browser: a s
 that visitor a moment and costs everyone else nothing. A request that overruns ten seconds has the
 worker terminated and replaced; one that traps has its host replaced inside the worker. Either way
 the editor stays live and the next evaluation runs.
+
+## Preview and Output
+
+The right pane always offers structured **Output**. A **Preview** tab appears only when a registered
+previewer supports the evaluated result, and is selected initially. Choosing Output persists across
+edits; opening another document resets the preference. Unsupported values show Output without a
+redundant tab switcher. Both presentations share the worker's current TypeScript IR value, including
+stateful component steps; the legacy HIR interpreter is not used by this browser flow.
+
+Choose **Graphics: shapes and text** or open `/play/graphics`. Its graphics previewer prepares that
+same value through the existing WASM compiler module and paints with HTML Canvas 2D. Rendering adds
+no WASM, CanvasKit, native Skia or server dependency. The component inspector is another previewer,
+retaining actions, state and timeline. Ordinary structured values are Output-only; a survey form
+renderer can be registered separately in the future. Renderer matching uses resolved module and
+declaration identities rather than display names. Compilation errors preserve preview availability
+and mark retained output stale; graphics preparation errors clear the scene without hiding Preview.
+
+The bundled DejaVu Sans face is exposed as `Fixture` (400, normal); both the worker and page load
+those bytes explicitly. The font license is linked under the canvas. Unsupported selections and
+missing glyphs fail clearly. Browser metrics/rasterization use the `browser-canvas2d-v1`
+configuration and can differ from the native Rust/Skia preview.
+
+Geometry, transforms, winding rules, bounds and resource limits share `nx-graphics` preparation.
+Translucent subtrees paint to isolated, bounded offscreen canvases. Only a completed frame from
+the current source is published. The element inspector shows revision-scoped identities, bounds,
+text metrics and source provenance; canvas clicks select by visible bounds.
+
+```sh
+pnpm --dir bindings/wasm build
+pnpm --dir sites/playground typecheck
+pnpm --dir sites/playground test
+# An installed Chromium/Chrome is required; no browser download is performed.
+CHROME_PATH=/usr/bin/chromium pnpm --dir sites/playground test:graphics-browser
+```
+
+Set `NX_PLAYGROUND_PREVIEW=1` after `pnpm --dir sites/playground build` to test the production
+bundle instead of the development server (CI uses this).
+
+Set `NX_GRAPHICS_SCREENSHOT=/tmp/nx-drawing.png` to save the browser integration's final image.
+
+### Shared source and preview selection
+
+Selection is shared across preview adapters, rather than tied to graphics. `src/preview/selection.ts`
+maps current renderer IDs to authored source spans, scoped to the exact source snapshot. Canvas
+uses scene node IDs; structured Output uses formatted record indices. Helpers retain construction
+identity separately from optional call-site ancestry, so selecting a Star navigates to the authored
+Star invocation rather than a Polygon inside the graphics library.
+
+Selecting a preview element keeps Visual or Source active and selects the corresponding authored
+expression. Selecting an expression in Visual highlights every matching output, including loop
+instances. The **A full survey** example opens structured Output at `/play/survey`; selecting a Survey
+Question reveals/highlights its output records, and choosing a Choice selects its source.
+A survey-specific form previewer can use the same contract later.
+
+Scene preparation preflights declaration identities and node/depth/geometry limits before measuring
+any text. The layer budget bounds peak concurrently allocated opacity layers, so sibling translucent
+shapes reuse that budget. Source-mode cursor/selection changes also update the shared output
+highlight, using Unicode-safe UTF-16 to UTF-8 conversion.
+
+### Adding a previewer
+
+Libraries declare type-to-renderer associations in NX, for example
+`visualizer Drawing = <ElementVisualizer preview=<PreviewVisualizer renderer="nx.graphics"/>/>`.
+The worker reads resolved visualizer metadata through a language snapshot, caches it per build,
+and matches the evaluated result's nominal declaration. The opt-in
+`includeUnreferencedDeclarations` query includes loaded visualizer targets constructed inside helpers.
+
+`src/preview/registry.ts` is the host implementation allowlist: it associates supported logical
+renderer IDs with bundled adapters, rather than listing NX type names. Unsupported IDs remain
+Output-only. Adding an implementation still requires its preparation and browser view; descriptors
+load no code and there is no dynamic plugin installation UI. Renderers share `preview/selection.ts`
+for source mapping. The component inspector remains a host facility for runnable component sessions.
+
+Browser graphics use physical-pixel backing stores at the device scale while keeping logical CSS
+coordinates. The browser scene depth limit is 48, fitting the compiler SDK's bounded JSON bridge;
+the neutral/native default remains 64. Canvas selection tests fill/stroke geometry and ancestor clips,
+with conservative ink bounds used only for text. Text is measured and painted at a 1000px reference
+size and scaled to local units to avoid browser font-size rounding and clamping.
+
+Raster resolution is capped to the physical surface budget and reduced further for scenes with many
+concurrent opacity layers, so high browser zoom does not reject a scene that fits at scale 1. Text
+painted bounds include 1.5 physical pixels of host raster uncertainty after the world transform,
+independently of intrinsic font measurement. Node/depth limits are checked with authored provenance
+before JSON transport; pending valid edits show a quiet updating indicator without stale styling.

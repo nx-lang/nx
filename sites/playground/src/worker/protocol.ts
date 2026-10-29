@@ -16,10 +16,9 @@ import type { PreviewCall } from "../preview/protocol.ts";
 
 /** A request from the main thread, before the channel gives it its id. */
 export type WorkerCall =
-  | { readonly kind: "evaluate"; readonly source: string }
   | { readonly kind: "language"; readonly query: LanguageQueryName; readonly request: unknown }
-  /** A call to the preview, which runs a session on the latest build `evaluate` made. */
-  | { readonly kind: "preview"; readonly call: PreviewCall };
+  /** Compiles and evaluates source through the shared TypeScript IR workbench. */
+  | { readonly kind: "preview"; readonly call: PreviewCall; readonly scale?: number };
 
 /** A request from the main thread, as the worker receives it. */
 export type WorkerRequest = WorkerCall & { readonly id: number };

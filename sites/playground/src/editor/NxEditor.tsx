@@ -1,3 +1,4 @@
+import { MODEL_URI } from "../compile/policy.ts";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import * as monaco from "monaco-editor";
 import type { TextEdit } from "@nx-lang/language-protocol";
@@ -16,7 +17,7 @@ import { openSuggestionDetailsOnce } from "./suggestDetails.ts";
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
 
 /** The one document the playground edits, under the logical URI the language service sees it by. */
-export const MODEL_URI = "nx://playground/playground.nx";
+export { MODEL_URI } from "../compile/policy.ts";
 
 
 /** The language service the editor's hover and completion use, and the output pane's hover too. */
@@ -82,6 +83,8 @@ function historyStep(instance: monaco.editor.IStandaloneCodeEditor | null, step:
 export interface NxEditorProps {
   readonly value: string;
   readonly onChange: (value: string) => void;
+  /** Current source snapshot and UTF-16 selection, also reported for cursor movement. */
+  readonly onSelection?: (source: string, start: number, end: number) => void;
   /** Marked in the text: compile diagnostics, and a runtime error's span. */
   readonly diagnostics: readonly Diagnostic[];
   /** The source `diagnostics` were reported against, whose lines and columns their spans count. */
@@ -99,11 +102,13 @@ export interface EditorHistory {
 }
 
 /** The source pane: Monaco, the shared NX integration, and markers for the visitor's own errors. */
-export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, theme, ref, onHistory }: NxEditorProps) {
+export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, theme, ref, onHistory, onSelection }: NxEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const latestChange = useRef(onChange);
   latestChange.current = onChange;
+  const latestSelection = useRef(onSelection);
+  latestSelection.current = onSelection;
   const latestHistory = useRef(onHistory);
   latestHistory.current = onHistory;
   const latestTheme = useRef(theme);
@@ -195,6 +200,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
   useEffect(() => {
     let disposed = false;
     let subscription: monaco.IDisposable | undefined;
+    let selectionSubscription: monaco.IDisposable | undefined;
     let suggestDetails: monaco.IDisposable | undefined;
     void registration.ready.then(() => {
       if (disposed || host.current === null) {
@@ -229,6 +235,9 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
       monaco.editor.setTheme(EDITOR_THEMES[latestTheme.current]);
       const reportHistory = () => latestHistory.current?.({ canUndo: model.canUndo(), canRedo: model.canRedo() });
       reportHistory();
+      selectionSubscription = instance.onDidChangeCursorSelection(({ selection }) => {
+        latestSelection.current?.(model.getValue(), model.getOffsetAt(selection.getStartPosition()), model.getOffsetAt(selection.getEndPosition()));
+      });
       subscription = instance.onDidChangeModelContent(() => {
         if (!settingValue.current) {
           const text = instance.getValue();
@@ -241,6 +250,7 @@ export function NxEditor({ value, onChange, diagnostics, diagnosticsSource, them
     return () => {
       disposed = true;
       subscription?.dispose();
+      selectionSubscription?.dispose();
       suggestDetails?.dispose();
       const model = editor.current?.getModel();
       editor.current?.dispose();

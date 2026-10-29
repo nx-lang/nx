@@ -9,6 +9,8 @@ members = [
     "crates/nx-ir",
     "crates/nx-ir-runtime",
     "crates/nx-api",
+    "crates/nx-graphics-skia",
+    "crates/nx-graphics",
     "crates/nx-language-service",
     "crates/nx-lsp",
     "crates/nx-codegen",

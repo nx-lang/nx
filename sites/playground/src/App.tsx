@@ -1,9 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { NxValueDescribe, NxValueNavigateDetail, NxValueNode } from "@nx-lang/value-view";
+import type {
+  NxValueDescribe,
+  NxValueNavigateDetail,
+  NxValueNode,
+} from "@nx-lang/value-view";
 import "./app.css";
-import { evaluateInBrowser, type Diagnostic } from "./compile";
-import { NxEditor, languageService, MODEL_URI, type EditorHistory, type NxEditorHandle } from "./editor/NxEditor";
-import { declaredName, offsetAtPosition, offsetOf, positionAt } from "./editor/positions.ts";
+import { type Diagnostic } from "./compile";
+import {
+  NxEditor,
+  languageService,
+  MODEL_URI,
+  type EditorHistory,
+  type NxEditorHandle,
+} from "./editor/NxEditor";
+import {
+  declaredName,
+  offsetAtPosition,
+  offsetOf,
+  positionAt,
+} from "./editor/positions.ts";
 import {
   DEFAULT_EXAMPLE,
   EXAMPLE_GROUPS,
@@ -14,37 +29,48 @@ import {
 } from "./examples";
 import { SiteHeader } from "./header/SiteHeader";
 import { OutputPane, type OutputView } from "./output/OutputPane";
+import { DrawingView } from "./graphics/DrawingView.tsx";
+import { FILE_NAME } from "./compile/policy.ts";
+import { SourceIndex } from "./preview/spans.ts";
+import type { SourceSelection, SourceSite } from "./preview/selection.ts";
+import { outputEvaluation } from "./output/evaluation.ts";
 import { PreviewView } from "./preview/PreviewView";
 import { usePreview } from "./preview/usePreview.ts";
 import { ReadingView, type ReadingCommands } from "./reading/ReadingView";
-import { createEditQueue, keyAtRange, keyOfChange, rangeOfKey, type NxOpenDetail } from "@nx-lang/viewer";
+import {
+  createEditQueue,
+  keyAtRange,
+  keyOfChange,
+  rangeOfKey,
+  type NxOpenDetail,
+} from "@nx-lang/viewer";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
 import { createAddressKeeper } from "./address.ts";
 import { pathForPayload, routeFromLocation } from "./routes.ts";
 import { decodeSource, encodeSource } from "./share/codec.ts";
-import type { PreviewReloadNotice, PreviewState } from "./preview/protocol.ts";
 import { useSiteTheme } from "./theme.ts";
-import { useEvaluation } from "./useEvaluation.ts";
-import { startNxWorker } from "./worker/index.ts";
 
+import { startNxWorker } from "./worker/index.ts";
 /** What the page shows at the address it was opened or navigated to. */
 interface Opened {
   readonly source: string;
   /** Set when the address asked for something that is not there, said once above the editor. */
   readonly notice: string | null;
 }
-
 const isExample = (id: string) => exampleById(id) !== undefined;
-
 /** The undo and redo shortcuts as the visitor's platform spells them, for the buttons' tooltips. */
 const SHORTCUTS = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "")
   ? { undo: "⌘Z", redo: "⇧⌘Z" }
   : { undo: "Ctrl+Z", redo: "Ctrl+Y" };
-
 /** Reads the current address into source, decoding a `#code=` fragment. */
 async function openLocation(): Promise<Opened> {
-  const route = routeFromLocation(window.location.pathname, window.location.hash, SITE_ROOT, isExample);
+  const route = routeFromLocation(
+    window.location.pathname,
+    window.location.hash,
+    SITE_ROOT,
+    isExample,
+  );
   switch (route.kind) {
     case "code":
       try {
@@ -67,27 +93,30 @@ async function openLocation(): Promise<Opened> {
       };
   }
 }
-
 /** How the NX pane shows the source: as text in the editor, or visually, as the reading. */
 type SourceMode = "source" | "visual";
-
 /** The site: the header, the toolbar, and the source and output panes. */
 export function App() {
   const theme = useSiteTheme();
   const [source, setSource] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
+  const [shareState, setShareState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
   const editor = useRef<NxEditorHandle>(null);
   // Only typed text is written back into the address, so opening an example keeps its clean path.
   const address = useMemo(
-    () => createAddressKeeper({ history: window.history, root: SITE_ROOT, encode: encodeSource }),
+    () =>
+      createAddressKeeper({
+        history: window.history,
+        root: SITE_ROOT,
+        encode: encodeSource,
+      }),
     [],
   );
   const sourceRef = useRef<string | null>(null);
   sourceRef.current = source;
-
   useEffect(startNxWorker, []);
-
   // The address decides the source on first load and on Back and Forward.
   useEffect(() => {
     let current = true;
@@ -96,6 +125,8 @@ export function App() {
         if (current) {
           // Another document opens on its own folding, as choosing an example does.
           setSource(opened.source);
+          setPreferredView(null);
+          preview.reset(opened.source);
           setFolded(undefined);
           setNotice(opened.notice);
         }
@@ -112,33 +143,46 @@ export function App() {
       window.removeEventListener("popstate", onPop);
     };
   }, [address]);
-
   const example = source === null ? undefined : exampleWithSource(source);
-
   useEffect(() => {
-    document.title = example === undefined ? "NX Playground" : `${example.title} — NX Playground`;
+    document.title =
+      example === undefined
+        ? "NX Playground"
+        : `${example.title} — NX Playground`;
   }, [example]);
-
-  const evaluation = useEvaluation(source, evaluateInBrowser);
-  // The source the output came from, read by the hover callback without re-creating it.
-  const evaluationSourceRef = useRef<string | null>(null);
-  evaluationSourceRef.current = evaluation.outcomeSource;
-
+  const [preferredView, setPreferredView] = useState<OutputView | null>(null);
+  const preview = usePreview(true, source);
+  const available = preview.state?.renderer != null;
+  const view: OutputView = available ? (preferredView ?? "preview") : "output";
+  const setView = (next: OutputView) => setPreferredView(next);
+  const evaluation = outputEvaluation(preview, source);
+  const drawing = {
+    source: preview.state?.drawing?.source ?? source ?? "",
+    scene: preview.state?.drawing?.scene ?? null,
+    diagnostics: preview.state?.drawing?.diagnostics ?? evaluation.diagnostics,
+    pending: evaluation.evaluating,
+    retry: preview.retry,
+    failure: preview.failure,
+  };
   const chooseExample = (chosen: Example) => {
     // A new history entry, so Back returns to the source that was there, edits and all.
     void address.choose(chosen.id);
     setSource(chosen.source);
+    setPreferredView(null);
+    preview.reset(chosen.source);
     setFolded(undefined);
     setNotice(null);
   };
-
   const share = async () => {
     if (source === null) {
       return;
     }
     try {
       const payload = await encodeSource(source);
-      const link = new URL(pathForPayload(payload, SITE_ROOT), window.location.origin).href;
+      const link = new URL(
+        pathForPayload(payload, SITE_ROOT),
+        window.location.origin,
+      ).href;
       await navigator.clipboard.writeText(link);
       setShareState("copied");
     } catch {
@@ -146,39 +190,39 @@ export function App() {
     }
     setTimeout(() => setShareState("idle"), 2000);
   };
-
-  const [view, setView] = useState<OutputView>("output");
-  const preview = usePreview(view === "preview", evaluation.outcomeSource);
   // The source the preview's spans index, read by its hover callback.
   const previewSourceRef = useRef<string | null>(null);
   previewSourceRef.current = preview.state?.source ?? null;
   // The preview is behind the editor: the edit does not compile, or the session could not run it
   // (its props, or its program, failed) and kept what it had.
-  const previewStale = evaluation.stale || preview.notice?.kind === "failed";
-
-  /** The output's hover: the language service's hover at the node's declaration, while it lines up. */
-  const describe = useCallback<NxValueDescribe>(
-    (node) => hoverAt(node, sourceRef.current, evaluationSourceRef.current),
-    [],
-  );
+  const previewStale = evaluation.stale;
   /** The preview's hover, over the source the session's spans index. */
   const describePreview = useCallback<NxValueDescribe>(
     (node) => hoverAt(node, sourceRef.current, previewSourceRef.current),
     [],
   );
-
   const [mode, setMode] = useState<SourceMode>("visual");
   const [selection, setSelection] = useState<string | undefined>(undefined);
+  const [outputSelection, setOutputSelection] =
+    useState<SourceSelection | null>(null);
+  const pendingOutputSelection = useRef<SourceSelection | null>(null);
   // What the reader folded in Visual, kept while they switch to Source and back; until they fold
   // anything, Visual folds the source's supporting declarations itself.
-  const [folded, setFolded] = useState<readonly string[] | undefined>(undefined);
+  const [folded, setFolded] = useState<readonly string[] | undefined>(
+    undefined,
+  );
   const readingCommands = useRef<ReadingCommands | null>(null);
   // The text an edit made in Visual left, whose tree is asked for at once rather than after a pause.
   const immediateTree = useRef<string | null>(null);
   // Raised by an edit made in Visual that changed nothing, or by an undo or redo, to give Visual its
   // tree again.
   const [visualRevision, setVisualRevision] = useState(0);
-  const reading = useSourceTree(source, mode === "visual", undefined, immediateTree);
+  const reading = useSourceTree(
+    source,
+    mode === "visual",
+    undefined,
+    immediateTree,
+  );
   // Visual's edits, made in the editor's text one after another, each one step of its undo history.
   const applyVisualEdit = useMemo(
     () =>
@@ -198,12 +242,17 @@ export function App() {
     [],
   );
   // Whether the editor's history holds anything to undo and to redo, for the title bar's buttons.
-  const [history, setHistory] = useState<EditorHistory>({ canUndo: false, canRedo: false });
+  const [history, setHistory] = useState<EditorHistory>({
+    canUndo: false,
+    canRedo: false,
+  });
   // A field open in Visual holding a change, and edits fired and not yet in the editor's history:
   // Undo takes them back too, after committing the field, so it is offered for them as well.
   const [visualDraft, setVisualDraft] = useState(false);
   const [editsInFlight, setEditsInFlight] = useState(0);
-  const canUndo = history.canUndo || (mode === "visual" && (visualDraft || editsInFlight > 0));
+  const canUndo =
+    history.canUndo ||
+    (mode === "visual" && (visualDraft || editsInFlight > 0));
   // When Visual last closed a field's change without committing it, as leaving a field holding an
   // entry it cannot take does, and when the Undo button was last pressed: a press that closed one
   // took that change back, which is all the visitor asked Undo for.
@@ -224,7 +273,10 @@ export function App() {
       const span = editor.current?.[step]();
       immediateTree.current = editor.current?.text() ?? null;
       // What the step changed is selected, and scrolled to, once Visual reads the text it left.
-      changeToSelect.current = span === undefined || immediateTree.current === null ? null : { text: immediateTree.current, ...span };
+      changeToSelect.current =
+        span === undefined || immediateTree.current === null
+          ? null
+          : { text: immediateTree.current, ...span };
       // The step can take the text back to what Visual's tree already describes, as Undo does with a
       // field open, whose edit it commits and takes back at once. No newer tree comes then, so Visual
       // gets its tree again, and drops the value it shows as pending.
@@ -234,7 +286,11 @@ export function App() {
   // The editor's cursor, carried into Visual until a tree of the same text can say what it is on.
   const cursorToSelect = useRef<number | null>(null);
   // Where an undo or redo changed the text, until a tree of the text it left can say what that is.
-  const changeToSelect = useRef<{ text: string; start: number; end: number } | null>(null);
+  const changeToSelect = useRef<{
+    text: string;
+    start: number;
+    end: number;
+  } | null>(null);
   // The selected node's start, carried into Source until the editor is shown again.
   const cursorToPlace = useRef<number | null>(null);
   // The node the cursor selected on entering Visual: leaving with it still selected leaves the cursor be.
@@ -249,11 +305,15 @@ export function App() {
     void applyVisualEdit.after(() => undefined);
     setMode("source");
   };
-
   useEffect(() => {
     const change = changeToSelect.current;
     const { tree, text } = reading;
-    if (change === null || tree === null || text === null || text !== change.text) {
+    if (
+      change === null ||
+      tree === null ||
+      text === null ||
+      text !== change.text
+    ) {
       return;
     }
     changeToSelect.current = null;
@@ -262,11 +322,16 @@ export function App() {
       setSelection(key);
     }
   }, [reading.tree, reading.text]);
-
   useEffect(() => {
     const offset = cursorToSelect.current;
     const { tree, text } = reading;
-    if (mode === "source" || offset === null || tree === null || text === null || text !== source) {
+    if (
+      mode === "source" ||
+      offset === null ||
+      tree === null ||
+      text === null ||
+      text !== source
+    ) {
       return;
     }
     cursorToSelect.current = null;
@@ -274,7 +339,6 @@ export function App() {
     selectedOnEntry.current = key;
     setSelection(key);
   }, [mode, reading.tree, reading.text, source]);
-
   useEffect(() => {
     const offset = cursorToPlace.current;
     if (mode === "source" && offset !== null) {
@@ -282,7 +346,6 @@ export function App() {
       editor.current?.placeCursor(offset);
     }
   }, [mode]);
-
   const switchTo = (next: SourceMode) => {
     if (next === mode) {
       return;
@@ -295,25 +358,31 @@ export function App() {
       // undo, which must not meet a preview outside the history.
       void applyVisualEdit.after(() => undefined);
       const { tree, text } = reading;
+      const selectedNode =
+        text === source
+          ? tree?.nodes.find((node) => node.key === selection)
+          : undefined;
+      if (text !== null && selectedNode !== undefined) {
+        setOutputSelection({
+          source: text,
+          start: selectedNode.range.startByte,
+          end: selectedNode.range.endByte,
+        });
+      }
       const moved = selection !== selectedOnEntry.current;
-      if (moved && selection !== undefined && tree !== null && text !== null && text === source) {
-        cursorToPlace.current = rangeOfKey(tree, text, selection)?.start ?? null;
+      if (
+        moved &&
+        selection !== undefined &&
+        tree !== null &&
+        text !== null &&
+        text === source
+      ) {
+        cursorToPlace.current =
+          rangeOfKey(tree, text, selection)?.start ?? null;
       }
     }
     setMode(next);
   };
-
-  const navigate = (detail: NxValueNavigateDetail) => {
-    const current = sourceRef.current;
-    if (current === null || current !== evaluation.outcomeSource) {
-      return;
-    }
-    const name = declaredName(detail.node, current);
-    if (name !== null) {
-      editor.current?.select(name.start, name.end);
-    }
-  };
-
   /** Selects where a preview's record was built, or a node's declaration when it was not. */
   const navigatePreview = (detail: NxValueNavigateDetail, built: boolean) => {
     const current = sourceRef.current;
@@ -328,17 +397,92 @@ export function App() {
         }
       : declaredName(detail.node, current);
     if (range !== null) {
-      editor.current?.select(range.start, range.end);
+      selectOutputSource(
+        {
+          module: FILE_NAME,
+          start: new TextEncoder().encode(current.slice(0, range.start)).length,
+          end: new TextEncoder().encode(current.slice(0, range.end)).length,
+        },
+        current,
+      );
     }
   };
-
+  // Selection never switches the source mode. Visual keys and drawing provenance both index
+  // the current source; keep stale trees and previous drawing revisions out of this mapping.
+  const visualNode =
+    mode === "visual" && reading.text === source
+      ? reading.tree?.nodes.find((node) => node.key === selection)
+      : undefined;
+  const outputSourceSelection: SourceSelection | null =
+    mode === "visual"
+      ? visualNode === undefined || source === null
+        ? null
+        : {
+            source,
+            start: visualNode.range.startByte,
+            end: visualNode.range.endByte,
+          }
+      : outputSelection?.source === source
+        ? outputSelection
+        : null;
+  useEffect(() => {
+    const pending = pendingOutputSelection.current;
+    if (pending === null || mode !== "visual") {
+      return;
+    }
+    if (pending.source !== source) {
+      pendingOutputSelection.current = null;
+      return;
+    }
+    if (reading.tree === null || reading.text !== source) {
+      return;
+    }
+    const span = new SourceIndex(source).span(pending.start, pending.end);
+    pendingOutputSelection.current = null;
+    if (span === null) {
+      return;
+    }
+    const key = keyAtRange(
+      reading.tree,
+      source,
+      offsetOf(source, span.startLine, span.startColumn),
+      offsetOf(source, span.endLine, span.endColumn),
+    );
+    if (key !== undefined) {
+      setSelection(key);
+    }
+  }, [mode, source, reading.tree, reading.text]);
+  const selectOutputSource = (site: SourceSite, snapshot: string | null) => {
+    if (source === null || source !== snapshot) {
+      return;
+    }
+    const span = new SourceIndex(source).span(site.start, site.end);
+    if (span === null) {
+      return;
+    }
+    const start = offsetOf(source, span.startLine, span.startColumn);
+    const end = offsetOf(source, span.endLine, span.endColumn);
+    setOutputSelection({ source, start: site.start, end: site.end });
+    pendingOutputSelection.current =
+      mode === "visual" && (reading.tree === null || reading.text !== source)
+        ? { source, start: site.start, end: site.end }
+        : null;
+    if (mode === "visual" && reading.tree !== null && reading.text === source) {
+      const key = keyAtRange(reading.tree, source, start, end);
+      if (key !== undefined) {
+        setSelection(key);
+      }
+    } else if (mode === "source") {
+      editor.current?.select(start, end);
+    }
+  };
+  const navigateDrawing = (site: SourceSite) => {
+    if (!drawing.pending) {
+      selectOutputSource(site, drawing.source);
+    }
+  };
   // While Preview shows, the editor also marks where a failed step or start points.
-  const previewDiagnostics = view === "preview" ? previewMarks(preview.state, preview.notice) : [];
-  const marked =
-    previewDiagnostics.length > 0 && preview.state?.source === evaluation.diagnosticsSource
-      ? [...evaluation.diagnostics, ...previewDiagnostics]
-      : evaluation.diagnostics;
-
+  const marked = evaluation.diagnostics;
   return (
     <div className="app">
       <SiteHeader theme={theme} />
@@ -376,8 +520,17 @@ export function App() {
           </a>
         )}
         <span className="spacer" />
-        <button type="button" className="share" onClick={() => void share()} disabled={source === null}>
-          {shareState === "copied" ? "Link copied" : shareState === "failed" ? "Could not copy" : "Share"}
+        <button
+          type="button"
+          className="share"
+          onClick={() => void share()}
+          disabled={source === null}
+        >
+          {shareState === "copied"
+            ? "Link copied"
+            : shareState === "failed"
+              ? "Could not copy"
+              : "Share"}
         </button>
         <a className="fiddle-link" href="https://fiddle.drawnui.net">
           Draw with NX: DrawnUI fiddle
@@ -386,7 +539,11 @@ export function App() {
       {notice !== null && (
         <div className="notice" role="status">
           <span>{notice}</span>
-          <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setNotice(null)}
+          >
             ×
           </button>
         </div>
@@ -406,7 +563,8 @@ export function App() {
                   undoPressedAt.current = event.timeStamp;
                 }}
                 onClick={() => {
-                  const dropped = draftDroppedAt.current >= undoPressedAt.current;
+                  const dropped =
+                    draftDroppedAt.current >= undoPressedAt.current;
                   undoPressedAt.current = Number.POSITIVE_INFINITY;
                   if (!dropped) {
                     visualHistory("undo");
@@ -433,14 +591,24 @@ export function App() {
             </span>
             {mode === "visual" && (
               <span className="fold-actions">
-                <button type="button" aria-label="Collapse all" title="Collapse all" onClick={() => readingCommands.current?.collapseAll()}>
+                <button
+                  type="button"
+                  aria-label="Collapse all"
+                  title="Collapse all"
+                  onClick={() => readingCommands.current?.collapseAll()}
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m7 20 5-5 5 5" />
                     <path d="m7 4 5 5 5-5" />
                   </svg>
                   <span>Collapse all</span>
                 </button>
-                <button type="button" aria-label="Expand all" title="Expand all" onClick={() => readingCommands.current?.expandAll()}>
+                <button
+                  type="button"
+                  aria-label="Expand all"
+                  title="Expand all"
+                  onClick={() => readingCommands.current?.expandAll()}
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m7 15 5 5 5-5" />
                     <path d="m7 9 5-5 5 5" />
@@ -449,7 +617,11 @@ export function App() {
                 </button>
               </span>
             )}
-            <span className="mode-switch" role="group" aria-label="Show the source as">
+            <span
+              className="mode-switch"
+              role="group"
+              aria-label="Show the source as"
+            >
               {(["visual", "source"] as const).map((option) => (
                 <button
                   key={option}
@@ -499,6 +671,24 @@ export function App() {
                   address.edited(next);
                   setSource(next);
                 }}
+                onSelection={(text, start, end) => {
+                  if (mode !== "source" || sourceRef.current !== text) {
+                    return;
+                  }
+                  const selected = {
+                    source: text,
+                    start: new TextEncoder().encode(text.slice(0, start))
+                      .length,
+                    end: new TextEncoder().encode(text.slice(0, end)).length,
+                  };
+                  setOutputSelection((previous) =>
+                    previous?.source === text &&
+                    previous.start === selected.start &&
+                    previous.end === selected.end
+                      ? previous
+                      : selected,
+                  );
+                }}
                 diagnostics={marked}
                 diagnosticsSource={evaluation.diagnosticsSource}
                 theme={theme}
@@ -506,35 +696,66 @@ export function App() {
               />
             )}
           </div>
-          <Diagnostics diagnostics={evaluation.diagnostics} evaluating={evaluation.evaluating} />
+          <Diagnostics
+            diagnostics={marked}
+            evaluating={evaluation.evaluating}
+          />
         </section>
         <OutputPane
           evaluation={evaluation}
+          onRetry={preview.retry}
           view={view}
           onViewChange={setView}
-          preview={
-            <PreviewView
-              preview={preview}
-              doesNotCompile={evaluation.outcomeSource === null && evaluation.diagnostics.length > 0}
-              stale={previewStale}
-              describe={describePreview}
-              onNavigate={navigatePreview}
-            />
+          available={available}
+          rendered={preview.state?.session ?? preview.state?.structured ?? null}
+          sourceSelection={
+            outputSourceSelection?.source === preview.state?.source
+              ? outputSourceSelection
+              : null
           }
-          describe={describe}
-          onNavigate={navigate}
+          preview={
+            preview.state?.renderer === "graphics" ? (
+              <DrawingView
+                drawing={drawing}
+                source={source}
+                sourceSelection={outputSourceSelection}
+                onNavigate={navigateDrawing}
+              />
+            ) : (
+              <PreviewView
+                preview={preview}
+                sourceSelection={outputSourceSelection}
+                doesNotCompile={
+                  evaluation.outcomeSource === null &&
+                  evaluation.diagnostics.length > 0
+                }
+                stale={previewStale}
+                describe={describePreview}
+                onNavigate={navigatePreview}
+              />
+            )
+          }
+          describe={describePreview}
+          onNavigate={navigatePreview}
         />
       </main>
     </div>
   );
 }
-
 /**
  * The hover at a node's declaration, from the language service, while the editor still holds the
  * source whose spans the node carries.
  */
-async function hoverAt(node: NxValueNode, current: string | null, spansSource: string | null) {
-  if (node.declaration === undefined || current === null || current !== spansSource) {
+async function hoverAt(
+  node: NxValueNode,
+  current: string | null,
+  spansSource: string | null,
+) {
+  if (
+    node.declaration === undefined ||
+    current === null ||
+    current !== spansSource
+  ) {
     return undefined;
   }
   const name = declaredName(node, current);
@@ -548,19 +769,6 @@ async function hoverAt(node: NxValueNode, current: string | null, spansSource: s
   });
   return hover?.contents;
 }
-
-/** The diagnostics of the preview's failed start, step or reload that point into the source. */
-function previewMarks(state: PreviewState | null, notice: PreviewReloadNotice | null): Diagnostic[] {
-  const problem = state?.problem;
-  const diagnostics = [
-    ...(problem?.kind === "startFailed" || problem?.kind === "dispatchFailed" || problem?.kind === "programFailed"
-      ? problem.diagnostics
-      : []),
-    ...(notice === null ? [] : notice.diagnostics),
-  ];
-  return diagnostics.filter((diagnostic) => diagnostic.span !== null);
-}
-
 /** The compile diagnostics, listed under the editor as well as marked in it. */
 function Diagnostics({
   diagnostics,
@@ -569,14 +777,24 @@ function Diagnostics({
   diagnostics: readonly Diagnostic[];
   evaluating: boolean;
 }) {
-  const compile = diagnostics.filter((diagnostic) => diagnostic.code !== "runtime-error" && diagnostic.code !== "nx-text-unspellable");
+  const compile = diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.code !== "runtime-error" &&
+      diagnostic.code !== "nx-text-unspellable",
+  );
   if (compile.length === 0) {
     return null;
   }
   return (
-    <ul className={`diagnostics${evaluating ? " evaluating" : ""}`} aria-label="Problems">
+    <ul
+      className={`diagnostics${evaluating ? " evaluating" : ""}`}
+      aria-label="Problems"
+    >
       {compile.map((diagnostic, index) => (
-        <li key={index} className={diagnostic.severity === "warning" ? "warning" : "error"}>
+        <li
+          key={index}
+          className={diagnostic.severity === "warning" ? "warning" : "error"}
+        >
           {diagnostic.span !== null && (
             <span className="where">
               {diagnostic.span.startLine}:{diagnostic.span.startColumn}

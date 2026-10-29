@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "coordinateTolerance": 1e-05,
+  "interiorAlphaTolerance": 1,
+  "references": [
+    {
+      "file": "opacity.svg",
+      "assertion": "interior alpha at x=5,15,30 and y=10 is 128; overlap composites once",
+      "samples": [
+        [
+          5,
+          10,
+          128
+        ],
+        [
+          15,
+          10,
+          128
+        ],
+        [
+          30,
+          10,
+          128
+        ]
+      ]
+    },
+    {
+      "file": "transforms.svg",
+      "assertion": "local (1,0) maps to (12,0)",
+      "samples": [
+        [
+          13,
+          2,
+          "nonzero"
+        ]
+      ]
+    },
+    {
+      "file": "ring.svg",
+      "assertion": "two closed subpaths; center hole uses evenodd; arcs normalize to cubics",
+      "samples": [
+        [
+          50,
+          50,
+          0
+        ],
+        [
+          80,
+          50,
+          255
+        ]
+      ]
+    }
+  ],
+  "differences": [
+    "Polyline defaults to no fill",
+    "host fonts are explicit; no automatic CSS/system fallback",
+    "unsupported effects diagnose before painting"
+  ]
+}

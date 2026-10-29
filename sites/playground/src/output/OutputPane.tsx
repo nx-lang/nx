@@ -1,108 +1,117 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import "@nx-lang/value-view";
-import {
-  NX_VALUE_NAVIGATE_EVENT,
-  type NxValueDescribe,
-  type NxValueElement,
-  type NxValueNavigateDetail,
+import type { ReactNode } from "react";
+import type {
+  NxValueDescribe,
+  NxValueNavigateDetail,
 } from "@nx-lang/value-view";
 import type { Diagnostic } from "../compile";
-import { outputNotice, type Evaluation } from "../evaluation.ts";
-import { EDITOR_THEMES } from "../theme.ts";
+import {
+  outputErrorHeading,
+  outputNotice,
+  type Evaluation,
+} from "../evaluation.ts";
+import { SessionOutput } from "../preview/PreviewView.tsx";
+import type { PreviewRenderedOutput } from "../preview/protocol.ts";
+import type { SourceSelection } from "../preview/selection.ts";
 
-/** What the output pane shows: what `root` returns, or a component running. */
 export type OutputView = "output" | "preview";
 
 export interface OutputPaneProps {
   readonly evaluation: Evaluation;
+  readonly onRetry: () => void;
   readonly view: OutputView;
+  readonly available: boolean;
   readonly onViewChange: (view: OutputView) => void;
-  /** The preview, shown in place of the output while `view` is `preview`. */
   readonly preview: ReactNode;
-  /** The hover for a node of the value, from the language service. */
+  readonly rendered: PreviewRenderedOutput | null;
+  readonly sourceSelection: SourceSelection | null;
   readonly describe: NxValueDescribe;
-  /** Shows a declaration in the source pane. */
-  readonly onNavigate: (detail: NxValueNavigateDetail) => void;
+  readonly onNavigate: (detail: NxValueNavigateDetail, built: boolean) => void;
 }
 
-/**
- * What `root` returns, shown by `<nx-value>`, or why there is nothing to show.
- *
- * <para>The element loads its own Shiki highlighter rather than sharing the editor's. Coloring with
- * a light and a dark theme switches a highlighter's current theme, and the Monaco bridge tokenizes
- * with whatever theme that is, so a shared one would recolor the source from the wrong palette.
- * </para>
- */
-export function OutputPane({ evaluation, view, onViewChange, preview, describe, onNavigate }: OutputPaneProps) {
-  const element = useRef<NxValueElement>(null);
-  const latestNavigate = useRef(onNavigate);
-  latestNavigate.current = onNavigate;
-
-  useEffect(() => {
-    const target = element.current;
-    if (target === null) {
-      return;
-    }
-    const listener = (event: Event) =>
-      latestNavigate.current((event as CustomEvent<NxValueNavigateDetail>).detail);
-    target.addEventListener(NX_VALUE_NAVIGATE_EVENT, listener);
-    return () => target.removeEventListener(NX_VALUE_NAVIGATE_EVENT, listener);
-  });
-
+/** A registered preview and the universal structured view of the same current value. */
+export function OutputPane({
+  evaluation,
+  onRetry,
+  view,
+  available,
+  onViewChange,
+  preview,
+  rendered,
+  sourceSelection,
+  describe,
+  onNavigate,
+}: OutputPaneProps) {
   const { outcome, failure, stale } = evaluation;
-  const value = outcome?.kind === "value" ? outcome : null;
   const notice = outputNotice(evaluation);
-
   return (
-    <section className="pane pane-output" aria-label={view === "output" ? "Output" : "Preview"}>
+    <section
+      className="pane pane-output"
+      aria-label={view === "output" ? "Output" : "Preview"}
+    >
       <div className="pane-title">
         <span>{view === "output" ? "Output" : "Preview"}</span>
         <span className="pane-note">
-          {view === "output" ? (
-            <>
-              what <code>root</code> returns
-            </>
-          ) : (
-            "a component, running"
-          )}
+          {evaluation.evaluating
+            ? "updating…"
+            : view === "output"
+              ? "evaluated value"
+              : "rendered output"}
         </span>
         <span className="spacer" />
-        <span className="mode-switch" role="group" aria-label="Show">
-          {(["output", "preview"] as const).map((option) => (
-            <button key={option} type="button" aria-pressed={view === option} onClick={() => onViewChange(option)}>
-              {option === "output" ? "Output" : "Preview"}
-            </button>
-          ))}
-        </span>
+        {available && (
+          <span className="mode-switch" role="group" aria-label="Show">
+            {(["preview", "output"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={view === option}
+                onClick={() => onViewChange(option)}
+              >
+                {option === "output" ? "Output" : "Preview"}
+              </button>
+            ))}
+          </span>
+        )}
       </div>
-      {/* The preview stays mounted while Output shows, so switching back finds the session as it was. */}
       <div className="output-body" hidden={view !== "preview"}>
         {preview}
       </div>
       <div className="output-body" hidden={view !== "output"}>
-        {failure !== null && <p className="output-message fault">{failure}</p>}
-        {notice === "evaluating" && <p className="output-message quiet">Evaluating…</p>}
+        {failure !== null && (
+          <div className="output-message fault" role="alert">
+            <p>{failure}</p>
+            <button type="button" onClick={onRetry}>
+              Start again
+            </button>
+          </div>
+        )}
+        {notice === "evaluating" && (
+          <p className="output-message quiet">Evaluating…</p>
+        )}
         {notice === "doesNotCompile" && (
           <p className="output-message">
-            The program does not compile yet, so there is no value to show. The problems are listed under
-            the source.
+            The program does not compile yet. The problems are listed under the
+            source.
           </p>
         )}
         {outcome?.kind === "noRoot" && (
           <p className={`output-message${stale ? " stale" : ""}`}>
-            There is no <code>root</code> to evaluate. Declare <code>let root() = …</code>, or end the
-            program with an element, and what it returns shows here.
+            End the program with a value or declare <code>let root() = …</code>{" "}
+            to see its output.
           </p>
         )}
-        {outcome?.kind === "error" && <ErrorMessage diagnostics={outcome.diagnostics} stale={stale} />}
-        {value !== null && (
-          <nx-value
-            ref={element}
-            value={value.value}
-            truncated={value.truncated}
+        {outcome?.kind === "error" && (
+          <ErrorMessage diagnostics={outcome.diagnostics} stale={stale} />
+        )}
+        {rendered !== null && outcome?.kind === "value" && (
+          <SessionOutput
+            session={rendered}
+            sourceSelection={sourceSelection}
             stale={stale}
             describe={describe}
-            themes={EDITOR_THEMES}
+            onPress={() => {}}
+            onNavigate={onNavigate}
+            interactive={false}
           />
         )}
       </div>
@@ -110,14 +119,19 @@ export function OutputPane({ evaluation, view, onViewChange, preview, describe, 
   );
 }
 
-function ErrorMessage({ diagnostics, stale }: { diagnostics: readonly Diagnostic[]; stale: boolean }) {
-  const [first] = diagnostics;
-  const unspellable = first?.code === "nx-text-unspellable";
+function ErrorMessage({
+  diagnostics,
+  stale,
+}: {
+  diagnostics: readonly Diagnostic[];
+  stale: boolean;
+}) {
   return (
-    <div className={`output-message error${stale ? " stale" : ""}`} role="alert">
-      <p className="output-heading">
-        {unspellable ? "The value has no NX spelling" : "Evaluating root failed"}
-      </p>
+    <div
+      className={`output-message error${stale ? " stale" : ""}`}
+      role="alert"
+    >
+      <p className="output-heading">{outputErrorHeading(diagnostics)}</p>
       {diagnostics.map((diagnostic, index) => (
         <p key={index}>
           {diagnostic.span !== null && (

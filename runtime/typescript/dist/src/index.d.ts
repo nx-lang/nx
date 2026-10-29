@@ -505,6 +505,9 @@ export interface NxRuntimeOptions {
 }
 /** Where the records of one call's value were constructed, as {@link NxRuntimeOptions.origins} reports it. */
 export interface NxRuntimeOrigins {
+    /** Opt in to source call-site ancestry, innermost first, without changing construction identity.
+     * Useful when a host maps expanded helper output back to authored invocations. */
+    readonly includeCallSites?: boolean;
     /**
      * One entry for each record of the value that has an origin, in the order of a depth-first walk
      * of the value: a record before its fields, a list's items in order and a record's fields by
@@ -519,12 +522,26 @@ export interface NxOriginEntry {
      * itself, `/content/0` for the first item of its `content` field.
      */
     readonly path: string;
+    /** Optional call-site ancestry (innermost first), recorded only with includeCallSites. */
+    readonly callSites?: readonly NxOriginSite[];
     /** The identity of the module whose source the span indexes. */
     readonly module: string;
     /** The UTF-8 byte offsets, in that module's source, of the element expression that constructed the record. */
     readonly start: number;
     readonly end: number;
 }
+/** A debug source location; offsets are UTF-8 bytes in the named module. */
+export interface NxOriginSite {
+    readonly module: string;
+    readonly start: number;
+    readonly end: number;
+}
+/**
+ * Resolves a record's construction site to its declaration in the linked program. Returns undefined
+ * for untyped elements, missing debug metadata, or expressions that do not directly construct a type.
+ * Call-site ancestry is deliberately ignored: callers do not determine nominal type identity.
+ */
+export declare function declarationAtOrigin(program: NxPreparedProgram, origin: NxOriginSite): PreparedDeclaration | undefined;
 /** What one call of an evaluation function used, as {@link NxRuntimeOptions.usage} reports it. */
 export interface NxRuntimeUsage {
     /**

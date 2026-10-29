@@ -28,6 +28,8 @@ x86/
 [Aa][Rr][Mm]64/
 bld/
 [Bb]in/
+# Rust binary targets are source files, not .NET build output.
+!/crates/nx-graphics-skia/src/bin/
 [Oo]bj/
 [Ll]og/
 

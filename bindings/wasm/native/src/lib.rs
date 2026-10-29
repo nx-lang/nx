@@ -10,6 +10,8 @@
 //! `catch_unwind`: a panic or an out-of-bounds access traps and ends the instance, and the loader
 //! reports that as a crashed host rather than hiding it behind a stale instance.</para>
 
+mod graphics;
+
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
 
@@ -31,7 +33,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 10;
+pub const ABI_VERSION: u32 = 11;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -412,6 +414,20 @@ pub unsafe extern "C" fn nx_wasm_program_format_value(
     len: usize,
 ) -> *mut NxWasmResult {
     into_result(program_format_value(&*handle, argument(ptr, len)))
+}
+
+/// Prepares an IR-evaluated graphics value with trusted construction origins and host text metrics.
+/// Returns a neutral prepared scene or graphics diagnostics; does not evaluate HIR or link Skia.
+///
+/// # Safety
+/// `handle` must name a live artifact, and `ptr`/`len` must describe UTF-8 JSON in module memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_program_graphics_prepare(
+    handle: *mut ProgramArtifact,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(graphics::prepare(&*handle, argument(ptr, len)))
 }
 
 /// Releases the artifact `handle` names.

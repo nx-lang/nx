@@ -8,8 +8,10 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { NxHostCrashedError, createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
-import { MAX_OUTPUT_CHARACTERS } from "../compile/evaluate.ts";
+import { MAX_OUTPUT_CHARACTERS } from "../compile/policy.ts";
 import { createNxSession } from "./session.ts";
+import { outputEvaluation } from "../output/evaluation.ts";
+import { initialPreview } from "../preview/model.ts";
 
 const module = await loadNxModule();
 const uri = "nx://playground/playground.nx";
@@ -18,7 +20,12 @@ const session = createNxSession({ module });
 after(() => session.dispose());
 
 let id = 0;
-const evaluate = (source) => session.answer({ kind: "evaluate", id: ++id, source });
+async function evaluate(source, target = session) {
+  const state = await target.answer({
+    kind: "preview", id: ++id, call: { op: "start", source, reset: true },
+  });
+  return outputEvaluation({ ...initialPreview, state, asked: source }, source);
+}
 
 test("answers a program with root's value as annotated NX text", async () => {
   const result = await evaluate('type User = { id:string name:string }\n<User id="1" name="Ada" />');
@@ -27,7 +34,7 @@ test("answers a program with root's value as annotated NX text", async () => {
   assert.equal(result.outcome.truncated, false);
   assert.equal(result.outcome.value.text, '<User id="1" name="Ada" />');
   assert.equal(result.outcome.value.nodes[0].type, "User");
-  assert.equal(result.outcome.value.nodes[0].declaration.startLine, 1);
+  assert.equal(result.outcome.value.nodes[0].declaration.startLine, 2);
 });
 
 test("answers a program that does not compile with diagnostics in the visitor's coordinates", async () => {
@@ -48,7 +55,7 @@ test("answers a runtime error with its span in the visitor's source", async () =
   const result = await evaluate("let root() = { 1 / 0 }");
   assert.equal(result.outcome.kind, "error");
   const [diagnostic] = result.outcome.diagnostics;
-  assert.equal(diagnostic.message, "Division by zero");
+  assert.equal(diagnostic.message, "Division by zero.");
   assert.equal(diagnostic.origin, "source");
   assert.equal(diagnostic.span.startColumn, 16);
 });
@@ -56,17 +63,17 @@ test("answers a runtime error with its span in the visitor's source", async () =
 test("answers runaway recursion with the recursion limit, and keeps the host", async () => {
   const result = await evaluate("let f(n:int): int = { f(n + 1) }\nlet root() = { f(0) }");
   assert.equal(result.outcome.kind, "error");
-  assert.match(result.outcome.diagnostics[0].message, /recursion depth/);
+  assert.match(result.outcome.diagnostics[0].message, /call depth/);
   assert.equal(session.replacements, 0);
 });
 
-test("answers a value with no NX spelling with an error naming the part", async () => {
+test("formats an IR action handler as a structured value", async () => {
   const result = await evaluate(`action SearchRequested = { query:string }
 action DoSearch = { query:string }
 external component <SearchBox emits { SearchRequested } />
 let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> /> }`);
-  assert.equal(result.outcome.kind, "error");
-  assert.equal(result.outcome.diagnostics[0].code, "nx-text-unspellable");
+  assert.equal(result.outcome.kind, "value");
+  assert.match(result.outcome.value.text, /ActionHandler/);
 });
 
 test("cuts a very large value, keeping only the nodes that start within the cut", async () => {
@@ -193,12 +200,12 @@ test("a crashed host is reported once and replaced, and the next request is answ
 
   try {
     await assert.rejects(
-      () => crashing.answer({ kind: "evaluate", id: ++id, source: "let root() = { 1 }" }),
+      () => evaluate("let root() = { 1 }", crashing),
       (error) => error.name === "NxHostCrashedError",
     );
     assert.equal(crashing.replacements, 1);
 
-    const result = await crashing.answer({ kind: "evaluate", id: ++id, source: "let root() = { 42 }" });
+    const result = await evaluate("let root() = { 42 }", crashing);
     assert.equal(result.outcome.value.text, "42");
     assert.equal(crashing.replacements, 1);
   } finally {
@@ -219,7 +226,7 @@ test("a trap that was the stack running out is named, and not retried as a compi
           return host.memoryBytes;
         },
         buildProgramArtifact: () => {
-          throw new NxHostCrashedError("nx_wasm_program_evaluate_nx", {
+          throw new NxHostCrashedError("nx_wasm_program_build", {
             cause: new RangeError("Maximum call stack size exceeded"),
           });
         },
@@ -232,11 +239,21 @@ test("a trap that was the stack running out is named, and not retried as a compi
   });
   try {
     await assert.rejects(
-      () => overflowing.answer({ kind: "evaluate", id: ++id, source: "let root() = { 1 }" }),
+      () => evaluate("let root() = { 1 }", overflowing),
       (error) => error.name === "NxStackOverflowError" && /recursed deeper/.test(error.message),
     );
     assert.equal(overflowing.replacements, 1, "the crashed host is still replaced");
   } finally {
     overflowing.dispose();
   }
+});
+
+
+test("IR output preserves compile warnings beside the value", async () => {
+  const result = await evaluate("/// See [Missing].\nlet root() = { 42 }");
+  assert.equal(result.outcome.kind, "value");
+  assert.deepEqual(
+    result.diagnostics.map(({ severity, code, origin, span }) => [severity, code, origin, span?.startLine]),
+    [["warning", "unresolved-doc-link", "source", 1]],
+  );
 });

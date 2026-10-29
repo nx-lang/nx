@@ -1,1 +1,12 @@
-<Counter start=3 />
+<Row
+  content={<Label text="Count: 3" /> <Button
+    label="Add one"
+    onTapped=<ActionHandler action="Button.Tapped" token="h1-1" />
+  /> <Button
+    label="Reset"
+    onTapped=<ActionHandler action="Button.Tapped" token="h1-2" />
+  /> <Button
+    label="Finish"
+    onTapped=<ActionHandler action="Button.Tapped" token="h1-3" />
+  />}
+/>

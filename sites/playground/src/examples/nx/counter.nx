@@ -1,5 +1,5 @@
-// A counter to click. Switch the pane from Output to Preview to run it: each
-// button's handler updates the component's state, and the timeline keeps every
+// A counter to click. Preview runs it automatically; Output shows its rendered value.
+// Each button's handler updates the component's state, and the timeline keeps every
 // step, so you can go back and try another branch. Edit the source while it
 // runs, and the preview keeps the count.
 

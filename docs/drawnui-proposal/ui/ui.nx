@@ -23,7 +23,7 @@ export type ScrollAxis = horizontal | vertical | both
 export type ScrollbarVisibility = auto | visible | hidden
 export type CardVariant = outlined | elevated | filled
 export type TextFormat = plain | markdown
-export type TextVariant = h1 | h2 | h3 | title | body | caption | code
+export type TextVariant = h1 | h2 | h3 | h4 | h5 | h6 | title | body | caption | code
 export type TextAlign = start | center | end | justify
 export type TextOverflow = clip | ellipsis
 
@@ -34,7 +34,7 @@ export type TrackSize =
 
 
 // ---------------------------------------------------------------------------
-// Components (§7.1–§7.12)
+// Components (§7.1–§7.13)
 // ---------------------------------------------------------------------------
 
 /// §7.1 — constraints and portable appearance accepted by every nx.ui component, and by
@@ -71,7 +71,7 @@ export abstract external component <UiCommon
 /// §7.2 — horizontal flow container. `justify` distributes only the free space left after `grow` has
 /// been applied, so a child with `grow > 0` under a `spaceBetween` parent is not double-counted.
 /// When `wrap` is true, `gap` separates both adjacent children and adjacent lines.
-export external component <HStack extends UiCommon
+export external component <Row extends UiCommon
   gap: float64 = 0
   justify: Distribution = start     /// horizontal main axis
   align: Alignment = stretch        /// vertical cross axis
@@ -79,9 +79,8 @@ export external component <HStack extends UiCommon
   content children?: Element+
 />
 
-/// §7.3 — vertical flow container. Named for its axis, following SwiftUI and Tamagui, so that `row`
-/// and `column` keep meaning grid structure in `Grid` below.
-export external component <VStack extends UiCommon
+/// §7.3 — vertical flow container, named to match A2UI, Flutter, and Jetpack Compose.
+export external component <Column extends UiCommon
   gap: float64 = 0
   justify: Distribution = start     /// vertical main axis
   align: Alignment = stretch        /// horizontal cross axis
@@ -145,9 +144,9 @@ export external component <Divider extends UiCommon
 />
 
 /// §7.10 — measured, wrapping output text. `variant` is a semantic role, not only a type ramp:
-/// h1/h2/h3 must reach the platform as real headings and `code` as a monospace code role, so a model
+/// h1 through h6 must reach the platform as real headings and `code` as a monospace code role, so a model
 /// that reaches for `fontSize` instead of `variant` silently produces a flat, unnavigable document.
-/// Null typography properties take the variant's theme value. Markdown is a host-defined safe subset
+/// Omitted colors inherit the nearest themed content foreground; other omitted typography uses the variant. Markdown is a host-defined safe subset
 /// that the host sanitizes, with raw HTML disallowed by default; under `markdown`, `variant` sets the
 /// block's baseline role and Markdown structure nests below it.
 export external component <Text extends UiCommon
@@ -185,4 +184,14 @@ export external component
   set?: string                      /// omitted means the host default icon set
   size?: float64                    /// sets both dimensions; explicit width/height wins over it
   color?: Color
+/>
+
+/// §7.13 — static scrollable sequence. Equivalent to Scroll + non-wrapping Row/Column.
+/// Items are explicit children; dynamic templates and virtualization guarantees are post-MVP.
+export external component <List extends UiCommon
+  direction: Axis = vertical
+  gap: float64 = 0
+  align: Alignment = stretch
+  scrollbar: ScrollbarVisibility = auto
+  content children?: Element+
 />

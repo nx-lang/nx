@@ -25,6 +25,8 @@ pub enum VisualizerRecord {
     Element,
     /// `ValueVisualizer`, for an alias of a primitive type.
     Value,
+    /// `FunctionVisualizer`, for an element-style function invocation.
+    Function,
 }
 
 impl VisualizerRecord {
@@ -33,6 +35,7 @@ impl VisualizerRecord {
         match self {
             VisualizerRecord::Element => "ElementVisualizer",
             VisualizerRecord::Value => "ValueVisualizer",
+            VisualizerRecord::Function => "FunctionVisualizer",
         }
     }
 }
@@ -50,7 +53,8 @@ pub struct VisualizerTarget {
     pub record: VisualizerRecord,
     /// The type `Target` binds to, spelled as the visualizer declaration's module sees it: the
     /// target itself, or its derived props record when it is a component.
-    pub target_type: Name,
+    /// None for FunctionVisualizer, which has no Target parameter.
+    pub target_type: Option<Name>,
     /// Whether the target is a component, whose `Target` is its props record.
     pub is_component: bool,
 }
@@ -69,8 +73,9 @@ pub enum VisualizerTargetError {
 ///
 /// <para>A record, an action (an inline emitted action included) or a component takes an
 /// `ElementVisualizer`, and an alias of a primitive type a `ValueVisualizer`. A generic declaration,
-/// a derived one, a union, a function, a value and an alias of any other type cannot have a
-/// visualizer in this release.</para>
+/// a derived one, a union, a paren-style function, a value and an alias of any other type cannot have a
+/// visualizer in this release. An element-style function takes a presentation-only
+/// `FunctionVisualizer`.</para>
 pub fn resolve_visualizer_target(
     module: &PreparedModule,
     target: &Name,
@@ -133,7 +138,7 @@ fn classify(
         declared_name: declared_name.clone(),
         kind_label,
         record: VisualizerRecord::Element,
-        target_type: target.clone(),
+        target_type: Some(target.clone()),
         is_component: false,
     };
     match item {
@@ -158,7 +163,7 @@ fn classify(
                 return not_allowed("it is a generic component, and generic declarations cannot have visualizers yet");
             }
             Ok(VisualizerTarget {
-                target_type: props_record_name(target.as_str()),
+                target_type: Some(props_record_name(target.as_str())),
                 is_component: true,
                 ..element("component", &component.name)
             })
@@ -173,14 +178,22 @@ fn classify(
                 declared_name: alias.name.clone(),
                 kind_label: "alias",
                 record: VisualizerRecord::Value,
-                target_type: target.clone(),
+                target_type: Some(target.clone()),
                 is_component: false,
             }),
             _ => not_allowed(
                 "it is an alias of a type that is not a primitive type, and only an alias of a primitive type can have a visualizer",
             ),
         },
-        Item::Function(_) => not_allowed("it is a function"),
+        Item::Function(function) if function.form == crate::FunctionForm::Element => Ok(VisualizerTarget {
+            origin,
+            declared_name: function.name.clone(),
+            kind_label: "element function",
+            record: VisualizerRecord::Function,
+            target_type: None,
+            is_component: false,
+        }),
+        Item::Function(_) => not_allowed("it is a paren-style function; only an element-style function (`let <Name …/>`) can have a FunctionVisualizer"),
         Item::Value(_) => not_allowed("it is a value"),
     }
 }
