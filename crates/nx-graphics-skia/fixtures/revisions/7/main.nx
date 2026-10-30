@@ -1,7 +1,7 @@
 import "@nx/graphics" as g
-let blue:g.Paint = <g.Paint.solid color=#2563eb/>
-let outline:g.Stroke = <g.Stroke paint=<g.Paint.solid color=#0f172a/> width=2/>
-let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=400 height=240/> background=<g.Paint.solid color=#ffffff/>>
+let blue:g.Paint = <g.Paint.color color=#2563eb/>
+let outline:g.Stroke = <g.Stroke paint=<g.Paint.color color=#0f172a/> width=2/>
+let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=400 height=240/> background=<g.Paint.color color=#ffffff/>>
   <g.RegularPolygon cx=55 cy=55 radius=35 pointCount=6 fill={blue}/>
   <g.Star cx=150 cy=55 outerRadius=36 innerRadius=17 pointCount=7 rotation=-90 fill={blue}/>
   <g.Arrow x1=210 y1=55 x2=285 y2=55 shaftWidth=8 headWidth=24 headLength=20 fill={blue}/>

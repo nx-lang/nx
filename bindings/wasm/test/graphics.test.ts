@@ -27,6 +27,7 @@ const config: NxGraphicsConfig = {
     path_commands: 10000,
     coordinate: 1e7,
     surface_pixels: 10000,
+    gradient_stops: 100000,
     layer_pixels: 40000,
   },
 };

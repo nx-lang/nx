@@ -17,6 +17,13 @@ try {
  const program=linkNxIrProgram(entry,{resolve:id=>modules.get(id)});
  const value=name=>evaluateFunction(program,name,[]);
  const near=(a,b)=>assert.ok(Math.abs(a-b)<=1e-5*Math.max(1,Math.abs(b)),`${a} vs ${b}`);
+ const sharedPaint=value("gradientPaint");
+ assert.deepEqual(value("gradientRect").fill,sharedPaint);
+ assert.deepEqual(value("gradientLine").stroke.paint,sharedPaint);
+ assert.deepEqual(value("gradientText").fill,sharedPaint);
+ assert.deepEqual(value("gradientBackground").background,value("radialPaint"));
+ assert.equal(value("radialPaint").$type,"Paint.radialGradient");
+ const gradient=value("gradientShape");assert.equal(gradient.fill.$type,"Paint.linearGradient");assert.deepEqual(gradient.fill,gradient.stroke.paint);assert.equal(gradient.fill.stops.length,2);
  const polygon=value("polygon");assert.equal(polygon.$type,"Polygon");assert.equal(polygon.points.length,3);near(polygon.points[1].x,-5);near(polygon.points[1].y,Math.sqrt(75));
  for(const [name,count] of [["star",5],["revisedStar",7]]) {const s=value(name);assert.equal(s.points.length,count*2);s.points.forEach((p,i)=>near(Math.hypot(p.x,p.y),i%2?5:10));near(s.points[0].x,0);near(s.points[0].y,-10);}
  const large=value("largeRotation").points[0];near(large.x,10*Math.cos((1e100%360)*Math.PI/180));near(large.y,10*Math.sin((1e100%360)*Math.PI/180));near(value("periodicRotation").points[0].y,10);assert.equal((value("periodicArc").data.match(/ A /g)||[]).length,2);

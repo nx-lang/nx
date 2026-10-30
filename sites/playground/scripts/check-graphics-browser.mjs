@@ -60,6 +60,78 @@ try {
   });
   await page.goto(base + "graphics");
   const canvas = page.locator("canvas.drawing-canvas[data-revision]");
+  const gradientCorpus = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/sampling.json", import.meta.url), "utf8"));
+  const gradientFailures = await page.evaluate(async (cases) => {
+    const { canvasPaint } = await import("/play/src/graphics/paint.ts");
+    const failures = [];
+    for (const test of cases) {
+      const surface = new OffscreenCanvas(101,101);
+      const ctx = surface.getContext("2d", { colorSpace: "srgb" });
+      ctx.fillStyle = canvasPaint(ctx, test.paint);
+      ctx.fillRect(0,0,101,101);
+      for (const sample of test.samples) {
+        const rgba = ctx.getImageData(sample.x,sample.y,1,1).data;
+        const actual = [rgba[0]*rgba[3]/65025,rgba[1]*rgba[3]/65025,rgba[2]*rgba[3]/65025,rgba[3]/255];
+        if (actual.some((x,i) => Math.abs(x-sample.expected[i]) > 2/255)) failures.push({name:test.name,actual,sample});
+      }
+    }
+    const { hitTest } = await import("/play/src/graphics/hit-test.ts");
+    const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
+    const bounds = {rect:{x0:0,y0:0,x1:100,y1:100},conservative:true};
+    const node = {id:"shape",parent:null,order:0,identity:{module:"test",version:"test",declaration:"Rect"},
+      provenance:null,accessibility:null,transform:[1,0,0,1,0,0],opacity:1,clip:null,clip_evenodd:false,
+      path:[{MoveTo:{x:0,y:0}},{LineTo:{x:100,y:0}},{LineTo:{x:100,y:100}},{LineTo:{x:0,y:100}},"ClosePath"],
+      evenodd:false,fill:cases[0].paint,stroke:null,text:null,geometry:bounds,painted:bounds,visible:bounds,children:[]};
+    const scene={profile:"graphics-core-v3",revision:"test",config:{width:100,height:100,scale:1},root:node};
+    if(hitTest(scene,99,50)?.id!=="shape") failures.push("transparent interval selection");
+    const group={...node,id:"group",path:null,fill:null,opacity:.5,children:[node],clip:[{MoveTo:{x:0,y:0}},{LineTo:{x:60,y:0}},{LineTo:{x:60,y:100}},{LineTo:{x:0,y:100}},"ClosePath"]};
+    const frame=renderCanvas({...scene,root:group}); const ctx=frame.getContext("2d");
+    const inside=ctx.getImageData(25,50,1,1).data,outside=ctx.getImageData(75,50,1,1).data;
+    if(Math.abs(inside[3]/255-.375)>2/255 || outside[3]!==0) failures.push({compositing:[...inside],outside:[...outside]});
+    node.fill={...node.fill,stops:node.fill.stops.map(s=>({...s,color:[s.color[0],s.color[1],s.color[2],0]}))};
+    if(hitTest(scene,50,50)!==undefined) failures.push("all-transparent paint hit");
+    const { measureBrowserText } = await import("/play/src/graphics/browser-font.ts");
+    for(const size of [16,32]) for(const anchor of [0,.5,1]) {
+      const measurement=await measureBrowserText({text:"Gradient",family:"Fixture",size,weight:400,italic:false});
+      const textNode={...node,id:"text",path:null,transform:[1.25,0,0,.8,10,5],fill:cases[0].paint,
+        text:{...measurement,x:55-measurement.run.advance*anchor,y:70}};
+      const cfg={...scene.config,width:240,height:110};
+      const frame=renderCanvas({...scene,config:cfg,root:textNode});
+      const solid=renderCanvas({...scene,config:cfg,root:{...textNode,fill:{kind:"color",color:[1,0,0,1]}}});
+      const actual=frame.getContext("2d").getImageData(0,0,240,110).data;
+      const reference=solid.getContext("2d").getImageData(0,0,240,110).data;
+      let checked=0;
+      for(let y=0;y<110;y++) for(let x=0;x<240;x++) {
+        const i=(y*240+x)*4;
+        if(reference[i+3]<250) continue;
+        const localX=(x+.5-10)/1.25;
+        const expected=Math.max(0,Math.min(1,1-(localX-.5)/100));
+        if(Math.abs(actual[i+3]/255-expected*reference[i+3]/255)>2/255) { if(failures.length<10) failures.push({textSize:size,anchor,x,y,alpha:actual[i+3],expected}); }
+        checked++;
+      }
+      if(!checked) failures.push({emptyText:size,anchor});
+    }
+    return failures;
+  }, gradientCorpus);
+  assert.deepEqual(gradientFailures, []);
+  const gradientScenes = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/scenes.json", import.meta.url), "utf8"));
+  const sceneFailures = await page.evaluate(async cases => {
+    const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
+    const failures = [];
+    for (const fixture of cases) {
+      const ctx = renderCanvas(fixture.prepared).getContext("2d");
+      for (const sample of fixture.samples) {
+        const rgba = ctx.getImageData(sample.x,sample.y,1,1).data;
+        const actual = [rgba[0]*rgba[3]/65025,rgba[1]*rgba[3]/65025,rgba[2]*rgba[3]/65025,rgba[3]/255];
+        if (actual.some((v,i) => Math.abs(v-sample.expected[i])>2/255)) failures.push({name:fixture.name,actual,sample});
+      }
+    }
+    return failures;
+  },gradientScenes);
+  assert.deepEqual(sceneFailures, []);
+
+  console.log("Canvas gradient interpolation matches the shared native analytic corpus.");
+
   await canvas.waitFor({ timeout: 60_000 });
   assert.equal(
     await page
@@ -319,6 +391,18 @@ try {
       return canvas !== null && canvas.dataset.revision !== old;
     }, old);
   }
+  const gradientStops = '<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff00/>';
+  const linear = `<g.Paint.linearGradient x1=0 y1=0 x2=100 y2=0 stops={${gradientStops}}/>`;
+  const radial = `<g.Paint.radialGradient cx=50 cy=50 radius=45 stops={${gradientStops}}/>`;
+  await draw(`<g.Rect width=100 height=100 fill=${linear}/><g.Circle cx=50 cy=50 r=30 fill=${radial}/><g.Line x1=10 y1=90 x2=90 y2=90 stroke=<g.Stroke paint=${linear} width=3/>/><g.Text x=10 y=20 fontFamily="Fixture" fill=${linear}>Gradient</g.Text>`);
+  const gradientPixels = await canvas.evaluate(c => {
+    const ctx=c.getContext("2d"); const y=Math.round(c.height*.8);
+    return [.2,.8].map(f => [...ctx.getImageData(Math.round(c.width*f),y,1,1).data]);
+  });
+  assert.ok(gradientPixels[0][0] > 245 && gradientPixels[0][3] > gradientPixels[1][3]);
+  await edit(prefix + `<g.Rect width=100 height=100 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0 y2=0 stops={${gradientStops}}/>/></g.Drawing>`);
+  await page.getByRole("alert").filter({hasText:"Drawing could not be rendered"}).waitFor();
+  assert.equal(await canvas.count(),0);
   await edit(prefix + '<g.Path data="M0 0 L"/></g.Drawing>');
   await page
     .getByRole("alert")
@@ -334,7 +418,7 @@ try {
   assert.equal(dialogs, 0);
   // Clip holes use their own rule, independently of the shape's fill rule and transforms.
   await draw(
-    '<g.Rect width=100 height=100 fill=<g.Paint.solid color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
+    '<g.Rect width=100 height=100 fill=<g.Paint.color color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
   );
   const clip = await canvas.evaluate((canvas) => {
     const ctx = canvas.getContext("2d");
@@ -678,7 +762,7 @@ try {
   await canvas.waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: "Source", exact: true }).click();
   await draw(
-    '<g.Rect x=70 y=5 width=20 height=20 fill=<g.Paint.solid color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.solid color=#000000/> width=2/>/>',
+    '<g.Rect x=70 y=5 width=20 height=20 fill=<g.Paint.color color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.color color=#000000/> width=2/>/>',
   );
   await canvas.evaluate((canvas) => {
     const box = canvas.getBoundingClientRect();

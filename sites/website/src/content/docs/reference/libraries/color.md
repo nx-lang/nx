@@ -115,6 +115,6 @@ Editable literals have swatches and an alpha-aware picker. Computed expressions 
 opening the picker does not change precision or rewrite source. Edits preserve surrounding source
 and participate in normal undo.
 
-Graphics profile graphics-core-v2 consumes this same Color. Replace `color="#2563eb"` with
+Graphics profile graphics-core-v3 consumes this same Color. Replace `color="#2563eb"` with
 `color=#2563eb`, use constructors for computed channels, and call `toCss` for string host APIs.
 Color-only applications never need to import graphics.

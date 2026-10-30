@@ -4,7 +4,7 @@ description: 'Unstable standalone graphics authoring, direct Skia rendering and 
 ---
 
 `@nx/graphics` is unstable: declarations may change incompatibly in any NX release. The
-`graphics-core-v2` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
+`graphics-core-v3` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
 will not be updated for graphics; `nxlang run` and SDK APIs that still use it are not graphics
 acceptance paths until the separate interpreter-retirement change lands. Use the preview below
 or emit/link IR directly. The TypeScript runtime evaluates authoring helpers; direct Skia painting
@@ -14,14 +14,14 @@ is provided by the optional Rust adapter.
 import "@nx/graphics" as g
 let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>
   <g.Star cx=50 cy=50 outerRadius=40 innerRadius=20 pointCount=5
-          fill=<g.Paint.solid color=#2563eb/>/>
+          fill=<g.Paint.color color=#2563eb/>/>
 </g.Drawing>
 ```
 
 Drawing, Group, Rect, Circle, Ellipse, Line, Polyline, Polygon, Path and Text have no UI/layout
 library dependency. The host supplies viewport dimensions and device scale. Drawing supports
 viewBox, contain/cover/fill, start/center/end alignment, background, opacity, accessibility and
-children. Shapes support solid/none fills, centered strokes with caps/joins/dashes, local affine
+children. Shapes support solid/none and linear/radial gradient fills, centered strokes with caps/joins/dashes, local affine
 transforms, SVG path clips and independent nonzero/evenodd winding rules. Child order is paint
 order. Opacity isolates the complete subtree. Zero-width strokes paint nothing; odd dash lists
 repeat, and all-zero lists are solid. SVG path commands M/L/H/V/C/S/Q/T/A/Z accept absolute and
@@ -35,7 +35,7 @@ to half the corresponding dimension. Clip paths are path-data strings in the nod
 Text is a shaped single-line run at an alphabetic baseline, with an explicit supplied font family,
 positive fontSize (default 16), exact host fontWeight/fontStyle selection (default 400/normal),
 and start/middle/end textAnchor. Stroke text, line breaks, letter spacing, alternate baselines,
-rich text, images, gradients, shadows and filters are unsupported and diagnosed. There is no
+rich text, images, shadows and filters are unsupported and diagnosed. There is no
 implicit system-font fallback. The fixture font covers Latin, combining marks and Greek; unsupported
 glyphs fail explicitly. Host registrations select exact family/weight/style combinations.
 
@@ -47,6 +47,61 @@ clipping and accessibility. `Shape` extends it with fill/stroke properties for g
 `AxisAlignment = start | center | end` positions content along one viewport axis, and
 `ContentAlignment` combines its `x` and `y` values. `TextAnchor` remains a separate text concept.
 `pointCount` counts RegularPolygon vertices or Star outer tips; a five-point star emits ten vertices.
+
+## Gradient paints
+
+Paint accepts `linearGradient` endpoints (`x1`, `y1`, `x2`, `y2`) or a centered `radialGradient`
+(`cx`, `cy`, `radius`). Both require an ordered sequence of at least two GradientStop values:
+
+```nx
+import "@nx/graphics"
+
+let ramp(): Paint =
+  <Paint.linearGradient
+    x1=0
+    y1=0
+    x2=100
+    y2=0
+    stops={
+      <GradientStop offset=0 color=#ff0000 />
+      <GradientStop offset=1 color=#0000ff00 />
+    }
+  />
+
+let root() =
+  <Drawing viewBox=<ViewBox x=0 y=0 width=100 height=100 />>
+    <Rect width=100 height=100 fill={ramp()} />
+  </Drawing>
+```
+
+Coordinates are element-local user units and follow the element's transforms. Reusing a paint
+preserves those coordinates; it does not automatically fit each shape's bounds. Drawing backgrounds
+use viewBox coordinates while covering the whole viewport. Gradients work in shape fills, strokes,
+text fills, backgrounds and helper Paint parameters. Stroke gradients follow local position, not
+path length. Nonuniform transforms stretch radial gradients into ellipses.
+
+Offsets must be finite, nondecreasing and in 0..1. Equal offsets create sharp transitions, with
+the last stop winning at the exact offset. Missing endpoint stops extend their nearest colors;
+positions beyond the endpoints clamp. Linear endpoints must differ at backend precision, and radial
+radius must be positive. Gradient vector length and radius must be strictly greater than 1/32768 local
+units with a float32 rounding margin at backend precision; for text larger than 1000 units, multiply this minimum by fontSize/1000. Invalid colors, geometry and stops fail before painting, even in hidden
+nodes. The positive integer `gradient_stops` host limit defaults to 100000 total supplied stops per
+scene; every paint occurrence counts, including reused values.
+
+Interpolation is linear in **premultiplied encoded sRGB**, including alpha. A fade from opaque red
+to transparent blue remains red as it fades. This differs from `@nx/color.mix`'s default Oklab space
+and `composite`'s linear-sRGB space. Skia uses explicit interpolation settings; Canvas uses bounded
+intermediate stops to reproduce premultiplied interpolation within the graphics fixture tolerance.
+Native and browser interior premultiplied channels are checked within 2/255, excluding raster edges.
+
+The inspector exposes paint coordinates and original stops in local units. Selection follows fill
+and stroke geometry, so transparent portions of a partially visible gradient remain selectable.
+Fully transparent paints have no painted bounds or hit targets, but their nodes remain available
+in the element dropdown. Bounds for partially transparent gradients are conservative.
+
+See `examples/graphics/gradients.nx` for an illustration, reusable paint and transparent chart fill.
+Repeat/reflect, bounding-box units, focal radial controls, separate gradient transforms, selectable
+interpolation spaces, sweep/mesh gradients and a dedicated gradient editor are deferred.
 
 ## Ordinary NX shape helpers
 
@@ -99,7 +154,8 @@ entry function. `--fonts fonts.json` accepts an array of `{family, weight, itali
 paths resolve relative to that manifest. Without it, the checked-in DejaVu Sans fixture is registered
 as Fixture/400/normal. Its bytes and license are included. `--limits limits.json` overrides the host's
 node, depth, path-command, coordinate, surface-pixel and layer-pixel limits. Keys use snake_case:
-`nodes`, `depth`, `path_commands`, `coordinate`, `surface_pixels` and `layer_pixels`. Unknown keys
+`nodes`, `depth`, `path_commands`, `coordinate`, `surface_pixels`, `layer_pixels` and
+`gradient_stops`. Unknown keys
 are rejected. `coordinate` may tighten the supported maximum of 10,000,000; values above it are rejected.
 Limit validation precedes viewport validation; diagnostics name the invalid field or viewport constraint.
 The CLI rejects unknown/duplicate options and accepts both `--width 640` and `--width=640`.
@@ -154,7 +210,7 @@ current image and show diagnostics.
 The playground bundles `Fixture` (DejaVu Sans, weight 400, normal) and its license. Missing glyphs
 or other face selections produce errors; no system font fallback is intentional. Text measurement
 and painting use the same supplied bytes and Canvas typography settings. Browser text metrics and
-rasterization can differ from the native Skia preview; `browser-canvas2d-v1` identifies this
+rasterization can differ from the native Skia preview; `browser-canvas2d-v2` identifies this
 configuration. Native Skia remains the PNG/export reference.
 
 ## Verification and optional authoring trials

@@ -1,0 +1,74 @@
+import "@nx/graphics"
+
+// Reusing a paint retains these local coordinates. Functions can parameterize endpoints.
+let sunset(): Paint =
+  <Paint.linearGradient
+    x1=0
+    y1=0
+    x2=320
+    y2=160
+    stops={
+      <GradientStop offset=0 color=#0f172a />
+      <GradientStop offset=0.55 color=#7c3aed />
+      <GradientStop offset=1 color=#fb7185 />
+    }
+  />
+
+let chartFade(): Paint =
+  <Paint.linearGradient
+    x1=0
+    y1=160
+    x2=0
+    y2=240
+    stops={
+      <GradientStop offset=0 color=#38bdf8c0 />
+      <GradientStop offset=1 color=#38bdf800 />
+    }
+  />
+
+export let root() =
+  <Drawing
+    viewBox=<ViewBox x=0 y=0 width=320 height=260 />
+    background=<Paint.color color=#0f172a />
+  >
+    <Rect width=320 height=150 fill={sunset()} />
+    <Circle
+      cx=245
+      cy=50
+      r=32
+      fill=<Paint.radialGradient
+        cx=240
+        cy=45
+        radius=35
+        stops={
+          <GradientStop offset=0 color=#fff7ed />
+          <GradientStop offset=1 color=#fdba7400 />
+        }
+      />
+    />
+    <Star
+      cx=60
+      cy=70
+      outerRadius=35
+      innerRadius=17
+      pointCount=5
+      fill={sunset()}
+      stroke=<Stroke paint=<Paint.color color=#ffffff /> width=2 />
+    />
+    <Text
+      x=15
+      y=140
+      fontFamily="Fixture"
+      fontSize=18
+      fill=<Paint.color color=#ffffff />
+    >Gradient paints</Text>
+    <Path
+      data="M20 225 L70 200 L120 210 L170 170 L220 185 L300 160 L300 240 L20 240 Z"
+      fill={chartFade()}
+    />
+    <Path
+      data="M20 225 L70 200 L120 210 L170 170 L220 185 L300 160"
+      fill=none
+      stroke=<Stroke paint=<Paint.color color=#38bdf8 /> width=2 />
+    />
+  </Drawing>

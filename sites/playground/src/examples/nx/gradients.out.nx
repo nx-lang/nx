@@ -1,0 +1,132 @@
+<Drawing
+  background=<Paint.color
+    color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+  />
+  children={<Rect
+    clipRule=nonzero
+    fill=<Paint.linearGradient
+      stops={<GradientStop
+        color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+        offset=0.0
+      /> <GradientStop
+        color=<Color a=1.0 b=0.92941177 g=0.22745098 r=0.4862745 />
+        offset=0.55
+      /> <GradientStop
+        color=<Color a=1.0 b=0.52156866 g=0.44313726 r=0.9843137 />
+        offset=1.0
+      />}
+      x1=0.0
+      x2=320.0
+      y1=0.0
+      y2=160.0
+    />
+    fillRule=nonzero
+    height=150.0
+    opacity=1.0
+    rx=0.0
+    width=320.0
+    x=0.0
+    y=0.0
+  /> <Circle
+    clipRule=nonzero
+    cx=245.0
+    cy=50.0
+    fill=<Paint.radialGradient
+      cx=240.0
+      cy=45.0
+      radius=35.0
+      stops={<GradientStop
+        color=<Color a=1.0 b=0.92941177 g=0.96862745 r=1.0 />
+        offset=0.0
+      /> <GradientStop
+        color=<Color a=0.0 b=0.45490196 g=0.7294118 r=0.99215686 />
+        offset=1.0
+      />}
+    />
+    fillRule=nonzero
+    opacity=1.0
+    r=32.0
+  /> <Polygon
+    clipRule=nonzero
+    fill=<Paint.linearGradient
+      stops={<GradientStop
+        color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+        offset=0.0
+      /> <GradientStop
+        color=<Color a=1.0 b=0.92941177 g=0.22745098 r=0.4862745 />
+        offset=0.55
+      /> <GradientStop
+        color=<Color a=1.0 b=0.52156866 g=0.44313726 r=0.9843137 />
+        offset=1.0
+      />}
+      x1=0.0
+      x2=320.0
+      y1=0.0
+      y2=160.0
+    />
+    fillRule=nonzero
+    opacity=1.0
+    points={<Point x=95.0 y=70.0 /> <Point x=73.7532889043741 y=79.99234928897204 /> <Point x=70.81559480312316 y=103.28697807033038 /> <Point x=54.7467110956259 y=86.16796077701761 /> <Point x=31.684405196876842 y=90.57248383023656 /> <Point x=43.0 y=70.0 /> <Point x=31.68440519687684 y=49.42751616976344 /> <Point x=54.74671109562589 y=53.83203922298239 /> <Point x=70.81559480312315 y=36.71302192966962 /> <Point x=73.7532889043741 y=60.00765071102795 />}
+    stroke=<Stroke
+      dashOffset=0.0
+      lineCap=butt
+      lineJoin=miter
+      miterLimit=4.0
+      paint=<Paint.color
+        color=<Color a=1.0 b=1.0 g=1.0 r=1.0 />
+      />
+      width=2.0
+    />
+  /> <Text
+    clipRule=nonzero
+    fill=<Paint.color
+      color=<Color a=1.0 b=1.0 g=1.0 r=1.0 />
+    />
+    fontFamily="Fixture"
+    fontSize=18.0
+    fontStyle=normal
+    fontWeight=400.0
+    opacity=1.0
+    text="Gradient paints"
+    textAnchor=start
+    x=15.0
+    y=140.0
+  /> <Path
+    clipRule=nonzero
+    data="M20 225 L70 200 L120 210 L170 170 L220 185 L300 160 L300 240 L20 240 Z"
+    fill=<Paint.linearGradient
+      stops={<GradientStop
+        color=<Color a=0.7529412 b=0.972549 g=0.7411765 r=0.21960784 />
+        offset=0.0
+      /> <GradientStop
+        color=<Color a=0.0 b=0.972549 g=0.7411765 r=0.21960784 />
+        offset=1.0
+      />}
+      x1=0.0
+      x2=0.0
+      y1=160.0
+      y2=240.0
+    />
+    fillRule=nonzero
+    opacity=1.0
+  /> <Path
+    clipRule=nonzero
+    data="M20 225 L70 200 L120 210 L170 170 L220 185 L300 160"
+    fill=none
+    fillRule=nonzero
+    opacity=1.0
+    stroke=<Stroke
+      dashOffset=0.0
+      lineCap=butt
+      lineJoin=miter
+      miterLimit=4.0
+      paint=<Paint.color
+        color=<Color a=1.0 b=0.972549 g=0.7411765 r=0.21960784 />
+      />
+      width=2.0
+    />
+  />}
+  fit=contain
+  opacity=1.0
+  viewBox=<ViewBox height=260.0 width=320.0 x=0.0 y=0.0 />
+/>

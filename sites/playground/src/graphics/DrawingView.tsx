@@ -128,6 +128,9 @@ export function DrawingView({
                   : JSON.stringify(
                       {
                         identity: chosen.identity,
+                        paintSpace: "element-local user units",
+                        fill: chosen.fill,
+                        stroke: chosen.stroke,
                         geometry: chosen.geometry,
                         painted: chosen.painted,
                         visible: chosen.visible,

@@ -36,17 +36,42 @@ between every record field, consecutive imports, or each item in a simple sequen
 lines immediately inside braces and avoid multiple consecutive blank lines.
 
 ```nx
-import "@nx/color" as c
+import "@nx/color" as color
 
 type Theme = {
-  accent: c.Color
-  surface: c.Color
+  accent: color.Color
+  surface: color.Color
 }
 
 let theme = <Theme accent=#5b6ef5 surface=#ffffff />
 
 let root() = { theme }
 ```
+
+## Imports and aliases
+
+Use unqualified imports for a file's main vocabulary. For example, a drawing-focused file can
+import `@nx/graphics` without an alias so its elements read as `Drawing`, `Circle`, and `Paint`.
+Use namespace aliases for supporting libraries when the prefix explains an expression's origin,
+such as `math.sqrt` or `color.mix`.
+
+```nx
+import "@nx/graphics"
+import "@nx/math" as math
+
+let root() =
+  <Drawing viewBox=<ViewBox x=0 y=0 width=100 height=100 />>
+    <Circle cx=50 cy=50 r={math.sqrt(1600)} />
+  </Drawing>
+```
+
+- Use namespace aliases to disambiguate overlapping names. When several libraries contribute
+  equally, prefer descriptive aliases that distinguish their roles.
+- Prefer meaningful aliases such as `math`, `color`, or `graphics` over single-letter aliases
+  such as `m`, `c`, or `g`.
+- Use selective imports when only a few declarations are needed: `import { Color } from "@nx/color"`.
+- Keep the choice consistent within a file. Qualify names when the prefix adds useful context;
+  omit it when the file already establishes the domain.
 
 ## Spaces and punctuation
 
@@ -114,8 +139,16 @@ type Wrapper = | only
 
 ## Elements
 
-Keep short elements on one line. For a long opening tag, put each attribute on its own line,
-indented by 2 spaces, with `>` or `/>` on a separate line aligned with the opening `<`.
+Keep short elements on one line. Once an opening tag needs multiple lines, including because an
+attribute contains a multiline value, put each attribute on its own line, indented by 2 spaces.
+Put `>` or `/>` on a separate line aligned with the opening `<`. For an element used as a
+multiline declaration initializer, start the element on the line after `=`, indented by 2 spaces.
+
+Keep an attribute's opening `{` beside its `=`, indent its value by another 2 spaces, and put the
+closing `}` on its own line aligned with the attribute. Short elements inside that value can stay
+on one line. For a nested element attribute value, indent its attributes relative to the containing
+attribute line rather than aligning under its distant opening `<`.
+
 Indent child elements by 2 spaces and align closing tags with their opening tags.
 
 ```nx
@@ -130,6 +163,22 @@ type Panel = {
   foreground="#111827"
   background="#ffffff"
 />
+```
+
+```nx
+import "@nx/graphics"
+
+let chartFade(): Paint =
+  <Paint.linearGradient
+    x1=0
+    y1=160
+    x2=0
+    y2=240
+    stops={
+      <GradientStop offset=0 color=#38bdf8c0 />
+      <GradientStop offset=1 color=#38bdf800 />
+    }
+  />
 ```
 
 Preserve meaningful whitespace in textual content. Do not reflow prose, strings, or mixed

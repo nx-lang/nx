@@ -1,11 +1,15 @@
+import { canvasPaint } from "./paint.ts";
 import { configureText, TEXT_REFERENCE_SIZE } from "./browser-font.ts";
-import { color, flattenNodes, pathData } from "./paths.ts";
+import { flattenNodes, pathData } from "./paths.ts";
 import type { GraphicsNode, GraphicsScene } from "./protocol.ts";
 /** Paint only prepared data. The caller publishes the completed frame, never a partial canvas. */
 export function renderCanvas(
   scene: GraphicsScene,
   selected: readonly string[] = [],
 ): HTMLCanvasElement {
+  if (scene.profile !== "graphics-core-v3") {
+    throw new Error("Unsupported graphics profile.");
+  }
   const frame = document.createElement("canvas");
   frame.width = Math.ceil(scene.config.width * scene.config.scale);
   frame.height = Math.ceil(scene.config.height * scene.config.scale);
@@ -17,12 +21,12 @@ export function renderCanvas(
     if (node.path !== null) {
       const path = new Path2D(pathData(node.path));
       if (node.fill !== null) {
-        ctx.fillStyle = color(node.fill);
+        ctx.fillStyle = canvasPaint(ctx, node.fill);
         ctx.fill(path, node.evenodd ? "evenodd" : "nonzero");
       }
       if (node.stroke !== null && node.stroke.width > 0) {
         const stroke = node.stroke;
-        ctx.strokeStyle = color(stroke.color);
+        ctx.strokeStyle = canvasPaint(ctx, stroke.paint);
         ctx.lineWidth = stroke.width;
         ctx.lineCap = stroke.cap;
         ctx.lineJoin = stroke.join;
@@ -42,10 +46,11 @@ export function renderCanvas(
           "Drawing font metrics changed between preparation and painting. Retry drawing.",
         );
       }
-      ctx.fillStyle = color(node.fill);
       ctx.save();
       ctx.translate(text.x, text.y);
       ctx.scale(ratio, ratio);
+      // Paint coordinates remain element-local despite reference-font normalization.
+      ctx.fillStyle = canvasPaint(ctx, node.fill, text.x, text.y, ratio);
       ctx.fillText(text.request.text, 0, 0);
       ctx.restore();
     }

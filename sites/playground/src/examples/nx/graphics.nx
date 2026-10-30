@@ -1,14 +1,14 @@
 import "@nx/graphics"
 
-let blue: Paint = <Paint.solid color=#2563eb/>
+let blue: Paint = <Paint.color color=#2563eb/>
 let outline: Stroke = <Stroke
-  paint=<Paint.solid color=#0f172a/>
+  paint=<Paint.color color=#0f172a/>
   width=2
 />
 
 <Drawing
   viewBox=<ViewBox x=0 y=0 width=400 height=240/>
-  background=<Paint.solid color=#ffffff/>
+  background=<Paint.color color=#ffffff/>
 >
   <RegularPolygon
     cx=55 cy=55

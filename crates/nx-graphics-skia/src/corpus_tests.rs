@@ -51,11 +51,11 @@ fn read_svg(node: roxmltree::Node<'_, '_>, path: &str, ids: &mut Identities) -> 
         v["fill"] = if color == "none" {
             json!("none")
         } else {
-            json!({"$type":"Paint.solid","color":nx_value::color::parse(color).unwrap()})
+            json!({"$type":"Paint.color","color":nx_value::color::parse(color).unwrap()})
         };
     }
     if let Some(color) = node.attribute("stroke") {
-        v["stroke"] = json!({"paint":{"$type":"Paint.solid","color":nx_value::color::parse(color).unwrap()},"width":number("stroke-width",1.0)});
+        v["stroke"] = json!({"paint":{"$type":"Paint.color","color":nx_value::color::parse(color).unwrap()},"width":number("stroke-width",1.0)});
     }
     if node.attribute("opacity").is_some() {
         v["opacity"] = json!(number("opacity", 1.0));
@@ -184,4 +184,126 @@ fn small_text_ink_scales_through_the_viewbox_and_local_transform() {
     }
     assert!(render_png(&small, &fonts).is_ok());
     assert!(render_png(&large, &fonts).is_ok());
+}
+
+#[test]
+fn shared_gradient_scenes_cover_placement_transforms_strokes_and_compositing() {
+    let file = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/gradients/scenes.json"
+    );
+    let mut cases: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    let update = std::env::var_os("NX_UPDATE_GRADIENT_SCENES").is_some();
+    fn identities(value: &Value, path: &str, ids: &mut Identities) {
+        ids.0
+            .insert(path.into(), value["$type"].as_str().unwrap().into());
+        if let Some(children) = value["children"].as_array() {
+            for (i, child) in children.iter().enumerate() {
+                identities(child, &format!("{path}/children/{i}"), ids);
+            }
+        }
+    }
+    for case in cases.as_array_mut().unwrap() {
+        let mut ids = Identities(BTreeMap::new());
+        identities(&case["value"], "", &mut ids);
+        let mut fonts = Fonts::fixture().unwrap();
+        let scene = nx_graphics::prepare(
+            &case["value"],
+            &ids,
+            &mut fonts,
+            Config {
+                width: 100.0,
+                height: 100.0,
+                graphics_version: "test".into(),
+                ..Config::default()
+            },
+        )
+        .unwrap();
+        let prepared = serde_json::to_value(&scene).unwrap();
+        if update {
+            case["prepared"] = prepared;
+        } else {
+            assert_eq!(case["prepared"], prepared, "{}", case["name"]);
+        }
+        let info = sk::ImageInfo::new(
+            (100, 100),
+            sk::ColorType::RGBA8888,
+            sk::AlphaType::Premul,
+            sk::ColorSpace::new_srgb(),
+        );
+        let mut surface = sk::surfaces::raster(&info, None, None).unwrap();
+        surface.canvas().clear(sk::Color::TRANSPARENT);
+        scene
+            .draw(&mut SkiaDestination::new(surface.canvas(), &fonts))
+            .unwrap();
+        let pixel_info = sk::ImageInfo::new(
+            (1, 1),
+            sk::ColorType::RGBA8888,
+            sk::AlphaType::Premul,
+            sk::ColorSpace::new_srgb(),
+        );
+        for sample in case["samples"].as_array().unwrap() {
+            let mut actual = [0u8; 4];
+            assert!(surface.canvas().read_pixels(
+                &pixel_info,
+                &mut actual,
+                4,
+                (
+                    sample["x"].as_i64().unwrap() as i32,
+                    sample["y"].as_i64().unwrap() as i32
+                )
+            ));
+            for i in 0..4 {
+                assert!(
+                    (actual[i] as f64 / 255.0 - sample["expected"][i].as_f64().unwrap()).abs()
+                        <= 2.0 / 255.0,
+                    "{}: {actual:?} expected {}",
+                    case["name"],
+                    sample["expected"]
+                );
+            }
+        }
+    }
+    if update {
+        std::fs::write(file, serde_json::to_string_pretty(&cases).unwrap() + "\n").unwrap();
+    }
+}
+
+#[test]
+fn pinned_skia_collapses_tiny_local_gradients_even_when_enlarged() {
+    // Probe the upstream behavior motivating neutral preparation's minimum span guard.
+    // These deliberately bypass preparation; magnification does not prevent Skia's collapse.
+    let stops = json!([
+        {"offset":0,"color":[1,0,0,1]},
+        {"offset":1,"color":[0,0,1,1]}
+    ]);
+    for value in [
+        json!({"kind":"linearGradient","x1":0,"y1":0,"x2":1.0/32768.0,"y2":0,"stops":stops}),
+        json!({"kind":"radialGradient","cx":0,"cy":0,"radius":1.0/32768.0,"stops":stops}),
+        json!({"kind":"linearGradient","x1":0,"y1":0,"x2":0.00002,"y2":0,"stops":stops}),
+        json!({"kind":"radialGradient","cx":0,"cy":0,"radius":0.00002,"stops":stops}),
+    ] {
+        let gradient: nx_graphics::Paint = serde_json::from_value(value).unwrap();
+        let info = sk::ImageInfo::new(
+            (40, 40),
+            sk::ColorType::RGBA8888,
+            sk::AlphaType::Premul,
+            sk::ColorSpace::new_srgb(),
+        );
+        let mut surface = sk::surfaces::raster(&info, None, None).unwrap();
+        surface.canvas().clear(sk::Color::TRANSPARENT);
+        surface.canvas().scale((480000.0, 480000.0));
+        surface
+            .canvas()
+            .draw_rect(sk::Rect::from_wh(0.001, 0.001), &paint(&gradient).unwrap());
+        let info = sk::ImageInfo::new(
+            (1, 1),
+            sk::ColorType::RGBA8888,
+            sk::AlphaType::Premul,
+            sk::ColorSpace::new_srgb(),
+        );
+        let mut pixel = [0u8; 4];
+        assert!(surface.canvas().read_pixels(&info, &mut pixel, 4, (2, 2)));
+        assert_eq!(pixel, [0, 0, 255, 255]);
+    }
 }

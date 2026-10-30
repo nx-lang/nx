@@ -1,11 +1,13 @@
 //! Backend-neutral preparation and direct frame painting for the unstable graphics-core profile.
 //! Hosts supply declaration identities separately from generic NX value serialization.
+mod paint;
 use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape};
+pub use paint::{GradientStop, Paint};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub const PROFILE: &str = "graphics-core-v2";
+pub const PROFILE: &str = "graphics-core-v3";
 pub const MODULE: &str = "@nx/graphics/graphics.nx";
 pub type Result<T> = std::result::Result<T, Diagnostic>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,7 @@ pub trait DeclarationResolver {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
+    pub gradient_stops: usize,
     pub nodes: usize,
     pub depth: usize,
     pub path_commands: usize,
@@ -61,6 +64,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            gradient_stops: 100000,
             nodes: 10000,
             depth: 64,
             path_commands: 100000,
@@ -127,7 +131,7 @@ impl Bounds {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stroke {
-    pub color: [f32; 4],
+    pub paint: Paint,
     pub width: f64,
     pub cap: String,
     pub join: String,
@@ -199,7 +203,7 @@ pub struct Node {
     pub opacity: f64,
     pub path: Option<BezPath>,
     pub evenodd: bool,
-    pub fill: Option<[f32; 4]>,
+    pub fill: Option<Paint>,
     pub stroke: Option<Stroke>,
     pub text: Option<Text>,
     pub geometry: Bounds,
@@ -229,6 +233,9 @@ impl Scene {
         find(&self.root, id).ok_or_else(|| error(id, "unknown element"))
     }
     pub fn draw(&self, destination: &mut dyn Destination) -> Result<()> {
+        if self.profile != PROFILE {
+            return Err(error("", "unsupported graphics profile"));
+        }
         destination.begin()?;
         let result = draw_node(&self.root, destination);
         let restored = destination.end();
@@ -251,10 +258,10 @@ pub trait Destination {
         &mut self,
         path: &BezPath,
         evenodd: bool,
-        fill: Option<[f32; 4]>,
+        fill: Option<&Paint>,
         stroke: Option<&Stroke>,
     ) -> Result<()>;
-    fn text(&mut self, text: &Text, color: [f32; 4]) -> Result<()>;
+    fn text(&mut self, text: &Text, paint: &Paint) -> Result<()>;
 }
 fn draw_node(n: &Node, d: &mut dyn Destination) -> Result<()> {
     if n.opacity == 0.0 {
@@ -275,10 +282,10 @@ fn draw_node(n: &Node, d: &mut dyn Destination) -> Result<()> {
     .map_err(locate)?;
     let result = (|| {
         if let Some(p) = &n.path {
-            d.path(p, n.evenodd, n.fill, n.stroke.as_ref())?;
+            d.path(p, n.evenodd, n.fill.as_ref(), n.stroke.as_ref())?;
         }
         if let Some(t) = &n.text {
-            if let Some(color) = n.fill {
+            if let Some(color) = &n.fill {
                 d.text(t, color)?;
             }
         }
@@ -325,28 +332,7 @@ fn choice(v: &Value, key: &str, default: &str, choices: &[&str], path: &str) -> 
         Err(error(path, format!("unsupported {key}: {s}")))
     }
 }
-fn paint(v: Option<&Value>, default: Option<[f32; 4]>, path: &str) -> Result<Option<[f32; 4]>> {
-    let Some(v) = v.filter(|v| !absent(v)) else {
-        return Ok(default);
-    };
-    if v.as_str() == Some("none") {
-        return Ok(None);
-    }
-    if text(v, "$type", "").rsplit('.').next() != Some("solid") {
-        return Err(error(path, "only none and solid paint are supported"));
-    }
-    let value = v
-        .get("color")
-        .ok_or_else(|| error(path, "solid paint requires a Color"))?;
-    let value: nx_value::NxValue = serde_json::from_value(value.clone())
-        .map_err(|_| error(path, "invalid solid Color record"))?;
-    let channels = nx_value::color::channels(&value).map_err(|failure| {
-        let mut diagnostic = error(path, failure.message);
-        diagnostic.code = failure.code.into();
-        diagnostic
-    })?;
-    Ok(Some(channels.map(|channel| channel as f32)).filter(|color| color[3] > 0.0))
-}
+
 fn rule(v: &Value, key: &str, path: &str) -> Result<bool> {
     Ok(choice(v, key, "nonzero", &["nonzero", "evenodd"], path)? == "evenodd")
 }
@@ -518,6 +504,7 @@ struct Prepare<'a> {
     config: &'a Config,
     nodes: usize,
     commands: usize,
+    gradient_stops: usize,
     layers: f64,
 }
 pub fn prepare(
@@ -526,6 +513,12 @@ pub fn prepare(
     text: &mut dyn TextService,
     config: Config,
 ) -> Result<Scene> {
+    if config.limits.gradient_stops == 0 {
+        return Err(error(
+            "",
+            "invalid host limits: gradient_stops must be positive",
+        ));
+    }
     if !config.limits.coordinate.is_finite()
         || config.limits.coordinate <= 0.0
         || config.limits.coordinate > 1e7
@@ -577,6 +570,7 @@ pub fn prepare(
         config: &config,
         nodes: 0,
         commands: 0,
+        gradient_stops: 0,
         layers: 0.0,
     };
     let root = p
@@ -764,14 +758,19 @@ impl Prepare<'_> {
                 Ok(x)
             }
         };
-        let mut fill = paint(
+        let mut fill = paint::prepare(
             v.get("fill"),
             if ["Group", "Drawing", "Line", "Polyline"].contains(&kind) {
                 None
             } else {
-                Some([0.0, 0.0, 0.0, 1.0])
+                Some(Paint::Color {
+                    color: [0.0, 0.0, 0.0, 1.0],
+                })
             },
             path,
+            "fill",
+            l,
+            &mut self.gradient_stops,
         )?;
         match kind {
             "Drawing" => {
@@ -816,7 +815,14 @@ impl Prepare<'_> {
                     y + (self.config.height - (self.config.height - h * sy) * anchor("y")?) / sy,
                 );
                 clip = Some(viewport.to_path(0.1));
-                fill = paint(v.get("background"), None, path)?;
+                fill = paint::prepare(
+                    v.get("background"),
+                    None,
+                    path,
+                    "background",
+                    l,
+                    &mut self.gradient_stops,
+                )?;
                 if fill.is_some() {
                     geometry = Some(viewport.to_path(0.1));
                 }
@@ -914,6 +920,10 @@ impl Prepare<'_> {
                         == "italic",
                 };
                 validate_text_request(&request, path)?;
+                if let Some(paint) = &fill {
+                    // Shared acceptance limit also covers Canvas reference-font coordinates.
+                    paint.validate_span((size / 1000.0).max(1.0), path, "fill")?;
+                }
                 let run = self.text.shape(&request).map_err(|mut e| {
                     e.element = path.into();
                     e
@@ -926,12 +936,11 @@ impl Prepare<'_> {
                             "end" => 1.0,
                             _ => 0.0,
                         };
-                text_run = Some(Text {
-                    request,
-                    run,
-                    x,
-                    y: n("y", 0.0)?,
-                });
+                let y = n("y", 0.0)?;
+                if let Some(paint) = &fill {
+                    paint.validate_text_span(x, y, size / 1000.0, path, "fill")?;
+                }
+                text_run = Some(Text { request, run, x, y });
             }
             _ => return Err(error(path, "unsupported primitive")),
         }
@@ -963,20 +972,27 @@ impl Prepare<'_> {
             } else if dashes.len() % 2 == 1 {
                 dashes.extend(dashes.clone())
             }
-            paint(s.get("paint"), None, path)?
-                .filter(|_| width > 0.0)
-                .map(|color| -> Result<Stroke> {
-                    Ok(Stroke {
-                        color,
-                        width,
-                        cap: choice(s, "lineCap", "butt", &["butt", "round", "square"], path)?,
-                        join: choice(s, "lineJoin", "miter", &["miter", "round", "bevel"], path)?,
-                        miter,
-                        dashes,
-                        offset: num(s, "dashOffset", 0.0, path, l)?,
-                    })
+            paint::prepare(
+                s.get("paint"),
+                None,
+                path,
+                "stroke.paint",
+                l,
+                &mut self.gradient_stops,
+            )?
+            .filter(|_| width > 0.0)
+            .map(|paint| -> Result<Stroke> {
+                Ok(Stroke {
+                    paint,
+                    width,
+                    cap: choice(s, "lineCap", "butt", &["butt", "round", "square"], path)?,
+                    join: choice(s, "lineJoin", "miter", &["miter", "round", "bevel"], path)?,
+                    miter,
+                    dashes,
+                    offset: num(s, "dashOffset", 0.0, path, l)?,
                 })
-                .transpose()?
+            })
+            .transpose()?
         } else {
             None
         };
@@ -994,12 +1010,12 @@ impl Prepare<'_> {
         if self.commands > l.path_commands {
             return Err(error(path, "scene command limit exceeded"));
         }
-        let mut painted = if fill.is_some() {
+        let mut painted = if fill.as_ref().is_some_and(Paint::visible) {
             local
         } else {
             Bounds::empty()
         };
-        if let Some(s) = &stroke {
+        if let Some(s) = stroke.as_ref().filter(|s| s.paint.visible()) {
             let local = geometry
                 .as_ref()
                 .map(|p| stroke_bounds(p, &s.cap))
@@ -1028,6 +1044,11 @@ impl Prepare<'_> {
                     conservative: true,
                 },
             )
+        }
+        if fill.as_ref().is_some_and(Paint::has_transparency)
+            || stroke.as_ref().is_some_and(|s| s.paint.has_transparency())
+        {
+            painted.conservative = true;
         }
         painted = map_bounds(painted, world, path, l)?;
         if text_run.is_some() && painted.rect.is_some() && self.config.text_ink_padding > 0.0 {
@@ -1225,7 +1246,101 @@ mod tests {
         }
     }
     fn drawing(data: &str) -> Value {
-        json!({"viewBox":{"width":100,"height":100},"children":[{"data":data,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]})
+        json!({"viewBox":{"width":100,"height":100},"children":[{"data":data,"fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]})
+    }
+    fn gradient() -> Value {
+        json!({"$type":"Paint.linearGradient","x1":0,"y1":0,"x2":100,"y2":0,"stops":[
+            {"offset":0,"color":{"r":1,"g":0,"b":0,"a":1}},
+            {"offset":1,"color":{"r":0,"g":0,"b":1,"a":0}}
+        ]})
+    }
+    #[test]
+    fn gradients_validate_budget_visibility_and_roundtrip() {
+        let mut value = drawing("M0 0H100V100H0Z");
+        value["children"][0]["fill"] = gradient();
+        let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
+        assert!(scene.root.children[0].painted.conservative);
+        let decoded: Scene = serde_json::from_value(serde_json::to_value(&scene).unwrap()).unwrap();
+        assert_eq!(decoded.root.children[0].fill, scene.root.children[0].fill);
+        let mut c = config();
+        c.limits.gradient_stops = 3;
+        let child = value["children"][0].clone();
+        value["children"].as_array_mut().unwrap().push(child);
+        assert!(prepare(&value, &Resolver { spoof: false }, &mut NoText, c)
+            .unwrap_err()
+            .message
+            .contains("gradient_stops"));
+        value["children"].as_array_mut().unwrap().pop();
+        value["children"][0]["fill"]["stops"][0]["color"]["a"] = json!(0);
+        let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
+        assert!(scene.root.children[0].painted.rect.is_none());
+        assert!(scene.root.children[0].fill.is_some());
+        let transparent = value["children"][0]["fill"].take();
+        value["children"][0]["fill"] = json!("none");
+        value["children"][0]["stroke"] = json!({"paint":transparent,"width":10});
+        let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
+        assert!(scene.root.children[0].painted.rect.is_none());
+    }
+    #[test]
+    fn gradient_stop_channels_offsets_and_radial_ranges_are_checked() {
+        for (pointer, bad) in [
+            ("/stops/0/offset", json!(-0.1)),
+            ("/stops/1/offset", json!(1.1)),
+            ("/stops/0/color/r", json!(2.0)),
+            ("/stops/1/color/a", json!(-1.0)),
+            (
+                "/stops",
+                json!([{ "offset":0,"color":{"r":1,"g":0,"b":0} }]),
+            ),
+        ] {
+            let mut value = drawing("M0 0H10V10Z");
+            let mut paint = gradient();
+            *paint.pointer_mut(pointer).unwrap() = bad;
+            value["children"][0]["fill"] = paint;
+            value["children"][0]["opacity"] = json!(0);
+            assert!(prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).is_err());
+        }
+        for radius in [0.0, -1.0, 1e20] {
+            let mut value = drawing("M0 0H10V10Z");
+            let mut paint = gradient();
+            paint["$type"] = json!("Paint.radialGradient");
+            paint["cx"] = json!(0);
+            paint["cy"] = json!(0);
+            paint["radius"] = json!(radius);
+            value["children"][0]["fill"] = paint;
+            assert!(prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).is_err());
+        }
+        let mut c = config();
+        c.limits.gradient_stops = 0;
+        assert!(
+            prepare(&drawing("M0 0"), &Resolver { spoof: false }, &mut NoText, c)
+                .unwrap_err()
+                .message
+                .contains("gradient_stops")
+        );
+    }
+    #[test]
+    fn invalid_gradients_are_rejected_even_when_hidden() {
+        for (key, bad) in [
+            ("x2", json!(0)),
+            ("y1", json!(1e20)),
+            ("stops", json!([])),
+            (
+                "stops",
+                json!([
+                    {"offset":0.8,"color":{"r":1,"g":0,"b":0}},
+                    {"offset":0.2,"color":{"r":0,"g":0,"b":1}}
+                ]),
+            ),
+        ] {
+            let mut value = drawing("M0 0H10V10Z");
+            value["children"][0]["opacity"] = json!(0);
+            value["children"][0]["fill"] = gradient();
+            value["children"][0]["fill"][key] = bad;
+            let e = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap_err();
+            assert!(e.element.contains("children/0"));
+            assert!(e.message.contains("fill"));
+        }
     }
     #[test]
     fn shared_colors_preserve_float32_channels_and_reject_invalid_late_elements() {
@@ -1235,7 +1350,9 @@ mod tests {
         let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
         assert_eq!(
             scene.root.children[0].fill,
-            Some([0.123456789_f32, 0.4, 0.8, 0.5])
+            Some(Paint::Color {
+                color: [0.123456789_f32, 0.4, 0.8, 0.5]
+            })
         );
         let valid = value["children"][0].clone();
         value["children"].as_array_mut().unwrap().push(valid);
@@ -1255,7 +1372,12 @@ mod tests {
         let mut value = drawing("M0 0H10V10Z");
         value["children"][0]["fill"]["color"] = json!({"r":1.0,"g":0.0,"b":0.0});
         let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
-        assert_eq!(scene.root.children[0].fill, Some([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(
+            scene.root.children[0].fill,
+            Some(Paint::Color {
+                color: [1.0, 0.0, 0.0, 1.0]
+            })
+        );
     }
     #[test]
     fn identity_and_late_path_validation() {
@@ -1333,7 +1455,7 @@ mod tests {
     #[test]
     fn limits_numbers_strokes_and_clips() {
         let mut v = drawing("M10 10L20 20");
-        v["children"][0]["stroke"] = json!({"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0}},"width":4,"dashArray":[1,2,3]});
+        v["children"][0]["stroke"] = json!({"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0}},"width":4,"dashArray":[1,2,3]});
         v["children"][0]["clipPath"] = json!("M0 0H5V5H0Z");
         let scene = prepare(&v, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
         let child = &scene.root.children[0];
@@ -1377,7 +1499,7 @@ mod tests {
             &mut self,
             _: &BezPath,
             _: bool,
-            _: Option<[f32; 4]>,
+            _: Option<&Paint>,
             _: Option<&Stroke>,
         ) -> Result<()> {
             self.paths += 1;
@@ -1387,7 +1509,7 @@ mod tests {
                 Ok(())
             }
         }
-        fn text(&mut self, _: &Text, _: [f32; 4]) -> Result<()> {
+        fn text(&mut self, _: &Text, _: &Paint) -> Result<()> {
             Ok(())
         }
     }
@@ -1434,7 +1556,7 @@ mod boundary_tests {
     }
     #[test]
     fn preflight_boundaries_and_zero_strokes() {
-        let v = json!({"viewBox":{"width":100,"height":100},"children":[{"width":10,"height":10,"fill":"none","stroke":{"paint":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":0}}]});
+        let v = json!({"viewBox":{"width":100,"height":100},"children":[{"width":10,"height":10,"fill":"none","stroke":{"paint":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":0}}]});
         let c = Config {
             graphics_version: "v".into(),
             ..Config::default()
@@ -1863,7 +1985,7 @@ mod layer_budget_tests {
         }
     }
     fn path() -> Value {
-        serde_json::json!({"data":"M0 0H5V5Z","opacity":0.5,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}})
+        serde_json::json!({"data":"M0 0H5V5Z","opacity":0.5,"fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}})
     }
     struct NoText;
     impl TextService for NoText {
@@ -1985,9 +2107,9 @@ mod full_review_tests {
     #[test]
     fn closed_moveto_caps_have_bounds_and_zero_radii_do_not_paint() {
         let s = scene(json!([
-            {"$type":"Path","data":"M30 50Z","fill":"none","stroke":{"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":10,"lineCap":"round"}},
-            {"$type":"Circle","cx":50,"cy":50,"r":0,"stroke":{"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}},
-            {"$type":"Ellipse","cx":50,"cy":50,"rx":0,"ry":30,"stroke":{"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}}
+            {"$type":"Path","data":"M30 50Z","fill":"none","stroke":{"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":10,"lineCap":"round"}},
+            {"$type":"Circle","cx":50,"cy":50,"r":0,"stroke":{"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}},
+            {"$type":"Ellipse","cx":50,"cy":50,"rx":0,"ry":30,"stroke":{"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}}
         ]));
         assert!(s.root.children[0]
             .painted

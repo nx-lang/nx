@@ -237,7 +237,7 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
         evaluate("<g.ContentAlignment/>"),
         serde_json::json!({"$type":"ContentAlignment", "x":"center", "y":"center"}),
     );
-    let rect = evaluate("<g.Rect width=2 height=3 transform={<g.Transform.translate x=1 y=2/>} fill=<g.Paint.solid color=#ff0000/> stroke=<g.Stroke paint={g.Paint.none}/>/>");
+    let rect = evaluate("<g.Rect width=2 height=3 transform={<g.Transform.translate x=1 y=2/>} fill=<g.Paint.color color=#ff0000/> stroke=<g.Stroke paint={g.Paint.none}/>/>");
     assert_eq!(rect["$type"], "Rect");
     assert_eq!(rect["width"], 2.0);
     assert_eq!(rect["height"], 3.0);
@@ -255,7 +255,7 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
     );
     assert_eq!(
         rect["fill"],
-        serde_json::json!({"$type":"Paint.solid", "color":{"$type":"Color", "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}})
+        serde_json::json!({"$type":"Paint.color", "color":{"$type":"Color", "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}})
     );
     assert_eq!(rect["stroke"]["$type"], "Stroke");
     assert_eq!(rect["stroke"]["paint"], "none");
@@ -420,4 +420,42 @@ fn color_literal_links_without_color_operation_module() {
         value["a"].as_f64().unwrap(),
         (128.0_f64 / 255.0) as f32 as f64
     );
+}
+
+#[test]
+fn graphics_gradients_evaluate_as_ordinary_reusable_paints() {
+    let program =
+        crate::ir_runtime_tests::program(include_str!("../../../examples/graphics/runtime.nx"));
+    let value = serde_json::to_value(
+        program
+            .evaluate_function("gradientShape", &[], &RuntimeOptions::default())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(value["fill"]["$type"], "Paint.linearGradient");
+    assert_eq!(value["fill"], value["stroke"]["paint"]);
+    assert_eq!(value["fill"]["stops"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn graphics_gradients_cover_every_paint_location_on_ir() {
+    let program =
+        crate::ir_runtime_tests::program(include_str!("../../../examples/graphics/runtime.nx"));
+    let value = |name| {
+        serde_json::to_value(
+            program
+                .evaluate_function(name, &[], &RuntimeOptions::default())
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let shared = value("gradientPaint");
+    assert_eq!(value("gradientRect")["fill"], shared);
+    assert_eq!(value("gradientLine")["stroke"]["paint"], shared);
+    assert_eq!(value("gradientText")["fill"], shared);
+    assert_eq!(
+        value("gradientBackground")["background"],
+        value("radialPaint")
+    );
+    assert_eq!(value("radialPaint")["$type"], "Paint.radialGradient");
 }

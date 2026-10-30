@@ -238,7 +238,7 @@ and mark retained output stale; graphics preparation errors clear the scene with
 
 The bundled DejaVu Sans face is exposed as `Fixture` (400, normal); both the worker and page load
 those bytes explicitly. The font license is linked under the canvas. Unsupported selections and
-missing glyphs fail clearly. Browser metrics/rasterization use the `browser-canvas2d-v1`
+missing glyphs fail clearly. Browser metrics/rasterization use the `browser-canvas2d-v2`
 configuration and can differ from the native Rust/Skia preview.
 
 Geometry, transforms, winding rules, bounds and resource limits share `nx-graphics` preparation.

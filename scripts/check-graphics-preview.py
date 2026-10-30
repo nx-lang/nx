@@ -111,6 +111,16 @@ with tempfile.TemporaryDirectory(prefix='nx-preview-') as d:
         assert (output/'current.json').read_bytes()==previous
 
     prefix='import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>'
+    gradient='<g.Paint.linearGradient x1=0 y1=0 x2=100 y2=0 stops={<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff00/>}/>'
+    entry.write_text(prefix+'<g.Rect width=100 height=100 fill='+gradient+'/></g.Drawing>')
+    limits=d/'gradient-limits.json';limits.write_text(json.dumps({'gradient_stops':1}))
+    error=run('--entry',entry,'--output',output,'--limits',limits,success=False)
+    assert 'gradient_stops' in error['diagnostics'][0]['message'],error
+    assert (output/'current.json').read_bytes()==previous
+    for bad in [gradient.replace('x2=100','x2=0'),gradient.replace('offset=1','offset=-1')]:
+        entry.write_text(prefix+'<g.Rect width=100 height=100 fill='+bad+'/></g.Drawing>')
+        assert run('--entry',entry,'--output',output,success=False)['diagnostics']
+        assert (output/'current.json').read_bytes()==previous
     for helper,reason in [
         ('<g.Arrow x1=0 y1=0 x2=0 y2=0/>','endpoints coincide'),
         ('<g.Arrow x1=0 y1=0 x2=10 y2=0 headLength=11/>','exceeds endpoint distance'),

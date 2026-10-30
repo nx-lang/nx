@@ -1,0 +1,2168 @@
+[
+  {
+    "name": "background-contain",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "29fb3ce555670393f8d795a4a0553a37a55be6e33b609d6661e1aefb80bceb81",
+      "root": {
+        "accessibility": null,
+        "children": [],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 20.0,
+              "y": -15.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": -15.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": 85.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 20.0,
+              "y": 85.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": {
+          "kind": "linearGradient",
+          "stops": [
+            {
+              "color": [
+                1.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "offset": 0.0
+            },
+            {
+              "color": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+              ],
+              "offset": 1.0
+            }
+          ],
+          "x1": 20.0,
+          "x2": 120.0,
+          "y1": 0.0,
+          "y2": 0.0
+        },
+        "geometry": {
+          "conservative": false,
+          "rect": {
+            "x0": 20.0,
+            "x1": 120.0,
+            "y0": -15.0,
+            "y1": 85.0
+          }
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        },
+        "parent": null,
+        "path": [
+          {
+            "MoveTo": {
+              "x": 20.0,
+              "y": -15.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": -15.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": 85.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 20.0,
+              "y": 85.0
+            }
+          },
+          "ClosePath"
+        ],
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          -20.0,
+          15.0
+        ],
+        "visible": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.745,
+          0,
+          0.255,
+          1
+        ],
+        "x": 25,
+        "y": 5
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "background": {
+        "$type": "Paint.linearGradient",
+        "stops": [
+          {
+            "color": {
+              "a": 1,
+              "b": 0,
+              "g": 0,
+              "r": 1
+            },
+            "offset": 0
+          },
+          {
+            "color": {
+              "a": 1,
+              "b": 1,
+              "g": 0,
+              "r": 0
+            },
+            "offset": 1
+          }
+        ],
+        "x1": 20,
+        "x2": 120,
+        "y1": 0,
+        "y2": 0
+      },
+      "fit": "contain",
+      "viewBox": {
+        "height": 50,
+        "width": 100,
+        "x": 20,
+        "y": 10
+      }
+    }
+  },
+  {
+    "name": "background-cover",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "5b2ae4a2defe39bc15bd28fae243bd3d47bc941c12ad0cf09cc61958b144b0c4",
+      "root": {
+        "accessibility": null,
+        "children": [],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 45.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 95.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 95.0,
+              "y": 60.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 45.0,
+              "y": 60.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": {
+          "kind": "linearGradient",
+          "stops": [
+            {
+              "color": [
+                1.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "offset": 0.0
+            },
+            {
+              "color": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+              ],
+              "offset": 1.0
+            }
+          ],
+          "x1": 20.0,
+          "x2": 120.0,
+          "y1": 0.0,
+          "y2": 0.0
+        },
+        "geometry": {
+          "conservative": false,
+          "rect": {
+            "x0": 45.0,
+            "x1": 95.0,
+            "y0": 10.0,
+            "y1": 60.0
+          }
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        },
+        "parent": null,
+        "path": [
+          {
+            "MoveTo": {
+              "x": 45.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 95.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 95.0,
+              "y": 60.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 45.0,
+              "y": 60.0
+            }
+          },
+          "ClosePath"
+        ],
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          2.0,
+          0.0,
+          0.0,
+          2.0,
+          -90.0,
+          -20.0
+        ],
+        "visible": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.6225,
+          0,
+          0.3775,
+          1
+        ],
+        "x": 25,
+        "y": 5
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "background": {
+        "$type": "Paint.linearGradient",
+        "stops": [
+          {
+            "color": {
+              "a": 1,
+              "b": 0,
+              "g": 0,
+              "r": 1
+            },
+            "offset": 0
+          },
+          {
+            "color": {
+              "a": 1,
+              "b": 1,
+              "g": 0,
+              "r": 0
+            },
+            "offset": 1
+          }
+        ],
+        "x1": 20,
+        "x2": 120,
+        "y1": 0,
+        "y2": 0
+      },
+      "fit": "cover",
+      "viewBox": {
+        "height": 50,
+        "width": 100,
+        "x": 20,
+        "y": 10
+      }
+    }
+  },
+  {
+    "name": "background-fill",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "a8b13edcd4e2a13fe9da7f8968c13db2818927df502f4c42bd146d0a0f023d30",
+      "root": {
+        "accessibility": null,
+        "children": [],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 20.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": 60.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 20.0,
+              "y": 60.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": {
+          "kind": "linearGradient",
+          "stops": [
+            {
+              "color": [
+                1.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "offset": 0.0
+            },
+            {
+              "color": [
+                0.0,
+                0.0,
+                1.0,
+                1.0
+              ],
+              "offset": 1.0
+            }
+          ],
+          "x1": 20.0,
+          "x2": 120.0,
+          "y1": 0.0,
+          "y2": 0.0
+        },
+        "geometry": {
+          "conservative": false,
+          "rect": {
+            "x0": 20.0,
+            "x1": 120.0,
+            "y0": 10.0,
+            "y1": 60.0
+          }
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        },
+        "parent": null,
+        "path": [
+          {
+            "MoveTo": {
+              "x": 20.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": 10.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 120.0,
+              "y": 60.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 20.0,
+              "y": 60.0
+            }
+          },
+          "ClosePath"
+        ],
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          2.0,
+          -20.0,
+          -20.0
+        ],
+        "visible": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.745,
+          0,
+          0.255,
+          1
+        ],
+        "x": 25,
+        "y": 5
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "background": {
+        "$type": "Paint.linearGradient",
+        "stops": [
+          {
+            "color": {
+              "a": 1,
+              "b": 0,
+              "g": 0,
+              "r": 1
+            },
+            "offset": 0
+          },
+          {
+            "color": {
+              "a": 1,
+              "b": 1,
+              "g": 0,
+              "r": 0
+            },
+            "offset": 1
+          }
+        ],
+        "x1": 20,
+        "x2": 120,
+        "y1": 0,
+        "y2": 0
+      },
+      "fit": "fill",
+      "viewBox": {
+        "height": 50,
+        "width": 100,
+        "x": 20,
+        "y": 10
+      }
+    }
+  },
+  {
+    "name": "transformed-clipped-radial",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "36280fb224553e559f22d99b24e8bdb52274a9b2aa28470dcb99f214bdf76bec",
+      "root": {
+        "accessibility": null,
+        "children": [
+          {
+            "accessibility": null,
+            "children": [
+              {
+                "accessibility": null,
+                "children": [],
+                "clip": null,
+                "clip_evenodd": false,
+                "evenodd": false,
+                "fill": {
+                  "cx": 0.0,
+                  "cy": 0.0,
+                  "kind": "radialGradient",
+                  "radius": 20.0,
+                  "stops": [
+                    {
+                      "color": [
+                        1.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "offset": 0.0
+                    },
+                    {
+                      "color": [
+                        0.0,
+                        0.0,
+                        1.0,
+                        1.0
+                      ],
+                      "offset": 1.0
+                    }
+                  ]
+                },
+                "geometry": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 0.0,
+                    "x1": 40.0,
+                    "y0": 0.0,
+                    "y1": 40.0
+                  }
+                },
+                "id": "element/children/0/children/0",
+                "identity": {
+                  "declaration": "Rect",
+                  "module": "@nx/graphics/graphics.nx",
+                  "version": "test"
+                },
+                "opacity": 1.0,
+                "order": 0,
+                "painted": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 10.0,
+                    "x1": 90.0,
+                    "y0": 10.0,
+                    "y1": 50.0
+                  }
+                },
+                "parent": "element/children/0",
+                "path": [
+                  {
+                    "MoveTo": {
+                      "x": 0.0,
+                      "y": 0.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 40.0,
+                      "y": 0.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 40.0,
+                      "y": 40.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 0.0,
+                      "y": 40.0
+                    }
+                  },
+                  "ClosePath"
+                ],
+                "provenance": null,
+                "stroke": null,
+                "text": null,
+                "transform": [
+                  2.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  10.0,
+                  10.0
+                ],
+                "visible": {
+                  "conservative": true,
+                  "rect": {
+                    "x0": 10.0,
+                    "x1": 60.0,
+                    "y0": 10.0,
+                    "y1": 50.0
+                  }
+                }
+              }
+            ],
+            "clip": [
+              {
+                "MoveTo": {
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 60.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 60.0,
+                  "y": 100.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 0.0,
+                  "y": 100.0
+                }
+              },
+              "ClosePath"
+            ],
+            "clip_evenodd": false,
+            "evenodd": false,
+            "fill": null,
+            "geometry": {
+              "conservative": false,
+              "rect": null
+            },
+            "id": "element/children/0",
+            "identity": {
+              "declaration": "Group",
+              "module": "@nx/graphics/graphics.nx",
+              "version": "test"
+            },
+            "opacity": 1.0,
+            "order": 0,
+            "painted": {
+              "conservative": false,
+              "rect": {
+                "x0": 10.0,
+                "x1": 90.0,
+                "y0": 10.0,
+                "y1": 50.0
+              }
+            },
+            "parent": "element",
+            "path": null,
+            "provenance": null,
+            "stroke": null,
+            "text": null,
+            "transform": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "visible": {
+              "conservative": true,
+              "rect": {
+                "x0": 10.0,
+                "x1": 60.0,
+                "y0": 10.0,
+                "y1": 50.0
+              }
+            }
+          }
+        ],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 100.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 0.0,
+              "y": 100.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": null,
+        "geometry": {
+          "conservative": false,
+          "rect": null
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": true,
+          "rect": {
+            "x0": 10.0,
+            "x1": 60.0,
+            "y0": 10.0,
+            "y1": 50.0
+          }
+        },
+        "parent": null,
+        "path": null,
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": {
+          "conservative": true,
+          "rect": {
+            "x0": 10.0,
+            "x1": 60.0,
+            "y0": 10.0,
+            "y1": 50.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.26632347045854055,
+          0,
+          0.7336765295414595,
+          1
+        ],
+        "x": 30,
+        "y": 20
+      },
+      {
+        "expected": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "x": 70,
+        "y": 20
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "children": [
+        {
+          "$type": "Group",
+          "children": [
+            {
+              "$type": "Rect",
+              "fill": {
+                "$type": "Paint.radialGradient",
+                "cx": 0,
+                "cy": 0,
+                "radius": 20,
+                "stops": [
+                  {
+                    "color": {
+                      "a": 1,
+                      "b": 0,
+                      "g": 0,
+                      "r": 1
+                    },
+                    "offset": 0
+                  },
+                  {
+                    "color": {
+                      "a": 1,
+                      "b": 1,
+                      "g": 0,
+                      "r": 0
+                    },
+                    "offset": 1
+                  }
+                ]
+              },
+              "height": 40,
+              "transform": [
+                {
+                  "$type": "Transform.translate",
+                  "x": 10,
+                  "y": 10
+                },
+                {
+                  "$type": "Transform.scale",
+                  "x": 2,
+                  "y": 1
+                }
+              ],
+              "width": 40
+            }
+          ],
+          "clipPath": "M0 0H60V100H0Z"
+        }
+      ],
+      "viewBox": {
+        "height": 100,
+        "width": 100,
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  {
+    "name": "dashed-stroke",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "6796f4c4306da1e076434b466bbc0132dea66c45fc481c0becab4be8df5d56d9",
+      "root": {
+        "accessibility": null,
+        "children": [
+          {
+            "accessibility": null,
+            "children": [],
+            "clip": null,
+            "clip_evenodd": false,
+            "evenodd": false,
+            "fill": null,
+            "geometry": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 50.0,
+                "y1": 50.0
+              }
+            },
+            "id": "element/children/0",
+            "identity": {
+              "declaration": "Line",
+              "module": "@nx/graphics/graphics.nx",
+              "version": "test"
+            },
+            "opacity": 1.0,
+            "order": 0,
+            "painted": {
+              "conservative": true,
+              "rect": {
+                "x0": -20.0,
+                "x1": 120.0,
+                "y0": 30.0,
+                "y1": 70.0
+              }
+            },
+            "parent": "element",
+            "path": [
+              {
+                "MoveTo": {
+                  "x": 0.0,
+                  "y": 50.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 100.0,
+                  "y": 50.0
+                }
+              }
+            ],
+            "provenance": null,
+            "stroke": {
+              "cap": "butt",
+              "dashes": [
+                20.0,
+                20.0
+              ],
+              "join": "miter",
+              "miter": 4.0,
+              "offset": 0.0,
+              "paint": {
+                "kind": "linearGradient",
+                "stops": [
+                  {
+                    "color": [
+                      1.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    "offset": 0.0
+                  },
+                  {
+                    "color": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "offset": 1.0
+                  }
+                ],
+                "x1": 0.0,
+                "x2": 100.0,
+                "y1": 0.0,
+                "y2": 0.0
+              },
+              "width": 10.0
+            },
+            "text": null,
+            "transform": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "visible": {
+              "conservative": true,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 30.0,
+                "y1": 70.0
+              }
+            }
+          }
+        ],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 100.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 0.0,
+              "y": 100.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": null,
+        "geometry": {
+          "conservative": false,
+          "rect": null
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": true,
+          "rect": {
+            "x0": -20.0,
+            "x1": 120.0,
+            "y0": 30.0,
+            "y1": 70.0
+          }
+        },
+        "parent": null,
+        "path": null,
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": {
+          "conservative": true,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 30.0,
+            "y1": 70.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.895,
+          0,
+          0.105,
+          1
+        ],
+        "x": 10,
+        "y": 50
+      },
+      {
+        "expected": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "x": 30,
+        "y": 50
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "children": [
+        {
+          "$type": "Line",
+          "stroke": {
+            "dashArray": [
+              20,
+              20
+            ],
+            "paint": {
+              "$type": "Paint.linearGradient",
+              "stops": [
+                {
+                  "color": {
+                    "a": 1,
+                    "b": 0,
+                    "g": 0,
+                    "r": 1
+                  },
+                  "offset": 0
+                },
+                {
+                  "color": {
+                    "a": 1,
+                    "b": 1,
+                    "g": 0,
+                    "r": 0
+                  },
+                  "offset": 1
+                }
+              ],
+              "x1": 0,
+              "x2": 100,
+              "y1": 0,
+              "y2": 0
+            },
+            "width": 10
+          },
+          "x1": 0,
+          "x2": 100,
+          "y1": 50,
+          "y2": 50
+        }
+      ],
+      "viewBox": {
+        "height": 100,
+        "width": 100,
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  {
+    "name": "isolated-opacity",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "3202e46d75f8ccb4df28a1088f25fc8b5d6a99dcd7ce71528b3740173c73d59f",
+      "root": {
+        "accessibility": null,
+        "children": [
+          {
+            "accessibility": null,
+            "children": [
+              {
+                "accessibility": null,
+                "children": [],
+                "clip": null,
+                "clip_evenodd": false,
+                "evenodd": false,
+                "fill": {
+                  "kind": "linearGradient",
+                  "stops": [
+                    {
+                      "color": [
+                        1.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "offset": 0.0
+                    },
+                    {
+                      "color": [
+                        0.0,
+                        0.0,
+                        1.0,
+                        1.0
+                      ],
+                      "offset": 1.0
+                    }
+                  ],
+                  "x1": 0.0,
+                  "x2": 100.0,
+                  "y1": 0.0,
+                  "y2": 0.0
+                },
+                "geometry": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 0.0,
+                    "x1": 75.0,
+                    "y0": 0.0,
+                    "y1": 100.0
+                  }
+                },
+                "id": "element/children/0/children/0",
+                "identity": {
+                  "declaration": "Rect",
+                  "module": "@nx/graphics/graphics.nx",
+                  "version": "test"
+                },
+                "opacity": 1.0,
+                "order": 0,
+                "painted": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 0.0,
+                    "x1": 75.0,
+                    "y0": 0.0,
+                    "y1": 100.0
+                  }
+                },
+                "parent": "element/children/0",
+                "path": [
+                  {
+                    "MoveTo": {
+                      "x": 0.0,
+                      "y": 0.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 75.0,
+                      "y": 0.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 75.0,
+                      "y": 100.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 0.0,
+                      "y": 100.0
+                    }
+                  },
+                  "ClosePath"
+                ],
+                "provenance": null,
+                "stroke": null,
+                "text": null,
+                "transform": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "visible": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 0.0,
+                    "x1": 75.0,
+                    "y0": 0.0,
+                    "y1": 100.0
+                  }
+                }
+              },
+              {
+                "accessibility": null,
+                "children": [],
+                "clip": null,
+                "clip_evenodd": false,
+                "evenodd": false,
+                "fill": {
+                  "kind": "linearGradient",
+                  "stops": [
+                    {
+                      "color": [
+                        1.0,
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "offset": 0.0
+                    },
+                    {
+                      "color": [
+                        0.0,
+                        0.0,
+                        1.0,
+                        1.0
+                      ],
+                      "offset": 1.0
+                    }
+                  ],
+                  "x1": 0.0,
+                  "x2": 100.0,
+                  "y1": 0.0,
+                  "y2": 0.0
+                },
+                "geometry": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 25.0,
+                    "x1": 100.0,
+                    "y0": 0.0,
+                    "y1": 100.0
+                  }
+                },
+                "id": "element/children/0/children/1",
+                "identity": {
+                  "declaration": "Rect",
+                  "module": "@nx/graphics/graphics.nx",
+                  "version": "test"
+                },
+                "opacity": 1.0,
+                "order": 1,
+                "painted": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 25.0,
+                    "x1": 100.0,
+                    "y0": 0.0,
+                    "y1": 100.0
+                  }
+                },
+                "parent": "element/children/0",
+                "path": [
+                  {
+                    "MoveTo": {
+                      "x": 25.0,
+                      "y": 0.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 100.0,
+                      "y": 0.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 100.0,
+                      "y": 100.0
+                    }
+                  },
+                  {
+                    "LineTo": {
+                      "x": 25.0,
+                      "y": 100.0
+                    }
+                  },
+                  "ClosePath"
+                ],
+                "provenance": null,
+                "stroke": null,
+                "text": null,
+                "transform": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "visible": {
+                  "conservative": false,
+                  "rect": {
+                    "x0": 25.0,
+                    "x1": 100.0,
+                    "y0": 0.0,
+                    "y1": 100.0
+                  }
+                }
+              }
+            ],
+            "clip": null,
+            "clip_evenodd": false,
+            "evenodd": false,
+            "fill": null,
+            "geometry": {
+              "conservative": false,
+              "rect": null
+            },
+            "id": "element/children/0",
+            "identity": {
+              "declaration": "Group",
+              "module": "@nx/graphics/graphics.nx",
+              "version": "test"
+            },
+            "opacity": 0.5,
+            "order": 0,
+            "painted": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 0.0,
+                "y1": 100.0
+              }
+            },
+            "parent": "element",
+            "path": null,
+            "provenance": null,
+            "stroke": null,
+            "text": null,
+            "transform": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "visible": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 0.0,
+                "y1": 100.0
+              }
+            }
+          }
+        ],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 100.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 0.0,
+              "y": 100.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": null,
+        "geometry": {
+          "conservative": false,
+          "rect": null
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        },
+        "parent": null,
+        "path": null,
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.2475,
+          0,
+          0.2525,
+          0.5
+        ],
+        "x": 50,
+        "y": 50
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "children": [
+        {
+          "$type": "Group",
+          "children": [
+            {
+              "$type": "Rect",
+              "fill": {
+                "$type": "Paint.linearGradient",
+                "stops": [
+                  {
+                    "color": {
+                      "a": 1,
+                      "b": 0,
+                      "g": 0,
+                      "r": 1
+                    },
+                    "offset": 0
+                  },
+                  {
+                    "color": {
+                      "a": 1,
+                      "b": 1,
+                      "g": 0,
+                      "r": 0
+                    },
+                    "offset": 1
+                  }
+                ],
+                "x1": 0,
+                "x2": 100,
+                "y1": 0,
+                "y2": 0
+              },
+              "height": 100,
+              "width": 75
+            },
+            {
+              "$type": "Rect",
+              "fill": {
+                "$type": "Paint.linearGradient",
+                "stops": [
+                  {
+                    "color": {
+                      "a": 1,
+                      "b": 0,
+                      "g": 0,
+                      "r": 1
+                    },
+                    "offset": 0
+                  },
+                  {
+                    "color": {
+                      "a": 1,
+                      "b": 1,
+                      "g": 0,
+                      "r": 0
+                    },
+                    "offset": 1
+                  }
+                ],
+                "x1": 0,
+                "x2": 100,
+                "y1": 0,
+                "y2": 0
+              },
+              "height": 100,
+              "width": 75,
+              "x": 25
+            }
+          ],
+          "opacity": 0.5
+        }
+      ],
+      "viewBox": {
+        "height": 100,
+        "width": 100,
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  {
+    "name": "shared-paint",
+    "prepared": {
+      "config": {
+        "fonts": [],
+        "graphics_version": "test",
+        "height": 100.0,
+        "limits": {
+          "coordinate": 10000000.0,
+          "depth": 64,
+          "gradient_stops": 100000,
+          "layer_pixels": 67108864.0,
+          "nodes": 10000,
+          "path_commands": 100000,
+          "surface_pixels": 16777216.0
+        },
+        "program_revision": "",
+        "renderer": "neutral",
+        "scale": 1.0,
+        "text_ink_padding": 0.0,
+        "width": 100.0
+      },
+      "profile": "graphics-core-v3",
+      "revision": "f0bf86a308360a08593e825307b976cdd3e3dd8f666dc2b69992568857a09792",
+      "root": {
+        "accessibility": null,
+        "children": [
+          {
+            "accessibility": null,
+            "children": [],
+            "clip": null,
+            "clip_evenodd": false,
+            "evenodd": false,
+            "fill": {
+              "kind": "linearGradient",
+              "stops": [
+                {
+                  "color": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ],
+                  "offset": 0.0
+                },
+                {
+                  "color": [
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0
+                  ],
+                  "offset": 1.0
+                }
+              ],
+              "x1": 0.0,
+              "x2": 100.0,
+              "y1": 0.0,
+              "y2": 0.0
+            },
+            "geometry": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 0.0,
+                "y1": 40.0
+              }
+            },
+            "id": "element/children/0",
+            "identity": {
+              "declaration": "Rect",
+              "module": "@nx/graphics/graphics.nx",
+              "version": "test"
+            },
+            "opacity": 1.0,
+            "order": 0,
+            "painted": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 0.0,
+                "y1": 40.0
+              }
+            },
+            "parent": "element",
+            "path": [
+              {
+                "MoveTo": {
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 100.0,
+                  "y": 0.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 100.0,
+                  "y": 40.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 0.0,
+                  "y": 40.0
+                }
+              },
+              "ClosePath"
+            ],
+            "provenance": null,
+            "stroke": null,
+            "text": null,
+            "transform": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "visible": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 0.0,
+                "y1": 40.0
+              }
+            }
+          },
+          {
+            "accessibility": null,
+            "children": [],
+            "clip": null,
+            "clip_evenodd": false,
+            "evenodd": false,
+            "fill": {
+              "kind": "linearGradient",
+              "stops": [
+                {
+                  "color": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0
+                  ],
+                  "offset": 0.0
+                },
+                {
+                  "color": [
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0
+                  ],
+                  "offset": 1.0
+                }
+              ],
+              "x1": 0.0,
+              "x2": 100.0,
+              "y1": 0.0,
+              "y2": 0.0
+            },
+            "geometry": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 60.0,
+                "y1": 100.0
+              }
+            },
+            "id": "element/children/1",
+            "identity": {
+              "declaration": "Rect",
+              "module": "@nx/graphics/graphics.nx",
+              "version": "test"
+            },
+            "opacity": 1.0,
+            "order": 1,
+            "painted": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 60.0,
+                "y1": 100.0
+              }
+            },
+            "parent": "element",
+            "path": [
+              {
+                "MoveTo": {
+                  "x": 0.0,
+                  "y": 60.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 100.0,
+                  "y": 60.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 100.0,
+                  "y": 100.0
+                }
+              },
+              {
+                "LineTo": {
+                  "x": 0.0,
+                  "y": 100.0
+                }
+              },
+              "ClosePath"
+            ],
+            "provenance": null,
+            "stroke": null,
+            "text": null,
+            "transform": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "visible": {
+              "conservative": false,
+              "rect": {
+                "x0": 0.0,
+                "x1": 100.0,
+                "y0": 60.0,
+                "y1": 100.0
+              }
+            }
+          }
+        ],
+        "clip": [
+          {
+            "MoveTo": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 0.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 100.0,
+              "y": 100.0
+            }
+          },
+          {
+            "LineTo": {
+              "x": 0.0,
+              "y": 100.0
+            }
+          },
+          "ClosePath"
+        ],
+        "clip_evenodd": false,
+        "evenodd": false,
+        "fill": null,
+        "geometry": {
+          "conservative": false,
+          "rect": null
+        },
+        "id": "element",
+        "identity": {
+          "declaration": "Drawing",
+          "module": "@nx/graphics/graphics.nx",
+          "version": "test"
+        },
+        "opacity": 1.0,
+        "order": 0,
+        "painted": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        },
+        "parent": null,
+        "path": null,
+        "provenance": null,
+        "stroke": null,
+        "text": null,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "visible": {
+          "conservative": false,
+          "rect": {
+            "x0": 0.0,
+            "x1": 100.0,
+            "y0": 0.0,
+            "y1": 100.0
+          }
+        }
+      }
+    },
+    "samples": [
+      {
+        "expected": [
+          0.745,
+          0,
+          0.255,
+          1
+        ],
+        "x": 25,
+        "y": 20
+      },
+      {
+        "expected": [
+          0.745,
+          0,
+          0.255,
+          1
+        ],
+        "x": 25,
+        "y": 80
+      }
+    ],
+    "value": {
+      "$type": "Drawing",
+      "children": [
+        {
+          "$type": "Rect",
+          "fill": {
+            "$type": "Paint.linearGradient",
+            "stops": [
+              {
+                "color": {
+                  "a": 1,
+                  "b": 0,
+                  "g": 0,
+                  "r": 1
+                },
+                "offset": 0
+              },
+              {
+                "color": {
+                  "a": 1,
+                  "b": 1,
+                  "g": 0,
+                  "r": 0
+                },
+                "offset": 1
+              }
+            ],
+            "x1": 0,
+            "x2": 100,
+            "y1": 0,
+            "y2": 0
+          },
+          "height": 40,
+          "width": 100
+        },
+        {
+          "$type": "Rect",
+          "fill": {
+            "$type": "Paint.linearGradient",
+            "stops": [
+              {
+                "color": {
+                  "a": 1,
+                  "b": 0,
+                  "g": 0,
+                  "r": 1
+                },
+                "offset": 0
+              },
+              {
+                "color": {
+                  "a": 1,
+                  "b": 1,
+                  "g": 0,
+                  "r": 0
+                },
+                "offset": 1
+              }
+            ],
+            "x1": 0,
+            "x2": 100,
+            "y1": 0,
+            "y2": 0
+          },
+          "height": 40,
+          "width": 100,
+          "y": 60
+        }
+      ],
+      "viewBox": {
+        "height": 100,
+        "width": 100,
+        "x": 0,
+        "y": 0
+      }
+    }
+  }
+]

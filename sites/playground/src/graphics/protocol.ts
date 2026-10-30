@@ -18,4 +18,4 @@ export interface DrawingResult {
   readonly scene: NxGraphicsScene | null;
   readonly diagnostics: readonly Diagnostic[];
 }
-export const BROWSER_RENDERER = "browser-canvas2d-v1";
+export const BROWSER_RENDERER = "browser-canvas2d-v2";

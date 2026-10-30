@@ -190,6 +190,7 @@ export async function prepareDrawingValue(
         path_commands: 50000,
         coordinate: 1e7,
         surface_pixels: 4194304,
+        gradient_stops: 100000,
         layer_pixels: 16777216,
       },
     };

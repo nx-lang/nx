@@ -27,8 +27,44 @@ export type ViewBox = {
 /// Author colors as hex literals, or construct them with @nx/color.
 export type Color = colors.Color
 
-/// No paint, or a uniform color. Gradients and patterns are not supported.
-export type Paint = none | solid { color: Color }
+/// A color and alpha at a normalized position along a gradient.
+/// Stops must be ordered by offset; equal offsets produce sharp transitions in sequence order.
+export type GradientStop = {
+  offset: float64  /// Position in [0, 1]; the last stop at an equal offset wins at that position.
+  color: Color     /// Shared sRGB color, including alpha, at this stop.
+}
+
+/// No paint, a uniform color, or a gradient in the painted element's local user units.
+/// Gradients require at least two ordered stops and extend their first/last colors beyond the stops.
+/// Colors interpolate in premultiplied encoded sRGB, independently of @nx/color.mix's default space.
+/// Gradient coordinates follow the element's transforms; reuse does not fit them to each shape.
+/// All coordinates must be finite and satisfy the host's coordinate and backend precision limits.
+export type Paint =
+  | none  /// Disables painting; distinct from a paint whose colors are fully transparent.
+
+  /// Paints uniformly with one color, which may be translucent or fully transparent.
+  | color {
+      color: Color  /// Shared sRGB color and alpha used throughout the painted geometry.
+    }
+
+  /// Transitions along the line from (x1, y1) to (x2, y2); colors are constant perpendicular to it.
+  /// Endpoints must be distinct at backend precision; SVG uses the same coordinate names.
+  | linearGradient {
+      x1: float64           /// Horizontal coordinate of the gradient's offset-0 endpoint.
+      y1: float64           /// Vertical coordinate of the gradient's offset-0 endpoint.
+      x2: float64           /// Horizontal coordinate of the gradient's offset-1 endpoint.
+      y2: float64           /// Vertical coordinate of the gradient's offset-1 endpoint.
+      stops: GradientStop+  /// At least two stops with nondecreasing offsets; equal offsets are allowed.
+    }
+
+  /// Transitions outward from (cx, cy), with offset 1 at radius distance from the center.
+  /// The gradient is circular in local units; nonuniform element scaling makes it elliptical.
+  | radialGradient {
+      cx: float64           /// Horizontal coordinate of the center, corresponding to SVG cx.
+      cy: float64           /// Vertical coordinate of the center, corresponding to SVG cy.
+      radius: float64       /// Positive radius in local units, corresponding to SVG r; no focal offset.
+      stops: GradientStop+  /// At least two stops with nondecreasing offsets; equal offsets are allowed.
+    }
 
 /// Determines the interior of a path: nonzero winding or even-odd crossing count, as in SVG.
 export type FillRule = nonzero | evenodd
@@ -85,7 +121,7 @@ export type Stroke = {
 export type Transform =
   | translate { x: float64 y: float64 }       /// Horizontal and vertical displacement in local units.
   | scale { x: float64 y?: float64 }          /// Axis scale factors; omitted y uses x for uniform scaling.
-  | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 } /// Rotation about the local pivot (cx, cy).
+  | rotate { degrees:float64  cx: float64 = 0  cy: float64 = 0 } /// Rotation about the local pivot (cx, cy).
   | skewX { degrees: float64 }                /// Horizontal shear angle.
   | skewY { degrees: float64 }                /// Vertical shear angle.
   | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 } /// Six affine coefficients.

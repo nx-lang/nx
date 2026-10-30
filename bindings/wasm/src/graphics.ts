@@ -45,6 +45,27 @@ export type NxGraphicsPathElement =
     }
   | "ClosePath";
 export type NxGraphicsColor = readonly [number, number, number, number];
+export interface NxGraphicsGradientStop {
+  readonly offset: number;
+  readonly color: NxGraphicsColor;
+}
+export type NxGraphicsPaint =
+  | { readonly kind: "color"; readonly color: NxGraphicsColor }
+  | {
+      readonly kind: "linearGradient";
+      readonly x1: number;
+      readonly y1: number;
+      readonly x2: number;
+      readonly y2: number;
+      readonly stops: readonly NxGraphicsGradientStop[];
+    }
+  | {
+      readonly kind: "radialGradient";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radius: number;
+      readonly stops: readonly NxGraphicsGradientStop[];
+    };
 export interface NxGraphicsTextRequest {
   readonly text: string;
   readonly family: string;
@@ -76,6 +97,7 @@ export interface NxGraphicsConfig {
   readonly renderer: string;
   readonly fonts: readonly string[];
   readonly limits: {
+    readonly gradient_stops: number;
     readonly nodes: number;
     readonly depth: number;
     readonly path_commands: number;
@@ -104,9 +126,9 @@ export interface NxGraphicsNode {
   readonly clip_evenodd: boolean;
   readonly path: readonly NxGraphicsPathElement[] | null;
   readonly evenodd: boolean;
-  readonly fill: NxGraphicsColor | null;
+  readonly fill: NxGraphicsPaint | null;
   readonly stroke: {
-    readonly color: NxGraphicsColor;
+    readonly paint: NxGraphicsPaint;
     readonly width: number;
     readonly cap: "butt" | "round" | "square";
     readonly join: "miter" | "round" | "bevel";

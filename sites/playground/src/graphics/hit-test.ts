@@ -1,3 +1,4 @@
+import { visiblePaint } from "./paint.ts";
 import { pathData } from "./paths.ts";
 import type { GraphicsNode, GraphicsScene } from "./protocol.ts";
 
@@ -49,7 +50,7 @@ export function hitTest(
         const path = new Path2D(pathData(node.path));
         if (
           node.fill !== null &&
-          node.fill[3] > 0 &&
+          visiblePaint(node.fill) &&
           context!.isPointInPath(
             path,
             x,
@@ -60,7 +61,7 @@ export function hitTest(
           return node;
         }
         const stroke = node.stroke;
-        if (stroke !== null && stroke.width > 0 && stroke.color[3] > 0) {
+        if (stroke !== null && stroke.width > 0 && visiblePaint(stroke.paint)) {
           context!.lineWidth = stroke.width;
           context!.lineCap = stroke.cap;
           context!.lineJoin = stroke.join;
@@ -73,7 +74,7 @@ export function hitTest(
         }
       }
       // Text has no portable glyph-path API in Canvas; use its conservative prepared ink bounds.
-      return node.text !== null && node.fill !== null && node.fill[3] > 0
+      return node.text !== null && node.fill !== null && visiblePaint(node.fill)
         ? node
         : undefined;
     } finally {

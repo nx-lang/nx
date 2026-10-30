@@ -267,11 +267,51 @@ fn path(p: &BezPath, evenodd: bool) -> Path {
     });
     out.detach()
 }
-fn paint(color: [f32; 4]) -> Paint {
+fn paint(value: &nx_graphics::Paint) -> Result<Paint> {
+    use nx_graphics::Paint as P;
     let mut p = Paint::default();
     p.set_anti_alias(true);
-    p.set_color4f(Color4f::new(color[0], color[1], color[2], color[3]), None);
-    p
+    let stops = match value {
+        P::Color { color } => {
+            p.set_color4f(Color4f::new(color[0], color[1], color[2], color[3]), None);
+            return Ok(p);
+        }
+        P::LinearGradient { stops, .. } | P::RadialGradient { stops, .. } => stops,
+    };
+    let colors = stops
+        .iter()
+        .map(|s| Color4f::new(s.color[0], s.color[1], s.color[2], s.color[3]))
+        .collect::<Vec<_>>();
+    let positions = stops.iter().map(|s| s.offset as f32).collect::<Vec<_>>();
+    let gradient = sk::gradient::Gradient::new(
+        sk::gradient::Colors::new(
+            &colors,
+            Some(&positions),
+            sk::TileMode::Clamp,
+            sk::ColorSpace::new_srgb(),
+        ),
+        sk::gradient::Interpolation {
+            in_premul: sk::gradient::interpolation::InPremul::Yes,
+            color_space: sk::gradient::interpolation::ColorSpace::SRGB,
+            ..Default::default()
+        },
+    );
+    let shader = match value {
+        P::LinearGradient { x1, y1, x2, y2, .. } => sk::gradient::shaders::linear_gradient(
+            ((*x1 as f32, *y1 as f32), (*x2 as f32, *y2 as f32)),
+            &gradient,
+            None,
+        ),
+        P::RadialGradient { cx, cy, radius, .. } => sk::gradient::shaders::radial_gradient(
+            ((*cx as f32, *cy as f32), *radius as f32),
+            &gradient,
+            None,
+        ),
+        _ => unreachable!(),
+    }
+    .ok_or_else(|| error("", "backend rejected gradient paint"))?;
+    p.set_shader(shader);
+    Ok(p)
 }
 /// Borrows a canvas for one frame. Frame exit and Drop restore its entry state; pixel rollback is
 /// the offscreen host's responsibility. No command recorder is installed or needed.
@@ -345,16 +385,16 @@ impl Destination for SkiaDestination<'_> {
         &mut self,
         p: &BezPath,
         evenodd: bool,
-        fill: Option<[f32; 4]>,
+        fill: Option<&nx_graphics::Paint>,
         stroke: Option<&Stroke>,
     ) -> Result<()> {
         let geometry = path(p, evenodd);
         if let Some(c) = fill {
-            self.canvas.draw_path(&geometry, &paint(c));
+            self.canvas.draw_path(&geometry, &paint(c)?);
         }
         if let Some(s) = stroke {
             if s.width > 0.0 {
-                let mut p = paint(s.color);
+                let mut p = paint(&s.paint)?;
                 p.set_style(sk::paint::Style::Stroke);
                 p.set_stroke_width(s.width as f32);
                 p.set_stroke_cap(match s.cap.as_str() {
@@ -380,7 +420,7 @@ impl Destination for SkiaDestination<'_> {
         }
         Ok(())
     }
-    fn text(&mut self, t: &Text, c: [f32; 4]) -> Result<()> {
+    fn text(&mut self, t: &Text, c: &nx_graphics::Paint) -> Result<()> {
         if t.request.text.is_empty() {
             return Ok(());
         }
@@ -396,7 +436,7 @@ impl Destination for SkiaDestination<'_> {
             ));
         }
         self.canvas
-            .draw_text_blob(&blob.blob, (t.x as f32, t.y as f32), &paint(c));
+            .draw_text_blob(&blob.blob, (t.x as f32, t.y as f32), &paint(c)?);
         Ok(())
     }
 }
@@ -443,7 +483,7 @@ mod tests {
         }
     }
     fn scene() -> Scene {
-        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"opacity":0.5,"children":[{"x":0,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}},{"x":10,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]}]});
+        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"opacity":0.5,"children":[{"x":0,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}},{"x":10,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]}]});
         nx_graphics::prepare(
             &value,
             &Resolver,
@@ -456,6 +496,132 @@ mod tests {
             },
         )
         .unwrap()
+    }
+    #[test]
+    fn gradient_sampling_matches_shared_analytic_corpus() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/gradients/sampling.json")).unwrap();
+        for case in corpus.as_array().unwrap() {
+            let value: nx_graphics::Paint = serde_json::from_value(case["paint"].clone()).unwrap();
+            let info = sk::ImageInfo::new(
+                (101, 101),
+                sk::ColorType::RGBA8888,
+                sk::AlphaType::Premul,
+                sk::ColorSpace::new_srgb(),
+            );
+            let mut surface = sk::surfaces::raster(&info, None, None).unwrap();
+            surface.canvas().clear(sk::Color::TRANSPARENT);
+            surface
+                .canvas()
+                .draw_rect(sk::Rect::from_wh(101.0, 101.0), &paint(&value).unwrap());
+            let info = sk::ImageInfo::new(
+                (1, 1),
+                sk::ColorType::RGBA8888,
+                sk::AlphaType::Premul,
+                sk::ColorSpace::new_srgb(),
+            );
+            for sample in case["samples"].as_array().unwrap() {
+                let mut pixel = [0u8; 4];
+                assert!(surface.canvas().read_pixels(
+                    &info,
+                    &mut pixel,
+                    4,
+                    (
+                        sample["x"].as_i64().unwrap() as i32,
+                        sample["y"].as_i64().unwrap() as i32
+                    )
+                ));
+                for i in 0..4 {
+                    assert!(
+                        (pixel[i] as f64 / 255.0 - sample["expected"][i].as_f64().unwrap()).abs()
+                            <= 2.0 / 255.0,
+                        "{}: {pixel:?}",
+                        case["name"]
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn gradient_text_retains_element_coordinates_at_all_sizes_and_anchors() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/gradients/sampling.json")).unwrap();
+        let gradient: nx_graphics::Paint =
+            serde_json::from_value(corpus[0]["paint"].clone()).unwrap();
+        let mut fonts = Fonts::fixture().unwrap();
+        for size in [16.0, 32.0] {
+            let request = TextRequest {
+                text: "Gradient".into(),
+                family: "Fixture".into(),
+                size,
+                weight: 400,
+                italic: false,
+            };
+            let run = fonts.shape(&request).unwrap();
+            for anchor in [0.0, 0.5, 1.0] {
+                let mut scene = scene();
+                let mut text = scene.root.children[0].children[0].clone();
+                scene.root.children.clear();
+                scene.root.fill = None;
+                scene.root.path = None;
+                scene.root.clip = None;
+                text.path = None;
+                text.stroke = None;
+                text.transform = Affine::new([1.25, 0.0, 0.0, 0.8, 10.0, 5.0]);
+                text.text = Some(Text {
+                    request: request.clone(),
+                    run: run.clone(),
+                    x: 55.0 - run.advance * anchor,
+                    y: 70.0,
+                });
+                text.fill = Some(gradient.clone());
+                scene.root.children.push(text);
+                let info = sk::ImageInfo::new(
+                    (240, 110),
+                    sk::ColorType::RGBA8888,
+                    sk::AlphaType::Premul,
+                    sk::ColorSpace::new_srgb(),
+                );
+                let mut pixels = Vec::new();
+                for solid in [false, true] {
+                    if solid {
+                        scene.root.children[0].fill = Some(nx_graphics::Paint::Color {
+                            color: [1.0, 0.0, 0.0, 1.0],
+                        });
+                    }
+                    let mut surface = sk::surfaces::raster(&info, None, None).unwrap();
+                    surface.canvas().clear(sk::Color::TRANSPARENT);
+                    scene
+                        .draw(&mut SkiaDestination::new(surface.canvas(), &fonts))
+                        .unwrap();
+                    let mut bytes = vec![0u8; 240 * 110 * 4];
+                    assert!(surface
+                        .canvas()
+                        .read_pixels(&info, &mut bytes, 240 * 4, (0, 0)));
+                    pixels.push(bytes);
+                }
+                let mut checked = 0;
+                for y in 0..110 {
+                    for x in 0..240 {
+                        let i = (y * 240 + x) * 4;
+                        if pixels[1][i + 3] < 250 {
+                            continue;
+                        }
+                        let local_x = (x as f64 + 0.5 - 10.0) / 1.25;
+                        let alpha = (1.0 - (local_x - 0.5) / 100.0).clamp(0.0, 1.0);
+                        assert!(
+                            (pixels[0][i + 3] as f64 / 255.0
+                                - alpha * pixels[1][i + 3] as f64 / 255.0)
+                                .abs()
+                                <= 2.0 / 255.0,
+                            "size={size} anchor={anchor} x={x} y={y}"
+                        );
+                        checked += 1;
+                    }
+                }
+                assert!(checked > 0);
+            }
+        }
     }
     #[test]
     fn direct_isolated_opacity_and_canvas_state() {
@@ -556,7 +722,7 @@ mod tests {
                 })
             }
         }
-        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"data":"M0 0H40V40H0Z","fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"fillRule":"nonzero","clipPath":"M0 0H40V40H0Z M10 10H30V30H10Z","clipRule":"evenodd"}]});
+        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"data":"M0 0H40V40H0Z","fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"fillRule":"nonzero","clipPath":"M0 0H40V40H0Z M10 10H30V30H10Z","clipRule":"evenodd"}]});
         let fonts = Fonts::fixture().unwrap();
         let scene = nx_graphics::prepare(
             &value,

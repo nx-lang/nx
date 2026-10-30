@@ -195,7 +195,7 @@ fn reexport_mismatch_uses_the_consumers_visible_alias() {
 fn graphics_solid_paint_rejects_noncanonical_color_payloads() {
     for color in ["\"red\"", "{ 1 }", "{ \"red\" }", "<Color r=1 g=0 b=0 />"] {
         let source = format!(
-            "import \"@nx/graphics\" as g\ntype Color = {{ r: float32 g: float32 b: float32 a: float32 = 1 }}\nlet root() = <g.Paint.solid color={color} />"
+            "import \"@nx/graphics\" as g\ntype Color = {{ r: float32 g: float32 b: float32 a: float32 = 1 }}\nlet root() = <g.Paint.color color={color} />"
         );
         let artifact =
             build_program_artifact_from_source(&source, "main.nx", &ProgramBuildContext::empty())
@@ -216,7 +216,7 @@ fn graphics_only_import_retains_transitive_color_type_context() {
     let program = crate::ir_runtime_tests::program(
         r#"import "@nx/graphics" as g
 let shade: g.Color = <g.Color r=1 g=0 b=0 />
-let root() = <g.Paint.solid color={shade} />"#,
+let root() = <g.Paint.color color={shade} />"#,
     );
     let NxValue::Record { properties, .. } = program
         .evaluate_function("root", &[], &RuntimeOptions::default())

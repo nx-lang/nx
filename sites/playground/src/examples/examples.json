@@ -148,5 +148,11 @@
     "title": "Graphics: shapes and text",
     "topic": "Larger examples",
     "docs": "reference/libraries/graphics"
+  },
+  {
+    "id": "gradients",
+    "title": "Graphics: gradients and chart fills",
+    "topic": "Larger examples",
+    "docs": "reference/libraries/graphics"
   }
 ]

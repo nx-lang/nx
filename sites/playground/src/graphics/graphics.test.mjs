@@ -263,7 +263,7 @@ test("helper diagnostics use authored call sites", async () => {
 
 test("legacy color strings are rejected before painting", async () => {
   const result = await prepareDrawing(host, complete(
-    '<g.Rect width=10 height=10 fill=<g.Paint.solid color="red"/>/>',
+    '<g.Rect width=10 height=10 fill=<g.Paint.color color="red"/>/>',
   ), measure);
   assert.equal(result.scene, null);
   assert.ok(result.diagnostics.length > 0);
@@ -400,4 +400,43 @@ test("remaining payload budget errors carry the nearest scene node's source", as
   );
   assert.match(result.diagnostics[0].message, /limits.*element\/children\/0/);
   assert.equal(result.diagnostics[0].span.startByte, start);
+});
+
+test("gradient example prepares shared illustration and chart fills through TypeScript IR", async () => {
+  const source = readFileSync(new URL("../examples/nx/gradients.nx", import.meta.url), "utf8");
+  const result = await prepareDrawing(host, source, measure);
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(result.scene.profile, "graphics-core-v3");
+  assert.equal(result.scene.root.children[0].fill.kind, "linearGradient");
+  assert.equal(result.scene.root.children[1].fill.kind, "radialGradient");
+  assert.deepEqual(result.scene.root.children[0].fill, result.scene.root.children[2].fill);
+});
+
+test("Canvas fades with equal effective RGB avoid redundant sub-stops", async () => {
+  const { canvasPaint } = await import("./paint.ts");
+  for (const end of [[1,0,0,0],[0,0,1,0]]) {
+    const stops=[];
+    const gradient={addColorStop(offset,color){ stops.push({offset,color}); }};
+    canvasPaint({createLinearGradient(){return gradient;}}, {
+      kind:"linearGradient",x1:0,y1:0,x2:100,y2:0,
+      stops:[{offset:0,color:[1,0,0,1]},{offset:1,color:end}],
+    });
+    assert.ok(stops.length<=4, `Expected exact fade without subdivision: ${stops.length}`);
+  }
+});
+
+test("large text rejects gradients that collapse under Canvas font normalization", async () => {
+  const result=await prepareDrawing(host,complete(
+    '<g.Text fontFamily="Fixture" fontSize=2000 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0.00005 y2=0 stops={<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff/>}/>>Gradient</g.Text>'
+  ),measure);
+  assert.equal(result.scene,null);
+  assert.ok(result.diagnostics.some(d=>/gradient|backend|precision/i.test(d.message)));
+});
+
+test("text origin compensation cannot collapse distinct gradient endpoints", async () => {
+  const result = await prepareDrawing(host, complete(
+    '<g.Text x=-1500 fontFamily="Fixture" fontSize=100 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0.000032 y2=0 stops={<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff/>}/>>' + "Gradient".repeat(40) + '</g.Text>'
+  ), measure);
+  assert.equal(result.scene, null);
+  assert.ok(result.diagnostics.some(d => /gradient span/.test(d.message)));
 });
