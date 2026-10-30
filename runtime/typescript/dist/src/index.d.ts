@@ -104,6 +104,7 @@ export declare const nodeKinds: {
     readonly call: 8;
     readonly intrinsic: 9;
     readonly standardMath: 26;
+    readonly standardColor: 27;
     readonly if: 10;
     readonly ifIs: 11;
     readonly array: 12;

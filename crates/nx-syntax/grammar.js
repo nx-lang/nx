@@ -674,6 +674,7 @@ module.exports = grammar({
 
     // ===== Literals =====
     literal: $ => choice(
+      $.color_literal,
       $.string_literal,
       $.int_literal,
       $.real_literal,
@@ -692,6 +693,7 @@ module.exports = grammar({
 
     int_literal: $ => /[0-9]+/,
     real_literal: $ => /[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?/,
+    color_literal: $ => token(/#[a-zA-Z0-9_]+/),
     hex_literal: $ => /0[xX][0-9a-fA-F]+/,
     bool_literal: $ => choice('true', 'false'),
 

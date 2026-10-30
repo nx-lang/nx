@@ -149,6 +149,7 @@ test("Canvas adapter accepts only prepared path commands and numerical colors", 
     "M0 0 Q1 2 3 4 C5 6 7 8 9 10 Z",
   );
   assert.equal(color([1, 0, 0, 0.5]), "rgba(255,0,0,0.5)");
+  assert.equal(color([0.123456789, 0.4, 0.8, 0.5]), "rgba(31.481481195,102,204,0.5)");
   assert.equal(color(null), "none");
 });
 test("helper output retains construction identity and maps every helper back to its authored call", async () => {
@@ -244,7 +245,6 @@ test("helper diagnostics use authored call sites", async () => {
     "<g.Star cx=50 cy=50 outerRadius=10 innerRadius=50 pointCount=5/>",
     "<g.RegularPolygon cx=50 cy=50 radius=10 pointCount=2/>",
     "<g.Arrow x1=5 y1=5 x2=5 y2=5 shaftWidth=2 headWidth=4 headLength=3/>",
-    '<g.Star cx=50 cy=50 outerRadius=10 innerRadius=5 pointCount=5 fill=<g.Paint.solid color="nope"/>/>',
   ]) {
     const source = complete(body);
     const result = await prepareDrawing(host, source, measure);
@@ -259,6 +259,14 @@ test("helper diagnostics use authored call sites", async () => {
       body,
     );
   }
+});
+
+test("legacy color strings are rejected before painting", async () => {
+  const result = await prepareDrawing(host, complete(
+    '<g.Rect width=10 height=10 fill=<g.Paint.solid color="red"/>/>',
+  ), measure);
+  assert.equal(result.scene, null);
+  assert.ok(result.diagnostics.length > 0);
 });
 
 test("identity and scene limits are checked before any browser text measurement", async () => {

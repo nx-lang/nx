@@ -1,0 +1,130 @@
+// Unstable color operations.
+
+import "./color.nx"
+
+/// Constructs encoded sRGB from channels in [0, 255], with opaque alpha.
+export external rgb(r: float64, g: float64, b: float64): Color
+
+/// Constructs encoded sRGB from channels in [0, 255] and alpha in [0, 1].
+export external rgba(r: float64, g: float64, b: float64, a: float64): Color
+
+/// Constructs encoded sRGB from channels and alpha in [0, 1].
+export external srgb(r: float64, g: float64, b: float64, a: float64 = 1): Color
+
+/// Constructs sRGB from linear-light channels and alpha in [0, 1].
+export external linearRgb(r: float64, g: float64, b: float64, a: float64 = 1): Color
+
+/// Constructs sRGB from hue in degrees and saturation, lightness, and alpha in [0, 1].
+export external hsl(h: float64, s: float64, l: float64, a: float64 = 1): Color
+
+/// Constructs sRGB from hue in degrees and saturation, value, and alpha in [0, 1].
+export external hsv(h: float64, s: float64, v: float64, a: float64 = 1): Color
+
+/// Constructs sRGB from hue in degrees and whiteness, blackness, and alpha in [0, 1].
+/// Normalizes whiteness and blackness when their sum exceeds 1.
+export external hwb(h: float64, w: float64, b: float64, a: float64 = 1): Color
+
+/// Constructs sRGB from Oklab lightness in [0, 1], finite opponent channels, and alpha in [0, 1].
+/// Clips converted RGB channels to [0, 1].
+export external oklab(l: float64, a: float64, b: float64, alpha: float64 = 1): Color
+
+/// Constructs sRGB from lightness in [0, 1], nonnegative chroma, and hue in degrees.
+/// Alpha is in [0, 1].
+/// Clips converted RGB channels to [0, 1].
+export external oklch(l: float64, c: float64, h: float64, alpha: float64 = 1): Color
+
+/// Parses supported standalone CSS color text; fails with color-invalid-text on invalid input.
+export external parse(text: string): Color
+
+/// Parses supported standalone CSS color text, returning a parsed value or an invalid result.
+export external tryParse(text: string): ParseResult
+
+/// Returns the color if all channels are finite and in [0, 1]; otherwise fails with
+/// color-invalid-channel.
+export external validate(value: Color): Color
+
+/// Formats lowercase #rrggbbaa, quantizing channels to bytes.
+export external toHex(value: Color): string
+
+/// Formats standalone rgba(...) text retaining float32 channel precision.
+export external toCss(value: Color): string
+
+/// Converts to encoded sRGB channels in [0, 255], with alpha in [0, 1].
+export external toRgb(value: Color): RgbChannels
+
+/// Converts to HSL with hue in degrees and saturation, lightness, and alpha in [0, 1].
+export external toHsl(value: Color): HslChannels
+
+/// Converts to HSV with hue in degrees and saturation, value, and alpha in [0, 1].
+export external toHsv(value: Color): HsvChannels
+
+/// Converts to HWB with hue in degrees and whiteness, blackness, and alpha in [0, 1].
+export external toHwb(value: Color): HwbChannels
+
+/// Converts to linear-light RGB channels and alpha in [0, 1].
+export external toLinearRgb(value: Color): LinearRgbChannels
+
+/// Converts to Oklab lightness, opponent channels, and alpha.
+export external toOklab(value: Color): OklabChannels
+
+/// Converts to Oklch lightness, nonnegative chroma, hue in degrees, and alpha.
+export external toOklch(value: Color): OklchChannels
+
+/// Replaces alpha with a value in [0, 1].
+export external withAlpha(value: Color, alpha: float64): Color
+
+/// Adds amount in [0, 1] to alpha, clamping the result to [0, 1].
+export external fadeIn(value: Color, amount: float64): Color
+
+/// Subtracts amount in [0, 1] from alpha, clamping the result to [0, 1].
+export external fadeOut(value: Color, amount: float64): Color
+
+/// Adds amount in [0, 1] to HSL lightness, clamping the result to [0, 1].
+export external lighten(value: Color, amount: float64): Color
+
+/// Subtracts amount in [0, 1] from HSL lightness, clamping the result to [0, 1].
+export external darken(value: Color, amount: float64): Color
+
+/// Adds amount in [0, 1] to HSL saturation, clamping the result to [0, 1].
+export external saturate(value: Color, amount: float64): Color
+
+/// Subtracts amount in [0, 1] from HSL saturation, clamping the result to [0, 1].
+export external desaturate(value: Color, amount: float64): Color
+
+/// Rotates HSL hue by degrees, wrapping modulo 360.
+export external rotateHue(value: Color, degrees: float64): Color
+
+/// Rotates HSL hue by 180 degrees.
+export external complement(value: Color): Color
+
+/// Sets HSL saturation to zero, preserving lightness and alpha.
+export external grayscale(value: Color): Color
+
+/// Blends encoded RGB toward its inverse by amount in [0, 1], preserving alpha.
+export external invert(value: Color, amount: float64 = 1): Color
+
+/// Mixes colors using premultiplied alpha in the selected space.
+/// Weight in [0, 1] is the contribution of the second color; endpoints preserve their inputs.
+export external mix(
+  first: Color,
+  second: Color,
+  weight: float64 = 0.5,
+  space: InterpolationSpace = oklab
+): Color
+
+/// Composites foreground over background in linear-light sRGB using source-over.
+export external composite(foreground: Color, background: Color): Color
+
+/// Returns WCAG relative luminance for an opaque color.
+export external relativeLuminance(value: Color): float64
+
+/// Returns the WCAG contrast ratio of two opaque colors.
+export external contrastRatio(first: Color, second: Color): float64
+
+/// Returns the candidate with higher WCAG contrast against an opaque background.
+/// Candidates must be opaque; defaults to black and white, and chooses first on ties.
+export external bestTextColor(
+  background: Color,
+  first: Color = { black },
+  second: Color = { white }
+): Color

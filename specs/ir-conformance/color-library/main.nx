@@ -1,0 +1,11 @@
+import "@nx/color" as c
+
+let root() = {
+  c.toHex(c.mix(#ff0000, #0000ff, 0.5, c.InterpolationSpace.srgb))
+  c.toHex(c.composite(#ff000080, #ffffff))
+  c.contrastRatio(#000000, #ffffff)
+  c.toCss(c.srgb(0.123456789, 0.4, 0.8, 0.5))
+  c.toHsl(c.hsl(360, 1, 0.5))
+  c.tryParse("hsl(180 100% 50%)")
+  c.tryParse("var(--accent)")
+}

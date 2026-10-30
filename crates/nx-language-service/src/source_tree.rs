@@ -108,6 +108,12 @@ pub struct SourceNode {
     /// text run, a comment, an unparsed region, the alias of an imported name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// A statically known canonical color, formatted for a host swatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// A validation failure for a statically recognized color constructor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_error: Option<String>,
     /// The text type of a typed body, as `markdown` in `<Note:markdown>`, on the element and on
     /// each run of its text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -475,7 +481,67 @@ impl WorkspaceSnapshot {
             builder.attach_visualizers(&visualizers);
             missing_visualizer_modules = visualizers.missing;
         }
-        let (nodes, declarations) = builder.finish();
+        let (mut nodes, declarations) = builder.finish();
+        for at in 0..nodes.len() {
+            let canonical = nodes[at]
+                .declaration
+                .and_then(|id| declarations.get(id as usize))
+                .is_some_and(|declaration| {
+                    matches!(
+                        declaration.module.as_str(),
+                        "@nx/color/color.nx" | "@nx/graphics/graphics.nx"
+                    ) && declaration.name == "Color"
+                });
+            if !canonical || nodes[at].role != SourceRole::Element {
+                continue;
+            }
+            let mut channels = [0.0, 0.0, 0.0, 1.0];
+            let mut seen = [false, false, false, true];
+            for attribute in 0..nodes.len() {
+                if nodes[attribute].parent != Some(at as u32)
+                    || nodes[attribute].role != SourceRole::Attribute
+                {
+                    continue;
+                }
+                let Some(channel) = ["r", "g", "b", "a"]
+                    .iter()
+                    .position(|name| Some(*name) == nodes[attribute].name.as_deref())
+                else {
+                    continue;
+                };
+                let value = nodes
+                    .iter()
+                    .find(|node| {
+                        node.parent == Some(attribute as u32) && node.role == SourceRole::Literal
+                    })
+                    .and_then(|node| node.value.as_ref())
+                    .and_then(|text| text.parse::<f64>().ok());
+                if let Some(value) = value {
+                    channels[channel] = value;
+                    seen[channel] = true;
+                } else {
+                    seen[channel] = false;
+                }
+            }
+            if seen.iter().all(|seen| *seen) {
+                match nx_value::color::make(channels) {
+                    Ok(value) => {
+                        if let Ok([r, g, b, a]) = nx_value::color::channels(&value) {
+                            nodes[at].color = Some(format!(
+                                "#{:02x}{:02x}{:02x}{:02x}",
+                                (r * 255.0).round() as u8,
+                                (g * 255.0).round() as u8,
+                                (b * 255.0).round() as u8,
+                                (a * 255.0).round() as u8
+                            ));
+                        }
+                    }
+                    Err(error) => {
+                        nodes[at].color_error = Some(format!("{}: {}", error.code, error.message))
+                    }
+                }
+            }
+        }
 
         Ok(SourceTree {
             uri: document.uri.clone(),
@@ -581,6 +647,8 @@ impl<'a> TreeBuilder<'a> {
             key: String::new(),
             name: None,
             value: None,
+            color: None,
+            color_error: None,
             text_type: None,
             ty: None,
             declaration: None,
@@ -958,7 +1026,10 @@ impl<'a> TreeBuilder<'a> {
             return;
         }
         match node.kind() {
-            SyntaxKind::LITERAL | SyntaxKind::SIGNED_NUMERIC_LITERAL | SyntaxKind::UNIT_LITERAL => {
+            SyntaxKind::LITERAL
+            | SyntaxKind::SIGNED_NUMERIC_LITERAL
+            | SyntaxKind::UNIT_LITERAL
+            | SyntaxKind::COLOR_LITERAL => {
                 let index = self.push_expression(SourceRole::Literal, node, parent, segment, flags);
                 self.nodes[index].value = Some(node.text().to_string());
             }
@@ -1164,6 +1235,69 @@ impl<'a> TreeBuilder<'a> {
         flags: &[SourceFlag],
     ) {
         let index = self.push_expression(SourceRole::Call, node, parent, segment, flags);
+        if let Some(callee) = node.child_by_field("callee") {
+            if let Some(declaration) = self.visible_declaration(callee.text()) {
+                let entry = &self.table[declaration as usize];
+                if matches!(
+                    entry.module.as_str(),
+                    "@nx/color/color.nx" | "@nx/color/operations.nx"
+                ) && matches!(entry.name.as_str(), "parse" | "rgb" | "rgba" | "srgb")
+                {
+                    self.nodes[index].declaration = Some(declaration);
+                    let name = entry.name.clone();
+                    let args: Option<Vec<nx_value::NxValue>> = fields(node)
+                        .into_iter()
+                        .filter(|(field, child)| {
+                            *field != Some("callee")
+                                && child.raw().is_named()
+                                && !matches!(
+                                    child.kind(),
+                                    SyntaxKind::LINE_COMMENT
+                                        | SyntaxKind::BLOCK_COMMENT
+                                        | SyntaxKind::DOC_COMMENT
+                                )
+                        })
+                        .map(|(_, child)| {
+                            let text = child.text();
+                            if name == "parse" {
+                                serde_json::from_str::<String>(text)
+                                    .ok()
+                                    .map(nx_value::NxValue::String)
+                            } else {
+                                text.parse::<f64>().ok().map(nx_value::NxValue::Float)
+                            }
+                        })
+                        .collect();
+                    if let Some(mut args) = args {
+                        if let Some(op) = nx_value::color::NAMES
+                            .iter()
+                            .position(|candidate| *candidate == name)
+                        {
+                            if matches!(name.as_str(), "srgb" | "rgba") && args.len() == 3 {
+                                args.push(nx_value::NxValue::Float(1.0));
+                            }
+                            match nx_value::color::evaluate(op as u32, &args) {
+                                Ok(value) => {
+                                    if let Ok([r, g, b, a]) = nx_value::color::channels(&value) {
+                                        self.nodes[index].color = Some(format!(
+                                            "#{:02x}{:02x}{:02x}{:02x}",
+                                            (r * 255.0).round() as u8,
+                                            (g * 255.0).round() as u8,
+                                            (b * 255.0).round() as u8,
+                                            (a * 255.0).round() as u8
+                                        ));
+                                    }
+                                }
+                                Err(error) => {
+                                    self.nodes[index].color_error =
+                                        Some(format!("{}: {}", error.code, error.message))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let mut argument = 0;
         for (field, child) in fields(node) {
             if self.trivia(child, Some(index)) || !child.raw().is_named() {

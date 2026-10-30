@@ -1,0 +1,224 @@
+// Unstable renderer-independent color standard library.
+
+/// Encoded non-premultiplied sRGB channels and alpha, each in [0, 1].
+export type Color = {
+  r: float32      /// Encoded red in [0, 1].
+  g: float32      /// Encoded green in [0, 1].
+  b: float32      /// Encoded blue in [0, 1].
+  a: float32 = 1  /// Alpha in [0, 1]; 0 is transparent and 1 is opaque.
+}
+
+/// Recoverable parsing result.
+export type ParseResult =
+  | parsed { value: Color }
+  | invalid { message: string }
+
+/// Rectangular interpolation space.
+export type InterpolationSpace = srgb | linearSrgb | oklab
+
+/// Encoded sRGB channels in [0, 255]; alpha is in [0, 1].
+export type RgbChannels = {
+  r: float64      /// Red in [0, 255].
+  g: float64      /// Green in [0, 255].
+  b: float64      /// Blue in [0, 255].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Hsl channels; alpha is in [0, 1].
+export type HslChannels = {
+  h: float64      /// Hue in degrees, in [0, 360).
+  s: float64      /// Saturation in [0, 1].
+  l: float64      /// Lightness in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Hsv channels; alpha is in [0, 1].
+export type HsvChannels = {
+  h: float64      /// Hue in degrees, in [0, 360).
+  s: float64      /// Saturation in [0, 1].
+  v: float64      /// Value in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Hwb channels; alpha is in [0, 1].
+export type HwbChannels = {
+  h: float64      /// Hue in degrees, in [0, 360).
+  w: float64      /// Whiteness in [0, 1].
+  b: float64      /// Blackness in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical LinearRgb channels; alpha is in [0, 1].
+export type LinearRgbChannels = {
+  r: float64      /// Linear-light red in [0, 1].
+  g: float64      /// Linear-light green in [0, 1].
+  b: float64      /// Linear-light blue in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Oklab channels; alpha is in [0, 1].
+export type OklabChannels = {
+  l: float64      /// Lightness in [0, 1].
+  a: float64      /// Green-red opponent channel.
+  b: float64      /// Blue-yellow opponent channel.
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Oklch channels; alpha is in [0, 1].
+export type OklchChannels = {
+  l: float64      /// Lightness in [0, 1].
+  c: float64      /// Nonnegative chroma.
+  h: float64      /// Hue in degrees, in [0, 360).
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+// CSS named colors and transparent, using camelCase NX identifiers.
+export let aliceBlue: Color = #f0f8ff
+export let antiqueWhite: Color = #faebd7
+export let aqua: Color = #00ffff
+export let aquamarine: Color = #7fffd4
+export let azure: Color = #f0ffff
+export let beige: Color = #f5f5dc
+export let bisque: Color = #ffe4c4
+export let black: Color = #000000
+export let blanchedAlmond: Color = #ffebcd
+export let blue: Color = #0000ff
+export let blueViolet: Color = #8a2be2
+export let brown: Color = #a52a2a
+export let burlyWood: Color = #deb887
+export let cadetBlue: Color = #5f9ea0
+export let chartreuse: Color = #7fff00
+export let chocolate: Color = #d2691e
+export let coral: Color = #ff7f50
+export let cornflowerBlue: Color = #6495ed
+export let cornsilk: Color = #fff8dc
+export let crimson: Color = #dc143c
+export let cyan: Color = #00ffff
+export let darkBlue: Color = #00008b
+export let darkCyan: Color = #008b8b
+export let darkGoldenrod: Color = #b8860b
+export let darkGray: Color = #a9a9a9
+export let darkGreen: Color = #006400
+export let darkGrey: Color = #a9a9a9
+export let darkKhaki: Color = #bdb76b
+export let darkMagenta: Color = #8b008b
+export let darkOliveGreen: Color = #556b2f
+export let darkOrange: Color = #ff8c00
+export let darkOrchid: Color = #9932cc
+export let darkRed: Color = #8b0000
+export let darkSalmon: Color = #e9967a
+export let darkSeaGreen: Color = #8fbc8f
+export let darkSlateBlue: Color = #483d8b
+export let darkSlateGray: Color = #2f4f4f
+export let darkSlateGrey: Color = #2f4f4f
+export let darkTurquoise: Color = #00ced1
+export let darkViolet: Color = #9400d3
+export let deepPink: Color = #ff1493
+export let deepSkyBlue: Color = #00bfff
+export let dimGray: Color = #696969
+export let dimGrey: Color = #696969
+export let dodgerBlue: Color = #1e90ff
+export let fireBrick: Color = #b22222
+export let floralWhite: Color = #fffaf0
+export let forestGreen: Color = #228b22
+export let fuchsia: Color = #ff00ff
+export let gainsboro: Color = #dcdcdc
+export let ghostWhite: Color = #f8f8ff
+export let gold: Color = #ffd700
+export let goldenrod: Color = #daa520
+export let gray: Color = #808080
+export let green: Color = #008000
+export let greenYellow: Color = #adff2f
+export let grey: Color = #808080
+export let honeydew: Color = #f0fff0
+export let hotPink: Color = #ff69b4
+export let indianRed: Color = #cd5c5c
+export let indigo: Color = #4b0082
+export let ivory: Color = #fffff0
+export let khaki: Color = #f0e68c
+export let lavender: Color = #e6e6fa
+export let lavenderBlush: Color = #fff0f5
+export let lawnGreen: Color = #7cfc00
+export let lemonChiffon: Color = #fffacd
+export let lightBlue: Color = #add8e6
+export let lightCoral: Color = #f08080
+export let lightCyan: Color = #e0ffff
+export let lightGoldenrodYellow: Color = #fafad2
+export let lightGray: Color = #d3d3d3
+export let lightGreen: Color = #90ee90
+export let lightGrey: Color = #d3d3d3
+export let lightPink: Color = #ffb6c1
+export let lightSalmon: Color = #ffa07a
+export let lightSeaGreen: Color = #20b2aa
+export let lightSkyBlue: Color = #87cefa
+export let lightSlateGray: Color = #778899
+export let lightSlateGrey: Color = #778899
+export let lightSteelBlue: Color = #b0c4de
+export let lightYellow: Color = #ffffe0
+export let lime: Color = #00ff00
+export let limeGreen: Color = #32cd32
+export let linen: Color = #faf0e6
+export let magenta: Color = #ff00ff
+export let maroon: Color = #800000
+export let mediumAquamarine: Color = #66cdaa
+export let mediumBlue: Color = #0000cd
+export let mediumOrchid: Color = #ba55d3
+export let mediumPurple: Color = #9370db
+export let mediumSeaGreen: Color = #3cb371
+export let mediumSlateBlue: Color = #7b68ee
+export let mediumSpringGreen: Color = #00fa9a
+export let mediumTurquoise: Color = #48d1cc
+export let mediumVioletRed: Color = #c71585
+export let midnightBlue: Color = #191970
+export let mintCream: Color = #f5fffa
+export let mistyRose: Color = #ffe4e1
+export let moccasin: Color = #ffe4b5
+export let navajoWhite: Color = #ffdead
+export let navy: Color = #000080
+export let oldLace: Color = #fdf5e6
+export let olive: Color = #808000
+export let oliveDrab: Color = #6b8e23
+export let orange: Color = #ffa500
+export let orangeRed: Color = #ff4500
+export let orchid: Color = #da70d6
+export let paleGoldenrod: Color = #eee8aa
+export let paleGreen: Color = #98fb98
+export let paleTurquoise: Color = #afeeee
+export let paleVioletRed: Color = #db7093
+export let papayaWhip: Color = #ffefd5
+export let peachPuff: Color = #ffdab9
+export let peru: Color = #cd853f
+export let pink: Color = #ffc0cb
+export let plum: Color = #dda0dd
+export let powderBlue: Color = #b0e0e6
+export let purple: Color = #800080
+export let rebeccaPurple: Color = #663399
+export let red: Color = #ff0000
+export let rosyBrown: Color = #bc8f8f
+export let royalBlue: Color = #4169e1
+export let saddleBrown: Color = #8b4513
+export let salmon: Color = #fa8072
+export let sandyBrown: Color = #f4a460
+export let seaGreen: Color = #2e8b57
+export let seaShell: Color = #fff5ee
+export let sienna: Color = #a0522d
+export let silver: Color = #c0c0c0
+export let skyBlue: Color = #87ceeb
+export let slateBlue: Color = #6a5acd
+export let slateGray: Color = #708090
+export let slateGrey: Color = #708090
+export let snow: Color = #fffafa
+export let springGreen: Color = #00ff7f
+export let steelBlue: Color = #4682b4
+export let tan: Color = #d2b48c
+export let teal: Color = #008080
+export let thistle: Color = #d8bfd8
+export let tomato: Color = #ff6347
+export let turquoise: Color = #40e0d0
+export let violet: Color = #ee82ee
+export let wheat: Color = #f5deb3
+export let white: Color = #ffffff
+export let whiteSmoke: Color = #f5f5f5
+export let yellow: Color = #ffff00
+export let yellowGreen: Color = #9acd32
+export let transparent: Color = #00000000

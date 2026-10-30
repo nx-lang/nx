@@ -14,3 +14,4 @@ readme = "README.md"
 include = ["src/**", "README.md", "Cargo.toml"]
 
 [dependencies]
+nx-value.workspace = true

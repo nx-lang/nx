@@ -3028,6 +3028,10 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "color_literal"
+        },
+        {
+          "type": "SYMBOL",
           "name": "string_literal"
         },
         {
@@ -3096,6 +3100,13 @@
     "real_literal": {
       "type": "PATTERN",
       "value": "[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?"
+    },
+    "color_literal": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "#[a-zA-Z0-9_]+"
+      }
     },
     "hex_literal": {
       "type": "PATTERN",

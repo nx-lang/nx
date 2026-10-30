@@ -195,6 +195,9 @@ pub struct LoweringContext {
     /// The doc comments of the file, keyed by the start of the node each documents.
     docs: nx_syntax::DocComments,
     /// Closed implementations supplied only by the compiler-owned module registry.
+    color_runtime: bool,
+    /// Only the compiler-registered module declaring the canonical Color uses local literals.
+    defines_color_type: bool,
     runtime_functions: Vec<nx_value::math::MathOp>,
     bound_runtime_functions: Vec<nx_value::math::MathOp>,
 }
@@ -220,6 +223,8 @@ impl LoweringContext {
             type_name_spans: RefCell::new(Vec::new()),
             rejected_type_parameters: RefCell::new(Vec::new()),
             docs: nx_syntax::DocComments::default(),
+            color_runtime: false,
+            defines_color_type: false,
             runtime_functions: Vec::new(),
             bound_runtime_functions: Vec::new(),
         }
@@ -1529,6 +1534,63 @@ impl LoweringContext {
                 }
             }
 
+            SyntaxKind::COLOR_LITERAL => {
+                let text = node.text();
+                let digits = &text[1..];
+                if !matches!(digits.len(), 3 | 4 | 6 | 8)
+                    || !digits.bytes().all(|c| c.is_ascii_hexdigit())
+                {
+                    self.add_diagnostic(
+                        "color-literal: expected #RGB, #RGBA, #RRGGBB, or #RRGGBBAA",
+                        node.span(),
+                    );
+                    return self.error_expr(node.span());
+                }
+                let expanded = if digits.len() <= 4 {
+                    digits.chars().flat_map(|c| [c, c]).collect::<String>()
+                } else {
+                    digits.to_string()
+                };
+                // The unspellable qualifier prevents authored names from shadowing literal types.
+                if !self.defines_color_type
+                    && !self.module.imports.iter().any(|i| matches!(&i.kind,
+                        crate::ImportKind::Wildcard { alias: Some(alias) } if alias.as_str() == "$nxColor"))
+                {
+                    self.module.imports.push(crate::Import {
+                        library_path: "@nx/color".to_string(),
+                        kind: crate::ImportKind::Wildcard { alias: Some(Name::new("$nxColor")) },
+                        span: TextSpan::empty(node.span().start()),
+                    });
+                }
+                let mut properties = Vec::new();
+                for (index, name) in ["r", "g", "b", "a"].iter().enumerate() {
+                    let byte = if index * 2 < expanded.len() {
+                        u8::from_str_radix(&expanded[index * 2..index * 2 + 2], 16).unwrap()
+                    } else {
+                        255
+                    };
+                    let value = self.literal_expr(
+                        Literal::Float32(OrderedFloat((byte as f64 / 255.0) as f32 as f64)),
+                        TypeTag::Float32,
+                        node.span(),
+                    );
+                    properties.push(RecordLiteralProperty {
+                        name: Name::new(name),
+                        value,
+                        span: node.span(),
+                    });
+                }
+                self.alloc_expr(Expr::RecordLiteral {
+                    record: Name::new(if self.defines_color_type {
+                        "Color"
+                    } else {
+                        "$nxColor.Color"
+                    }),
+                    properties,
+                    span: node.span(),
+                })
+            }
+
             SyntaxKind::HEX_LITERAL => {
                 let text = node.text();
                 let digits = text.trim_start_matches("0x").trim_start_matches("0X");
@@ -2625,6 +2687,26 @@ impl LoweringContext {
         visibility: Visibility,
         span: TextSpan,
     ) -> ExprId {
+        if self.color_runtime {
+            if let Some(op) = nx_value::color::NAMES
+                .iter()
+                .position(|n| *n == name.as_str())
+            {
+                let args = params
+                    .iter()
+                    .map(|p| {
+                        let id = self.alloc_expr(Expr::Ident(p.name.clone()));
+                        self.module.set_expr_span(id, TextSpan::default());
+                        id
+                    })
+                    .collect();
+                return self.alloc_expr(Expr::StandardColor {
+                    op: op as u32,
+                    args,
+                    result: return_type.unwrap().clone(),
+                });
+            }
+        }
         let Some(op) = self
             .runtime_functions
             .iter()
@@ -7306,4 +7388,110 @@ component <Search
         };
         assert_eq!(alias.doc, None);
     }
+}
+
+#[cfg(test)]
+mod color_literal_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_trusted_canonical_color_module_resolves_literals_locally() {
+        let source = "type Color = { r: float32 g: float32 b: float32 a: float32 }\n\
+                      let gray = #dcdcdc\nlet transparent = #00000000";
+        let parsed = nx_syntax::parse_str(source, "color.nx");
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let tree = parsed.tree.unwrap();
+        for (trusted, defines_color_type) in [(false, false), (true, false), (true, true)] {
+            let module = if trusted {
+                lower_with_color_runtime(tree.root(), SourceId::new(0), defines_color_type)
+            } else {
+                lower(tree.root(), SourceId::new(0))
+            };
+            assert!(module.diagnostics().is_empty());
+            assert_eq!(module.imports.len(), usize::from(!defines_color_type));
+            for name in ["gray", "transparent"] {
+                let Some(Item::Value(binding)) = module.find_item(name) else {
+                    panic!("{name}");
+                };
+                let Expr::RecordLiteral { record, .. } = module.expr(binding.value) else {
+                    panic!("color record");
+                };
+                assert_eq!(
+                    record.as_str(),
+                    if defines_color_type {
+                        "Color"
+                    } else {
+                        "$nxColor.Color"
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn color_literals_lower_to_float32_records_and_import_once() {
+        let parsed = nx_syntax::parse_str("let a = #f008\nlet b = #FF000088", "colors.nx");
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let tree = parsed.tree.unwrap();
+        let module = lower(tree.root(), SourceId::new(0));
+        assert!(module.diagnostics().is_empty());
+        assert_eq!(module.imports.len(), 1);
+        assert_eq!(module.imports[0].library_path, "@nx/color");
+        let values: Vec<_> = module
+            .items()
+            .iter()
+            .filter_map(|item| {
+                if let Item::Value(binding) = item {
+                    Some(binding.value)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(values.len(), 2);
+        for value in values {
+            let Expr::RecordLiteral {
+                record, properties, ..
+            } = module.expr(value)
+            else {
+                panic!("record")
+            };
+            assert_eq!(record.as_str(), "$nxColor.Color");
+            assert_eq!(properties.len(), 4);
+            assert!(
+                matches!(module.expr(properties[3].value), Expr::Literal(Literal::Float32(x)) if x.0 == (136.0_f64 / 255.0) as f32 as f64)
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_colors_recover_at_the_following_declaration() {
+        for bad in ["#12", "#gg0000", "#ff0000oops"] {
+            let source = format!("let bad = {bad}\nlet good = #fff");
+            let parsed = nx_syntax::parse_str(&source, "colors.nx");
+            assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+            let tree = parsed.tree.unwrap();
+            let module = lower(tree.root(), SourceId::new(0));
+            assert_eq!(module.diagnostics().len(), 1);
+            assert!(module.diagnostics()[0]
+                .message
+                .starts_with("color-literal:"));
+            assert_eq!(module.items().len(), 2);
+        }
+    }
+}
+
+/// Lowers trusted color-library functions. The canonical type module resolves literals locally
+/// to avoid importing the library while it is being built; sibling modules use normal imports.
+pub fn lower_with_color_runtime(
+    root: SyntaxNode,
+    source_id: SourceId,
+    defines_color_type: bool,
+) -> LoweredModule {
+    let mut ctx = LoweringContext::new(source_id);
+    ctx.color_runtime = true;
+    ctx.defines_color_type = defines_color_type;
+    ctx.docs = nx_syntax::doc_comments(&root);
+    ctx.lower_module(root);
+    ctx.finish()
 }

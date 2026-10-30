@@ -85,6 +85,8 @@ export type NxValueRole =
  * its own: the property's node describes it.</para>
  */
 export interface NxValueNode {
+  /** CSS presentation of a validated canonical Color value. */
+  readonly color?: string;
   /**
    * First UTF-16 code unit of the node's text, so `text.slice(start, end)` is the node.
    */

@@ -975,7 +975,9 @@ impl fmt::Display for Type {
             Type::AnyFunction { ret } => f.write_str(&nx_hir::ast::spell_function_reference_type(
                 &ret.to_string(),
             )),
-            Type::Named(named) if named.args().is_empty() => write!(f, "{}", named.name),
+            Type::Named(named) if named.args().is_empty() => {
+                f.write_str(public_type_name(&named.name))
+            }
             Type::Named(named) => f.write_str(&format_applied_type(
                 &named.name,
                 named.args(),
@@ -1009,6 +1011,11 @@ pub fn display_type_pair(lhs: &Type, rhs: &Type) -> (String, String) {
     (lhs.to_string(), rhs.to_string())
 }
 
+/// Hides compiler-synthesized import aliases in both display and collision detection.
+fn public_type_name(name: &Name) -> &str {
+    name.as_str().strip_prefix("$nxColor.").unwrap_or(name.as_str())
+}
+
 /// Returns true when the two types spell one display name for two different declarations.
 fn nominal_parts_collide(lhs: &Type, rhs: &Type) -> bool {
     let (mut lhs_parts, mut rhs_parts) = (Vec::new(), Vec::new());
@@ -1016,7 +1023,8 @@ fn nominal_parts_collide(lhs: &Type, rhs: &Type) -> bool {
     collect_nominal_parts(rhs, &mut rhs_parts);
     lhs_parts.iter().any(|(lhs_name, lhs_origin)| {
         rhs_parts.iter().any(|(rhs_name, rhs_origin)| {
-            lhs_name == rhs_name && !same_declaration(*lhs_origin, lhs_name, *rhs_origin, rhs_name)
+            public_type_name(lhs_name) == public_type_name(rhs_name)
+                && !same_declaration(*lhs_origin, lhs_name, *rhs_origin, rhs_name)
         })
     })
 }
@@ -1068,8 +1076,12 @@ fn qualified_display(ty: &Type) -> String {
         },
         Type::Named(named) => {
             let name = match named.origin() {
-                Some(origin) => Name::new(&format!("{}:{}", origin.module_identity(), named.name)),
-                None => named.name.clone(),
+                Some(origin) => Name::new(&format!(
+                    "{}:{}",
+                    origin.module_identity(),
+                    public_type_name(&named.name)
+                )),
+                None => Name::new(public_type_name(&named.name)),
             };
             if named.args().is_empty() {
                 name.to_string()

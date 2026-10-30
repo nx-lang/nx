@@ -3248,3 +3248,30 @@ let root():float64 = { cos(2.0) + math.cos(0.0) }
         "13"
     );
 }
+
+#[test]
+fn color_transport_typescript_exports_numerical_records_and_typechecks() {
+    let artifact = artifact_from_source(
+        r##"import "@nx/color" as c
+export type Brand = { accent:c.Color }
+let root() = <Brand accent=#1234/>
+"##,
+    );
+    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("color TS");
+    let declarations = output
+        .files
+        .iter()
+        .map(|file| file.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        declarations.contains("interface Color") || declarations.contains("type Color"),
+        "canonical exported Color: {declarations}"
+    );
+    assert!(declarations.contains("r: number"), "numeric color channel");
+    assert!(
+        declarations.contains("a?: number") || declarations.contains("a: number"),
+        "numeric alpha"
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}

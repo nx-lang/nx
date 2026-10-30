@@ -561,6 +561,23 @@ impl PreparedModule {
             .insert(module_identity.into(), namespace);
     }
 
+    /// Retains the dependency modules and namespaces needed to read another module's types.
+    /// This shares peer context without importing any names into the consumer's bindings.
+    pub fn add_peer_context(&mut self, source: &PreparedModule) {
+        self.peer_modules.extend(
+            source
+                .peer_modules
+                .iter()
+                .map(|(identity, module)| (identity.clone(), module.clone())),
+        );
+        self.peer_namespaces.extend(
+            source
+                .peer_namespaces
+                .iter()
+                .map(|(identity, namespace)| (identity.clone(), namespace.clone())),
+        );
+    }
+
     /// Resolves one name in a peer module's own namespace.
     pub fn peer_entry(
         &self,

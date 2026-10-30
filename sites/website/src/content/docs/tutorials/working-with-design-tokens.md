@@ -9,7 +9,9 @@ Design tokens in NX are just typed data. This tutorial shows how to declare toke
 Start a file named `tokens.nx`, or work in the [playground](/play):
 
 ```nx
-type ColorToken = { name:string value:string }
+import "@nx/color" as c
+
+type ColorToken = { name:string value:c.Color }
 type SpaceScale = { xs:int sm:int md:int lg:int }
 type FontToken = { family:string size:int weight:int }
 type FontScale = { body:FontToken heading:FontToken }
@@ -33,9 +35,9 @@ Each block from here on continues the same file:
 ```nx fragment
 let baseTheme: Theme =
   <Theme
-    primary=<ColorToken name="primary" value="#5B6EF5"/>
-    surface=<ColorToken name="surface" value="#0B0C10"/>
-    text=<ColorToken name="text" value="#F2F4F8"/>
+    primary=<ColorToken name="primary" value=#5B6EF5/>
+    surface=<ColorToken name="surface" value=#0B0C10/>
+    text=<ColorToken name="text" value=#F2F4F8/>
     space=<SpaceScale xs=4 sm=8 md=12 lg=16/>
     fonts=<FontScale
       body=<FontToken family="Inter" size=16 weight=400/>
@@ -52,8 +54,8 @@ type Style = { backgroundColor:string color:string padding:string fontFamily:str
 let <Panel theme:Theme title:string  content body:Element /> =
   <section
     style=<Style
-      backgroundColor={theme.surface.value}
-      color={theme.text.value}
+      backgroundColor={c.toCss(theme.surface.value)}
+      color={c.toCss(theme.text.value)}
       padding={theme.space.md + "px"}
       fontFamily={theme.fonts.body.family}
     />>

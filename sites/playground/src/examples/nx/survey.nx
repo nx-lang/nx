@@ -1,4 +1,5 @@
 import "@nx/visualizer"
+import { Color } from "@nx/color"
 
 // A whole survey, written as data: a research screener for hobbyist woodworkers. A host reads this
 // value, shows one step at a time and collects the answers. The types come first, then the
@@ -16,8 +17,6 @@ type uitext = string
 
 /// The address of a picture.
 type ImageUrl = string
-/// A color, as CSS writes one.
-type Color = string
 
 type Choice = {
   value:string
@@ -131,7 +130,6 @@ type ChatLinkConfig = {
   preview?:LinkPreview
 }
 
-visualizer Color = <ValueVisualizer format=color />
 visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot" />
 visualizer StatementStep = <ElementVisualizer title=headline id=id icon="message-square-text" />
 visualizer Question = <ElementVisualizer title=label id=id icon="circle-question-mark" />
@@ -293,15 +291,15 @@ This is research only; there’s no sales pitch or purchase required."
 let root(): ChatLinkConfig = {
   <ChatLinkConfig
     appearance=<ImmersiveAppearance
-      brand=<BrandStyle brandColor="#b6695d" onBrandColor="#ffffff" font="Inter" />
-      questionFlow=<QuestionFlowStyle questionColor="#2b211e" answerColor="#843f10" />
+      brand=<BrandStyle brandColor=#b6695d onBrandColor=#ffffff font="Inter" />
+      questionFlow=<QuestionFlowStyle questionColor=#2b211e answerColor=#843f10 />
       identity=<ChatIdentity
         name="Woodworking Research"
         tagline="Hobbyist woodworking study"
         responseLabel="Research screener"
         status=none
       />
-      background=<SolidChatBackground color="#f4e9e7" />
+      background=<SolidChatBackground color=#f4e9e7 />
     />
     questionFlow={screener}
     preview=<LinkPreview

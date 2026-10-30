@@ -1075,6 +1075,10 @@
           "named": true
         },
         {
+          "type": "color_literal",
+          "named": true
+        },
+        {
           "type": "hex_literal",
           "named": true
         },
@@ -2704,6 +2708,10 @@
   {
     "type": "boolean",
     "named": false
+  },
+  {
+    "type": "color_literal",
+    "named": true
   },
   {
     "type": "component",

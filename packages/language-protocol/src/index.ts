@@ -143,6 +143,8 @@ export type SourceEdit =
 export type SourceEditValue =
   /** A string, its content unescaped. */
   | { kind: "string"; value: string }
+  /** A typed hexadecimal color literal, including its hash. */
+  | { kind: "color"; text: string }
   /** A number as the reader typed it, written as given when it is an NX numeric literal. */
   | { kind: "number"; text: string }
   | { kind: "boolean"; value: boolean }
@@ -423,6 +425,10 @@ export interface SourceNode {
   name?: string;
   /** What the construct says as written: a literal, an operator's token, a type, a text run, a comment. */
   value?: string;
+  /** A statically known canonical color, formatted for a host swatch. */
+  color?: string;
+  /** Validation failure for a statically recognized color constructor. */
+  colorError?: string;
   /** The text type of a typed body, as `markdown` in `<Note:markdown>`. */
   textType?: string;
   /** The construct's type spelled in NX, wherever the type checker gave it one. */

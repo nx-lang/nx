@@ -34,6 +34,8 @@ export interface EditTarget {
    * run as written, a case's name, or `true` or `false`.
    */
   readonly value: string;
+  /** A native hexadecimal literal rather than a formatted string. */
+  readonly colorLiteral?: boolean;
   /** The cases a case's popover lists: those of its union that hold no properties. */
   readonly cases?: readonly SourceCase[];
   /**
@@ -115,6 +117,7 @@ function valueEdit(target: EditTarget, value: SourceEditValue): SourceEdit {
 }
 
 function valueOf(target: EditTarget, value: string): SourceEditValue {
+  if (target.colorLiteral === true) return { kind: "color", text: value };
   switch (target.kind) {
     case "number":
       return { kind: "number", text: value };
@@ -191,6 +194,7 @@ function targetOf(
   const hints = hintsOf(index, at, spelled);
   const property = propertyOf(index, at);
   const extra = { ...(hints === undefined ? {} : { hints }), ...(property === undefined ? {} : { property }) };
+  if ((node.role === "call" || node.role === "element") && node.color !== undefined) return { at, key, kind: "color", value: node.color, colorLiteral: true, ...extra };
   if (node.role !== "literal" && node.role !== "case") {
     return undefined;
   }
@@ -200,6 +204,7 @@ function targetOf(
     return cases.length > 0 && node.name !== undefined ? { at, key, kind: "case", value: node.name, cases, ...extra } : undefined;
   }
   const written = node.value ?? "";
+  if (isHexColor(written)) return { at, key, kind: "color", value: written, colorLiteral: true, ...extra };
   if (written.startsWith('"') && written.endsWith('"') && written.length >= 2) {
     const format = formats.get(at) ?? declared.format;
     const value = decodeString(written);

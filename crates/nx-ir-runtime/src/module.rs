@@ -18,7 +18,8 @@ use nx_ir::{
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 9] = [
+const KNOWN_FEATURES: [&str; 10] = [
+    "standard-color-v1",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
@@ -345,6 +346,10 @@ pub(crate) enum Node {
         callee: u32,
         args: Properties,
     },
+    StandardColor {
+        op: u32,
+        args: Box<[u32]>,
+    },
     StandardMath {
         op: nx_value::math::MathOp,
         args: Box<[u32]>,
@@ -408,9 +413,9 @@ impl Node {
                 visit(*callee);
                 properties(args, visit);
             }
-            Node::StandardMath { args, .. } | Node::Intrinsic { args, .. } => {
-                args.iter().for_each(|node| visit(*node))
-            }
+            Node::StandardColor { args, .. }
+            | Node::StandardMath { args, .. }
+            | Node::Intrinsic { args, .. } => args.iter().for_each(|node| visit(*node)),
             Node::If {
                 condition,
                 then,
@@ -676,6 +681,14 @@ impl<'a> Decoder<'a> {
                 callee: reader.next()?,
                 args: self.properties(&mut reader)?,
             },
+            node::STANDARD_COLOR => {
+                let op = reader.next()?;
+                let args = self.nodes(&mut reader)?;
+                if nx_value::color::ARITIES.get(op as usize).copied() != Some(args.len()) {
+                    return Err("wrong standard color operation/arity".into());
+                }
+                Node::StandardColor { op, args }
+            }
             node::STANDARD_MATH => {
                 let op = nx_value::math::MathOp::from_code(reader.next()?)
                     .ok_or("unknown standard math operation")?;

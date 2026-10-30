@@ -75,6 +75,8 @@ fn record_lineage(shape: &nx_hir::EffectiveRecordShape) -> Vec<nx_hir::RecordAnc
 /// reached it otherwise.</para>
 struct TypeAliasInfo {
     target: ast::TypeRef,
+    /// Namespace in which the target was written, including its import aliases.
+    origin: DeclaringOrigin,
     /// Whether another module wrote the alias. A name its target fails to resolve is that
     /// module's to report, when it is analyzed, not this one's.
     foreign: bool,
@@ -325,6 +327,8 @@ pub struct InferenceContext<'a> {
     /// the same module. The declaring module reports its own cycle; this only stops the consumer
     /// from following one forever.</para>
     foreign_alias_stack: FxHashSet<DeclaringOrigin>,
+    /// Cycles discovered during quiet foreign resolution, reported by local declarations.
+    cyclic_alias_origins: FxHashSet<DeclaringOrigin>,
     /// How many imported alias targets are being walked. A name one of them fails to resolve is
     /// left as it was written rather than reported: its module reports it, and a library that
     /// names an unresolved type does not load.
@@ -501,6 +505,7 @@ impl<'a> InferenceContext<'a> {
             type_aliases: FxHashMap::default(),
             foreign_union_defs: FxHashMap::default(),
             foreign_alias_stack: FxHashSet::default(),
+            cyclic_alias_origins: FxHashSet::default(),
             foreign_alias_depth: 0,
             type_name_ordinals: FxHashMap::default(),
             union_defs: FxHashMap::default(),
@@ -709,6 +714,12 @@ impl<'a> InferenceContext<'a> {
         let ty = match expr {
             // Literals have known types
             ast::Expr::Literal(lit) => self.infer_literal(lit),
+            ast::Expr::StandardColor { args, result, .. } => {
+                for arg in args {
+                    self.infer_expr(*arg);
+                }
+                self.type_from_type_ref_in(None, result)
+            }
             ast::Expr::StandardMath { op, args } => {
                 debug_assert_eq!(op.arity(), args.len());
                 for arg in args {
@@ -4899,7 +4910,7 @@ impl<'a> InferenceContext<'a> {
             || nx_syntax::BUILTIN_TYPE_NAMES.contains(&name.as_str())
     }
 
-    /// Every name `is_visible_type_name` answers for, for a did-you-mean.
+    /// Every user-spellable name `is_visible_type_name` answers for, for a did-you-mean.
     fn visible_type_names(&self) -> Vec<Name> {
         let mut names: Vec<Name> = PRIMITIVE_TYPE_NAMES.into_iter().map(Name::new).collect();
         names.extend(self.type_parameter_scope.keys().cloned());
@@ -4908,6 +4919,7 @@ impl<'a> InferenceContext<'a> {
         names.extend(self.record_origins.keys().cloned());
         names.extend(self.component_origins.keys().cloned());
         names.extend(nx_syntax::BUILTIN_TYPE_NAMES.into_iter().map(Name::new));
+        names.retain(|name| !name.as_str().starts_with('$'));
         names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         names.dedup();
         names
@@ -4985,7 +4997,10 @@ impl<'a> InferenceContext<'a> {
             self.apply_record_type_arguments(&mut spec, arguments, &type_params, owner.as_ref())
         });
         self.check_record_element_bindings(element_id, element, span, &spec);
-        match (self.nominal_named_type(&element.tag), resolved) {
+        // A constructor tag may be a re-exported type alias. Its result has the
+        // target declaration's identity, just as an annotation naming that alias does.
+        let result = self.resolve_named_type(&element.tag, &mut FxHashSet::default());
+        match (result, resolved) {
             (Type::Named(named), Some(resolved)) => Type::Named(named.with_args(resolved)),
             (ty, _) => ty,
         }
@@ -5183,44 +5198,24 @@ impl<'a> InferenceContext<'a> {
             return None;
         }
 
-        // The declaring module's own namespace, which includes what it imported. A type it named
-        // but did not declare is reached here and nowhere else. Records and unions live in the
-        // type namespace, components in the element namespace, and a property may be typed by any
-        // of the three.
-        let peer_entry = self
+        // Resolve through the declaring namespace, including references back to this module.
+        // Looking only in peer_modules misses local declarations reached through a peer import.
+        let resolved = self
             .module
-            .peer_entry(PreparedNamespace::Type, module_identity, name)
+            .resolve_in_module(PreparedNamespace::Type, module_identity, name)
             .or_else(|| {
                 self.module
-                    .peer_entry(PreparedNamespace::Element, module_identity, name)
+                    .resolve_in_module(PreparedNamespace::Element, module_identity, name)
             });
-        if let Some(entry) = peer_entry {
-            let origin = entry.clone();
-            if let Some(item) = self
-                .module
-                .peer_module(origin.module_identity())
-                .and_then(|module| module.item_by_definition(origin.definition_id()))
-                .cloned()
-            {
-                if let Some(ty) = self.foreign_nominal_type(name, &item, origin) {
-                    return Some(ty);
-                }
-            }
-        }
-
-        // A workspace peer keeps its whole lowered module, so its own definitions are readable
-        // directly, whether or not the consumer imported them. This is what a module analyzed
-        // outside a graph has, where no peer namespace was registered.
-        if let Some((definition_id, item)) = self
-            .module
-            .peer_module(module_identity)
-            .and_then(|peer| peer.find_item_with_definition(name.as_str()))
-            .map(|(definition_id, item)| (definition_id, item.clone()))
+        if let Some(ResolvedPreparedItem::Raw {
+            module_identity,
+            definition_id,
+            item,
+            ..
+        }) = resolved
         {
             let origin = DeclaringOrigin::new(module_identity, definition_id);
-            if let Some(ty) = self.foreign_nominal_type(name, &item, origin) {
-                return Some(ty);
-            }
+            return self.foreign_nominal_type(name, &item, origin);
         }
 
         None
@@ -5237,10 +5232,19 @@ impl<'a> InferenceContext<'a> {
         item: &Item,
         origin: DeclaringOrigin,
     ) -> Option<Type> {
+        // A qualified spelling here belongs to the declaring module's imports, not the
+        // consumer's. Use the declaration address rather than leaking that private alias.
+        let display_name = |declared_name: &Name| {
+            if name.as_str().contains('.') {
+                Name::new(&format!("{}:{}", origin.module_identity(), declared_name))
+            } else {
+                declared_name.clone()
+            }
+        };
         match item {
             Item::Union(union_def) => {
                 let mut union_def = union_def.clone();
-                union_def.name = name.clone();
+                union_def.name = display_name(&union_def.name);
                 let entry = UnionEntry {
                     def: union_def,
                     origin: Some(origin.clone()),
@@ -5249,14 +5253,17 @@ impl<'a> InferenceContext<'a> {
                 self.foreign_union_defs.insert(origin, entry);
                 Some(ty)
             }
-            Item::Record(_) | Item::Component(_) => {
-                Some(Type::named_at(name.clone(), Some(origin)))
+            Item::Record(record) => Some(Type::named_at(display_name(&record.name), Some(origin))),
+            Item::Component(component) => {
+                Some(Type::named_at(display_name(&component.name), Some(origin)))
             }
             // An alias is a type reference the declaring module wrote, so what it names is
             // resolved there too. Stopping at the alias would hand the reference back to the
             // consumer's namespace, where an unrelated same-named declaration answers for it.
             Item::TypeAlias(alias) => {
                 if !self.foreign_alias_stack.insert(origin.clone()) {
+                    self.cyclic_alias_origins
+                        .extend(self.foreign_alias_stack.iter().cloned());
                     return Some(Type::Error);
                 }
                 let target = alias.ty.clone();
@@ -7398,6 +7405,7 @@ impl<'a> InferenceContext<'a> {
                         binding.visible_name.clone(),
                         TypeAliasInfo {
                             target: alias.ty.clone(),
+                            origin: origin.clone(),
                             // A workspace peer's alias arrives raw, just as a local one does.
                             foreign: origin.module_identity() != self.module.module_identity(),
                         },
@@ -7409,6 +7417,7 @@ impl<'a> InferenceContext<'a> {
                             binding.visible_name.clone(),
                             TypeAliasInfo {
                                 target: alias.ty,
+                                origin: origin.clone(),
                                 foreign: true,
                             },
                         );
@@ -7578,6 +7587,17 @@ impl<'a> InferenceContext<'a> {
                 // after it. Walking it again here would report whatever is wrong with its target
                 // a second time, and whether that happened would depend on declaration order.
                 if self.resolved_type_aliases.contains_key(&alias.name) {
+                    if self
+                        .type_aliases
+                        .get(&alias.name)
+                        .is_some_and(|info| self.cyclic_alias_origins.contains(&info.origin))
+                    {
+                        self.error(
+                            "type-alias-cycle",
+                            format!("Type alias '{}' forms a cycle", alias.name),
+                            alias.span,
+                        );
+                    }
                     continue;
                 }
                 // The answer is cached under the alias's name, so this is the resolution every
@@ -7607,7 +7627,21 @@ impl<'a> InferenceContext<'a> {
         seen.insert(name.clone());
         let enclosing_span = std::mem::replace(&mut self.type_ref_span, span);
         let enclosing_ordinals = std::mem::take(&mut self.type_name_ordinals);
+        let origin = self.type_aliases.get(name).map(|alias| alias.origin.clone());
+        if let Some(origin) = &origin {
+            self.foreign_alias_stack.insert(origin.clone());
+        }
         let ty = self.type_from_type_ref_walk(None, target, &mut seen, false);
+        if let Some(origin) = &origin {
+            self.foreign_alias_stack.remove(origin);
+            if self.cyclic_alias_origins.contains(origin) {
+                self.error(
+                    "type-alias-cycle",
+                    format!("Type alias '{}' forms a cycle", name),
+                    span,
+                );
+            }
+        }
         self.type_name_ordinals = enclosing_ordinals;
         self.type_ref_span = enclosing_span;
         ty
@@ -8049,6 +8083,9 @@ impl<'a> InferenceContext<'a> {
                 return resolved.clone();
             }
             if !seen.insert(name.clone()) {
+                self.cyclic_alias_origins
+                    .extend(self.foreign_alias_stack.iter().cloned());
+                self.cyclic_alias_origins.insert(alias.origin.clone());
                 // The alias a cycle closes on is not always one this module wrote: the eager
                 // alias pass enters the cycle from a local alias, so it closes on whichever name
                 // completes the loop, which may be an imported one. That alias's span belongs to
@@ -8077,6 +8114,8 @@ impl<'a> InferenceContext<'a> {
             // alias's for the length of the walk, and the caller's is put back afterwards.
             let target = alias.target.clone();
             let foreign = alias.foreign;
+            let origin = alias.origin.clone();
+            let declaring_module = origin.module_identity().to_string();
             let enclosing_span = self
                 .local_type_alias_spans
                 .get(name)
@@ -8085,9 +8124,29 @@ impl<'a> InferenceContext<'a> {
             // The target is a reference of its own, whose names are counted apart from the
             // reference that reached the alias.
             let enclosing_ordinals = std::mem::take(&mut self.type_name_ordinals);
+            let inserted = self.foreign_alias_stack.insert(origin.clone());
+            if !inserted {
+                self.cyclic_alias_origins
+                    .extend(self.foreign_alias_stack.iter().cloned());
+            }
             self.foreign_alias_depth += usize::from(foreign);
-            let ty = self.type_from_type_ref_walk(None, &target, seen, false);
+            let ty =
+                self.type_from_type_ref_walk(Some(&declaring_module), &target, seen, false);
             self.foreign_alias_depth -= usize::from(foreign);
+            if inserted {
+                self.foreign_alias_stack.remove(&origin);
+            }
+            let ty = if foreign {
+                match ty {
+                    Type::Named(mut named) => {
+                        named.name = name.clone();
+                        Type::Named(named)
+                    }
+                    other => other,
+                }
+            } else {
+                ty
+            };
             self.type_name_ordinals = enclosing_ordinals;
             if let Some(enclosing_span) = enclosing_span {
                 self.type_ref_span = enclosing_span;
@@ -8167,13 +8226,11 @@ impl<'a> InferenceContext<'a> {
     /// The form and parameters of a call's callee when it names a declared function under its
     /// own name, each parameter as its name and whether a caller may omit it.
     fn declared_function_callee(&mut self, callee: ExprId) -> Option<DeclaredCallee> {
-        let ast::Expr::Ident(name) = self.module.raw_module().expr(callee) else {
-            return None;
-        };
-        if self.env.binding_depth(name).is_some_and(|depth| depth > 1) {
+        let name = self.flattened_expr_name(callee)?;
+        if self.env.binding_depth(&name).is_some_and(|depth| depth > 1) {
             return None;
         }
-        let resolved = self.resolve_function_definition(name)?;
+        let resolved = self.resolve_function_definition(&name)?;
         let (form, params) = match &resolved {
             ResolvedPreparedItem::Raw {
                 item: Item::Function(function),

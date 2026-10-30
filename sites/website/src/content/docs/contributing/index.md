@@ -6,6 +6,12 @@ description: 'Build NX from source, run the nxlang command-line tool, and work o
 NX is developed in the open at [github.com/nx-lang/nx](https://github.com/nx-lang/nx). Issues and
 pull requests are welcome.
 
+## NX source style
+
+Follow the [NX Style Guide](/reference/style-guide) for NX source, examples, and documentation:
+use 2-space indentation, separate top-level declarations with one blank line, and aim for
+100-character lines. The guide also covers spacing, wrapping, unions, elements, and API comments.
+
 ## Building from source
 
 You need:

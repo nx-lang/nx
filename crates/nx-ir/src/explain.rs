@@ -585,6 +585,16 @@ impl<'a> Explainer<'a> {
                     &[],
                 )?
             }
+            kinds::node::STANDARD_COLOR => {
+                let op = self.int_operand(entry, 1, "standardColor")?;
+                let name = nx_value::color::NAMES
+                    .get(op as usize)
+                    .ok_or_else(|| self.malformed("unknown standard color operation"))?;
+                call_like(
+                    format!("color.{name}"),
+                    self.nodes(self.list_operand(entry, 2, "standardColor")?)?,
+                )
+            }
             kinds::node::STANDARD_MATH => {
                 let op = self.int_operand(entry, 1, "standardMath")?;
                 let name = kinds::name(kinds::standard_math::NAMES, op)

@@ -499,7 +499,8 @@ Unit ::=
     "()"
 
 Literal ::=
-    StringLiteral
+    ColorLiteral
+    | StringLiteral
     | IntegerLiteral
     | RealLiteral
     | HexLiteral
@@ -682,7 +683,7 @@ HexDigits        ::=
 
 StringLiteral ::=
     '"' { StringCharDoubleQuoted | Entity } '"'
-    "'" { StringCharSingleQuoted | Entity } "'"
+    | "'" { StringCharSingleQuoted | Entity } "'"
 StringCharDoubleQuoted ::=
     ? any character except '"' and "&" ?
 StringCharSingleQuoted ::=
@@ -722,3 +723,18 @@ EscapedAtSign    ::=
     "\@"
     ? "\@" is treated as an escape; other backslashes remain literal. ?
 ```
+
+### Color literals
+
+`#RGB`, `#RGBA`, `#RRGGBB`, and `#RRGGBBAA` are sRGB color expressions, with alpha last. Hex digits are case-insensitive; shorthand repeats each nibble. Channels decode to float32 byte/255 values and omitted alpha is 1. Literals infer the canonical `@nx/color` Color record without explicit imports. Quoted colors remain strings.
+
+```nx
+let accent = #5b6ef5
+let translucent = #00000080
+```
+
+```ebnf
+ColorLiteral ::= "#" ( HexDigit{3} | HexDigit{4} | HexDigit{6} | HexDigit{8} )
+```
+
+Literals can appear in defaults, sequences, ordinary expressions and bare element properties. An adjacent identifier character makes the entire hash-prefixed token invalid. Formatting preserves source spelling.

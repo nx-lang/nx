@@ -507,7 +507,7 @@ fn lowering_diagnostics(diagnostics: &[LoweringDiagnostic], file_name: &str) -> 
     diagnostics
         .iter()
         .map(|diagnostic| {
-            Diagnostic::error("lowering-error")
+            Diagnostic::error(diagnostic.code())
                 .with_message(diagnostic.message.clone())
                 .with_label(Label::primary(file_name, diagnostic.span))
                 .build()

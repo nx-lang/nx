@@ -122,6 +122,14 @@ export function renderValue(
       element.classList.add("declared");
     }
     elements[index] = element;
+    if (node.color !== undefined) {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.setAttribute("aria-hidden", "true");
+      swatch.style.cssText = "display:inline-block;width:.8em;height:.8em;margin-right:.35em;border:1px solid currentColor;vertical-align:baseline";
+      swatch.style.backgroundColor = node.color;
+      if (swatch.style.backgroundColor !== "") element.append(swatch);
+    }
 
     const childIndices = children[index]!;
     if (foldable[index] === true) {

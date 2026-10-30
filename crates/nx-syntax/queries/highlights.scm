@@ -180,6 +180,7 @@
 (int_literal) @number
 (real_literal) @number
 (hex_literal) @number
+(color_literal) @constant
 (bool_literal) @constant.builtin
 
 ;; Identifiers

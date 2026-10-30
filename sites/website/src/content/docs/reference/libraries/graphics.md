@@ -4,7 +4,7 @@ description: 'Unstable standalone graphics authoring, direct Skia rendering and 
 ---
 
 `@nx/graphics` is unstable: declarations may change incompatibly in any NX release. The
-`graphics-core-v1` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
+`graphics-core-v2` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
 will not be updated for graphics; `nxlang run` and SDK APIs that still use it are not graphics
 acceptance paths until the separate interpreter-retirement change lands. Use the preview below
 or emit/link IR directly. The TypeScript runtime evaluates authoring helpers; direct Skia painting
@@ -14,7 +14,7 @@ is provided by the optional Rust adapter.
 import "@nx/graphics" as g
 let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>
   <g.Star cx=50 cy=50 outerRadius=40 innerRadius=20 pointCount=5
-          fill=<g.Paint.solid color="#2563eb"/>/>
+          fill=<g.Paint.solid color=#2563eb/>/>
 </g.Drawing>
 ```
 
@@ -29,7 +29,7 @@ relative forms. Open paths close for filling and remain open for strokes.
 
 Transforms concatenate in SVG order: translate(10,0), then scale(2,2) maps local (1,0) to (12,0).
 Closed shapes and Text default to black; Line and Polyline default to no fill. This Polyline default
-differs from SVG. Colors are CSS solid color strings. Rect's omitted ry uses rx; corner radii clamp
+differs from SVG. Colors use the shared float32 sRGB [`@nx/color`](/reference/libraries/color) record; write hex literals such as `color=#2563eb`. Rect's omitted ry uses rx; corner radii clamp
 to half the corresponding dimension. Clip paths are path-data strings in the node's local space.
 
 Text is a shaped single-line run at an alphabetic baseline, with an explicit supplied font family,

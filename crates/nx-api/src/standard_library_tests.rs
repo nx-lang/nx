@@ -142,7 +142,13 @@ fn the_table_holds_the_agent_and_visualizer_libraries() {
         .collect::<Vec<_>>();
     assert_eq!(
         roots,
-        [AGENT_ROOT, "@nx/graphics", "@nx/math", "@nx/visualizer"]
+        [
+            AGENT_ROOT,
+            "@nx/color",
+            "@nx/graphics",
+            "@nx/math",
+            "@nx/visualizer"
+        ]
     );
 
     let agent = standard_library_entry(AGENT_ROOT).expect("the agent library");
@@ -1161,7 +1167,7 @@ let axis:g.AxisAlignment = center
   contentAlignment=<g.ContentAlignment x={axis} y=end/>>
   <g.RegularPolygon cx=25 cy=25 radius=10 pointCount=4/>
   <g.Star cx=75 cy=75 outerRadius=10 innerRadius=5 pointCount=5/>
-  <CustomShape fill=<g.Paint.solid color="blue"/> opacity=0.5/>
+  <CustomShape fill=<g.Paint.solid color=#0000ff/> opacity=0.5/>
   <CustomGraphic opacity=0.5/>
 </g.Drawing>"#;
     let artifact =
@@ -1201,4 +1207,47 @@ let axis:g.AxisAlignment = center
             "{diagnostics:?}"
         );
     }
+}
+
+#[test]
+fn color_type_mismatch_does_not_expose_synthesized_import_names() {
+    let source = "type Brand = { accent:string }\nlet root() = <Brand accent=#5b6ef5/>";
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    assert!(
+        artifact
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message().contains("found Color")),
+        "{:?}",
+        artifact.diagnostics
+    );
+    assert!(!artifact
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message().contains("$nxColor")));
+}
+
+#[test]
+fn graphics_color_alias_keeps_the_canonical_type_in_application_annotations() {
+    let source = r##"import "@nx/graphics" as g
+import "@nx/color" as c
+
+let literal: g.Color = #5b6ef5
+let parsed: g.Color = { c.parse("red") }
+let record: g.Color = <c.Color r=1 g=0 b=0 />
+type Brand = { accent: g.Color }
+let brand = <Brand accent=#5b6ef5 />
+let css(value: g.Color): string = { c.toHex(value) }
+let root() = { css(literal) css(parsed) css(record) c.toHex(brand.accent) }
+"##;
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    assert!(
+        artifact.diagnostics.is_empty(),
+        "{:?}",
+        artifact.diagnostics
+    );
 }

@@ -62,6 +62,8 @@ mod prelude_image_tests;
 mod tests;
 
 #[cfg(test)]
+mod color_transport_tests;
+#[cfg(test)]
 mod graphics_tests;
 #[cfg(test)]
 mod math_tests;

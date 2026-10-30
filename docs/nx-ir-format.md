@@ -154,6 +154,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 24 | optionalMember | `[24, node, str]` | `x?.m`: the named member of the base when the base holds a value, and the empty value when the base is empty. Requires `occurrence-v1`. |
 | 25 | coalesce | `[25, node, node]` | `x ?? y`: the left operand when it holds at least one item, otherwise the right, which is evaluated only when the left is empty. Requires `occurrence-v1`. |
 | 26 | standardMath | `[26, operation, [node...]]` | A closed numerical body in a compiler-owned standard function. Requires `standard-math-v1`; see [Standard math bodies](#standard-math-bodies-standard-math-v1) for operation IDs and arities. |
+| 27 | standardColor | `[27, operation, [node...]]` | A closed color body in a compiler-owned standard function. Requires `standard-color-v1`; see [Standard color bodies](#standard-color-bodies-standard-color-v1). |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
@@ -512,7 +513,7 @@ predates the kind refuses the module by name rather than as malformed, and lists
 `function-values-v1` too only on that feature's own terms; one that contains a `forRange`
 lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
 arm with the `{}` pattern, lists `occurrence-v1`; one that contains a `standardMath` node lists
-`standard-math-v1`. Constructing a range needs no feature: that is an
+`standard-math-v1`; a `standardColor` node lists `standard-color-v1`. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
 needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
 never tests, steps through or falls back from one lists nothing. A runtime that does not know a
@@ -1489,3 +1490,59 @@ The math library's version extends the existing source hash with each ordered ru
 `@nx/math/math.nx::name(param:float64,...):float64=operation:v1`, encoded as UTF-8 followed by a zero
 byte. Source-only standard-library versions are unchanged. Parameter names/order, operation mapping,
 result type and semantic revision all participate in this deterministic version.
+
+## Standard color bodies (`standard-color-v1`)
+
+Node kind **27**, `standardColor`, has logical layout `[27, operation, [argumentNode...]]`
+and flat cells `[27, operation, argumentCount, argumentNode...]`. Arguments reference earlier nodes.
+A module carrying it must declare `standard-color-v1`; readers validate the operation, exact arity,
+argument references, and feature declaration before execution. The compiler synthesizes bodies only
+for its registered color operations module. Calls remain ordinary references and colors remain
+ordinary records with float32 fields; no color value tag is introduced. The contracts-only color
+image can be linked without these function bodies for a literal-only program.
+
+| Operation | Name | Arity |
+| --- | --- | --- |
+| 0 | `rgb` | 3 |
+| 1 | `rgba` | 4 |
+| 2 | `srgb` | 4 |
+| 3 | `linearRgb` | 4 |
+| 4 | `hsl` | 4 |
+| 5 | `hsv` | 4 |
+| 6 | `hwb` | 4 |
+| 7 | `oklab` | 4 |
+| 8 | `oklch` | 4 |
+| 9 | `parse` | 1 |
+| 10 | `tryParse` | 1 |
+| 11 | `validate` | 1 |
+| 12 | `toHex` | 1 |
+| 13 | `toCss` | 1 |
+| 14 | `toRgb` | 1 |
+| 15 | `toHsl` | 1 |
+| 16 | `toHsv` | 1 |
+| 17 | `toHwb` | 1 |
+| 18 | `toLinearRgb` | 1 |
+| 19 | `toOklab` | 1 |
+| 20 | `toOklch` | 1 |
+| 21 | `withAlpha` | 2 |
+| 22 | `fadeIn` | 2 |
+| 23 | `fadeOut` | 2 |
+| 24 | `lighten` | 2 |
+| 25 | `darken` | 2 |
+| 26 | `saturate` | 2 |
+| 27 | `desaturate` | 2 |
+| 28 | `rotateHue` | 2 |
+| 29 | `complement` | 1 |
+| 30 | `grayscale` | 1 |
+| 31 | `invert` | 2 |
+| 32 | `mix` | 4 |
+| 33 | `composite` | 2 |
+| 34 | `relativeLuminance` | 1 |
+| 35 | `contrastRatio` | 2 |
+| 36 | `bestTextColor` | 3 |
+
+Each body costs one operation plus ordinary argument/call costs. Numerical parameters/intermediates
+are float64; stored Color channels round to float32. Failures use `color-invalid-text` or
+`color-invalid-channel` with authored call provenance. `tryParse` returns its typed invalid case
+for malformed text. See the [color reference](../sites/website/src/content/docs/reference/libraries/color.md)
+for units, strict construction versus CSS parsing, alpha, mixing spaces, and contrast semantics.

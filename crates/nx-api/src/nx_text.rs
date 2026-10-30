@@ -67,6 +67,9 @@ pub struct NxValueNode {
     /// The RFC 6901 JSON pointer of the node's value within the value's canonical JSON form: the
     /// empty string for the whole value. A property's is its value's.
     pub pointer: String,
+    /// CSS presentation of a validated canonical Color value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// The kinds of thing an [`NxValueNode`] can be.
@@ -136,6 +139,7 @@ pub(crate) fn annotate_nx_text(
 
 /// A node as the writer records it: byte offsets, and a key to look its declaration up by.
 struct RawNode {
+    color: Option<String>,
     start: usize,
     end: usize,
     parent: Option<usize>,
@@ -184,6 +188,7 @@ impl Writer {
     ) {
         let index = self.nodes.len();
         self.nodes.push(RawNode {
+            color: None,
             start: self.output.len(),
             end: self.output.len(),
             parent: self.open.last().copied(),
@@ -326,6 +331,33 @@ impl Writer {
             None,
             DeclarationKey::Record(tag_name.clone()),
         );
+        if tag_name.as_str() == "Color" {
+            let channels: Option<Vec<f64>> = ["r", "g", "b", "a"]
+                .iter()
+                .map(|name| match fields.get(*name)? {
+                    Value::Float32(value) => Some(*value as f64),
+                    Value::Float(value) => Some(*value),
+                    Value::Int(value) => Some(*value as f64),
+                    _ => None,
+                })
+                .collect();
+            if let Some(channels) = channels {
+                if channels
+                    .iter()
+                    .all(|x| x.is_finite() && (0.0..=1.0).contains(x) && (*x as f32) as f64 == *x)
+                {
+                    if let Some(index) = self.open.last().copied() {
+                        self.nodes[index].color = Some(format!(
+                            "rgba({}, {}, {}, {})",
+                            channels[0] * 255.0,
+                            channels[1] * 255.0,
+                            channels[2] * 255.0,
+                            channels[3]
+                        ));
+                    }
+                }
+            }
+        }
         write!(self.output, "<{}", tag_name).unwrap();
 
         if field_vec.iter().any(|(_, value)| is_complex_value(value)) {
@@ -551,6 +583,7 @@ fn sequence_type(elements: &[Value]) -> String {
 /// declared the way a record's fields are.
 #[derive(Clone, Copy)]
 struct Shape<'a> {
+    canonical_color: bool,
     span: TextRange,
     fields: &'a [RecordField],
     base: Option<&'a Name>,
@@ -598,6 +631,15 @@ impl<'a> Declarations<'a> {
             match item {
                 Item::Record(record) => {
                     self.shapes.entry(record.name.as_str()).or_insert(Shape {
+                        canonical_color: record.name.as_str() == "Color"
+                            && crate::standard_library("@nx/color").is_some_and(|library| {
+                                library.modules.iter().any(|artifact| {
+                                    artifact.file_name == "@nx/color/color.nx"
+                                        && artifact.lowered_module.as_ref().is_some_and(|lowered| {
+                                            lowered.source_id == module.source_id
+                                        })
+                                })
+                            }),
                         span: record.span,
                         fields: &record.properties,
                         base: record.base.as_ref(),
@@ -612,6 +654,7 @@ impl<'a> Declarations<'a> {
                             .insert(component.name.as_str(), component.state.as_slice());
                     }
                     self.shapes.entry(component.name.as_str()).or_insert(Shape {
+                        canonical_color: false,
                         span: component.span,
                         fields: &component.props,
                         base: component.base.as_ref(),
@@ -652,11 +695,15 @@ impl<'a> Declarations<'a> {
             count: node.count.map(|count| count as u32),
             declaration: None,
             pointer: node.pointer,
+            color: node.color,
         };
 
         match node.key {
             DeclarationKey::None => {}
             DeclarationKey::Record(name) => {
+                if !self.shape(&name).is_some_and(|shape| shape.canonical_color) {
+                    annotated.color = None;
+                }
                 annotated.declaration = self
                     .shape(&name)
                     .map(|shape| {
@@ -2267,5 +2314,35 @@ mod tests {
                 other => other,
             }
         }
+    }
+    #[test]
+    fn evaluated_color_swatches_require_canonical_declarations() {
+        let entry = nx_types::analyze_str("let x = 0", "main.nx")
+            .lowered_module
+            .unwrap();
+        let library = crate::standard_library("@nx/color").unwrap();
+        let color = library
+            .modules
+            .iter()
+            .find(|module| module.file_name == "@nx/color/color.nx")
+            .unwrap()
+            .lowered_module
+            .as_ref()
+            .unwrap();
+        let value = Value::Record {
+            type_name: Name::new("Color"),
+            fields: [("r", 0.125_f32), ("g", 0.5), ("b", 1.0), ("a", 0.5)]
+                .into_iter()
+                .map(|(name, value)| (SmolStr::new(name), Value::Float32(value)))
+                .collect(),
+        };
+        let rendered = annotate_nx_text(&value, &entry, &[color], "").unwrap();
+        assert!(rendered.nodes[0].color.is_some());
+        let source = "type Color = { r:float32 g:float32 b:float32 a:float32 }";
+        let decoy = nx_types::analyze_str(source, "decoy.nx")
+            .lowered_module
+            .unwrap();
+        let rendered = annotate_nx_text(&value, &decoy, &[color], source).unwrap();
+        assert!(rendered.nodes[0].color.is_none());
     }
 }

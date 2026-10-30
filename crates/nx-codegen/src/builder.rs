@@ -407,13 +407,16 @@ fn build_module(
             imports
                 .iter()
                 .map(|(visible_name, reference)| {
-                    reference_from_resolved_module(
+                    let mut imported = reference_from_resolved_module(
                         artifact,
                         reference.module_id,
                         reference.definition_id,
                         visible_name,
                         reference.kind,
-                    )
+                    );
+                    // Type annotations retain authored aliases; preserve their visible spelling.
+                    imported.name = visible_name.clone();
+                    imported
                 })
                 .collect::<Vec<_>>()
         })
@@ -1302,6 +1305,24 @@ fn build_expression(
     let ty = type_env.get_expr_type(expr_id).cloned();
     let kind = match expr {
         ast::Expr::Literal(literal) => CodegenExpressionKind::Literal(literal.clone()),
+        ast::Expr::StandardColor { op, args, .. } => CodegenExpressionKind::StandardColor {
+            op: *op,
+            args: args
+                .iter()
+                .map(|arg| {
+                    build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        *arg,
+                        scope,
+                        diagnostics,
+                    )
+                })
+                .collect::<Option<Vec<_>>>()?,
+        },
         ast::Expr::StandardMath { op, args } => CodegenExpressionKind::StandardMath {
             op: *op,
             args: args
@@ -2352,6 +2373,20 @@ fn build_element_expression(
                 return Some(CodegenExpressionKind::Element(mapped));
             };
 
+            let reference = if reference.kind == ResolvedItemKind::TypeAlias {
+                match build_type_ref(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    &ast::TypeRef::Name(element.tag.clone()),
+                    diagnostics,
+                )? {
+                    CodegenTypeRef::Nominal { reference, .. } => reference,
+                    _ => return Some(CodegenExpressionKind::Element(mapped)),
+                }
+            } else {
+                reference
+            };
             match reference.kind {
                 ResolvedItemKind::Function => build_function_element_call(
                     artifact,
@@ -2837,6 +2872,21 @@ fn record_literal_shape(
 ) -> Option<RecordLiteralShape> {
     let Some(reference) = resolve_visible_reference(artifact, module_id, record_name) else {
         return Some(RecordLiteralShape::unresolved(record_name));
+    };
+    let reference = if reference.kind == ResolvedItemKind::TypeAlias {
+        let module = artifact.resolved_program.module(module_id)?;
+        match build_type_ref(
+            artifact,
+            module,
+            prepared_cache,
+            &ast::TypeRef::Name(Name::new(record_name)),
+            diagnostics,
+        )? {
+            CodegenTypeRef::Nominal { reference, .. } => reference,
+            _ => return Some(RecordLiteralShape::unresolved(record_name)),
+        }
+    } else {
+        reference
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Record {
         return Some(RecordLiteralShape::unresolved(record_name));

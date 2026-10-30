@@ -1,0 +1,115 @@
+module @nx/color/operations.nx fingerprint 148550021078355564
+links @nx/color/color.nx version "66a4d2b1d49a6436" fingerprint 6839805114163841305
+requires standard-color-v1
+entrypoints functions [rgb rgba srgb linearRgb hsl hsv hwb oklab oklch parse tryParse validate toHex toCss toRgb toHsl toHsv toHwb toLinearRgb toOklab toOklch withAlpha fadeIn fadeOut lighten darken saturate desaturate rotateHue complement grayscale invert mix composite relativeLuminance contrastRatio bestTextColor] components []
+
+function rgb(r: float64, g: float64, b: float64): @nx/color/color.nx:Color =
+  color.rgb(r, g, b)
+
+function rgba(r: float64, g: float64, b: float64, a: float64): @nx/color/color.nx:Color =
+  color.rgba(r, g, b, a)
+
+function srgb(r: float64, g: float64, b: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
+  color.srgb(r, g, b, a)
+
+function linearRgb(r: float64, g: float64, b: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
+  color.linearRgb(r, g, b, a)
+
+function hsl(h: float64, s: float64, l: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
+  color.hsl(h, s, l, a)
+
+function hsv(h: float64, s: float64, v: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
+  color.hsv(h, s, v, a)
+
+function hwb(h: float64, w: float64, b: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
+  color.hwb(h, w, b, a)
+
+function oklab(l: float64, a: float64, b: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.oklab(l, a, b, alpha)
+
+function oklch(l: float64, c: float64, h: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.oklch(l, c, h, alpha)
+
+function parse(text: string): @nx/color/color.nx:Color =
+  color.parse(text)
+
+function tryParse(text: string): @nx/color/color.nx:ParseResult =
+  color.tryParse(text)
+
+function validate(value: @nx/color/color.nx:Color): @nx/color/color.nx:Color =
+  color.validate(value)
+
+function toHex(value: @nx/color/color.nx:Color): string =
+  color.toHex(value)
+
+function toCss(value: @nx/color/color.nx:Color): string =
+  color.toCss(value)
+
+function toRgb(value: @nx/color/color.nx:Color): @nx/color/color.nx:RgbChannels =
+  color.toRgb(value)
+
+function toHsl(value: @nx/color/color.nx:Color): @nx/color/color.nx:HslChannels =
+  color.toHsl(value)
+
+function toHsv(value: @nx/color/color.nx:Color): @nx/color/color.nx:HsvChannels =
+  color.toHsv(value)
+
+function toHwb(value: @nx/color/color.nx:Color): @nx/color/color.nx:HwbChannels =
+  color.toHwb(value)
+
+function toLinearRgb(value: @nx/color/color.nx:Color): @nx/color/color.nx:LinearRgbChannels =
+  color.toLinearRgb(value)
+
+function toOklab(value: @nx/color/color.nx:Color): @nx/color/color.nx:OklabChannels =
+  color.toOklab(value)
+
+function toOklch(value: @nx/color/color.nx:Color): @nx/color/color.nx:OklchChannels =
+  color.toOklch(value)
+
+function withAlpha(value: @nx/color/color.nx:Color, alpha: float64): @nx/color/color.nx:Color =
+  color.withAlpha(value, alpha)
+
+function fadeIn(value: @nx/color/color.nx:Color, amount: float64): @nx/color/color.nx:Color =
+  color.fadeIn(value, amount)
+
+function fadeOut(value: @nx/color/color.nx:Color, amount: float64): @nx/color/color.nx:Color =
+  color.fadeOut(value, amount)
+
+function lighten(value: @nx/color/color.nx:Color, amount: float64): @nx/color/color.nx:Color =
+  color.lighten(value, amount)
+
+function darken(value: @nx/color/color.nx:Color, amount: float64): @nx/color/color.nx:Color =
+  color.darken(value, amount)
+
+function saturate(value: @nx/color/color.nx:Color, amount: float64): @nx/color/color.nx:Color =
+  color.saturate(value, amount)
+
+function desaturate(value: @nx/color/color.nx:Color, amount: float64): @nx/color/color.nx:Color =
+  color.desaturate(value, amount)
+
+function rotateHue(value: @nx/color/color.nx:Color, degrees: float64): @nx/color/color.nx:Color =
+  color.rotateHue(value, degrees)
+
+function complement(value: @nx/color/color.nx:Color): @nx/color/color.nx:Color =
+  color.complement(value)
+
+function grayscale(value: @nx/color/color.nx:Color): @nx/color/color.nx:Color =
+  color.grayscale(value)
+
+function invert(value: @nx/color/color.nx:Color, amount: float64 = 1.0): @nx/color/color.nx:Color =
+  color.invert(value, amount)
+
+function mix(first: @nx/color/color.nx:Color, second: @nx/color/color.nx:Color, weight: float64 = 0.5, space: @nx/color/color.nx:InterpolationSpace = @nx/color/color.nx:InterpolationSpace.oklab): @nx/color/color.nx:Color =
+  color.mix(first, second, weight, space)
+
+function composite(foreground: @nx/color/color.nx:Color, background: @nx/color/color.nx:Color): @nx/color/color.nx:Color =
+  color.composite(foreground, background)
+
+function relativeLuminance(value: @nx/color/color.nx:Color): float64 =
+  color.relativeLuminance(value)
+
+function contrastRatio(first: @nx/color/color.nx:Color, second: @nx/color/color.nx:Color): float64 =
+  color.contrastRatio(first, second)
+
+function bestTextColor(background: @nx/color/color.nx:Color, first: @nx/color/color.nx:Color = @nx/color/color.nx:black, second: @nx/color/color.nx:Color = @nx/color/color.nx:white): @nx/color/color.nx:Color =
+  color.bestTextColor(background, first, second)

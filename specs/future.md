@@ -1933,6 +1933,34 @@ If this is revisited in the future:
   and a scenario to `function-reference-type` for a prop that shares a record's name.
 - Hold all three engines to it with a conformance corpus program.
 
+## JavaScript Codegen Nests Sequences Containing Imported Constants
+
+**Observed.** During the independent `add-color-support` review, emitted JavaScript returned
+`[0, [1, 2]]` where the Rust IR runtime returned the expected flat sequence `[0, 1, 2]`:
+
+```nx
+// model.nx
+export let one = 1
+```
+
+```nx
+// main.nx
+import "./model.nx" as m
+
+let xs: int* = { m.one 2 }
+
+let root() = { 0 xs }
+```
+
+Using a local `one` instead flattens correctly on both paths. The issue predates color support
+and reproduces without colors; it was recorded as an out-of-scope note in the
+[color review](../openspec/changes/archive/2026-10-30-add-color-support/review.md).
+
+**Follow-up.** Make emitted JavaScript preserve NX sequence splicing when a sequence contains
+references to imported constants. Add a regression comparing emitted JavaScript with Rust IR
+evaluation, covering both local and imported constants and sequences referenced from another
+sequence.
+
 ## Generated TypeScript: an omitted optional field beside a defaulted one fails `tsc`
 
 **Observed.** `nxlang codegen --target typescript` emits a record construction that does not

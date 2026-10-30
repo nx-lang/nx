@@ -1,9 +1,18 @@
 <ChatLinkConfig
   appearance=<ImmersiveAppearance
-    background=<SolidChatBackground color="#f4e9e7" />
-    brand=<BrandStyle brandColor="#b6695d" font="Inter" onBrandColor="#ffffff" />
+    background=<SolidChatBackground
+      color=<Color a=1.0 b=0.90588236 g=0.9137255 r=0.95686275 />
+    />
+    brand=<BrandStyle
+      brandColor=<Color a=1.0 b=0.3647059 g=0.4117647 r=0.7137255 />
+      font="Inter"
+      onBrandColor=<Color a=1.0 b=1.0 g=1.0 r=1.0 />
+    />
     identity=<ChatIdentity name="Woodworking Research" responseLabel="Research screener" status=none tagline="Hobbyist woodworking study" />
-    questionFlow=<QuestionFlowStyle answerColor="#843f10" questionColor="#2b211e" />
+    questionFlow=<QuestionFlowStyle
+      answerColor=<Color a=1.0 b=0.0627451 g=0.24705882 r=0.5176471 />
+      questionColor=<Color a=1.0 b=0.11764706 g=0.12941177 r=0.16862746 />
+    />
   />
   preview=<LinkPreview description="A 3-5 minute screener for hobbyist woodworkers about your projects, your tools, and how you manage them." title="Woodworking research: are you a fit?" />
   questionFlow=<QuestionFlow

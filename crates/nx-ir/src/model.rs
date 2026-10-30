@@ -78,6 +78,7 @@ pub mod kinds {
         pub const OPTIONAL_MEMBER: i64 = 24;
         /// `x ?? y`: `[25, left, right]`.
         pub const COALESCE: i64 = 25;
+        pub const STANDARD_COLOR: i64 = 27;
         pub const STANDARD_MATH: i64 = 26;
 
         pub const NAMES: &[(i64, &str)] = &[
@@ -106,6 +107,7 @@ pub mod kinds {
             (EXISTS, "exists"),
             (OPTIONAL_MEMBER, "optionalMember"),
             (COALESCE, "coalesce"),
+            (STANDARD_COLOR, "standardColor"),
             (STANDARD_MATH, "standardMath"),
         ];
     }

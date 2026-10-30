@@ -305,6 +305,7 @@ impl From<serde_json::Error> for NxValueIoError {
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+pub mod color;
 pub mod math;
 
 #[cfg(test)]
@@ -627,3 +628,6 @@ mod tests {
         assert_eq!(decoded, NxValue::Int(42));
     }
 }
+
+#[cfg(test)]
+mod color_corpus_tests;

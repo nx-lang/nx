@@ -12,7 +12,7 @@ Runtime acceptance and negative tests use IR, with no HIR parity requirement.
 ## Requirements
 
 ### Requirement: Graphics declarations are available as an unstable standard library
-The system SHALL carry `@nx/graphics` as ordinary NX standard-library source with Drawing, Group, Rect, Circle, Ellipse, Line, Polyline, Polygon, Path, and Text contracts. It SHALL declare an unstable `graphics-core` profile and require no UI library/renderer. Imports, analysis, IR emission/linking and evaluation SHALL follow existing standard-library and external-component contracts. Alias spelling SHALL NOT change component identity. Generic value and IR encodings SHALL remain unchanged.
+The system SHALL carry `@nx/graphics` as ordinary NX standard-library source with Drawing, Group, Rect, Circle, Ellipse, Line, Polyline, Polygon, Path, and Text contracts. It SHALL declare an unstable `graphics-core-v2` profile and require no UI library/renderer. Imports, analysis, IR emission/linking and evaluation SHALL follow existing standard-library and external-component contracts. Alias spelling SHALL NOT change component identity. Generic value and IR encodings SHALL remain unchanged.
 
 #### Scenario: Standalone drawing evaluates under an alias
 - **WHEN** a program imports `@nx/graphics` under a local alias and returns a Drawing containing a Rect
@@ -33,7 +33,7 @@ The system SHALL carry `@nx/graphics` as ordinary NX standard-library source wit
 - **THEN** linking or preparation SHALL fail before painting, rather than silently substitute geometry or a host-specific approximation
 
 ### Requirement: Initial profile is explicit about supported content
-The graphics-core profile SHALL support solid/none paint, centered strokes including caps/joins/dashes, affine transforms, both fill and clip winding rules, isolated opacity and view-box placement. Text SHALL support shaped single-line host-font content with size/weight/style and start/middle/end anchors at an alphabetic baseline. Unsupported paints, effects, images, multiline, text strokes, nonzero letter spacing and baseline alternatives SHALL produce diagnostics before painting.
+The graphics-core-v2 profile SHALL support solid/none paint, centered strokes including caps/joins/dashes, affine transforms, both fill and clip winding rules, isolated opacity and view-box placement. Text SHALL support shaped single-line host-font content with size/weight/style and start/middle/end anchors at an alphabetic baseline. Unsupported paints, effects, images, multiline, text strokes, nonzero letter spacing and baseline alternatives SHALL produce diagnostics before painting.
 
 #### Scenario: Unsupported content is not silently ignored
 - **WHEN** a drawing requests a gradient, shadow or unsupported text feature
@@ -89,3 +89,25 @@ counting polygon vertices and star outer tips respectively; generated geometry S
   Drawing using AxisAlignment and helpers with pointCount
 - **THEN** inherited appearance/defaults and helper geometry SHALL retain their prior behavior
 - **AND** the library SHALL NOT retain the old public names or count helper properties as aliases
+
+### Requirement: Graphics consumes the shared color contract
+@nx/graphics SHALL import and re-export the canonical @nx/color Color rather than declaring a separate string alias. Solid paint colors and drawing backgrounds SHALL accept shared float32 Color records, including values authored as hex literals. Standard-library linking SHALL include color transitively when required, without requiring an application-level import. Scene preparation SHALL validate finite normalized channels, including raw SDK records, before painting. Direct strings in Color fields SHALL fail type checking or scene validation rather than being silently reparsed. Native and browser renderers SHALL preserve numerical channel precision until backend conversion.
+
+#### Scenario: One shared color across application and drawing
+- **WHEN** a program supplies the same @nx/color Color to an application brand record and a graphics solid fill
+- **THEN** both SHALL accept the canonical value without a duplicate type or string conversion
+
+#### Scenario: Graphics-only import links constructors
+- **WHEN** a program imports graphics and its evaluated program needs the transitive color image
+- **THEN** linking SHALL include the required image or report its absence before painting
+
+#### Scenario: Invalid SDK color is rejected before painting
+- **WHEN** a later scene element contains a Color channel outside [0,1] or non-finite channels
+- **THEN** preparation SHALL fail before painting any element and identify the element/channel
+
+### Requirement: Changed graphics color semantics have a new profile
+Graphics SHALL identify the changed authored/evaluated color contract as graphics-core-v2 in documentation, preparation metadata, previews, and fixtures. Existing geometry, solid/none paint behavior, opacity, and unsupported-effect diagnostics SHALL remain applicable. Supported native and browser paths SHALL consume the shared color record consistently.
+
+#### Scenario: Matching native and browser color semantics
+- **WHEN** a scene with a translucent numerical Color is prepared for native Skia and browser Canvas
+- **THEN** both SHALL report graphics-core-v2 and preserve the same sRGB-plus-alpha color contract

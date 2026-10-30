@@ -41,7 +41,7 @@ use smol_str::SmolStr;
 pub use doc::{Doc, DocData, DocLink};
 pub use fnv::Fnv1a64;
 // Re-export lowering function
-pub use lower::{lower, lower_with_runtime_functions};
+pub use lower::{lower, lower_with_color_runtime, lower_with_runtime_functions};
 pub use prepared::{
     binding_specs_for_item, interface_component, interface_function_signature, interface_record,
     interface_type_alias, interface_union, local_definition_id, module_namespace_from_bindings,
@@ -167,7 +167,7 @@ pub fn lower_source_module(
             .diagnostics()
             .iter()
             .map(|diagnostic| {
-                Diagnostic::error("lowering-error")
+                Diagnostic::error(diagnostic.code())
                     .with_message(diagnostic.message.clone())
                     .with_label(Label::primary(file_name, diagnostic.span))
                     .build()
@@ -1621,6 +1621,17 @@ pub struct LoweringDiagnostic {
     pub message: String,
     /// Source span
     pub span: TextSpan,
+}
+
+impl LoweringDiagnostic {
+    /// The stable diagnostic category for this lowering failure.
+    pub fn code(&self) -> &'static str {
+        if self.message.starts_with("color-literal:") {
+            "color-literal"
+        } else {
+            "lowering-error"
+        }
+    }
 }
 
 #[cfg(test)]

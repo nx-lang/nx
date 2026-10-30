@@ -342,6 +342,7 @@ impl WorkspaceSnapshot {
         let workspace = self.to_workspace()?;
         let mut diagnostics = validate_workspace(&workspace, &self.build_context);
         diagnostics.extend(self.merged_hint_diagnostics());
+        diagnostics.extend(self.color_diagnostics());
         Ok(self.project_diagnostic_report(&diagnostics))
     }
 
@@ -382,6 +383,83 @@ impl WorkspaceSnapshot {
                     message,
                     labels: vec![NxDiagnosticLabel {
                         file: identity.to_string(),
+                        span: nx_api::NxTextSpan {
+                            start_byte: start as i32,
+                            end_byte: end as i32,
+                            start_line: from.line as i32 + 1,
+                            start_column: from.character as i32 + 1,
+                            end_line: to.line as i32 + 1,
+                            end_column: to.character as i32 + 1,
+                        },
+                        message: None,
+                        primary: true,
+                    }],
+                    help: None,
+                    note: None,
+                });
+            }
+        }
+        found
+    }
+
+    fn color_diagnostics(&self) -> Vec<NxDiagnostic> {
+        let mut found = Vec::new();
+        for document in &self.documents {
+            let Ok(tree) = self.source_tree(&document.uri) else {
+                continue;
+            };
+            let index = LineIndex::new(document.source());
+            for (at, node) in tree.nodes.iter().enumerate() {
+                let Some(error) = &node.color_error else {
+                    continue;
+                };
+                let Some((code, message)) = error.split_once(": ") else {
+                    continue;
+                };
+                let field = message.rsplit(": ").next().unwrap_or("");
+                let channel = match field {
+                    "r" => Some(0),
+                    "g" => Some(1),
+                    "b" => Some(2),
+                    "a" | "alpha" => Some(3),
+                    _ => None,
+                };
+                let literals: Vec<_> = tree
+                    .nodes
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.parent == Some(at as u32) && candidate.role == SourceRole::Literal
+                    })
+                    .collect();
+                let record_literal = tree
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .find(|(_, candidate)| {
+                        candidate.parent == Some(at as u32)
+                            && candidate.role == SourceRole::Attribute
+                            && candidate.name.as_deref() == Some(field)
+                    })
+                    .and_then(|(attribute, _)| {
+                        tree.nodes.iter().find(|candidate| {
+                            candidate.parent == Some(attribute as u32)
+                                && candidate.role == SourceRole::Literal
+                        })
+                    });
+                let range = record_literal
+                    .or_else(|| literals.get(channel.unwrap_or(0)).copied())
+                    .map(|candidate| &candidate.range)
+                    .unwrap_or(&node.range);
+                let start = range.start_byte as usize;
+                let end = range.end_byte as usize;
+                let from = index.byte_offset_to_position(start);
+                let to = index.byte_offset_to_position(end);
+                found.push(NxDiagnostic {
+                    severity: NxSeverity::Error,
+                    code: Some(code.to_string()),
+                    message: message.to_string(),
+                    labels: vec![NxDiagnosticLabel {
+                        file: document.identity.to_string(),
                         span: nx_api::NxTextSpan {
                             start_byte: start as i32,
                             end_byte: end as i32,

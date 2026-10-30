@@ -193,6 +193,12 @@ pub enum Expr {
     Literal(Literal),
 
     /// Compiler-synthesized body; never produced by source lowering.
+    StandardColor {
+        op: u32,
+        args: Vec<ExprId>,
+        result: super::TypeRef,
+    },
+
     StandardMath {
         op: nx_value::math::MathOp,
         args: Vec<ExprId>,
@@ -493,7 +499,7 @@ impl Expr {
     /// Get the source span of this expression.
     pub fn span(&self) -> TextSpan {
         match self {
-            Expr::StandardMath { .. } | Expr::Literal(_) => {
+            Expr::StandardColor { .. } | Expr::StandardMath { .. } | Expr::Literal(_) => {
                 TextSpan::new(TextSize::from(0), TextSize::from(0))
             } // Literals don't track spans yet
             Expr::Ident(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)),

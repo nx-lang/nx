@@ -208,6 +208,42 @@ try {
     new URL("../src/examples/nx/graphics.nx", import.meta.url),
     "utf8",
   );
+  // Color tooling works in an application that imports no graphics library.
+  const colorOnlySource = 'import "@nx/color" as c\nlet accent = #33669980\nlet calculated = { c.withAlpha(accent, 0.5) }\nlet root() = { accent }';
+  await edit(colorOnlySource);
+  await page.getByRole("button", { name: "Visual", exact: true }).click();
+  await page.waitForFunction(() => {
+    const v = document.querySelector("nx-viewer");
+    return v?.text.includes("let accent = #33669980") && !v.stale;
+  });
+  const literalKey = await viewer.evaluate(v => v.tree.nodes.find(n => n.value === "#33669980")?.key);
+  assert.ok(literalKey);
+  const colorNode = viewer.locator(`[data-key=${JSON.stringify(literalKey)}]`).last();
+  await colorNode.click();
+  const colorPicker = viewer.locator(".popover-picker");
+  await colorPicker.waitFor({ state: "visible" });
+  assert.equal(await viewer.locator(".popover-alpha").getAttribute("aria-label") !== null, true);
+  await colorPicker.evaluate(picker => {
+    picker.value = "#aabbcc";
+    picker.dispatchEvent(new Event("input", { bubbles: true }));
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.waitForFunction(() => document.querySelector("nx-viewer")?.text.includes("#aabbcc80"));
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  await editor.click({ position: { x: 100, y: 40 } });
+  await page.keyboard.press("Control+z");
+  await page.getByRole("button", { name: "Visual", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("nx-viewer")?.text.includes("#33669980"));
+  const computedEditable = await viewer.evaluate(v => {
+    const call = v.tree.nodes.find(n => n.role === "call" && v.text.slice(n.range.startByte,n.range.endByte).startsWith("c.withAlpha"));
+    return call?.color !== undefined;
+  });
+  assert.equal(computedEditable, false, "computed colors stay read-only");
+  assert.equal(await page.locator("canvas.drawing-canvas[data-revision]").count(), 0, "color-only source activates no graphics preview");
+  console.log("Color-only literal picker preserves alpha, supports undo, and leaves computed colors read-only.");
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  await edit(original);
+  await canvas.waitFor({ timeout: 60_000 });
   await edit(original.replace("pointCount=5", "pointCount=7"));
   await page.waitForFunction((old) => {
     const canvas = document.querySelector(
@@ -298,7 +334,7 @@ try {
   assert.equal(dialogs, 0);
   // Clip holes use their own rule, independently of the shape's fill rule and transforms.
   await draw(
-    '<g.Rect width=100 height=100 fill=<g.Paint.solid color="red"/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
+    '<g.Rect width=100 height=100 fill=<g.Paint.solid color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
   );
   const clip = await canvas.evaluate((canvas) => {
     const ctx = canvas.getContext("2d");
@@ -642,7 +678,7 @@ try {
   await canvas.waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: "Source", exact: true }).click();
   await draw(
-    '<g.Rect x=70 y=5 width=20 height=20 fill=<g.Paint.solid color="blue"/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.solid color="black"/> width=2/>/>',
+    '<g.Rect x=70 y=5 width=20 height=20 fill=<g.Paint.solid color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.solid color=#000000/> width=2/>/>',
   );
   await canvas.evaluate((canvas) => {
     const box = canvas.getBoundingClientRect();

@@ -9,6 +9,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+nx-value.workspace = true
+serde_json.workspace = true
 nx-api = { path = "../nx-api" }
 nx-hir = { path = "../nx-hir" }
 nx-syntax = { path = "../nx-syntax" }
@@ -19,5 +21,4 @@ text-size.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile = "3"

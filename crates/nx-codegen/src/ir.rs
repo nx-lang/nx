@@ -332,6 +332,13 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
     let mut features: Vec<String> = Vec::new();
     if module.declarations.iter().any(|d| {
         declaration_contains(d, |e| {
+            matches!(e.kind, CodegenExpressionKind::StandardColor { .. })
+        })
+    }) {
+        features.push("standard-color-v1".into());
+    }
+    if module.declarations.iter().any(|d| {
+        declaration_contains(d, |e| {
             matches!(e.kind, CodegenExpressionKind::StandardMath { .. })
         })
     }) {
@@ -541,6 +548,7 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
             }
         }
         CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardColor { args, .. }
         | CodegenExpressionKind::StandardMath { args, .. } => visit_expressions(args, visit),
         CodegenExpressionKind::If {
             condition,
@@ -1343,6 +1351,14 @@ impl<'a> ModuleEmitter<'a> {
                 IrItem::list([
                     IrItem::Int(kinds::node::NAMED_CALL),
                     IrItem::Int(callee),
+                    args,
+                ])
+            }
+            CodegenExpressionKind::StandardColor { op, args } => {
+                let args = self.expressions(args);
+                IrItem::list([
+                    IrItem::Int(kinds::node::STANDARD_COLOR),
+                    IrItem::Int(*op as i64),
                     args,
                 ])
             }

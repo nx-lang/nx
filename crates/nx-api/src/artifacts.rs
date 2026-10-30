@@ -1305,7 +1305,7 @@ impl StandardLibrary {
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 4] = [
+static STANDARD_LIBRARIES: [StandardLibrary; 5] = [
     StandardLibrary::new(
         "@nx/agent",
         StandardLibraryStability::Unstable,
@@ -1316,6 +1316,24 @@ static STANDARD_LIBRARIES: [StandardLibrary; 4] = [
         }],
         "@nx-lang/agent",
         "NxLang.Agent",
+    ),
+    StandardLibrary::new(
+        "@nx/color",
+        StandardLibraryStability::Unstable,
+        &[
+            StandardLibraryModule {
+                identity: "color.nx",
+                source: include_str!("std/color/color.nx"),
+                runtime_functions: &[],
+            },
+            StandardLibraryModule {
+                identity: "operations.nx",
+                source: include_str!("std/color/operations.nx"),
+                runtime_functions: &[],
+            },
+        ],
+        "@nx-lang/color",
+        "NxLang.Color",
     ),
     StandardLibrary::new(
         "@nx/graphics",
@@ -1392,11 +1410,19 @@ pub(crate) fn build_standard_library(library: &StandardLibrary) -> LibraryArtifa
             let source_id = SourceId::new(parse_result.source_id.as_u32());
             let diagnostics = normalize_diagnostics_file_name(parse_result.errors, &file_name);
             let preserved_module = parse_result.tree.map(|tree| {
-                nx_hir::lower_with_runtime_functions(
-                    tree.root(),
-                    source_id,
-                    module.runtime_functions,
-                )
+                if library.root == "@nx/color" {
+                    nx_hir::lower_with_color_runtime(
+                        tree.root(),
+                        source_id,
+                        module.identity == "color.nx",
+                    )
+                } else {
+                    nx_hir::lower_with_runtime_functions(
+                        tree.root(),
+                        source_id,
+                        module.runtime_functions,
+                    )
+                }
             });
             LibrarySourceFile {
                 path: PathBuf::from(&file_name),
@@ -1498,6 +1524,19 @@ fn unknown_standard_library_diagnostic(path: &str, label: Option<(&str, TextSpan
 /// resolves paths to identities at all; a directory library's paths resolve to directories, which
 /// are never under the reserved root. The import itself binds nothing: the pipelines skip both
 /// kinds of path.</para>
+// Only compiler-registered modules may resolve sibling modules under the reserved root.
+fn standard_library_internal_import(importer: &str, target: &str) -> bool {
+    STANDARD_LIBRARIES.iter().any(|library| {
+        let registered = |identity: &str| {
+            library
+                .modules
+                .iter()
+                .any(|module| identity == format!("{}/{}", library.root, module.identity))
+        };
+        registered(importer) && registered(target)
+    })
+}
+
 fn standard_import_diagnostics(
     imports: &[Import],
     file_name: &str,
@@ -1512,7 +1551,10 @@ fn standard_import_diagnostics(
             )),
             Some(StandardImport::Library(_)) => None,
             None => resolve(&import.library_path)
-                .filter(|identity| is_reserved_identity(identity))
+                .filter(|identity| {
+                    is_reserved_identity(identity)
+                        && !standard_library_internal_import(file_name, identity)
+                })
                 .map(|identity| {
                     reserved_import_path_diagnostic(
                         &import.library_path,
@@ -2653,7 +2695,8 @@ fn apply_graph_imports(
                 // another name.
                 Ok(identity)
                     if standard_import(&import.library_path).is_none()
-                        && is_reserved_identity(&identity) =>
+                        && is_reserved_identity(&identity)
+                        && !standard_library_internal_import(&source_file.identity, &identity) =>
                 {
                     module.mark_import_incomplete(import.span);
                     continue;
@@ -2694,7 +2737,10 @@ fn apply_graph_imports(
                     add_library_wildcard_bindings(
                         module,
                         &library,
-                        None,
+                        match &import.kind {
+                            ImportKind::Wildcard { alias } => alias.as_ref(),
+                            _ => None,
+                        },
                         import.span,
                         &mut imported_visible_names,
                     );
@@ -3580,6 +3626,9 @@ fn add_imported_interface_bindings(
     imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
 ) {
     for artifact in &library.modules {
+        if let Some(prepared) = artifact.prepared_module.as_ref() {
+            module.add_peer_context(prepared);
+        }
         if let Some(lowered_module) = artifact.lowered_module.as_ref() {
             module.add_peer_module(artifact.file_name.clone(), lowered_module.clone());
         }
@@ -7167,6 +7216,67 @@ export let <Edge o: Outline /> = <div weight={o.weight} />"#
             messages.is_empty(),
             "each foreign `Shape` must keep its own base, got: {messages:?}"
         );
+    }
+
+    #[test]
+    fn cross_module_alias_cycles_report_errors_in_the_defining_modules() {
+        let workspace = workspace(vec![
+            workspace_module("main.nx", br#"import "./b.nx" as b
+let value: b.X = 42
+let constructed: b.X = <b.X />
+let root() = { value constructed }"#.to_vec()),
+            workspace_module("a.nx", b"import \"./b.nx\" as other\nexport type Y = other.X".to_vec()),
+            workspace_module("b.nx", b"import \"./a.nx\" as base\nexport type X = base.Y".to_vec()),
+        ]);
+        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+        for file in ["a.nx", "b.nx"] {
+            assert!(diagnostics.iter().any(|d| d.code.as_deref() == Some("type-alias-cycle")
+                && d.labels.iter().any(|label| label.file == file)), "{diagnostics:?}");
+        }
+    }
+
+    #[test]
+    fn identical_alias_names_in_different_modules_do_not_form_a_cycle() {
+        let workspace = workspace(vec![
+            workspace_module("main.nx", br#"import "./a.nx" as a
+let value: a.X = 42
+let root() = { value }"#.to_vec()),
+            workspace_module("a.nx", b"import \"./b.nx\" as other\nexport type X = other.X".to_vec()),
+            workspace_module("b.nx", b"export type X = int".to_vec()),
+        ]);
+        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn reexported_alias_targets_keep_the_defining_modules_import_names() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import "./original.nx" as a
+import "./bridge.nx" as b
+import "./chain.nx" as c
+
+type P = { unrelated: string }
+let first: b.Q = <a.P x=1 />
+let second: c.R = <a.P x=2 />
+let third: a.P = <c.R x=3 />
+let consume(value: c.R): int = { value.x }
+let root() = { consume(first) consume(second) consume(third) }"#
+                    .to_vec(),
+            ),
+            workspace_module("original.nx", b"export type P = { x: int }".to_vec()),
+            workspace_module(
+                "bridge.nx",
+                b"import \"./original.nx\" as base\nexport type Q = base.P".to_vec(),
+            ),
+            workspace_module(
+                "chain.nx",
+                b"import \"./bridge.nx\" as hop\nexport type R = hop.Q".to_vec(),
+            ),
+        ]);
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty());
+        assert!(messages.is_empty(), "{messages:?}");
     }
 
     /// A contract typed by a *type alias* still names what the declaring module named.

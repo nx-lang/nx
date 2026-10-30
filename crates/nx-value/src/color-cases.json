@@ -1,0 +1,3185 @@
+{
+  "version": 1,
+  "reference": "CSS Color 4 2026-10-29 / WCAG 2.2 2024-12-12; analytical primaries, endpoints, transfer functions",
+  "cases": [
+    {
+      "op": "parse",
+      "args": [
+        " RED "
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#1234"
+      ],
+      "expected": [
+        0.06666666666666667,
+        0.13333333333333333,
+        0.2,
+        0.26666666666666666
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rebeccapurple"
+      ],
+      "expected": [
+        0.4,
+        0.2,
+        0.6,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "transparent"
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(100% 0% 0% / 50%)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(0.5turn 100% 50%)"
+      ],
+      "expected": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hwb(0 100% 100%)"
+      ],
+      "expected": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "color(srgb 1 0 0 / .5)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "color(srgb-linear 1 0 0)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "oklab(1 0 0)"
+      ],
+      "expected": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "oklch(0 0 0)"
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#12"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#gg0000"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "currentColor"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "var(--accent)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "none"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(1, 2 3)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hwb(0, 0%, 0%)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(1 2 3 4)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(0 50 50)"
+      ],
+      "expected": [
+        0.75,
+        0.25,
+        0.25,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "color(display-p3 1 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(none 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "calc(1)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(1e999 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "rgb",
+      "args": [
+        255,
+        0,
+        0
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "rgba",
+      "args": [
+        255,
+        0,
+        0,
+        0.5
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "srgb",
+      "args": [
+        0.123456789,
+        0.4,
+        0.8,
+        0.5
+      ],
+      "expected": [
+        0.123456789,
+        0.4,
+        0.8,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "linearRgb",
+      "args": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ],
+      "expected": [
+        0.735356983,
+        0.735356983,
+        0.735356983,
+        1
+      ]
+    },
+    {
+      "op": "hsl",
+      "args": [
+        360,
+        1,
+        0.5,
+        1
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "hsv",
+      "args": [
+        -120,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        0,
+        0,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "hwb",
+      "args": [
+        0,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ]
+    },
+    {
+      "op": "oklab",
+      "args": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "expected": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "oklch",
+      "args": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "withAlpha",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        0.5
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ]
+    },
+    {
+      "op": "fadeIn",
+      "args": [
+        {
+          "color": "#ff000080"
+        },
+        1
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "fadeOut",
+      "args": [
+        {
+          "color": "#ff000080"
+        },
+        1
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "op": "lighten",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        0.5
+      ],
+      "expected": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "darken",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        0.5
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "saturate",
+      "args": [
+        {
+          "color": "#808080"
+        },
+        1
+      ],
+      "expected": [
+        1,
+        0.00392156862745098,
+        0.00392156862745098,
+        1
+      ]
+    },
+    {
+      "op": "desaturate",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        1
+      ],
+      "expected": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ]
+    },
+    {
+      "op": "rotateHue",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        120
+      ],
+      "expected": [
+        0,
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "complement",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "grayscale",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ]
+    },
+    {
+      "op": "invert",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        1
+      ],
+      "expected": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        {
+          "color": "#0000ff00"
+        },
+        0.5,
+        "srgb"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ]
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#000"
+        },
+        {
+          "color": "#fff"
+        },
+        0.5,
+        "linearSrgb"
+      ],
+      "expected": [
+        0.735356983,
+        0.735356983,
+        0.735356983,
+        1
+      ]
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#000"
+        },
+        {
+          "color": "#fff"
+        },
+        0.5,
+        "srgb"
+      ],
+      "expected": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ]
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        {
+          "color": "#0000ff00"
+        },
+        1,
+        "oklab"
+      ],
+      "expected": [
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#ff000000"
+        },
+        {
+          "color": "#0000ff00"
+        },
+        0.5,
+        "oklab"
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "op": "composite",
+      "args": [
+        {
+          "color": "#ff000000"
+        },
+        {
+          "color": "#fff"
+        }
+      ],
+      "expected": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "relativeLuminance",
+      "args": [
+        {
+          "color": "#000"
+        }
+      ],
+      "expected": 0
+    },
+    {
+      "op": "relativeLuminance",
+      "args": [
+        {
+          "color": "#fff"
+        }
+      ],
+      "expected": 1
+    },
+    {
+      "op": "contrastRatio",
+      "args": [
+        {
+          "color": "#000"
+        },
+        {
+          "color": "#fff"
+        }
+      ],
+      "expected": 21
+    },
+    {
+      "op": "contrastRatio",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": 1
+    },
+    {
+      "op": "toHex",
+      "args": [
+        {
+          "color": "#ff000080"
+        }
+      ],
+      "expected": "#ff000080"
+    },
+    {
+      "op": "toRgb",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": {
+        "r": 255,
+        "g": 0,
+        "b": 0,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toHsl",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": {
+        "h": 0,
+        "s": 1,
+        "l": 0.5,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toHsv",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": {
+        "h": 0,
+        "s": 1,
+        "v": 1,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toHwb",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": {
+        "h": 0,
+        "w": 0,
+        "b": 0,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toLinearRgb",
+      "args": [
+        {
+          "color": "#f00"
+        }
+      ],
+      "expected": {
+        "r": 1,
+        "g": 0,
+        "b": 0,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toOklab",
+      "args": [
+        {
+          "color": "#000"
+        }
+      ],
+      "expected": {
+        "l": 0,
+        "a": 0,
+        "b": 0,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toOklch",
+      "args": [
+        {
+          "color": "#000"
+        }
+      ],
+      "expected": {
+        "l": 0,
+        "c": 0,
+        "h": 0,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "srgb",
+      "args": [
+        1.01,
+        0,
+        0,
+        1
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "rgba",
+      "args": [
+        256,
+        0,
+        0,
+        1
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "hsl",
+      "args": [
+        0,
+        2,
+        0.5,
+        1
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "oklch",
+      "args": [
+        0.5,
+        -1,
+        0,
+        1
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#000"
+        },
+        {
+          "color": "#fff"
+        },
+        2,
+        "srgb"
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "relativeLuminance",
+      "args": [
+        {
+          "color": "#ff000080"
+        }
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "contrastRatio",
+      "args": [
+        {
+          "color": "#ff000080"
+        },
+        {
+          "color": "#fff"
+        }
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "withAlpha",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        -1
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "bad"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "ff0000"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "cafe"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "fed"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "face"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "decade"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "\u000bred"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(255\u000b0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(255\u00a00 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "\u00a0red"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(120, 100, 50)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(255\n0 0)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(255\r0 0)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "color( srgb 1 0 0)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(120 100 50)"
+      ],
+      "expected": [
+        0,
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hwb(0 0 0)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(200grad 100% 50%)"
+      ],
+      "expected": [
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(0rad 100% 50%)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(120deg 100% 50%)"
+      ],
+      "expected": [
+        0,
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgba(255, 0, 0, 0.5)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsla(0, 100%, 50%, 0.5)"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#f00"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#FF0000"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#FF000080"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        0.5019607843137255
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "#0000"
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "exact": true
+    },
+    {
+      "op": "hsl",
+      "args": [
+        -1e-20,
+        1,
+        0.5,
+        1
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "hsv",
+      "args": [
+        -1e-20,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "hwb",
+      "args": [
+        -1e-20,
+        0,
+        0,
+        1
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "parse",
+      "args": [
+        "aliceblue"
+      ],
+      "expected": [
+        0.9411764705882353,
+        0.9725490196078431,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "antiquewhite"
+      ],
+      "expected": [
+        0.9803921568627451,
+        0.9215686274509803,
+        0.8431372549019608,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "aqua"
+      ],
+      "expected": [
+        0.0,
+        1.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "aquamarine"
+      ],
+      "expected": [
+        0.4980392156862745,
+        1.0,
+        0.8313725490196079,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "azure"
+      ],
+      "expected": [
+        0.9411764705882353,
+        1.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "beige"
+      ],
+      "expected": [
+        0.9607843137254902,
+        0.9607843137254902,
+        0.8627450980392157,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "bisque"
+      ],
+      "expected": [
+        1.0,
+        0.8941176470588236,
+        0.7686274509803922,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "black"
+      ],
+      "expected": [
+        0.0,
+        0.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "blanchedalmond"
+      ],
+      "expected": [
+        1.0,
+        0.9215686274509803,
+        0.803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "blue"
+      ],
+      "expected": [
+        0.0,
+        0.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "blueviolet"
+      ],
+      "expected": [
+        0.5411764705882353,
+        0.16862745098039217,
+        0.8862745098039215,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "brown"
+      ],
+      "expected": [
+        0.6470588235294118,
+        0.16470588235294117,
+        0.16470588235294117,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "burlywood"
+      ],
+      "expected": [
+        0.8705882352941177,
+        0.7215686274509804,
+        0.5294117647058824,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "cadetblue"
+      ],
+      "expected": [
+        0.37254901960784315,
+        0.6196078431372549,
+        0.6274509803921569,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "chartreuse"
+      ],
+      "expected": [
+        0.4980392156862745,
+        1.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "chocolate"
+      ],
+      "expected": [
+        0.8235294117647058,
+        0.4117647058823529,
+        0.11764705882352941,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "coral"
+      ],
+      "expected": [
+        1.0,
+        0.4980392156862745,
+        0.3137254901960784,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "cornflowerblue"
+      ],
+      "expected": [
+        0.39215686274509803,
+        0.5843137254901961,
+        0.9294117647058824,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "cornsilk"
+      ],
+      "expected": [
+        1.0,
+        0.9725490196078431,
+        0.8627450980392157,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "crimson"
+      ],
+      "expected": [
+        0.8627450980392157,
+        0.0784313725490196,
+        0.23529411764705882,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "cyan"
+      ],
+      "expected": [
+        0.0,
+        1.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkblue"
+      ],
+      "expected": [
+        0.0,
+        0.0,
+        0.5450980392156862,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkcyan"
+      ],
+      "expected": [
+        0.0,
+        0.5450980392156862,
+        0.5450980392156862,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkgoldenrod"
+      ],
+      "expected": [
+        0.7215686274509804,
+        0.5254901960784314,
+        0.043137254901960784,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkgray"
+      ],
+      "expected": [
+        0.6627450980392157,
+        0.6627450980392157,
+        0.6627450980392157,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkgreen"
+      ],
+      "expected": [
+        0.0,
+        0.39215686274509803,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkgrey"
+      ],
+      "expected": [
+        0.6627450980392157,
+        0.6627450980392157,
+        0.6627450980392157,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkkhaki"
+      ],
+      "expected": [
+        0.7411764705882353,
+        0.7176470588235294,
+        0.4196078431372549,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkmagenta"
+      ],
+      "expected": [
+        0.5450980392156862,
+        0.0,
+        0.5450980392156862,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkolivegreen"
+      ],
+      "expected": [
+        0.3333333333333333,
+        0.4196078431372549,
+        0.1843137254901961,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkorange"
+      ],
+      "expected": [
+        1.0,
+        0.5490196078431373,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkorchid"
+      ],
+      "expected": [
+        0.6,
+        0.19607843137254902,
+        0.8,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkred"
+      ],
+      "expected": [
+        0.5450980392156862,
+        0.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darksalmon"
+      ],
+      "expected": [
+        0.9137254901960784,
+        0.5882352941176471,
+        0.47843137254901963,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkseagreen"
+      ],
+      "expected": [
+        0.5607843137254902,
+        0.7372549019607844,
+        0.5607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkslateblue"
+      ],
+      "expected": [
+        0.2823529411764706,
+        0.23921568627450981,
+        0.5450980392156862,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkslategray"
+      ],
+      "expected": [
+        0.1843137254901961,
+        0.30980392156862746,
+        0.30980392156862746,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkslategrey"
+      ],
+      "expected": [
+        0.1843137254901961,
+        0.30980392156862746,
+        0.30980392156862746,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkturquoise"
+      ],
+      "expected": [
+        0.0,
+        0.807843137254902,
+        0.8196078431372549,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "darkviolet"
+      ],
+      "expected": [
+        0.5803921568627451,
+        0.0,
+        0.8274509803921568,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "deeppink"
+      ],
+      "expected": [
+        1.0,
+        0.0784313725490196,
+        0.5764705882352941,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "deepskyblue"
+      ],
+      "expected": [
+        0.0,
+        0.7490196078431373,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "dimgray"
+      ],
+      "expected": [
+        0.4117647058823529,
+        0.4117647058823529,
+        0.4117647058823529,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "dimgrey"
+      ],
+      "expected": [
+        0.4117647058823529,
+        0.4117647058823529,
+        0.4117647058823529,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "dodgerblue"
+      ],
+      "expected": [
+        0.11764705882352941,
+        0.5647058823529412,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "firebrick"
+      ],
+      "expected": [
+        0.6980392156862745,
+        0.13333333333333333,
+        0.13333333333333333,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "floralwhite"
+      ],
+      "expected": [
+        1.0,
+        0.9803921568627451,
+        0.9411764705882353,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "forestgreen"
+      ],
+      "expected": [
+        0.13333333333333333,
+        0.5450980392156862,
+        0.13333333333333333,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "fuchsia"
+      ],
+      "expected": [
+        1.0,
+        0.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "gainsboro"
+      ],
+      "expected": [
+        0.8627450980392157,
+        0.8627450980392157,
+        0.8627450980392157,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "ghostwhite"
+      ],
+      "expected": [
+        0.9725490196078431,
+        0.9725490196078431,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "gold"
+      ],
+      "expected": [
+        1.0,
+        0.8431372549019608,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "goldenrod"
+      ],
+      "expected": [
+        0.8549019607843137,
+        0.6470588235294118,
+        0.12549019607843137,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "gray"
+      ],
+      "expected": [
+        0.5019607843137255,
+        0.5019607843137255,
+        0.5019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "green"
+      ],
+      "expected": [
+        0.0,
+        0.5019607843137255,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "greenyellow"
+      ],
+      "expected": [
+        0.6784313725490196,
+        1.0,
+        0.1843137254901961,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "grey"
+      ],
+      "expected": [
+        0.5019607843137255,
+        0.5019607843137255,
+        0.5019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "honeydew"
+      ],
+      "expected": [
+        0.9411764705882353,
+        1.0,
+        0.9411764705882353,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hotpink"
+      ],
+      "expected": [
+        1.0,
+        0.4117647058823529,
+        0.7058823529411765,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "indianred"
+      ],
+      "expected": [
+        0.803921568627451,
+        0.3607843137254902,
+        0.3607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "indigo"
+      ],
+      "expected": [
+        0.29411764705882354,
+        0.0,
+        0.5098039215686274,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "ivory"
+      ],
+      "expected": [
+        1.0,
+        1.0,
+        0.9411764705882353,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "khaki"
+      ],
+      "expected": [
+        0.9411764705882353,
+        0.9019607843137255,
+        0.5490196078431373,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lavender"
+      ],
+      "expected": [
+        0.9019607843137255,
+        0.9019607843137255,
+        0.9803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lavenderblush"
+      ],
+      "expected": [
+        1.0,
+        0.9411764705882353,
+        0.9607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lawngreen"
+      ],
+      "expected": [
+        0.48627450980392156,
+        0.9882352941176471,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lemonchiffon"
+      ],
+      "expected": [
+        1.0,
+        0.9803921568627451,
+        0.803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightblue"
+      ],
+      "expected": [
+        0.6784313725490196,
+        0.8470588235294118,
+        0.9019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightcoral"
+      ],
+      "expected": [
+        0.9411764705882353,
+        0.5019607843137255,
+        0.5019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightcyan"
+      ],
+      "expected": [
+        0.8784313725490196,
+        1.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightgoldenrodyellow"
+      ],
+      "expected": [
+        0.9803921568627451,
+        0.9803921568627451,
+        0.8235294117647058,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightgray"
+      ],
+      "expected": [
+        0.8274509803921568,
+        0.8274509803921568,
+        0.8274509803921568,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightgreen"
+      ],
+      "expected": [
+        0.5647058823529412,
+        0.9333333333333333,
+        0.5647058823529412,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightgrey"
+      ],
+      "expected": [
+        0.8274509803921568,
+        0.8274509803921568,
+        0.8274509803921568,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightpink"
+      ],
+      "expected": [
+        1.0,
+        0.7137254901960784,
+        0.7568627450980392,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightsalmon"
+      ],
+      "expected": [
+        1.0,
+        0.6274509803921569,
+        0.47843137254901963,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightseagreen"
+      ],
+      "expected": [
+        0.12549019607843137,
+        0.6980392156862745,
+        0.6666666666666666,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightskyblue"
+      ],
+      "expected": [
+        0.5294117647058824,
+        0.807843137254902,
+        0.9803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightslategray"
+      ],
+      "expected": [
+        0.4666666666666667,
+        0.5333333333333333,
+        0.6,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightslategrey"
+      ],
+      "expected": [
+        0.4666666666666667,
+        0.5333333333333333,
+        0.6,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightsteelblue"
+      ],
+      "expected": [
+        0.6901960784313725,
+        0.7686274509803922,
+        0.8705882352941177,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lightyellow"
+      ],
+      "expected": [
+        1.0,
+        1.0,
+        0.8784313725490196,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "lime"
+      ],
+      "expected": [
+        0.0,
+        1.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "limegreen"
+      ],
+      "expected": [
+        0.19607843137254902,
+        0.803921568627451,
+        0.19607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "linen"
+      ],
+      "expected": [
+        0.9803921568627451,
+        0.9411764705882353,
+        0.9019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "magenta"
+      ],
+      "expected": [
+        1.0,
+        0.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "maroon"
+      ],
+      "expected": [
+        0.5019607843137255,
+        0.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumaquamarine"
+      ],
+      "expected": [
+        0.4,
+        0.803921568627451,
+        0.6666666666666666,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumblue"
+      ],
+      "expected": [
+        0.0,
+        0.0,
+        0.803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumorchid"
+      ],
+      "expected": [
+        0.7294117647058823,
+        0.3333333333333333,
+        0.8274509803921568,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumpurple"
+      ],
+      "expected": [
+        0.5764705882352941,
+        0.4392156862745098,
+        0.8588235294117647,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumseagreen"
+      ],
+      "expected": [
+        0.23529411764705882,
+        0.7019607843137254,
+        0.44313725490196076,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumslateblue"
+      ],
+      "expected": [
+        0.4823529411764706,
+        0.40784313725490196,
+        0.9333333333333333,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumspringgreen"
+      ],
+      "expected": [
+        0.0,
+        0.9803921568627451,
+        0.6039215686274509,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumturquoise"
+      ],
+      "expected": [
+        0.2823529411764706,
+        0.8196078431372549,
+        0.8,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mediumvioletred"
+      ],
+      "expected": [
+        0.7803921568627451,
+        0.08235294117647059,
+        0.5215686274509804,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "midnightblue"
+      ],
+      "expected": [
+        0.09803921568627451,
+        0.09803921568627451,
+        0.4392156862745098,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mintcream"
+      ],
+      "expected": [
+        0.9607843137254902,
+        1.0,
+        0.9803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "mistyrose"
+      ],
+      "expected": [
+        1.0,
+        0.8941176470588236,
+        0.8823529411764706,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "moccasin"
+      ],
+      "expected": [
+        1.0,
+        0.8941176470588236,
+        0.7098039215686275,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "navajowhite"
+      ],
+      "expected": [
+        1.0,
+        0.8705882352941177,
+        0.6784313725490196,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "navy"
+      ],
+      "expected": [
+        0.0,
+        0.0,
+        0.5019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "oldlace"
+      ],
+      "expected": [
+        0.9921568627450981,
+        0.9607843137254902,
+        0.9019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "olive"
+      ],
+      "expected": [
+        0.5019607843137255,
+        0.5019607843137255,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "olivedrab"
+      ],
+      "expected": [
+        0.4196078431372549,
+        0.5568627450980392,
+        0.13725490196078433,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "orange"
+      ],
+      "expected": [
+        1.0,
+        0.6470588235294118,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "orangered"
+      ],
+      "expected": [
+        1.0,
+        0.27058823529411763,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "orchid"
+      ],
+      "expected": [
+        0.8549019607843137,
+        0.4392156862745098,
+        0.8392156862745098,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "palegoldenrod"
+      ],
+      "expected": [
+        0.9333333333333333,
+        0.9098039215686274,
+        0.6666666666666666,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "palegreen"
+      ],
+      "expected": [
+        0.596078431372549,
+        0.984313725490196,
+        0.596078431372549,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "paleturquoise"
+      ],
+      "expected": [
+        0.6862745098039216,
+        0.9333333333333333,
+        0.9333333333333333,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "palevioletred"
+      ],
+      "expected": [
+        0.8588235294117647,
+        0.4392156862745098,
+        0.5764705882352941,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "papayawhip"
+      ],
+      "expected": [
+        1.0,
+        0.9372549019607843,
+        0.8352941176470589,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "peachpuff"
+      ],
+      "expected": [
+        1.0,
+        0.8549019607843137,
+        0.7254901960784313,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "peru"
+      ],
+      "expected": [
+        0.803921568627451,
+        0.5215686274509804,
+        0.24705882352941178,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "pink"
+      ],
+      "expected": [
+        1.0,
+        0.7529411764705882,
+        0.796078431372549,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "plum"
+      ],
+      "expected": [
+        0.8666666666666667,
+        0.6274509803921569,
+        0.8666666666666667,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "powderblue"
+      ],
+      "expected": [
+        0.6901960784313725,
+        0.8784313725490196,
+        0.9019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "purple"
+      ],
+      "expected": [
+        0.5019607843137255,
+        0.0,
+        0.5019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rebeccapurple"
+      ],
+      "expected": [
+        0.4,
+        0.2,
+        0.6,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "red"
+      ],
+      "expected": [
+        1.0,
+        0.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rosybrown"
+      ],
+      "expected": [
+        0.7372549019607844,
+        0.5607843137254902,
+        0.5607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "royalblue"
+      ],
+      "expected": [
+        0.2549019607843137,
+        0.4117647058823529,
+        0.8823529411764706,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "saddlebrown"
+      ],
+      "expected": [
+        0.5450980392156862,
+        0.27058823529411763,
+        0.07450980392156863,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "salmon"
+      ],
+      "expected": [
+        0.9803921568627451,
+        0.5019607843137255,
+        0.4470588235294118,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "sandybrown"
+      ],
+      "expected": [
+        0.9568627450980393,
+        0.6431372549019608,
+        0.3764705882352941,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "seagreen"
+      ],
+      "expected": [
+        0.1803921568627451,
+        0.5450980392156862,
+        0.3411764705882353,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "seashell"
+      ],
+      "expected": [
+        1.0,
+        0.9607843137254902,
+        0.9333333333333333,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "sienna"
+      ],
+      "expected": [
+        0.6274509803921569,
+        0.3215686274509804,
+        0.17647058823529413,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "silver"
+      ],
+      "expected": [
+        0.7529411764705882,
+        0.7529411764705882,
+        0.7529411764705882,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "skyblue"
+      ],
+      "expected": [
+        0.5294117647058824,
+        0.807843137254902,
+        0.9215686274509803,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "slateblue"
+      ],
+      "expected": [
+        0.41568627450980394,
+        0.35294117647058826,
+        0.803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "slategray"
+      ],
+      "expected": [
+        0.4392156862745098,
+        0.5019607843137255,
+        0.5647058823529412,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "slategrey"
+      ],
+      "expected": [
+        0.4392156862745098,
+        0.5019607843137255,
+        0.5647058823529412,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "snow"
+      ],
+      "expected": [
+        1.0,
+        0.9803921568627451,
+        0.9803921568627451,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "springgreen"
+      ],
+      "expected": [
+        0.0,
+        1.0,
+        0.4980392156862745,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "steelblue"
+      ],
+      "expected": [
+        0.27450980392156865,
+        0.5098039215686274,
+        0.7058823529411765,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "tan"
+      ],
+      "expected": [
+        0.8235294117647058,
+        0.7058823529411765,
+        0.5490196078431373,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "teal"
+      ],
+      "expected": [
+        0.0,
+        0.5019607843137255,
+        0.5019607843137255,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "thistle"
+      ],
+      "expected": [
+        0.8470588235294118,
+        0.7490196078431373,
+        0.8470588235294118,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "tomato"
+      ],
+      "expected": [
+        1.0,
+        0.38823529411764707,
+        0.2784313725490196,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "turquoise"
+      ],
+      "expected": [
+        0.25098039215686274,
+        0.8784313725490196,
+        0.8156862745098039,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "violet"
+      ],
+      "expected": [
+        0.9333333333333333,
+        0.5098039215686274,
+        0.9333333333333333,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "wheat"
+      ],
+      "expected": [
+        0.9607843137254902,
+        0.8705882352941177,
+        0.7019607843137254,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "white"
+      ],
+      "expected": [
+        1.0,
+        1.0,
+        1.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "whitesmoke"
+      ],
+      "expected": [
+        0.9607843137254902,
+        0.9607843137254902,
+        0.9607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "yellow"
+      ],
+      "expected": [
+        1.0,
+        1.0,
+        0.0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "yellowgreen"
+      ],
+      "expected": [
+        0.6039215686274509,
+        0.803921568627451,
+        0.19607843137254902,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "rgba",
+      "args": [
+        128.5,
+        0,
+        0,
+        0.5
+      ],
+      "expected": [
+        0.503921568627451,
+        0,
+        0,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "rgba",
+      "args": [
+        127.499999,
+        0,
+        0,
+        0.5
+      ],
+      "expected": [
+        0.4999999960784314,
+        0,
+        0,
+        0.5
+      ],
+      "exact": true
+    },
+    {
+      "op": "validate",
+      "args": [
+        {
+          "r": 1,
+          "g": 0,
+          "b": 0
+        }
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "exact": true
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(255. 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(1.e2 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "rgb(20.% 0% 0%)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "hsl(120.deg 100% 50%)"
+      ],
+      "error": "color-invalid-text"
+    }
+  ]
+}

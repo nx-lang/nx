@@ -1336,3 +1336,365 @@ fn moving_and_removing_items_over_the_repository() {
         "moved {moved}, removed {removed}"
     );
 }
+
+#[test]
+fn color_edits_expand_shorthand_and_reject_malformed_values() {
+    assert_eq!(
+        spell_value(&SourceEditValue::Color {
+            text: "#F008".into()
+        })
+        .unwrap(),
+        "#ff000088"
+    );
+    for text in ["red", "#12", "#ff0000oops", "#gg0000"] {
+        assert!(spell_value(&SourceEditValue::Color { text: text.into() }).is_err());
+    }
+}
+
+#[test]
+fn native_color_edit_changes_only_the_token() {
+    let source = "let accent = #f008 // keep this comment\n";
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let color = tree
+        .nodes
+        .iter()
+        .find(|node| node.role == SourceRole::Literal && node.value.as_deref() == Some("#f008"))
+        .unwrap();
+    let result = edited(
+        source,
+        &color.key,
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color {
+                text: "#12345688".into(),
+            },
+        },
+    );
+    assert_eq!(result, "let accent = #12345688 // keep this comment\n");
+}
+
+#[test]
+fn canonical_color_constructors_get_metadata_without_name_heuristics() {
+    let source = r#"import "@nx/color" as c
+let accent = { c.srgb(0.123456789, 0.4, 0.8, 0.5) }
+"#;
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let color = tree
+        .nodes
+        .iter()
+        .find(|node| node.role == SourceRole::Call && node.color.is_some())
+        .unwrap_or_else(|| panic!("canonical call has swatch: {tree:#?}"));
+    let result = edited(
+        source,
+        &color.key,
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color {
+                text: "#ff66cc80".into(),
+            },
+        },
+    );
+    assert!(
+        result.contains("0.4, 0.8, 0.5"),
+        "untouched channels retain source precision: {result}"
+    );
+}
+
+#[test]
+fn color_diagnostics_distinguish_parse_from_try_parse() {
+    let source = r##"import "@nx/color" as c
+let invalid = { c.parse("#xyz") }
+let handled = { c.tryParse("#xyz") }
+"##;
+    let diagnostics = snapshot_for(source).diagnostics().unwrap();
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .flat_map(|document| &document.diagnostics)
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some("color-invalid-text"))
+        .collect();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn canonical_color_records_are_editable_and_decoys_are_not() {
+    let source = r#"import "@nx/color" as c
+let accent = <c.Color r=0.125 g=0.5 b=1 />
+type Color = { r:float32 g:float32 b:float32 a:float32 = 1 }
+let decoy = <Color r=0 g=0 b=0 />
+"#;
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let colors: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.color.is_some())
+        .collect();
+    assert_eq!(colors.len(), 1);
+    let result = edited(
+        source,
+        &colors[0].key,
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color {
+                text: "#ff80ff80".into(),
+            },
+        },
+    );
+    assert!(result.contains("r=1 g=0.5 b=1"));
+    assert!(result.contains("a="));
+}
+
+#[test]
+fn color_channel_edits_use_short_source_numbers_and_preserve_comments() {
+    for (expression, expected) in [
+        ("c.rgb(0, 0, 0)", "c.rgb(91, 110, 245)"),
+        ("c.rgba(0, 0, 0, 0.5)", "c.rgba(91, 110, 245, 0.5)"),
+        (
+            "c.srgb(0, /* keep */ 0, 0)",
+            "c.srgb(0.35686275, /* keep */ 0.43137255, 0.9607843, 0.5019608)",
+        ),
+    ] {
+        let source = format!("import \"@nx/color\" as c\nlet accent = {{ {expression} }}\n");
+        let tree = snapshot_for(&source)
+            .source_tree(&DocumentUri::from(URI))
+            .unwrap();
+        let color = tree
+            .nodes
+            .iter()
+            .find(|node| node.role == SourceRole::Call && node.color.is_some())
+            .unwrap();
+        let chosen = if expression.starts_with("c.rgb(") {
+            "#5b6ef5"
+        } else {
+            "#5b6ef580"
+        };
+        let after = edited(
+            &source,
+            &color.key,
+            SourceEdit::SetValue {
+                value: SourceEditValue::Color {
+                    text: chosen.into(),
+                },
+            },
+        );
+        assert!(after.contains(expected), "{after}");
+    }
+    let source = "import \"@nx/color\" as c\nlet accent = <c.Color r=0 g=0 b=0/>\n";
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let color = tree.nodes.iter().find(|node| node.color.is_some()).unwrap();
+    let after = edited(
+        source,
+        &color.key,
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color {
+                text: "#5b6ef580".into(),
+            },
+        },
+    );
+    assert!(
+        after.contains("r=0.35686275 g=0.43137255 b=0.9607843"),
+        "{after}"
+    );
+    assert_eq!(after, "import \"@nx/color\" as c\nlet accent = <c.Color r=0.35686275 g=0.43137255 b=0.9607843 a=0.5019608/>\n");
+}
+
+#[test]
+fn color_edits_refuse_wrong_kinds_removed_nodes_and_noneditable_expressions() {
+    for (source, change) in [
+        (
+            "let value = \"#fff\"",
+            SourceEditValue::Color {
+                text: "#f00".into(),
+            },
+        ),
+        (
+            "let value = 123",
+            SourceEditValue::Color {
+                text: "#f00".into(),
+            },
+        ),
+        (
+            "let value = #fff",
+            SourceEditValue::String {
+                value: "red".into(),
+            },
+        ),
+    ] {
+        let tree = snapshot_for(source)
+            .source_tree(&DocumentUri::from(URI))
+            .unwrap();
+        let literal = tree
+            .nodes
+            .iter()
+            .find(|node| node.role == SourceRole::Literal)
+            .unwrap();
+        assert_eq!(
+            edit(source, &literal.key, SourceEdit::SetValue { value: change }).refused,
+            Some(SourceEditRefusal::InvalidValue)
+        );
+    }
+    let source = "import \"@nx/color\" as c\nlet rgb = { c.rgb(0,0,0) }\nlet computed = { c.withAlpha(#fff,0.5) }\nlet handled = { c.tryParse(\"red\") }";
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    for node in tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == SourceRole::Call)
+    {
+        let answer = edit(
+            source,
+            &node.key,
+            SourceEdit::SetValue {
+                value: SourceEditValue::Color {
+                    text: "#f008".into(),
+                },
+            },
+        );
+        assert_eq!(
+            answer.refused,
+            Some(SourceEditRefusal::NotEditable),
+            "{}",
+            node.key
+        );
+    }
+    let old = snapshot_for("let accent = #fff")
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let key = &old
+        .nodes
+        .iter()
+        .find(|node| node.role == SourceRole::Literal)
+        .unwrap()
+        .key;
+    assert_eq!(
+        edit(
+            "let changed = #000",
+            key,
+            SourceEdit::SetValue {
+                value: SourceEditValue::Color {
+                    text: "#f00".into()
+                }
+            }
+        )
+        .refused,
+        Some(SourceEditRefusal::UnknownNode)
+    );
+}
+
+#[test]
+fn color_diagnostics_locate_the_invalid_channel_and_literal() {
+    for (source, code, token) in [
+        (
+            "import \"@nx/color\" as c\nlet value = { c.rgb(1,2,300) }",
+            "color-invalid-channel",
+            "300",
+        ),
+        (
+            "import \"@nx/color\" as c\nlet value = <c.Color r=2 g=0 b=0/>",
+            "color-invalid-channel",
+            "2",
+        ),
+        ("let value = #12", "color-literal", "#12"),
+    ] {
+        let diagnostics = snapshot_for(source).diagnostics().unwrap();
+        let found = diagnostics
+            .iter()
+            .flat_map(|document| &document.diagnostics)
+            .find(|diagnostic| diagnostic.code.as_deref() == Some(code))
+            .unwrap_or_else(|| panic!("{diagnostics:?}"));
+        let span = &found.range;
+        assert_eq!(
+            &source[span.start_byte as usize..span.end_byte as usize],
+            token,
+            "{found:?}"
+        );
+    }
+}
+
+#[test]
+fn parsed_color_picker_preserves_unmodified_alpha_and_precision() {
+    let source="import \"@nx/color\" as c\nlet value = { c.parse(\"rgba(31.481481716036797, 102.00000151991844, 204.00000303983688, 0.5)\") }";
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let node = tree
+        .nodes
+        .iter()
+        .find(|node| node.role == SourceRole::Call && node.color.is_some())
+        .unwrap();
+    let after = edited(
+        source,
+        &node.key,
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color {
+                text: "#ff66cc80".into(),
+            },
+        },
+    );
+    assert!(
+        after.contains("102.00000151991844, 204.00000303983688, 0.5"),
+        "{after}"
+    );
+}
+
+#[test]
+fn graphics_color_reexports_keep_canonical_editing() {
+    let source = "import \"@nx/graphics\" as g\nlet accent = <g.Color r=0 g=0 b=0/>";
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let color = tree
+        .nodes
+        .iter()
+        .find(|node| node.color.is_some())
+        .unwrap_or_else(|| panic!("{tree:#?}"));
+    let after = edited(
+        source,
+        &color.key,
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color {
+                text: "#5b6ef5".into(),
+            },
+        },
+    );
+    assert!(after.contains("r=0.35686275"), "{after}");
+}
+
+#[test]
+fn parsed_byte_colors_keep_compact_hex_spelling() {
+    for (before, chosen, expected) in [
+        ("#123456", "#5b6ef5", "#5b6ef5"),
+        ("#33669980", "#11223380", "#11223380"),
+        ("red", "#5b6ef5", "#5b6ef5"),
+        ("#ffffffFF", "#5b6ef5", "#5b6ef5ff"),
+    ] {
+        let source =
+            format!("import \"@nx/color\" as c\nlet value = {{ c.parse(\"{before}\") }}\n");
+        let tree = snapshot_for(&source)
+            .source_tree(&DocumentUri::from(URI))
+            .unwrap();
+        let node = tree
+            .nodes
+            .iter()
+            .find(|node| node.role == SourceRole::Call && node.color.is_some())
+            .unwrap();
+        let after = edited(
+            &source,
+            &node.key,
+            SourceEdit::SetValue {
+                value: SourceEditValue::Color {
+                    text: chosen.into(),
+                },
+            },
+        );
+        assert_eq!(
+            after,
+            format!("import \"@nx/color\" as c\nlet value = {{ c.parse(\"{expected}\") }}\n")
+        );
+    }
+}

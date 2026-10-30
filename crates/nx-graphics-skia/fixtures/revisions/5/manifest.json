@@ -1,15 +1,15 @@
 {
   "diagnostics": [],
   "image": "image.png",
-  "profile": "graphics-core-v1",
+  "profile": "graphics-core-v2",
   "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
-  "revision": "110811ce4b7ca3f05c141e22c053fa4372d708acfd54a9f4a9ec7a02c1307c1b",
+  "revision": "d6f4270fc9553db1d44fdbbe5233e0fab6c318af8d3688605a867bb16be604be",
   "scene": {
     "config": {
       "fonts": [
         "sha256:ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280"
       ],
-      "graphics_version": "cec0428e64be5468",
+      "graphics_version": "550dd90b1543cbf3",
       "height": 240.0,
       "limits": {
         "coordinate": 10000000.0,
@@ -19,14 +19,14 @@
         "path_commands": 100000,
         "surface_pixels": 16777216.0
       },
-      "program_revision": "2a540fb3dc748f1f",
+      "program_revision": "b1aac89fa55fc110",
       "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
       "scale": 1.0,
       "text_ink_padding": 0.0,
       "width": 400.0
     },
-    "profile": "graphics-core-v1",
-    "revision": "110811ce4b7ca3f05c141e22c053fa4372d708acfd54a9f4a9ec7a02c1307c1b",
+    "profile": "graphics-core-v2",
+    "revision": "d6f4270fc9553db1d44fdbbe5233e0fab6c318af8d3688605a867bb16be604be",
     "root": {
       "accessibility": null,
       "children": [
@@ -55,7 +55,7 @@
           "identity": {
             "declaration": "Polygon",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 1.0,
           "order": 0,
@@ -109,9 +109,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 16281,
+            "end": 16306,
             "module": "@nx/graphics/graphics.nx",
-            "start": 15901
+            "start": 15926
           },
           "stroke": null,
           "text": null,
@@ -158,7 +158,7 @@
           "identity": {
             "declaration": "Polygon",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 1.0,
           "order": 1,
@@ -236,9 +236,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 19568,
+            "end": 19593,
             "module": "@nx/graphics/graphics.nx",
-            "start": 18964
+            "start": 18989
           },
           "stroke": null,
           "text": null,
@@ -285,7 +285,7 @@
           "identity": {
             "declaration": "Polygon",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 1.0,
           "order": 2,
@@ -345,9 +345,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 28008,
+            "end": 28033,
             "module": "@nx/graphics/graphics.nx",
-            "start": 27317
+            "start": 27342
           },
           "stroke": null,
           "text": null,
@@ -389,7 +389,7 @@
           "identity": {
             "declaration": "Path",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 1.0,
           "order": 3,
@@ -540,9 +540,9 @@
             }
           ],
           "provenance": {
-            "end": 31385,
+            "end": 31410,
             "module": "@nx/graphics/graphics.nx",
-            "start": 31103
+            "start": 31128
           },
           "stroke": {
             "cap": "butt",
@@ -602,7 +602,7 @@
           "identity": {
             "declaration": "Path",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 1.0,
           "order": 4,
@@ -1017,9 +1017,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 35517,
+            "end": 35542,
             "module": "@nx/graphics/graphics.nx",
-            "start": 34657
+            "start": 34682
           },
           "stroke": null,
           "text": null,
@@ -1069,7 +1069,7 @@
               "identity": {
                 "declaration": "Rect",
                 "module": "@nx/graphics/graphics.nx",
-                "version": "cec0428e64be5468"
+                "version": "550dd90b1543cbf3"
               },
               "opacity": 1.0,
               "order": 0,
@@ -1111,9 +1111,9 @@
                 "ClosePath"
               ],
               "provenance": {
-                "end": 778,
+                "end": 774,
                 "module": "main.nx",
-                "start": 726
+                "start": 722
               },
               "stroke": null,
               "text": null,
@@ -1160,7 +1160,7 @@
               "identity": {
                 "declaration": "Circle",
                 "module": "@nx/graphics/graphics.nx",
-                "version": "cec0428e64be5468"
+                "version": "550dd90b1543cbf3"
               },
               "opacity": 1.0,
               "order": 1,
@@ -1359,9 +1359,9 @@
                 }
               ],
               "provenance": {
-                "end": 825,
+                "end": 821,
                 "module": "main.nx",
-                "start": 783
+                "start": 779
               },
               "stroke": null,
               "text": null,
@@ -1396,7 +1396,7 @@
           "identity": {
             "declaration": "Group",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 0.5,
           "order": 5,
@@ -1412,9 +1412,9 @@
           "parent": "element",
           "path": null,
           "provenance": {
-            "end": 838,
+            "end": 834,
             "module": "main.nx",
-            "start": 700
+            "start": 696
           },
           "stroke": null,
           "text": null,
@@ -1461,7 +1461,7 @@
           "identity": {
             "declaration": "Text",
             "module": "@nx/graphics/graphics.nx",
-            "version": "cec0428e64be5468"
+            "version": "550dd90b1543cbf3"
           },
           "opacity": 1.0,
           "order": 6,
@@ -1477,9 +1477,9 @@
           "parent": "element",
           "path": null,
           "provenance": {
-            "end": 926,
+            "end": 922,
             "module": "main.nx",
-            "start": 841
+            "start": 837
           },
           "stroke": null,
           "text": {
@@ -1576,7 +1576,7 @@
       "identity": {
         "declaration": "Drawing",
         "module": "@nx/graphics/graphics.nx",
-        "version": "cec0428e64be5468"
+        "version": "550dd90b1543cbf3"
       },
       "opacity": 1.0,
       "order": 0,
@@ -1618,9 +1618,9 @@
         "ClosePath"
       ],
       "provenance": {
-        "end": 939,
+        "end": 935,
         "module": "main.nx",
-        "start": 174
+        "start": 170
       },
       "stroke": null,
       "text": null,

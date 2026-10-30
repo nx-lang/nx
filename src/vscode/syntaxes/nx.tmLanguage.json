@@ -279,6 +279,10 @@
     "numbers": {
       "patterns": [
         {
+          "name": "constant.other.color.nx",
+          "match": "#[0-9A-Fa-f]{8}(?![A-Za-z0-9_])|#[0-9A-Fa-f]{6}(?![A-Za-z0-9_])|#[0-9A-Fa-f]{4}(?![A-Za-z0-9_])|#[0-9A-Fa-f]{3}(?![A-Za-z0-9_])"
+        },
+        {
           "name": "constant.numeric.hex.nx",
           "match": "(?:0x|0X)[0-9A-Fa-f](?:_?[0-9A-Fa-f])*"
         },

@@ -1444,6 +1444,12 @@ impl Interpreter {
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
     ) -> Result<(), RuntimeError> {
+        if self.runtime_prepared_module(module).module_identity() == "@nx/color/color.nx" {
+            return Err(Self::unchecked_expression_error(
+                "color requires the IR runtime",
+            ));
+        }
+
         let module_key = module.source_id.as_u32();
         // A pass that runs while a value is already being bound exists only to furnish the
         // environment of a field default that value's initializer needed. It leaves behind
@@ -2214,6 +2220,9 @@ impl Interpreter {
         let expr = module.expr(expr_id);
         match expr {
             ast::Expr::Literal(lit) => self.eval_literal(lit),
+            ast::Expr::StandardColor { .. } => Err(Self::unchecked_expression_error(
+                "color requires the IR runtime",
+            )),
             ast::Expr::StandardMath { op, args } => {
                 let values = args
                     .iter()
@@ -2306,7 +2315,14 @@ impl Interpreter {
             ast::Expr::Element { element, .. } => self.eval_element_expr(module, ctx, *element),
             ast::Expr::RecordLiteral {
                 record, properties, ..
-            } => self.eval_record_literal(module, ctx, record, properties),
+            } => {
+                if record.as_str().starts_with("$nxColor.") {
+                    return Err(Self::unchecked_expression_error(
+                        "color requires the IR runtime",
+                    ));
+                }
+                self.eval_record_literal(module, ctx, record, properties)
+            }
             ast::Expr::Index { base, index, .. } => self.eval_index(module, ctx, *base, *index),
             ast::Expr::Member { base, member, .. } => self.eval_member(module, ctx, *base, member),
             ast::Expr::OptionalMember { base, member, .. } => {

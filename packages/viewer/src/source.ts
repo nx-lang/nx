@@ -304,13 +304,16 @@ export function renderSource(
   // A small square of the color a string names, before it, for a string its visualizer formats as a
   // color. Nothing when the string names no color: the square would show a color that is not there.
   const swatch = (at: number, start: number, end: number): HTMLElement | undefined => {
-    if (formats.get(at) !== "color") {
+    const raw = text.slice(start, end);
+    const native = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(raw);
+    const known = tree.nodes[at]?.color;
+    if (!native && known === undefined && formats.get(at) !== "color") {
       return undefined;
     }
     const square = document.createElement("span");
     square.className = "swatch";
     // A color, never anything else: `background-color` takes no URL.
-    square.style.backgroundColor = text.slice(start + 1, end - 1).trim();
+    square.style.backgroundColor = known ?? (native ? raw : text.slice(start + 1, end - 1).trim());
     if (square.style.backgroundColor === "") {
       return undefined;
     }
@@ -494,7 +497,7 @@ export function renderSource(
         if (uiText.has(child)) {
           element.classList.add("uitext", "uitext-body");
         }
-        const square = quoted ? swatch(child, start, end) : undefined;
+        const square = quoted || node.color !== undefined || text[start] === "#" ? swatch(child, start, end) : undefined;
         if (square !== undefined) {
           element.append(square);
         }
@@ -713,6 +716,14 @@ export function renderSource(
     const start = startOf(value);
     const end = endOf(value);
     const written = value.value ?? "";
+    if (value.role === "literal" && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(written)) {
+      const words = marked(at, "span", "colored");
+      const square = swatch(at, start, end);
+      if (square !== undefined) words.append(square);
+      writeText(words, start, end);
+      cell.append(words);
+      return;
+    }
     if (value.role === "literal" && written.startsWith('"') && end - start >= 2) {
       if (identifiers.has(at)) {
         const chip = marked(at, "span", "id-value");

@@ -725,9 +725,10 @@ fn resolve_record_definition_inner(
     module: &PreparedModule,
     namespace_module: &str,
     name: &Name,
-    seen: &mut FxHashSet<Name>,
+    seen: &mut FxHashSet<(String, Name)>,
 ) -> Option<ResolvedRecordDefinition> {
-    if !seen.insert(name.clone()) {
+    let key = (namespace_module.to_string(), name.clone());
+    if !seen.insert(key.clone()) {
         return None;
     }
 
@@ -736,7 +737,7 @@ fn resolve_record_definition_inner(
             if let Some(record) = record_definition_from_prepared_item(module, resolved.clone()) {
                 Some(record)
             } else if let Some(target) = type_alias_target_from_prepared_item(&resolved) {
-                resolve_record_definition_inner(module, namespace_module, &target, seen)
+                resolve_record_definition_inner(module, resolved.module_identity(), &target, seen)
             } else {
                 None
             }
@@ -744,7 +745,7 @@ fn resolve_record_definition_inner(
         _ => None,
     };
 
-    seen.remove(name);
+    seen.remove(&key);
     result
 }
 

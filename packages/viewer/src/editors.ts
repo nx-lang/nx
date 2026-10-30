@@ -4,7 +4,7 @@
  */
 import type { SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
 
-import { isNumericLiteral, type EditTarget, type TypeEditor } from "./edit.js";
+import { isHexColor, isNumericLiteral, type EditTarget, type TypeEditor } from "./edit.js";
 import { decodeString } from "./source.js";
 
 /** A boolean's mark, as the reading draws it. */
@@ -387,4 +387,12 @@ export function offsetAtPoint(element: HTMLElement, x: number, y: number): numbe
     }
   }
   return best;
+}
+
+/** Replace RGB while retaining an explicitly authored hex alpha channel. */
+export function preserveHexAlpha(rgb: string, original: string): string {
+  if (!isHexColor(original)) return rgb;
+  const digits = original.slice(1);
+  const alpha = digits.length === 4 ? digits[3]! + digits[3]! : digits.length === 8 ? digits.slice(6) : "";
+  return rgb.slice(0, 7) + alpha.toLowerCase();
 }

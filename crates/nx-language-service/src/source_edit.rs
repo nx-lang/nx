@@ -56,6 +56,11 @@ pub enum SourceEditValue {
         /// The string's content, unescaped.
         value: String,
     },
+    /// A typed hexadecimal color literal.
+    Color {
+        /// Hexadecimal source spelling, including the hash.
+        text: String,
+    },
     /// A number, written as given when it is an NX numeric literal.
     Number {
         /// The number as the reader typed it, such as `12.5` or `-3`.
@@ -142,6 +147,11 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
         return SourceEditAnswer::refused(SourceEditRefusal::UnknownNode);
     };
     let result = match edit {
+        SourceEdit::SetValue {
+            value: SourceEditValue::Color { text },
+        } if matches!(tree.nodes[at].role, SourceRole::Call | SourceRole::Element) => {
+            set_constructor_color(source, tree, at, text)
+        }
         SourceEdit::SetValue { value } => set_value(source, tree, at, value).map(Vec::from_iter),
         SourceEdit::SetText { text } => set_text(source, tree, at, text).map(Vec::from_iter),
         SourceEdit::Remove => remove(source, tree, at),
@@ -246,6 +256,9 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
     let Some(written) = source.get(start..end) else {
         return Err(SourceEditRefusal::NotEditable);
     };
+    if written.starts_with('#') != matches!(value, SourceEditValue::Color { .. }) {
+        return Err(SourceEditRefusal::InvalidValue);
+    }
     let text = spell_value(value)?;
     let owner = parent(tree, node).map(|owner| owner.role);
     let braced = node.flags.contains(&SourceFlag::Braced);
@@ -273,6 +286,22 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
 pub(crate) fn spell_value(value: &SourceEditValue) -> Result<String, SourceEditRefusal> {
     match value {
         SourceEditValue::String { value } => Ok(quote_string(value)),
+        SourceEditValue::Color { text } => {
+            let Some(digits) = text.strip_prefix('#') else {
+                return Err(SourceEditRefusal::InvalidValue);
+            };
+            if !matches!(digits.len(), 3 | 4 | 6 | 8)
+                || !digits.bytes().all(|b| b.is_ascii_hexdigit())
+            {
+                return Err(SourceEditRefusal::InvalidValue);
+            }
+            let expanded = if digits.len() <= 4 {
+                digits.chars().flat_map(|ch| [ch, ch]).collect::<String>()
+            } else {
+                digits.to_string()
+            };
+            Ok(format!("#{}", expanded.to_ascii_lowercase()))
+        }
         SourceEditValue::Number { text } => {
             if is_numeric_literal(text) {
                 Ok(text.clone())
@@ -831,4 +860,149 @@ fn tag_name_end(source: &str, element_start: usize) -> Option<usize> {
             .find_map(|child| find(child, start))
     }
     find(syntax.root(), element_start)
+}
+
+fn set_constructor_color(
+    source: &str,
+    tree: &SourceTree,
+    at: usize,
+    text: &str,
+) -> Result<Vec<(usize, usize, String)>, SourceEditRefusal> {
+    let node = &tree.nodes[at];
+    if !is_whole_value(tree, at) || node.color.is_none() {
+        return Err(SourceEditRefusal::NotEditable);
+    }
+    let declaration = node
+        .declaration
+        .and_then(|index| tree.declarations.get(index as usize))
+        .ok_or(SourceEditRefusal::NotEditable)?;
+    if !matches!(
+        declaration.module.as_str(),
+        "@nx/color/color.nx" | "@nx/color/operations.nx" | "@nx/graphics/graphics.nx"
+    ) {
+        return Err(SourceEditRefusal::NotEditable);
+    }
+    let parsed = nx_value::color::parse(text).map_err(|_| SourceEditRefusal::InvalidValue)?;
+    let channels =
+        nx_value::color::channels(&parsed).map_err(|_| SourceEditRefusal::InvalidValue)?;
+    if node.role == SourceRole::Element && declaration.name == "Color" {
+        let mut replacements = Vec::new();
+        for (i, name) in ["r", "g", "b", "a"].iter().enumerate() {
+            let attribute = tree.nodes.iter().position(|candidate| {
+                candidate.parent == Some(at as u32)
+                    && candidate.role == SourceRole::Attribute
+                    && candidate.name.as_deref() == Some(*name)
+            });
+            if let Some(attribute) = attribute {
+                let literal = tree
+                    .nodes
+                    .iter()
+                    .find(|candidate| {
+                        candidate.parent == Some(attribute as u32)
+                            && candidate.role == SourceRole::Literal
+                    })
+                    .ok_or(SourceEditRefusal::NotEditable)?;
+                let (start, end) = byte_span(literal);
+                let old = source[start..end]
+                    .parse::<f64>()
+                    .map_err(|_| SourceEditRefusal::NotEditable)?;
+                if (old * 255.0).round() != (channels[i] * 255.0).round() {
+                    replacements.push((start, end, (channels[i] as f32).to_string()));
+                }
+            } else if i == 3 && channels[3] != 1.0 {
+                replacements.extend(add_property(
+                    source,
+                    tree,
+                    at,
+                    "a",
+                    &SourceEditValue::Number {
+                        text: (channels[3] as f32).to_string(),
+                    },
+                )?);
+            }
+        }
+        return Ok(replacements);
+    }
+    let args: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter(|candidate| {
+            candidate.parent == Some(at as u32) && candidate.role == SourceRole::Literal
+        })
+        .collect();
+    if declaration.name == "parse" && args.len() == 1 {
+        let (start, end) = byte_span(args[0]);
+        let original_text = serde_json::from_str::<String>(&source[start..end])
+            .map_err(|_| SourceEditRefusal::NotEditable)?;
+        let original =
+            nx_value::color::parse(&original_text).map_err(|_| SourceEditRefusal::NotEditable)?;
+        let mut merged =
+            nx_value::color::channels(&original).map_err(|_| SourceEditRefusal::NotEditable)?;
+        for i in 0..4 {
+            if (merged[i] * 255.0).round() != (channels[i] * 255.0).round() {
+                merged[i] = channels[i];
+            }
+        }
+        let bytes = merged.map(|channel| (channel * 255.0).round() as u8);
+        if merged
+            .iter()
+            .zip(bytes)
+            .all(|(channel, byte)| *channel as f32 == (byte as f64 / 255.0) as f32)
+        {
+            let original = original_text.trim_ascii();
+            let explicit_alpha = original.starts_with('#') && matches!(original.len(), 5 | 9);
+            let mut hex = format!("#{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2]);
+            if bytes[3] != 255 || explicit_alpha {
+                hex.push_str(&format!("{:02x}", bytes[3]));
+            }
+            return Ok(vec![(start, end, quote_string(&hex))]);
+        }
+        let value = nx_value::color::make(merged).map_err(|_| SourceEditRefusal::InvalidValue)?;
+        let op = nx_value::color::NAMES
+            .iter()
+            .position(|name| *name == "toCss")
+            .unwrap();
+        let nx_value::NxValue::String(css) = nx_value::color::evaluate(op as u32, &[value])
+            .map_err(|_| SourceEditRefusal::InvalidValue)?
+        else {
+            return Err(SourceEditRefusal::InvalidValue);
+        };
+        return Ok(vec![(start, end, quote_string(&css))]);
+    }
+    if !matches!(declaration.name.as_str(), "rgb" | "rgba" | "srgb")
+        || !(3..=4).contains(&args.len())
+    {
+        return Err(SourceEditRefusal::NotEditable);
+    }
+    let normalized = declaration.name == "srgb";
+    let mut edits = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        let (start, end) = byte_span(arg);
+        let previous = source[start..end]
+            .parse::<f64>()
+            .map_err(|_| SourceEditRefusal::NotEditable)?;
+        let scale = if i == 3 || normalized { 1.0 } else { 255.0 };
+        // A byte picker cannot express existing sub-byte precision. Leave a channel alone when
+        // its displayed byte did not change, including an unchanged alpha.
+        if (previous / scale * 255.0).round() == (channels[i] * 255.0).round() {
+            continue;
+        }
+        edits.push((
+            start,
+            end,
+            if scale == 255.0 {
+                (channels[i] * 255.0).round().to_string()
+            } else {
+                (channels[i] as f32).to_string()
+            },
+        ));
+    }
+    if args.len() == 3 && channels[3] != 1.0 {
+        if declaration.name == "rgb" {
+            return Err(SourceEditRefusal::NotEditable);
+        }
+        let (_, end) = byte_span(args[2]);
+        edits.push((end, end, format!(", {}", channels[3] as f32)));
+    }
+    Ok(edits)
 }

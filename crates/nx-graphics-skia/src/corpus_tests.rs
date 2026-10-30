@@ -51,11 +51,11 @@ fn read_svg(node: roxmltree::Node<'_, '_>, path: &str, ids: &mut Identities) -> 
         v["fill"] = if color == "none" {
             json!("none")
         } else {
-            json!({"$type":"Paint.solid","color":color})
+            json!({"$type":"Paint.solid","color":nx_value::color::parse(color).unwrap()})
         };
     }
     if let Some(color) = node.attribute("stroke") {
-        v["stroke"] = json!({"paint":{"$type":"Paint.solid","color":color},"width":number("stroke-width",1.0)});
+        v["stroke"] = json!({"paint":{"$type":"Paint.solid","color":nx_value::color::parse(color).unwrap()},"width":number("stroke-width",1.0)});
     }
     if node.attribute("opacity").is_some() {
         v["opacity"] = json!(number("opacity", 1.0));

@@ -1,0 +1,605 @@
+module @nx/color/color.nx fingerprint 6839805114163841305
+requires update-records-v1 property-unions-v1
+entrypoints functions [] components []
+
+record Color @4:1-9:2
+  r: float32 required
+  g: float32 required
+  b: float32 required
+  a: float32 = 1.0
+
+union ParseResult @12:1-14:32
+  case parsed
+    value: Color required
+  case invalid
+    message: string required
+
+union InterpolationSpace @17:1-17:59
+  case srgb constant
+  case linearSrgb constant
+  case oklab constant
+
+record RgbChannels @20:1-25:2
+  r: float64 required
+  g: float64 required
+  b: float64 required
+  alpha: float64 required
+
+record HslChannels @28:1-33:2
+  h: float64 required
+  s: float64 required
+  l: float64 required
+  alpha: float64 required
+
+record HsvChannels @36:1-41:2
+  h: float64 required
+  s: float64 required
+  v: float64 required
+  alpha: float64 required
+
+record HwbChannels @44:1-49:2
+  h: float64 required
+  w: float64 required
+  b: float64 required
+  alpha: float64 required
+
+record LinearRgbChannels @52:1-57:2
+  r: float64 required
+  g: float64 required
+  b: float64 required
+  alpha: float64 required
+
+record OklabChannels @60:1-65:2
+  l: float64 required
+  a: float64 required
+  b: float64 required
+  alpha: float64 required
+
+record OklchChannels @68:1-73:2
+  l: float64 required
+  c: float64 required
+  h: float64 required
+  alpha: float64 required
+
+value aliceBlue: Color @76:1-76:38 =
+  <Color a=1.0 b=1.0 g=0.9725490212440491 r=0.9411764740943909 />
+
+value antiqueWhite: Color @77:1-77:41 =
+  <Color a=1.0 b=0.843137264251709 g=0.9215686321258545 r=0.9803921580314636 />
+
+value aqua: Color @78:1-78:33 =
+  <Color a=1.0 b=1.0 g=1.0 r=0.0 />
+
+value aquamarine: Color @79:1-79:39 =
+  <Color a=1.0 b=0.8313725590705872 g=1.0 r=0.49803921580314636 />
+
+value azure: Color @80:1-80:34 =
+  <Color a=1.0 b=1.0 g=1.0 r=0.9411764740943909 />
+
+value beige: Color @81:1-81:34 =
+  <Color a=1.0 b=0.8627451062202454 g=0.9607843160629272 r=0.9607843160629272 />
+
+value bisque: Color @82:1-82:35 =
+  <Color a=1.0 b=0.7686274647712708 g=0.8941176533699036 r=1.0 />
+
+value black: Color @83:1-83:34 =
+  <Color a=1.0 b=0.0 g=0.0 r=0.0 />
+
+value blanchedAlmond: Color @84:1-84:43 =
+  <Color a=1.0 b=0.8039215803146362 g=0.9215686321258545 r=1.0 />
+
+value blue: Color @85:1-85:33 =
+  <Color a=1.0 b=1.0 g=0.0 r=0.0 />
+
+value blueViolet: Color @86:1-86:39 =
+  <Color a=1.0 b=0.886274516582489 g=0.16862745583057404 r=0.5411764979362488 />
+
+value brown: Color @87:1-87:34 =
+  <Color a=1.0 b=0.16470588743686676 g=0.16470588743686676 r=0.6470588445663452 />
+
+value burlyWood: Color @88:1-88:38 =
+  <Color a=1.0 b=0.529411792755127 g=0.7215686440467834 r=0.8705882430076599 />
+
+value cadetBlue: Color @89:1-89:38 =
+  <Color a=1.0 b=0.6274510025978088 g=0.6196078658103943 r=0.37254902720451355 />
+
+value chartreuse: Color @90:1-90:39 =
+  <Color a=1.0 b=0.0 g=1.0 r=0.49803921580314636 />
+
+value chocolate: Color @91:1-91:38 =
+  <Color a=1.0 b=0.11764705926179886 g=0.4117647111415863 r=0.8235294222831726 />
+
+value coral: Color @92:1-92:34 =
+  <Color a=1.0 b=0.3137255012989044 g=0.49803921580314636 r=1.0 />
+
+value cornflowerBlue: Color @93:1-93:43 =
+  <Color a=1.0 b=0.929411768913269 g=0.5843137502670288 r=0.3921568691730499 />
+
+value cornsilk: Color @94:1-94:37 =
+  <Color a=1.0 b=0.8627451062202454 g=0.9725490212440491 r=1.0 />
+
+value crimson: Color @95:1-95:36 =
+  <Color a=1.0 b=0.23529411852359772 g=0.0784313753247261 r=0.8627451062202454 />
+
+value cyan: Color @96:1-96:33 =
+  <Color a=1.0 b=1.0 g=1.0 r=0.0 />
+
+value darkBlue: Color @97:1-97:37 =
+  <Color a=1.0 b=0.545098066329956 g=0.0 r=0.0 />
+
+value darkCyan: Color @98:1-98:37 =
+  <Color a=1.0 b=0.545098066329956 g=0.545098066329956 r=0.0 />
+
+value darkGoldenrod: Color @99:1-99:42 =
+  <Color a=1.0 b=0.04313725605607033 g=0.5254902243614197 r=0.7215686440467834 />
+
+value darkGray: Color @100:1-100:37 =
+  <Color a=1.0 b=0.6627451181411743 g=0.6627451181411743 r=0.6627451181411743 />
+
+value darkGreen: Color @101:1-101:38 =
+  <Color a=1.0 b=0.0 g=0.3921568691730499 r=0.0 />
+
+value darkGrey: Color @102:1-102:37 =
+  <Color a=1.0 b=0.6627451181411743 g=0.6627451181411743 r=0.6627451181411743 />
+
+value darkKhaki: Color @103:1-103:38 =
+  <Color a=1.0 b=0.41960784792900085 g=0.7176470756530762 r=0.7411764860153198 />
+
+value darkMagenta: Color @104:1-104:40 =
+  <Color a=1.0 b=0.545098066329956 g=0.0 r=0.545098066329956 />
+
+value darkOliveGreen: Color @105:1-105:43 =
+  <Color a=1.0 b=0.18431372940540314 g=0.41960784792900085 r=0.3333333432674408 />
+
+value darkOrange: Color @106:1-106:39 =
+  <Color a=1.0 b=0.0 g=0.5490196347236633 r=1.0 />
+
+value darkOrchid: Color @107:1-107:39 =
+  <Color a=1.0 b=0.800000011920929 g=0.19607843458652496 r=0.6000000238418579 />
+
+value darkRed: Color @108:1-108:36 =
+  <Color a=1.0 b=0.0 g=0.0 r=0.545098066329956 />
+
+value darkSalmon: Color @109:1-109:39 =
+  <Color a=1.0 b=0.47843137383461 g=0.5882353186607361 r=0.9137254953384399 />
+
+value darkSeaGreen: Color @110:1-110:41 =
+  <Color a=1.0 b=0.5607843399047852 g=0.7372549176216125 r=0.5607843399047852 />
+
+value darkSlateBlue: Color @111:1-111:42 =
+  <Color a=1.0 b=0.545098066329956 g=0.239215686917305 r=0.2823529541492462 />
+
+value darkSlateGray: Color @112:1-112:42 =
+  <Color a=1.0 b=0.30980393290519714 g=0.30980393290519714 r=0.18431372940540314 />
+
+value darkSlateGrey: Color @113:1-113:42 =
+  <Color a=1.0 b=0.30980393290519714 g=0.30980393290519714 r=0.18431372940540314 />
+
+value darkTurquoise: Color @114:1-114:42 =
+  <Color a=1.0 b=0.8196078538894653 g=0.8078431487083435 r=0.0 />
+
+value darkViolet: Color @115:1-115:39 =
+  <Color a=1.0 b=0.8274509906768799 g=0.0 r=0.5803921818733215 />
+
+value deepPink: Color @116:1-116:37 =
+  <Color a=1.0 b=0.5764706134796143 g=0.0784313753247261 r=1.0 />
+
+value deepSkyBlue: Color @117:1-117:40 =
+  <Color a=1.0 b=1.0 g=0.7490196228027344 r=0.0 />
+
+value dimGray: Color @118:1-118:36 =
+  <Color a=1.0 b=0.4117647111415863 g=0.4117647111415863 r=0.4117647111415863 />
+
+value dimGrey: Color @119:1-119:36 =
+  <Color a=1.0 b=0.4117647111415863 g=0.4117647111415863 r=0.4117647111415863 />
+
+value dodgerBlue: Color @120:1-120:39 =
+  <Color a=1.0 b=1.0 g=0.5647059082984924 r=0.11764705926179886 />
+
+value fireBrick: Color @121:1-121:38 =
+  <Color a=1.0 b=0.13333334028720856 g=0.13333334028720856 r=0.6980392336845398 />
+
+value floralWhite: Color @122:1-122:40 =
+  <Color a=1.0 b=0.9411764740943909 g=0.9803921580314636 r=1.0 />
+
+value forestGreen: Color @123:1-123:40 =
+  <Color a=1.0 b=0.13333334028720856 g=0.545098066329956 r=0.13333334028720856 />
+
+value fuchsia: Color @124:1-124:36 =
+  <Color a=1.0 b=1.0 g=0.0 r=1.0 />
+
+value gainsboro: Color @125:1-125:38 =
+  <Color a=1.0 b=0.8627451062202454 g=0.8627451062202454 r=0.8627451062202454 />
+
+value ghostWhite: Color @126:1-126:39 =
+  <Color a=1.0 b=1.0 g=0.9725490212440491 r=0.9725490212440491 />
+
+value gold: Color @127:1-127:33 =
+  <Color a=1.0 b=0.0 g=0.843137264251709 r=1.0 />
+
+value goldenrod: Color @128:1-128:38 =
+  <Color a=1.0 b=0.125490203499794 g=0.6470588445663452 r=0.8549019694328308 />
+
+value gray: Color @129:1-129:33 =
+  <Color a=1.0 b=0.501960813999176 g=0.501960813999176 r=0.501960813999176 />
+
+value green: Color @130:1-130:34 =
+  <Color a=1.0 b=0.0 g=0.501960813999176 r=0.0 />
+
+value greenYellow: Color @131:1-131:40 =
+  <Color a=1.0 b=0.18431372940540314 g=1.0 r=0.6784313917160034 />
+
+value grey: Color @132:1-132:33 =
+  <Color a=1.0 b=0.501960813999176 g=0.501960813999176 r=0.501960813999176 />
+
+value honeydew: Color @133:1-133:37 =
+  <Color a=1.0 b=0.9411764740943909 g=1.0 r=0.9411764740943909 />
+
+value hotPink: Color @134:1-134:36 =
+  <Color a=1.0 b=0.7058823704719543 g=0.4117647111415863 r=1.0 />
+
+value indianRed: Color @135:1-135:38 =
+  <Color a=1.0 b=0.3607843220233917 g=0.3607843220233917 r=0.8039215803146362 />
+
+value indigo: Color @136:1-136:35 =
+  <Color a=1.0 b=0.5098039507865906 g=0.0 r=0.29411765933036804 />
+
+value ivory: Color @137:1-137:34 =
+  <Color a=1.0 b=0.9411764740943909 g=1.0 r=1.0 />
+
+value khaki: Color @138:1-138:34 =
+  <Color a=1.0 b=0.5490196347236633 g=0.9019607901573181 r=0.9411764740943909 />
+
+value lavender: Color @139:1-139:37 =
+  <Color a=1.0 b=0.9803921580314636 g=0.9019607901573181 r=0.9019607901573181 />
+
+value lavenderBlush: Color @140:1-140:42 =
+  <Color a=1.0 b=0.9607843160629272 g=0.9411764740943909 r=1.0 />
+
+value lawnGreen: Color @141:1-141:38 =
+  <Color a=1.0 b=0.0 g=0.9882352948188782 r=0.48627451062202454 />
+
+value lemonChiffon: Color @142:1-142:41 =
+  <Color a=1.0 b=0.8039215803146362 g=0.9803921580314636 r=1.0 />
+
+value lightBlue: Color @143:1-143:38 =
+  <Color a=1.0 b=0.9019607901573181 g=0.8470588326454163 r=0.6784313917160034 />
+
+value lightCoral: Color @144:1-144:39 =
+  <Color a=1.0 b=0.501960813999176 g=0.501960813999176 r=0.9411764740943909 />
+
+value lightCyan: Color @145:1-145:38 =
+  <Color a=1.0 b=1.0 g=1.0 r=0.8784313797950745 />
+
+value lightGoldenrodYellow: Color @146:1-146:49 =
+  <Color a=1.0 b=0.8235294222831726 g=0.9803921580314636 r=0.9803921580314636 />
+
+value lightGray: Color @147:1-147:38 =
+  <Color a=1.0 b=0.8274509906768799 g=0.8274509906768799 r=0.8274509906768799 />
+
+value lightGreen: Color @148:1-148:39 =
+  <Color a=1.0 b=0.5647059082984924 g=0.9333333373069763 r=0.5647059082984924 />
+
+value lightGrey: Color @149:1-149:38 =
+  <Color a=1.0 b=0.8274509906768799 g=0.8274509906768799 r=0.8274509906768799 />
+
+value lightPink: Color @150:1-150:38 =
+  <Color a=1.0 b=0.7568627595901489 g=0.7137255072593689 r=1.0 />
+
+value lightSalmon: Color @151:1-151:40 =
+  <Color a=1.0 b=0.47843137383461 g=0.6274510025978088 r=1.0 />
+
+value lightSeaGreen: Color @152:1-152:42 =
+  <Color a=1.0 b=0.6666666865348816 g=0.6980392336845398 r=0.125490203499794 />
+
+value lightSkyBlue: Color @153:1-153:41 =
+  <Color a=1.0 b=0.9803921580314636 g=0.8078431487083435 r=0.529411792755127 />
+
+value lightSlateGray: Color @154:1-154:43 =
+  <Color a=1.0 b=0.6000000238418579 g=0.5333333611488342 r=0.46666666865348816 />
+
+value lightSlateGrey: Color @155:1-155:43 =
+  <Color a=1.0 b=0.6000000238418579 g=0.5333333611488342 r=0.46666666865348816 />
+
+value lightSteelBlue: Color @156:1-156:43 =
+  <Color a=1.0 b=0.8705882430076599 g=0.7686274647712708 r=0.6901960968971252 />
+
+value lightYellow: Color @157:1-157:40 =
+  <Color a=1.0 b=0.8784313797950745 g=1.0 r=1.0 />
+
+value lime: Color @158:1-158:33 =
+  <Color a=1.0 b=0.0 g=1.0 r=0.0 />
+
+value limeGreen: Color @159:1-159:38 =
+  <Color a=1.0 b=0.19607843458652496 g=0.8039215803146362 r=0.19607843458652496 />
+
+value linen: Color @160:1-160:34 =
+  <Color a=1.0 b=0.9019607901573181 g=0.9411764740943909 r=0.9803921580314636 />
+
+value magenta: Color @161:1-161:36 =
+  <Color a=1.0 b=1.0 g=0.0 r=1.0 />
+
+value maroon: Color @162:1-162:35 =
+  <Color a=1.0 b=0.0 g=0.0 r=0.501960813999176 />
+
+value mediumAquamarine: Color @163:1-163:45 =
+  <Color a=1.0 b=0.6666666865348816 g=0.8039215803146362 r=0.4000000059604645 />
+
+value mediumBlue: Color @164:1-164:39 =
+  <Color a=1.0 b=0.8039215803146362 g=0.0 r=0.0 />
+
+value mediumOrchid: Color @165:1-165:41 =
+  <Color a=1.0 b=0.8274509906768799 g=0.3333333432674408 r=0.729411780834198 />
+
+value mediumPurple: Color @166:1-166:41 =
+  <Color a=1.0 b=0.8588235378265381 g=0.43921568989753723 r=0.5764706134796143 />
+
+value mediumSeaGreen: Color @167:1-167:43 =
+  <Color a=1.0 b=0.4431372582912445 g=0.7019608020782471 r=0.23529411852359772 />
+
+value mediumSlateBlue: Color @168:1-168:44 =
+  <Color a=1.0 b=0.9333333373069763 g=0.40784314274787903 r=0.48235294222831726 />
+
+value mediumSpringGreen: Color @169:1-169:46 =
+  <Color a=1.0 b=0.6039215922355652 g=0.9803921580314636 r=0.0 />
+
+value mediumTurquoise: Color @170:1-170:44 =
+  <Color a=1.0 b=0.800000011920929 g=0.8196078538894653 r=0.2823529541492462 />
+
+value mediumVioletRed: Color @171:1-171:44 =
+  <Color a=1.0 b=0.5215686559677124 g=0.08235294371843338 r=0.7803921699523926 />
+
+value midnightBlue: Color @172:1-172:41 =
+  <Color a=1.0 b=0.43921568989753723 g=0.09803921729326248 r=0.09803921729326248 />
+
+value mintCream: Color @173:1-173:38 =
+  <Color a=1.0 b=0.9803921580314636 g=1.0 r=0.9607843160629272 />
+
+value mistyRose: Color @174:1-174:38 =
+  <Color a=1.0 b=0.8823529481887817 g=0.8941176533699036 r=1.0 />
+
+value moccasin: Color @175:1-175:37 =
+  <Color a=1.0 b=0.7098039388656616 g=0.8941176533699036 r=1.0 />
+
+value navajoWhite: Color @176:1-176:40 =
+  <Color a=1.0 b=0.6784313917160034 g=0.8705882430076599 r=1.0 />
+
+value navy: Color @177:1-177:33 =
+  <Color a=1.0 b=0.501960813999176 g=0.0 r=0.0 />
+
+value oldLace: Color @178:1-178:36 =
+  <Color a=1.0 b=0.9019607901573181 g=0.9607843160629272 r=0.9921568632125854 />
+
+value olive: Color @179:1-179:34 =
+  <Color a=1.0 b=0.0 g=0.501960813999176 r=0.501960813999176 />
+
+value oliveDrab: Color @180:1-180:38 =
+  <Color a=1.0 b=0.13725490868091583 g=0.5568627715110779 r=0.41960784792900085 />
+
+value orange: Color @181:1-181:35 =
+  <Color a=1.0 b=0.0 g=0.6470588445663452 r=1.0 />
+
+value orangeRed: Color @182:1-182:38 =
+  <Color a=1.0 b=0.0 g=0.2705882489681244 r=1.0 />
+
+value orchid: Color @183:1-183:35 =
+  <Color a=1.0 b=0.8392156958580017 g=0.43921568989753723 r=0.8549019694328308 />
+
+value paleGoldenrod: Color @184:1-184:42 =
+  <Color a=1.0 b=0.6666666865348816 g=0.9098039269447327 r=0.9333333373069763 />
+
+value paleGreen: Color @185:1-185:38 =
+  <Color a=1.0 b=0.5960784554481506 g=0.9843137264251709 r=0.5960784554481506 />
+
+value paleTurquoise: Color @186:1-186:42 =
+  <Color a=1.0 b=0.9333333373069763 g=0.9333333373069763 r=0.686274528503418 />
+
+value paleVioletRed: Color @187:1-187:42 =
+  <Color a=1.0 b=0.5764706134796143 g=0.43921568989753723 r=0.8588235378265381 />
+
+value papayaWhip: Color @188:1-188:39 =
+  <Color a=1.0 b=0.8352941274642944 g=0.9372549057006836 r=1.0 />
+
+value peachPuff: Color @189:1-189:38 =
+  <Color a=1.0 b=0.7254902124404907 g=0.8549019694328308 r=1.0 />
+
+value peru: Color @190:1-190:33 =
+  <Color a=1.0 b=0.24705882370471954 g=0.5215686559677124 r=0.8039215803146362 />
+
+value pink: Color @191:1-191:33 =
+  <Color a=1.0 b=0.7960784435272217 g=0.7529411911964417 r=1.0 />
+
+value plum: Color @192:1-192:33 =
+  <Color a=1.0 b=0.8666666746139526 g=0.6274510025978088 r=0.8666666746139526 />
+
+value powderBlue: Color @193:1-193:39 =
+  <Color a=1.0 b=0.9019607901573181 g=0.8784313797950745 r=0.6901960968971252 />
+
+value purple: Color @194:1-194:35 =
+  <Color a=1.0 b=0.501960813999176 g=0.0 r=0.501960813999176 />
+
+value rebeccaPurple: Color @195:1-195:42 =
+  <Color a=1.0 b=0.6000000238418579 g=0.20000000298023224 r=0.4000000059604645 />
+
+value red: Color @196:1-196:32 =
+  <Color a=1.0 b=0.0 g=0.0 r=1.0 />
+
+value rosyBrown: Color @197:1-197:38 =
+  <Color a=1.0 b=0.5607843399047852 g=0.5607843399047852 r=0.7372549176216125 />
+
+value royalBlue: Color @198:1-198:38 =
+  <Color a=1.0 b=0.8823529481887817 g=0.4117647111415863 r=0.2549019753932953 />
+
+value saddleBrown: Color @199:1-199:40 =
+  <Color a=1.0 b=0.07450980693101883 g=0.2705882489681244 r=0.545098066329956 />
+
+value salmon: Color @200:1-200:35 =
+  <Color a=1.0 b=0.4470588266849518 g=0.501960813999176 r=0.9803921580314636 />
+
+value sandyBrown: Color @201:1-201:39 =
+  <Color a=1.0 b=0.3764705955982208 g=0.6431372761726379 r=0.95686274766922 />
+
+value seaGreen: Color @202:1-202:37 =
+  <Color a=1.0 b=0.34117648005485535 g=0.545098066329956 r=0.18039216101169586 />
+
+value seaShell: Color @203:1-203:37 =
+  <Color a=1.0 b=0.9333333373069763 g=0.9607843160629272 r=1.0 />
+
+value sienna: Color @204:1-204:35 =
+  <Color a=1.0 b=0.1764705926179886 g=0.32156863808631897 r=0.6274510025978088 />
+
+value silver: Color @205:1-205:35 =
+  <Color a=1.0 b=0.7529411911964417 g=0.7529411911964417 r=0.7529411911964417 />
+
+value skyBlue: Color @206:1-206:36 =
+  <Color a=1.0 b=0.9215686321258545 g=0.8078431487083435 r=0.529411792755127 />
+
+value slateBlue: Color @207:1-207:38 =
+  <Color a=1.0 b=0.8039215803146362 g=0.3529411852359772 r=0.4156862795352936 />
+
+value slateGray: Color @208:1-208:38 =
+  <Color a=1.0 b=0.5647059082984924 g=0.501960813999176 r=0.43921568989753723 />
+
+value slateGrey: Color @209:1-209:38 =
+  <Color a=1.0 b=0.5647059082984924 g=0.501960813999176 r=0.43921568989753723 />
+
+value snow: Color @210:1-210:33 =
+  <Color a=1.0 b=0.9803921580314636 g=0.9803921580314636 r=1.0 />
+
+value springGreen: Color @211:1-211:40 =
+  <Color a=1.0 b=0.49803921580314636 g=1.0 r=0.0 />
+
+value steelBlue: Color @212:1-212:38 =
+  <Color a=1.0 b=0.7058823704719543 g=0.5098039507865906 r=0.27450981736183167 />
+
+value tan: Color @213:1-213:32 =
+  <Color a=1.0 b=0.5490196347236633 g=0.7058823704719543 r=0.8235294222831726 />
+
+value teal: Color @214:1-214:33 =
+  <Color a=1.0 b=0.501960813999176 g=0.501960813999176 r=0.0 />
+
+value thistle: Color @215:1-215:36 =
+  <Color a=1.0 b=0.8470588326454163 g=0.7490196228027344 r=0.8470588326454163 />
+
+value tomato: Color @216:1-216:35 =
+  <Color a=1.0 b=0.27843138575553894 g=0.38823530077934265 r=1.0 />
+
+value turquoise: Color @217:1-217:38 =
+  <Color a=1.0 b=0.8156862854957581 g=0.8784313797950745 r=0.250980406999588 />
+
+value violet: Color @218:1-218:35 =
+  <Color a=1.0 b=0.9333333373069763 g=0.5098039507865906 r=0.9333333373069763 />
+
+value wheat: Color @219:1-219:34 =
+  <Color a=1.0 b=0.7019608020782471 g=0.8705882430076599 r=0.9607843160629272 />
+
+value white: Color @220:1-220:34 =
+  <Color a=1.0 b=1.0 g=1.0 r=1.0 />
+
+value whiteSmoke: Color @221:1-221:39 =
+  <Color a=1.0 b=0.9607843160629272 g=0.9607843160629272 r=0.9607843160629272 />
+
+value yellow: Color @222:1-222:35 =
+  <Color a=1.0 b=0.0 g=1.0 r=1.0 />
+
+value yellowGreen: Color @223:1-223:40 =
+  <Color a=1.0 b=0.19607843458652496 g=0.8039215803146362 r=0.6039215922355652 />
+
+value transparent: Color @224:1-224:42 =
+  <Color a=0.0 b=0.0 g=0.0 r=0.0 />
+
+record Color.Update update of Color @4:1-9:2
+  r: float32
+  g: float32
+  b: float32
+  a: float32
+
+record RgbChannels.Update update of RgbChannels @20:1-25:2
+  r: float64
+  g: float64
+  b: float64
+  alpha: float64
+
+record HslChannels.Update update of HslChannels @28:1-33:2
+  h: float64
+  s: float64
+  l: float64
+  alpha: float64
+
+record HsvChannels.Update update of HsvChannels @36:1-41:2
+  h: float64
+  s: float64
+  v: float64
+  alpha: float64
+
+record HwbChannels.Update update of HwbChannels @44:1-49:2
+  h: float64
+  w: float64
+  b: float64
+  alpha: float64
+
+record LinearRgbChannels.Update update of LinearRgbChannels @52:1-57:2
+  r: float64
+  g: float64
+  b: float64
+  alpha: float64
+
+record OklabChannels.Update update of OklabChannels @60:1-65:2
+  l: float64
+  a: float64
+  b: float64
+  alpha: float64
+
+record OklchChannels.Update update of OklchChannels @68:1-73:2
+  l: float64
+  c: float64
+  h: float64
+  alpha: float64
+
+union Color.Property property of Color @4:1-9:2
+  case r constant
+  case g constant
+  case b constant
+  case a constant
+
+union RgbChannels.Property property of RgbChannels @20:1-25:2
+  case r constant
+  case g constant
+  case b constant
+  case alpha constant
+
+union HslChannels.Property property of HslChannels @28:1-33:2
+  case h constant
+  case s constant
+  case l constant
+  case alpha constant
+
+union HsvChannels.Property property of HsvChannels @36:1-41:2
+  case h constant
+  case s constant
+  case v constant
+  case alpha constant
+
+union HwbChannels.Property property of HwbChannels @44:1-49:2
+  case h constant
+  case w constant
+  case b constant
+  case alpha constant
+
+union LinearRgbChannels.Property property of LinearRgbChannels @52:1-57:2
+  case r constant
+  case g constant
+  case b constant
+  case alpha constant
+
+union OklabChannels.Property property of OklabChannels @60:1-65:2
+  case l constant
+  case a constant
+  case b constant
+  case alpha constant
+
+union OklchChannels.Property property of OklchChannels @68:1-73:2
+  case l constant
+  case c constant
+  case h constant
+  case alpha constant

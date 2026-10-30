@@ -5,7 +5,15 @@ pub fn javascript_runtime_abi() -> &'static str {
 }
 
 pub fn javascript_runtime_helper_source() -> String {
-    format!("{}\n{}", javascript_runtime(), standard_math_source(false))
+    format!(
+        "{}\n{}\n{}",
+        javascript_runtime(),
+        standard_math_source(false),
+        include_str!("../../../runtime/typescript/src/color.ts")
+            .replace(": any", "")
+            .replace(": never", "")
+            .replace(": Record<string, number[]>", "")
+    )
 }
 
 pub fn runtime_helper_source(target: CodegenTarget) -> String {
@@ -13,7 +21,18 @@ pub fn runtime_helper_source(target: CodegenTarget) -> String {
         CodegenTarget::TypeScript => typescript_runtime(),
         CodegenTarget::JavaScript => javascript_runtime(),
     };
-    format!("{base}\n{}", standard_math_source(target.is_typescript()))
+    format!(
+        "{base}\n{}\n{}",
+        standard_math_source(target.is_typescript()),
+        if target.is_typescript() {
+            include_str!("../../../runtime/typescript/src/color.ts").to_string()
+        } else {
+            include_str!("../../../runtime/typescript/src/color.ts")
+                .replace(": any", "")
+                .replace(": never", "")
+                .replace(": Record<string, number[]>", "")
+        }
+    )
 }
 
 fn typescript_runtime() -> String {

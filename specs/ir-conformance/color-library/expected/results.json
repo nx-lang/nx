@@ -1,0 +1,29 @@
+{
+  "main.nx::root#mix": [
+    "#800080ff",
+    "#ffbbbbff",
+    21.0,
+    "rgba(31.481481716036797, 102.00000151991844, 204.00000303983688, 0.5)",
+    {
+      "$type": "HslChannels",
+      "alpha": 1.0,
+      "h": 0.0,
+      "l": 0.5,
+      "s": 1.0
+    },
+    {
+      "$type": "ParseResult.parsed",
+      "value": {
+        "$type": "Color",
+        "a": 1.0,
+        "b": 1.0,
+        "g": 1.0,
+        "r": 0.0
+      }
+    },
+    {
+      "$type": "ParseResult.invalid",
+      "message": "invalid standalone color: var(--accent)"
+    }
+  ]
+}

@@ -18,7 +18,7 @@ export function pathData(path: readonly PathElement[]): string {
 export function color(c: Color | null): string {
   return c === null
     ? "none"
-    : `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${c[3]})`;
+    : `rgba(${c[0] * 255},${c[1] * 255},${c[2] * 255},${c[3]})`;
 }
 export function flattenNodes(node: GraphicsNode): GraphicsNode[] {
   return [node, ...node.children.flatMap(flattenNodes)];

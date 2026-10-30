@@ -1886,3 +1886,61 @@ describe("selection as editors open, and gestures the reader moves on from", () 
     assert.equal(element.selection, "latte.value");
   });
 });
+
+describe("typed color editors", () => {
+  const fromSource = (source: string) => treeOf([{ uri: "nx:///typed-colors.nx", identity: "typed-colors.nx", source }], { visualizers: { modules: [] } });
+  it("does not quantize or emit edits when a native picker is opened and dismissed", async () => {
+    const item = await fromSource("let accent = #f008\n");
+    const node = item.tree.nodes.find(node => node.value === "#f008")!;
+    const element = show(item);
+    const { edits, lives } = events(element);
+    rendered(element,node.key).click();
+    assert.ok(popover(element).querySelector(".popover-alpha"));
+    press(popover(element).querySelector(".popover-hex")!,"Escape");
+    assert.deepEqual(edits,[]);
+    assert.deepEqual(lives,[]);
+  });
+  it("commits native alpha explicitly and leaves computed colors read-only", async () => {
+    const item = await fromSource('import "@nx/color" as c\nlet accent = #33669980\nlet calculated = { c.withAlpha(accent,0.5) }\n');
+    const node = item.tree.nodes.find(node => node.value === "#33669980")!;
+    const element = show(item);
+    const { edits } = events(element);
+    rendered(element,node.key).click();
+    const alpha=popover(element).querySelector<HTMLInputElement>(".popover-alpha")!;
+    alpha.value="0.25";
+    alpha.dispatchEvent(new window.Event("change",{bubbles:true}));
+    assert.deepEqual(edits,[{key:node.key,edit:{kind:"setValue",value:{kind:"color",text:"#33669940"}}}]);
+    const targets=editTargets(indexTree(item.tree,item.text));
+    const computed=item.tree.nodes.find(node=>node.role==="call")!;
+    assert.equal(targets.has(computed.key),false);
+  });
+  it("keeps legacy CSS string color editors free of the typed alpha control", async () => {
+    const item=await fromSource('import "@nx/visualizer"\ntype Swatch = string\nvisualizer Swatch = <ValueVisualizer format=color/>\nlet accent:Swatch = "rgba(0, 0, 0, 0.5)"\n');
+    const node=item.tree.nodes.find(node=>node.role==="literal" && node.value?.includes("rgba"))!;
+    const element=show(item);
+    const { edits }=events(element);
+    rendered(element,node.key).click();
+    assert.equal(popover(element).querySelector(".popover-alpha"),null);
+    assert.equal(popover(element).querySelector<HTMLInputElement>(".popover-hex")!.value,"rgba(0, 0, 0, 0.5)");
+    press(popover(element).querySelector(".popover-hex")!,"Escape");
+    assert.deepEqual(edits,[]);
+  });
+});
+
+describe("color editor revisions", () => {
+  it("ignores a detached alpha control after the document tree changes", async () => {
+    const before=await treeOf([{uri:"nx:///revision.nx",identity:"revision.nx",source:"let accent = #33669980\n"}]);
+    const element=show(before);
+    const {edits}=events(element);
+    const node=before.tree.nodes.find(node=>node.value==="#33669980")!;
+    rendered(element,node.key).click();
+    const old=popover(element).querySelector<HTMLInputElement>(".popover-alpha")!;
+    const after=await treeOf([{uri:"nx:///revision.nx",identity:"revision.nx",source:"let accent = #abcdef80\n"}]);
+    element.tree=undefined;
+    element.text=after.text;
+    element.tree=after.tree;
+    old.value="0";
+    old.dispatchEvent(new window.Event("change",{bubbles:true}));
+    assert.deepEqual(edits,[]);
+  });
+});

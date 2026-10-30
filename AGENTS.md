@@ -45,6 +45,9 @@ if (condition)
 ```
 ### NX Conventions
 
+- Follow the [NX Style Guide](sites/website/src/content/docs/reference/style-guide.md) for NX
+  source formatting. Use 2-space indentation, a 100-character line-length target, spaces after
+  type annotation colons and commas, and one blank line between top-level declarations.
 - **Union declarations**: omit the leading `|` when the case list is on one line
   (`type ThemeMode = light | dark`). Use a leading `|` on every case, including the first, when the
   list spans multiple lines. This matches F#, OCaml, and TypeScript, where the leading bar is a
@@ -60,7 +63,7 @@ type ThemeMode = light | dark
 type LoadState =
   | idle
   | loading
-  | failed { message:string }
+  | failed { message: string }
 
 // One case: the bar is required
 type Wrapper = | only

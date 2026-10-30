@@ -539,6 +539,31 @@ impl<'p> Machine<'p> {
         Err(error)
     }
 
+    // Keep host conversion temporaries out of every ordinary evaluator stack frame.
+    fn eval_standard_color(
+        &self,
+        cx: Cx,
+        frame: &mut Frame,
+        index: u32,
+        op: u32,
+        args: &[u32],
+    ) -> Result<Value> {
+        let mut values = Vec::new();
+        for arg in args {
+            let value = self.eval(cx, frame, *arg)?;
+            values.push(crate::value::to_host(
+                &value,
+                None,
+                &Meter::free(),
+                &self.stack,
+            )?);
+        }
+        match nx_value::color::evaluate(op, &values) {
+            Ok(value) => crate::value::from_host(&value, &self.stack),
+            Err(error) => self.fail(cx, index, error.code, error.message),
+        }
+    }
+
     fn eval_node(&self, cx: Cx, frame: &mut Frame, index: u32) -> Result<Value> {
         match self.node(cx, index)? {
             Node::Bool(value) => Ok(Value::Bool(*value)),
@@ -555,6 +580,9 @@ impl<'p> Machine<'p> {
             Node::Call { callee, args } => self.eval_call(cx, frame, index, *callee, args),
             Node::NamedCall { callee, args } => {
                 self.eval_named_call(cx, frame, index, *callee, args)
+            }
+            Node::StandardColor { op, args } => {
+                self.eval_standard_color(cx, frame, index, *op, args)
             }
             Node::StandardMath { op, args } => {
                 let mut values = Vec::with_capacity(args.len());

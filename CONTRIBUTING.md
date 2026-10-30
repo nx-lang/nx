@@ -1,5 +1,8 @@
 # Contributing
 
+For NX source formatting, follow the
+[NX Style Guide](sites/website/src/content/docs/reference/style-guide.md).
+
 This project has adopted the [Microsoft Open Source Code of
 Conduct](https://opensource.microsoft.com/codeofconduct/).
 For more information see the [Code of Conduct

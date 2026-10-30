@@ -28,6 +28,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "NxResult",
     "NxValue",
     "nxApplyUpdate",
+    "nxStandardColor",
     "nxStandardMath",
     "nxStandardMathNames",
     "nxStandardMathArities",
@@ -272,6 +273,7 @@ fn collect_expression_source_codegen_diagnostics(
             }
         }
         CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardColor { args, .. }
         | CodegenExpressionKind::StandardMath { args, .. } => {
             for arg in args {
                 collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
@@ -2418,6 +2420,7 @@ fn expression_render_return_type(
             .as_ref()
             .and_then(|ty| emit_known_type(current_module_id, ty, module, context)),
         CodegenExpressionKind::IntrinsicCall { .. }
+        | CodegenExpressionKind::StandardColor { .. }
         | CodegenExpressionKind::StandardMath { .. } => expression
             .ty
             .as_ref()
@@ -3459,6 +3462,7 @@ fn emit_expression(
                     .join(", ")
             )
         }
+        CodegenExpressionKind::StandardColor { op, args } => format!("nxStandardColor({}, [{}])", op, args.iter().map(|arg| emit_expression(current_module_id,arg,context)).collect::<Vec<_>>().join(", ")),
         CodegenExpressionKind::StandardMath { op, args } => format!("nxStandardMath({}, [{}])", *op as u8, args.iter().map(|arg| emit_expression(current_module_id, arg, context)).collect::<Vec<_>>().join(", ")),
         CodegenExpressionKind::IntrinsicCall {
             intrinsic,
@@ -4679,6 +4683,7 @@ fn collect_expression_value_references(
             }
         }
         CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardColor { args, .. }
         | CodegenExpressionKind::StandardMath { args, .. } => {
             for arg in args {
                 collect_expression_value_references(current_module_id, arg, output);
@@ -5132,6 +5137,12 @@ fn collect_expression_runtime_helpers(
             collect_expression_runtime_helpers(callee, output);
             for arg in args {
                 collect_expression_runtime_helpers(&arg.value, output);
+            }
+        }
+        CodegenExpressionKind::StandardColor { args, .. } => {
+            output.insert("nxStandardColor");
+            for arg in args {
+                collect_expression_runtime_helpers(arg, output);
             }
         }
         CodegenExpressionKind::StandardMath { args, .. } => {

@@ -6,6 +6,7 @@
 // SVG references describe geometry and painting conventions, not full SVG/CSS support.
 // There is no CSS cascade or inherited paint: each shape supplies its own fill and stroke.
 import "@nx/math" as math
+import "@nx/color" as colors
 import "@nx/visualizer"
 
 /// A position in the local coordinate system.
@@ -22,9 +23,9 @@ export type ViewBox = {
   height: float64                 /// Height in user units; must be positive.
 }
 
-/// A CSS color string, such as "red", "#336699", or "rgba(0, 0, 0, 0.5)".
-/// Context-dependent CSS values such as currentColor are not supported.
-export type Color = string
+/// The shared non-premultiplied sRGB color with float32 components.
+/// Author colors as hex literals, or construct them with @nx/color.
+export type Color = colors.Color
 
 /// No paint, or a uniform color. Gradients and patterns are not supported.
 export type Paint = none | solid { color: Color }

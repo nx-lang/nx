@@ -1,0 +1,5 @@
+{
+  "entry": "main.nx",
+  "emit": ["main.nx", "@nx/color/color.nx", "@nx/color/operations.nx"],
+  "entrypoints": [{ "module": "main.nx", "function": "root", "case": "mix", "arguments": [] }]
+}

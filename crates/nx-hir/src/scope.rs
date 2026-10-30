@@ -469,7 +469,7 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             // against lexical scope, so it is deliberately not checked for an undefined name here.
             // Nor is the resolved case it becomes: it carries its declaring origin instead of a
             // name that has to be visible.
-            ast::Expr::StandardMath { args, .. } => {
+            ast::Expr::StandardColor { args, .. } | ast::Expr::StandardMath { args, .. } => {
                 for arg in args {
                     self.check_expr(*arg, scope);
                 }

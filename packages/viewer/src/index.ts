@@ -33,6 +33,7 @@ import {
   defaultValue,
   offsetAtPoint,
   pickerColor,
+  preserveHexAlpha,
   rangeProblem,
   showValue,
   stepNumber,
@@ -2834,9 +2835,28 @@ export class NxViewerElement extends ElementBase {
       this.#popover.className = "popover colors";
       this.#popover.replaceChildren(input, picker);
     }
+    this.#popover.querySelector(".popover-alpha")?.remove();
     this.#popover.hidden = false;
     span.classList.add("editing");
     const session: EditSession = { target, span, input, picker, listening, closed: false };
+    if (target.colorLiteral === true) {
+      const alpha = document.createElement("input");
+      alpha.className = "popover-alpha";
+      alpha.type = "number";
+      alpha.min = "0";
+      alpha.max = "1";
+      alpha.step = "0.01";
+      alpha.setAttribute("aria-label", `${this.#labelOf(target)}: alpha`);
+      const hex = preserveHexAlpha("#000000", input.value);
+      alpha.value = String(hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1);
+      this.#popover.append(alpha);
+      alpha.addEventListener("change", () => {
+        const value = Number(alpha.value);
+        if (!Number.isFinite(value) || value < 0 || value > 1 || alpha.value.trim() === "") return;
+        input.value = picker.value + Math.round(value * 255).toString(16).padStart(2, "0");
+        this.#choose(session, input.value);
+      }, { signal });
+    }
     this.#session = session;
     input.addEventListener(
       "input",
@@ -2849,12 +2869,12 @@ export class NxViewerElement extends ElementBase {
     picker.addEventListener(
       "input",
       () => {
-        input.value = picker.value;
+        input.value = preserveHexAlpha(picker.value, input.value);
         this.#validate(session, false, 0);
       },
       { signal }
     );
-    picker.addEventListener("change", () => this.#choose(session, picker.value), { signal });
+    picker.addEventListener("change", () => this.#choose(session, preserveHexAlpha(picker.value, input.value)), { signal });
     this.#validate(session);
     this.#placeCard(span, this.#popover);
     if (kept !== undefined) {

@@ -27,6 +27,8 @@ export type NxValueRole =
 
 /** What one range of an {@link NxValueText}'s text is. */
 export interface NxValueNode {
+  /** CSS presentation of a validated canonical Color value. */
+  readonly color?: string;
   /** First UTF-16 code unit of the node, so `text.slice(start, end)` is the node. */
   readonly start: number;
   /** UTF-16 code unit one past the node. */

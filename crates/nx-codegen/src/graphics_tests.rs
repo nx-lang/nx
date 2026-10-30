@@ -237,7 +237,7 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
         evaluate("<g.ContentAlignment/>"),
         serde_json::json!({"$type":"ContentAlignment", "x":"center", "y":"center"}),
     );
-    let rect = evaluate("<g.Rect width=2 height=3 transform={<g.Transform.translate x=1 y=2/>} fill=<g.Paint.solid color=\"red\"/> stroke=<g.Stroke paint={g.Paint.none}/>/>");
+    let rect = evaluate("<g.Rect width=2 height=3 transform={<g.Transform.translate x=1 y=2/>} fill=<g.Paint.solid color=#ff0000/> stroke=<g.Stroke paint={g.Paint.none}/>/>");
     assert_eq!(rect["$type"], "Rect");
     assert_eq!(rect["width"], 2.0);
     assert_eq!(rect["height"], 3.0);
@@ -255,7 +255,7 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
     );
     assert_eq!(
         rect["fill"],
-        serde_json::json!({"$type":"Paint.solid", "color":"red"})
+        serde_json::json!({"$type":"Paint.solid", "color":{"$type":"Color", "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}})
     );
     assert_eq!(rect["stroke"]["$type"], "Stroke");
     assert_eq!(rect["stroke"]["paint"], "none");
@@ -297,4 +297,127 @@ let root() = <Box><Shape/><div/></Box>"#;
     assert_eq!(value["$type"], "Box");
     assert_eq!(value["children"][0]["$type"], "Shape");
     assert_eq!(value["children"][1]["$type"], "div");
+}
+
+#[test]
+fn color_literal_ir_infers_canonical_import_free_records() {
+    let source = "type Color = { decoy:string }\nlet root() = { #f008 #FF000088 #fff }";
+    let actual = crate::ir_runtime_tests::program(source)
+        .evaluate_function("root", &[], &RuntimeOptions::default())
+        .unwrap();
+    let value = serde_json::to_value(actual).unwrap();
+    assert_eq!(value[0], value[1]);
+    assert_eq!(value[0]["$type"], "Color");
+    assert_eq!(
+        value[0]["a"].as_f64().unwrap(),
+        (136.0_f64 / 255.0) as f32 as f64
+    );
+    assert_eq!(value[2]["r"], 1.0);
+    assert_eq!(value[2]["a"], 1.0);
+}
+
+#[test]
+fn color_literals_bind_defaults_and_unbraced_properties() {
+    let source = "import \"@nx/color\" as c\ntype Brand = { accent:c.Color = #fff }\nlet root() = { <Brand/> <Brand accent=#1234/> }";
+    let actual = crate::ir_runtime_tests::program(source)
+        .evaluate_function("root", &[], &RuntimeOptions::default())
+        .unwrap();
+    let value = serde_json::to_value(actual).unwrap();
+    assert_eq!(value[0]["accent"]["r"], 1.0);
+    assert_eq!(
+        value[1]["accent"]["a"].as_f64().unwrap(),
+        (68.0_f64 / 255.0) as f32 as f64
+    );
+}
+
+#[test]
+fn standard_color_runtime_construction_and_parse_result() {
+    let program = crate::ir_runtime_tests::program(
+        r##"import "@nx/color" as c
+let root() = { c.srgb(0.2,0.4,0.8,0.5) }
+let failure() = { c.tryParse("invalid") }
+let contrast() = { c.contrastRatio(#000,#fff) }
+let textColor() = { c.bestTextColor(#fff) }
+let defaultAlpha() = { c.srgb(0.2,0.4,0.8) }
+"##,
+    );
+    let value = program
+        .evaluate_function("root", &[], &RuntimeOptions::default())
+        .unwrap();
+    let color = serde_json::to_value(value).unwrap();
+    assert_eq!(color["r"], serde_json::json!(0.2f32 as f64));
+    assert_eq!(color["a"], serde_json::json!(0.5));
+    assert_eq!(
+        program
+            .evaluate_function("contrast", &[], &RuntimeOptions::default())
+            .unwrap(),
+        nx_value::NxValue::Float(21.0)
+    );
+    let text_color = program
+        .evaluate_function("textColor", &[], &RuntimeOptions::default())
+        .unwrap();
+    assert_eq!(
+        nx_value::color::channels(&text_color).unwrap(),
+        [0.0, 0.0, 0.0, 1.0]
+    );
+    let default_alpha = program
+        .evaluate_function("defaultAlpha", &[], &RuntimeOptions::default())
+        .unwrap();
+    assert_eq!(nx_value::color::channels(&default_alpha).unwrap()[3], 1.0);
+    let failed = serde_json::to_value(
+        program
+            .evaluate_function("failure", &[], &RuntimeOptions::default())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(failed["message"].as_str().unwrap().contains("invalid"));
+}
+
+#[test]
+fn color_literal_links_without_color_operation_module() {
+    use nx_ir_runtime::{LinkOptions, PreparedModule, Program};
+    use std::collections::BTreeMap;
+    let source = "let root() = #33669980";
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    let images = crate::emit_nx_ir(
+        &artifact,
+        &NxIrEmitOptions {
+            modules: Some(vec![]),
+            debug: true,
+        },
+    )
+    .unwrap();
+    let modules: BTreeMap<_, _> = images
+        .into_iter()
+        .filter(|image| image.identity != "@nx/color/operations.nx")
+        .inspect(|image| {
+            assert!(!image
+                .metadata
+                .required_features
+                .iter()
+                .any(|f| f == "standard-color-v1"))
+        })
+        .map(|image| {
+            let module = PreparedModule::prepare(image.bytes).unwrap();
+            (image.identity, module)
+        })
+        .collect();
+    let program = Program::link(
+        modules.get("main.nx").unwrap(),
+        |identity| modules.get(identity).cloned(),
+        &LinkOptions::default(),
+    )
+    .unwrap();
+    let value = serde_json::to_value(
+        program
+            .evaluate_function("root", &[], &RuntimeOptions::default())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        value["a"].as_f64().unwrap(),
+        (128.0_f64 / 255.0) as f32 as f64
+    );
 }

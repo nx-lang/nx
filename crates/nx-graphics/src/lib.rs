@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub const PROFILE: &str = "graphics-core-v1";
+pub const PROFILE: &str = "graphics-core-v2";
 pub const MODULE: &str = "@nx/graphics/graphics.nx";
 pub type Result<T> = std::result::Result<T, Diagnostic>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,19 +335,17 @@ fn paint(v: Option<&Value>, default: Option<[f32; 4]>, path: &str) -> Result<Opt
     if text(v, "$type", "").rsplit('.').next() != Some("solid") {
         return Err(error(path, "only none and solid paint are supported"));
     }
-    let c: text_color::Color = text(v, "color", "")
-        .parse()
-        .map_err(|_| error(path, "invalid solid color"))?;
-    Ok(Some(c.0.to_array()).filter(|color| color[3] > 0.0))
-}
-mod text_color {
-    pub struct Color(pub csscolorparser::Color);
-    impl std::str::FromStr for Color {
-        type Err = csscolorparser::ParseColorError;
-        fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-            s.parse().map(Self)
-        }
-    }
+    let value = v
+        .get("color")
+        .ok_or_else(|| error(path, "solid paint requires a Color"))?;
+    let value: nx_value::NxValue = serde_json::from_value(value.clone())
+        .map_err(|_| error(path, "invalid solid Color record"))?;
+    let channels = nx_value::color::channels(&value).map_err(|failure| {
+        let mut diagnostic = error(path, failure.message);
+        diagnostic.code = failure.code.into();
+        diagnostic
+    })?;
+    Ok(Some(channels.map(|channel| channel as f32)).filter(|color| color[3] > 0.0))
 }
 fn rule(v: &Value, key: &str, path: &str) -> Result<bool> {
     Ok(choice(v, key, "nonzero", &["nonzero", "evenodd"], path)? == "evenodd")
@@ -1227,7 +1225,37 @@ mod tests {
         }
     }
     fn drawing(data: &str) -> Value {
-        json!({"viewBox":{"width":100,"height":100},"children":[{"data":data,"fill":{"$type":"Paint.solid","color":"red"}}]})
+        json!({"viewBox":{"width":100,"height":100},"children":[{"data":data,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]})
+    }
+    #[test]
+    fn shared_colors_preserve_float32_channels_and_reject_invalid_late_elements() {
+        let color = nx_value::color::make([0.123456789, 0.4, 0.8, 0.5]).unwrap();
+        let mut value = drawing("M0 0H10V10Z");
+        value["children"][0]["fill"]["color"] = serde_json::to_value(color).unwrap();
+        let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
+        assert_eq!(
+            scene.root.children[0].fill,
+            Some([0.123456789_f32, 0.4, 0.8, 0.5])
+        );
+        let valid = value["children"][0].clone();
+        value["children"].as_array_mut().unwrap().push(valid);
+        for invalid in [
+            json!("red"),
+            json!({"r": 2.0, "g": 0.0, "b": 0.0, "a": 1.0}),
+        ] {
+            value["children"][1]["fill"]["color"] = invalid;
+            let failure =
+                prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap_err();
+            assert_eq!(failure.code, "color-invalid-channel");
+            assert!(failure.element.contains("children/1"));
+        }
+    }
+    #[test]
+    fn raw_color_records_use_the_default_alpha() {
+        let mut value = drawing("M0 0H10V10Z");
+        value["children"][0]["fill"]["color"] = json!({"r":1.0,"g":0.0,"b":0.0});
+        let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
+        assert_eq!(scene.root.children[0].fill, Some([1.0, 0.0, 0.0, 1.0]));
     }
     #[test]
     fn identity_and_late_path_validation() {
@@ -1305,8 +1333,7 @@ mod tests {
     #[test]
     fn limits_numbers_strokes_and_clips() {
         let mut v = drawing("M10 10L20 20");
-        v["children"][0]["stroke"] =
-            json!({"paint":{"$type":"Paint.solid","color":"blue"},"width":4,"dashArray":[1,2,3]});
+        v["children"][0]["stroke"] = json!({"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0}},"width":4,"dashArray":[1,2,3]});
         v["children"][0]["clipPath"] = json!("M0 0H5V5H0Z");
         let scene = prepare(&v, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
         let child = &scene.root.children[0];
@@ -1407,7 +1434,7 @@ mod boundary_tests {
     }
     #[test]
     fn preflight_boundaries_and_zero_strokes() {
-        let v = json!({"viewBox":{"width":100,"height":100},"children":[{"width":10,"height":10,"fill":"none","stroke":{"paint":{"$type":"Paint.solid","color":"red"},"width":0}}]});
+        let v = json!({"viewBox":{"width":100,"height":100},"children":[{"width":10,"height":10,"fill":"none","stroke":{"paint":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":0}}]});
         let c = Config {
             graphics_version: "v".into(),
             ..Config::default()
@@ -1836,7 +1863,7 @@ mod layer_budget_tests {
         }
     }
     fn path() -> Value {
-        serde_json::json!({"data":"M0 0H5V5Z","opacity":0.5,"fill":{"$type":"Paint.solid","color":"red"}})
+        serde_json::json!({"data":"M0 0H5V5Z","opacity":0.5,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}})
     }
     struct NoText;
     impl TextService for NoText {
@@ -1958,9 +1985,9 @@ mod full_review_tests {
     #[test]
     fn closed_moveto_caps_have_bounds_and_zero_radii_do_not_paint() {
         let s = scene(json!([
-            {"$type":"Path","data":"M30 50Z","fill":"none","stroke":{"paint":{"$type":"Paint.solid","color":"black"},"width":10,"lineCap":"round"}},
-            {"$type":"Circle","cx":50,"cy":50,"r":0,"stroke":{"paint":{"$type":"Paint.solid","color":"black"},"width":8}},
-            {"$type":"Ellipse","cx":50,"cy":50,"rx":0,"ry":30,"stroke":{"paint":{"$type":"Paint.solid","color":"black"},"width":8}}
+            {"$type":"Path","data":"M30 50Z","fill":"none","stroke":{"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":10,"lineCap":"round"}},
+            {"$type":"Circle","cx":50,"cy":50,"r":0,"stroke":{"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}},
+            {"$type":"Ellipse","cx":50,"cy":50,"rx":0,"ry":30,"stroke":{"paint":{"$type":"Paint.solid","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}}
         ]));
         assert!(s.root.children[0]
             .painted

@@ -352,6 +352,10 @@ pub enum CodegenExpressionKind {
         args: Vec<CodegenProperty>,
     },
     /// A trusted standard-library declaration's numerical body.
+    StandardColor {
+        op: u32,
+        args: Vec<CodegenExpression>,
+    },
     StandardMath {
         op: nx_value::math::MathOp,
         args: Vec<CodegenExpression>,

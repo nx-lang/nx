@@ -443,7 +443,7 @@ mod tests {
         }
     }
     fn scene() -> Scene {
-        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"opacity":0.5,"children":[{"x":0,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.solid","color":"red"}},{"x":10,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.solid","color":"red"}}]}]});
+        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"opacity":0.5,"children":[{"x":0,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}},{"x":10,"y":0,"width":25,"height":25,"fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]}]});
         nx_graphics::prepare(
             &value,
             &Resolver,
@@ -556,7 +556,7 @@ mod tests {
                 })
             }
         }
-        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"data":"M0 0H40V40H0Z","fill":{"$type":"Paint.solid","color":"red"},"fillRule":"nonzero","clipPath":"M0 0H40V40H0Z M10 10H30V30H10Z","clipRule":"evenodd"}]});
+        let value = json!({"viewBox":{"width":40,"height":40},"children":[{"data":"M0 0H40V40H0Z","fill":{"$type":"Paint.solid","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"fillRule":"nonzero","clipPath":"M0 0H40V40H0Z M10 10H30V30H10Z","clipRule":"evenodd"}]});
         let fonts = Fonts::fixture().unwrap();
         let scene = nx_graphics::prepare(
             &value,

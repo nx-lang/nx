@@ -1,0 +1,7 @@
+module main.nx fingerprint 54002658316341040
+links @nx/color/operations.nx version "66a4d2b1d49a6436" fingerprint 148550021078355564
+links @nx/color/color.nx version "66a4d2b1d49a6436" fingerprint 6839805114163841305
+entrypoints functions [root] components []
+
+function root() @3:1-11:2 =
+  [@nx/color/operations.nx:toHex(@nx/color/operations.nx:mix(<@nx/color/color.nx:Color a=1.0 b=0.0 g=0.0 r=1.0 />, <@nx/color/color.nx:Color a=1.0 b=1.0 g=0.0 r=0.0 />, 0.5, @nx/color/color.nx:InterpolationSpace.srgb)), @nx/color/operations.nx:toHex(@nx/color/operations.nx:composite(<@nx/color/color.nx:Color a=0.501960813999176 b=0.0 g=0.0 r=1.0 />, <@nx/color/color.nx:Color a=1.0 b=1.0 g=1.0 r=1.0 />)), @nx/color/operations.nx:contrastRatio(<@nx/color/color.nx:Color a=1.0 b=0.0 g=0.0 r=0.0 />, <@nx/color/color.nx:Color a=1.0 b=1.0 g=1.0 r=1.0 />), @nx/color/operations.nx:toCss(@nx/color/operations.nx:srgb(0.123456789, 0.4, 0.8, 0.5)), @nx/color/operations.nx:toHsl(@nx/color/operations.nx:hsl(360.0, 1.0, 0.5)), @nx/color/operations.nx:tryParse("hsl(180 100% 50%)"), @nx/color/operations.nx:tryParse("var(--accent)")]
