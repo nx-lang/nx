@@ -4,7 +4,8 @@
 The viewer SHALL bound a number's editor by its property's `bounds`, with or without editor hints,
 and SHALL edit a value as a number when its declared type is a constrained numeric type, whose
 spelling now carries a `where` clause, as it does for the base type. These rules add to "Editor hints
-choose and shape a value's editor" for a property with `bounds`, and change nothing for one without:
+choose and shape a value's editor" for a property with `bounds`, and, but for the step below, change
+nothing for one without:
 the field, arrows, steppers and drag SHALL stay within the bounds, and a typed number outside them
 SHALL stay in the field with a note and SHALL NOT be committed. The note SHALL read `At least N` or
 `At most N` for an inclusive end and `Above N` or `Below N` for an exclusive end. When the property
@@ -13,8 +14,8 @@ bounds, so a hint can narrow the range the editor offers but not widen it; a hin
 overlap the bounds SHALL be ignored and the bounds used alone. Steppers and arrows SHALL
 NOT step onto or past an exclusive end: a step that would SHALL leave the value where it is. Bounds
 arrive with an integer's ends already inclusive. A choice outside the bounds SHALL be refused as a choice outside the hints is. When a
-floating-point property has no `step` hint and the range the editor offers (the intersection, or
-the bounds alone) has both ends, its step SHALL be the largest power of ten not above a tenth of
+floating-point property has no `step` hint and the range the editor offers (the intersection, the
+bounds alone, or with no bounds the hints alone) has both ends, its step SHALL be the largest power of ten not above a tenth of
 that range's span, so a `0.0..=1.0` number steps by `0.1`, as does a `0.0..=1000.0` number hinted
 `max=1`; an integer's step SHALL stay `1`.
 
@@ -38,3 +39,4 @@ that range's span, so a `0.0..=1.0` number steps by `0.1`, as does a `0.0..=1000
 #### Scenario: The step follows the narrowed range
 - **WHEN** `dim` is `float64 where in 0.0..=1000.0`, hinted `max=1` with no `step`
 - **THEN** the editor SHALL offer `0..=1` and step by `0.1`
+- **AND** a plain `float64`, or a `float64 where >= 0.0`, hinted `min=0 max=1` SHALL step by `0.1` too

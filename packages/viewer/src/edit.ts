@@ -82,7 +82,7 @@ export interface EditorHints extends SourceEditorHints {
  * The hints a number of the type `base` edits with, given its constraint's `bounds`: the range of
  * the hints narrowed to the bounds, or the bounds alone where the hints give no range or one that
  * does not overlap them. A floating-point number with no `step` hint and two ends steps by the
- * largest power of ten not above a tenth of that range's span. The hints as they are without bounds.
+ * largest power of ten not above a tenth of that range's span, as one with hints alone does.
  */
 export function boundedHints(
   hints: SourceEditorHints | undefined,
@@ -90,7 +90,9 @@ export function boundedHints(
   base: string | undefined
 ): EditorHints | undefined {
   if (bounds === undefined || (bounds.min === undefined && bounds.max === undefined)) {
-    return hints;
+    // With no constraint the hints alone give the range offered, and its step as above.
+    const derived = hints?.step === undefined ? derivedStep(base, hints?.min, hints?.max) : undefined;
+    return derived === undefined ? hints : { ...hints, step: derived };
   }
   const { min: _min, max: _max, ...rest } = hints ?? {};
   // A `float32` bound arrives as the `float64` it widens to, `0.10000000149011612`, and reads as
@@ -120,9 +122,7 @@ export function boundedHints(
   }
   let step = hints?.step;
   // The step comes from the range the editor offers, the hints' where they narrow the bounds.
-  if (step === undefined && base !== undefined && FLOAT_TYPES.has(base) && low !== undefined && high !== undefined && high > low) {
-    step = 10 ** Math.floor(Math.log10((high - low) / 10));
-  }
+  step ??= derivedStep(base, low, high);
   return {
     ...rest,
     ...(low === undefined ? {} : { min: low }),
@@ -132,6 +132,17 @@ export function boundedHints(
     ...(highExclusive ? { maxExclusive: true } : {}),
     ...(float32 ? { float32: true } : {})
   };
+}
+
+/**
+ * The step of a floating-point number offered `low` to `high`: the largest power of ten not above
+ * a tenth of the span, or nothing for an integer or a range without both ends.
+ */
+function derivedStep(base: string | undefined, low: number | undefined, high: number | undefined): number | undefined {
+  if (base === undefined || !FLOAT_TYPES.has(base) || low === undefined || high === undefined || !(high > low)) {
+    return undefined;
+  }
+  return 10 ** Math.floor(Math.log10((high - low) / 10));
 }
 
 /** The shortest number that rounds to the same `float32` as `value`: `0.1` for `0.10000000149011612`. */

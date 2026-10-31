@@ -1973,6 +1973,9 @@ describe("value constraints", () => {
       { min: 0, max: 1, step: 0.1 },
       "the step comes from the range the hint narrows to, not the constraint's"
     );
+    // Hints alone, or over a constraint with one end, step by the same rule.
+    assert.deepEqual(targets.get("paint.value.plain.value")?.hints, { min: 0, max: 1, step: 0.1 });
+    assert.deepEqual(targets.get("paint.value.upper.value")?.hints, { min: 0, max: 1, step: 0.1 });
     const extra = unwrittenProperties(index, index.byKey.get("paint.value")!).find((entry) => entry.property.name === "extra");
     assert.equal(extra?.editor?.kind, "number");
     assert.deepEqual(extra?.hints, { min: 1, max: 10 });

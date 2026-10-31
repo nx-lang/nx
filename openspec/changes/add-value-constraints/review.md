@@ -469,6 +469,68 @@ applies to it.
   test cases cover the IR and checker halves. The `specs/future.md` paragraph is now wrapped at 100.
   `cargo test -p nx-types`, `-p nx-codegen --lib` and `openspec validate --strict` pass.
 
+## Findings From the 2026-10-31 Review of be48fd6 (hint range and step)
+
+Scope: `git show be48fd6` only (the checker's constraint check on `min`/`max` hints, the viewer's
+step from the offered range, and the spec, design, proposal, task and website wording). Checked by
+probing `nxlang run` on scratch files (inline, alias, `Ratio?`, `Ratio+`, optional and inherited
+fields, exclusive ends, `float32` rounding at `16777217`, hex and fractional hints) and
+`boundedHints` directly. `cargo test -p nx-api --lib visualizer_declarations`, the viewer's
+`npm test` and `openspec validate --strict` pass. The warning-not-error decision is stated the same
+way in the spec delta, `design.md`, `proposal.md`, `tasks.md` and the website; the source tree still
+leaves out only an empty resolved range, so a hint that now warns still reaches the viewer, which
+intersects it with the bounds as `viewer` requires.
+
+### 🟡 Fixed - RF15 A hint outside a constrained alias that also empties the merged range gets two `editor-hint-range` warnings at one span, with messages that disagree on what the viewer does
+- **Severity:** Low
+- **Evidence:** With `type Spacing = int where in 0..=64`, `visualizer Spacing = <ValueVisualizer
+  max=64 />` and `<PropertyVisualizer property=padding min=100 />` on `padding: Spacing`, analysis
+  now warns at `min=100` ("outside the constraint of 'padding', `int where in 0..=64`; a viewer
+  keeps within the constraint", `crates/nx-types/src/infer.rs:1890-1912`, confirmed with `nxlang`),
+  and the language service's merged-range pass also warns at the same `min=100` ("the range is
+  empty and a viewer ignores both", `crates/nx-language-service/src/source_tree.rs:2813-2857`, which
+  reports any merged `min > max` without regard to the constraint). The editor shows both at one
+  span under one code. Both are true (the source tree drops both ends, the viewer falls back to the
+  bounds), but the pair reads as two problems and their advice differs. `merged_range_warnings`'s
+  doc says it does not repeat what analysis reports; that now holds only for one element's own empty
+  range.
+- **Recommendation:** In `merged_range_warning`, skip the hint it would report when the property's
+  or alias's type has a constraint that does not admit that hint (analysis already reported it), or
+  accept the pair and say so in `merged_range_warnings`'s doc and the `visualizer-declarations`
+  requirement. Add a language-service test for the constrained-alias case either way.
+- **Fix:** `merged_range_warning` takes the value's constraint (`type_interval` of the alias or the property's type) and leaves a `min` or `max` the constraint does not admit to analysis, so that hint gets one `editor-hint-range`, the "outside the constraint" one. The doc comment of `merged_range_warnings` says so. New language-service test `a_hint_outside_the_constraint_warns_once_as_outside` (the `Spacing = int where in 0..=64` case).
+
+### 🟡 Fixed - RF16 A float's derived step now depends on whether any constraint exists, not on the range offered: `float64 where >= 0.0` hinted `min=0 max=1` steps by `0.1`, a plain `float64` with the same hints by `1`
+- **Severity:** Low
+- **Evidence:** `packages/viewer/src/edit.ts:121-125` now derives the step from `low`/`high` after
+  the hints narrow the bounds, so a half-bounded constraint whose other end comes from a hint gets a
+  derived step (`boundedHints({min:0,max:1}, {min:0}, "float64")` gives `step: 0.1`), while
+  `boundedHints` returns the hints untouched when there are no bounds (`edit.ts:92-94`), so the same
+  hints on an unconstrained `float64` give no step and the editor steps by `1` across the whole
+  `0..1` range. Before this commit both cases stepped by `1` (the step needed both constraint
+  ends). Adding `where >= 0.0`, which changes nothing about the offered range, now changes the step.
+  No test covers the half-bounded case.
+- **Recommendation:** Apply the derived step to any float whose offered range has both ends,
+  constraint or not (derive it outside the `bounds === undefined` early return, and widen the
+  `viewer` wording beyond the constraint requirement), or keep requiring both constraint ends and
+  say so in the spec. Add a test for the half-bounded case whichever is chosen.
+- **Fix:** `boundedHints` derives the step through one `derivedStep` helper for every float: from the narrowed range when there are bounds, and from the hints alone when there are none, so a plain `float64` hinted `min=0 max=1` steps by `0.1`, as `float64 where >= 0.0` with the same hints does. The viewer delta says the hints alone give the range when there are no bounds, with an added `AND` clause, and the visualizer reference says the same. The viewer fixture gains `plain` and `upper` properties asserting both.
+
+### 🟡 Fixed - RF17 No checker test covers the new warning through an alias-typed, optional, sequence or inherited property
+- **Severity:** Low
+- **Evidence:** `a_hint_wider_than_the_constraint_is_a_warning`
+  (`crates/nx-api/src/visualizer_declarations_tests.rs:261-288`) covers inline-constrained
+  properties and an alias's own `ValueVisualizer`, but not a `PropertyVisualizer` on a property typed
+  through an alias (`opacity: Ratio`), `maybe?: Ratio`, `many: Ratio+`, or a field inherited from an
+  abstract base. These all warn today (checked with `nxlang`) because
+  `type_from_type_ref_in_quietly` expands the alias and `Type::constraint` looks through the
+  occurrence, but nothing guards that. The one alias-property case in
+  `a_constrained_number_takes_number_hints` asserts only the clean in-range path.
+- **Recommendation:** Extend the warning test with an alias-typed property and an optional or
+  sequence one (`maybe?: Ratio max=5`, `many: Ratio+ max=5`), each expecting one
+  `editor-hint-range` that names `float32 where in 0.0..=1.0`.
+- **Fix:** `a_hint_wider_than_the_constraint_is_a_warning` now also covers a `PropertyVisualizer` on a property typed `Ratio`, `Ratio?` and `Ratio+`, and on a field inherited from an abstract base; each gets one warning.
+
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
   already said so. The `nx-ir-format` delta spec and the design now say n + 1.

@@ -2718,8 +2718,9 @@ fn editor_hints(hints: &Hints, kind: HintValueKind) -> Option<SourceEditorHints>
 /// `PropertyVisualizer`'s `min=100` over its type's `max=64`, or a derived visualizer's over its
 /// base's. Each is at the declaration's `min` or `max` that takes part, with its message.
 ///
-/// <para>One visualizer element's own empty range is analysis's to report, and so is a hint that
-/// does not fit; neither is reported again here.</para>
+/// <para>One visualizer element's own empty range is analysis's to report, and so are a hint that
+/// does not fit and a `min` or `max` its property's constraint does not admit; none is reported
+/// again here.</para>
 pub(crate) fn merged_range_warnings(
     workspace: &WorkspaceDeclarations,
     visualizers: &ProgramVisualizers,
@@ -2759,6 +2760,7 @@ pub(crate) fn merged_range_warnings(
                     &visualizer.value.attributes,
                     &hints,
                     kind,
+                    type_interval(workspace, &origin.0, &alias.ty, 0),
                     "this type",
                 ));
             }
@@ -2798,6 +2800,7 @@ pub(crate) fn merged_range_warnings(
                         &written.attributes,
                         &hints,
                         hint_value_kind(workspace, type_module, ty, 0),
+                        type_interval(workspace, type_module, ty, 0),
                         &format!("'{name}'"),
                     ));
                 }
@@ -2809,12 +2812,14 @@ pub(crate) fn merged_range_warnings(
 }
 
 /// The warning for one visualizer element whose `min` or `max`, written as `properties` and read
-/// as `written`, makes the range of `hints` empty, where its own range is not.
+/// as `written`, makes the range of `hints` empty, where its own range is not. A hint outside
+/// `constraint`, the value's own interval, is left to analysis, which reports it as outside.
 fn merged_range_warning(
     properties: &[nx_hir::Property],
     written: &[(String, VisualizerAttribute)],
     hints: &Hints,
     kind: HintValueKind,
+    constraint: Option<(nx_types::Primitive, nx_hir::ast::Interval)>,
     subject: &str,
 ) -> Option<(ByteTextRange, String)> {
     let own = |name: &str| {
@@ -2845,6 +2850,17 @@ fn merged_range_warning(
     } else {
         return None;
     };
+    if let Some((base, interval)) = constraint {
+        let value = if at == "min" { min } else { max };
+        let at_base = if base == nx_types::Primitive::Float32 {
+            f64::from(value as f32)
+        } else {
+            value
+        };
+        if !interval.contains(at_base) {
+            return None;
+        }
+    }
     let span = properties
         .iter()
         .find(|property| property.key.as_str() == at)?

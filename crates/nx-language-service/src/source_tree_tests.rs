@@ -2339,6 +2339,29 @@ visualizer Box = <ElementVisualizer>
 }
 
 #[test]
+fn a_hint_outside_the_constraint_warns_once_as_outside() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export type Spacing = int where in 0..=64
+export type Box = { padding:Spacing = 8 }
+
+visualizer Spacing = <ValueVisualizer max=64 />
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=padding min=100 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "analysis's alone: {warnings:?}");
+    assert_eq!(warnings[0].0, "min=100");
+    assert!(
+        warnings[0].1.contains("outside the constraint"),
+        "{}",
+        warnings[0].1
+    );
+}
+
+#[test]
 fn preview_metadata_resolves_inheritance_and_entry_overrides() {
     let source = "import \"@nx/visualizer\"\nabstract external component <Base/>\nexternal component <Derived extends Base/>\nvisualizer Base = <ElementVisualizer icon=\"frame\" preview=<PreviewVisualizer renderer=\"base.renderer\"/>/>\nvisualizer Derived = <ElementVisualizer icon=\"circle\"/>\n<Derived/>";
     let snapshot = snapshot_for(source);

@@ -285,6 +285,20 @@ fn a_hint_wider_than_the_constraint_is_a_warning() {
         "editor-hint-range",
     );
     assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    // A property typed through an alias, optional, as a sequence, or inherited.
+    for body in [
+        "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { opacity: Ratio }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=opacity max=2 /></ElementVisualizer>",
+        "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { opacity?: Ratio }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=opacity max=2 /></ElementVisualizer>",
+        "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { stops: Ratio+ }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=stops max=2 /></ElementVisualizer>",
+        "abstract type Base = { level: int where in 1..=5 }\ntype Meter extends Base = { label: string }\n\
+         visualizer Meter = <ElementVisualizer><PropertyVisualizer property=level max=9 /></ElementVisualizer>",
+    ] {
+        let warnings = warnings_of(body, "editor-hint-range");
+        assert_eq!(warnings.len(), 1, "{body}: {warnings:#?}");
+    }
 }
 
 #[test]
