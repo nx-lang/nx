@@ -147,14 +147,21 @@ type of an optional property, `name?: Ratio`, and of a `?` or `*` item type thro
 ### Requirement: The checker rejects a constant outside its site's range
 The type checker SHALL check a literal, signed literal or constant expression (as the types
 reference defines one: arithmetic whose operands are all numeric literals) bound to a constrained
-site, after it takes the site's numeric type, and one the interval does not admit SHALL be reported as `constraint-violation` at the value, with a message naming the value, the interval as
-written and the site. This SHALL apply to property values, record and union-case field values,
+site, after it takes the site's numeric type, and one the interval does not admit SHALL be reported
+as `constraint-violation` at the value. The message SHALL name the value, the site, and the site's
+constrained type as resolved: its base and interval, with an integer's exclusive end spelled as the
+inclusive end next to it, an alias's terms intersected, and a `float32` bound in its shortest
+`float32` digits. This SHALL apply to property values, record and union-case field values,
 arguments, `let` initializers, returned values, sequence items whose item type is constrained, and
 defaults where they are declared.
 
 #### Scenario: A property value out of range
 - **WHEN** a file contains `type Paint = { opacity: float64 where in 0.0..=1.0 }` and `let p = <Paint opacity=1.5 />`
 - **THEN** analysis SHALL report `constraint-violation` at `1.5`, naming `0.0..=1.0` and `opacity`
+
+#### Scenario: The message spells the resolved interval
+- **WHEN** a file contains `type Small = int where < 10` and `let s: Small = 10`
+- **THEN** analysis SHALL report `constraint-violation` at `10`, naming `s` and `int where <= 9`
 
 #### Scenario: A default out of range
 - **WHEN** a file contains `type Paint = { opacity: float64 where in 0.0..=1.0 = 2.0 }`
@@ -176,7 +183,9 @@ nothing for the check. The sites SHALL be the ones the constant check covers, pl
 `for` result or sequence bound to a constrained item type, a value bound to an optional constrained
 property, and a field of an update record derived from a record or component state with a
 constrained field. For a sequence or a value that may be empty, the check SHALL apply to each item,
-and the empty value SHALL pass. `NaN` SHALL fail every constraint.
+and the empty value SHALL pass. `NaN` SHALL fail every constraint. A record or union-case default
+that reads a sibling field SHALL be checked when it runs, whatever the sibling's type, since the
+checker does not type a default against its siblings.
 
 #### Scenario: A computed argument
 - **WHEN** a file contains `let fade(amount: float64 where in 0.0..=1.0) = { amount }` and `let twice(x: float64) = { fade(x * 2.0) }`, and `twice(0.75)` runs
@@ -185,6 +194,10 @@ and the empty value SHALL pass. `NaN` SHALL fail every constraint.
 
 #### Scenario: A returned value
 - **WHEN** a file contains `let clampLow(x: int): int where >= 0 = { x }` and `clampLow(-1)` runs
+- **THEN** evaluation SHALL fail with `nx-ir-constraint`
+
+#### Scenario: A default read from a sibling field
+- **WHEN** a file contains `type Stroke = { width: int  inset: int where >= 0 = {width - 1} }` and `<Stroke width=0 />` runs
 - **THEN** evaluation SHALL fail with `nx-ir-constraint`
 
 #### Scenario: Each item of a computed sequence

@@ -840,12 +840,12 @@ function intervalAdmits(interval: Interval, value: number): boolean {
   return above && below;
 }
 
-/** The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`. */
 /** A number at the interval's base: a `float32` in its shortest digits, `0.1`, not `0.10000000149011612`. */
 function intervalNumberText(interval: Interval, value: number): string {
   return interval.float32 ? float32Text(value) : String(value);
 }
 
+/** The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`. */
 function intervalText(interval: Interval): string {
   const bound = (value: number): string => {
     if (interval.integer) {

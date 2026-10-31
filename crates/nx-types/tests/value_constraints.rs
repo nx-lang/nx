@@ -171,6 +171,49 @@ fn a_comma_in_a_constraint_is_named_not_a_parse_error() {
 }
 
 #[test]
+fn a_violation_spells_the_sites_resolved_interval() {
+    let message = reported(
+        "type Small = int where < 10\nlet s: Small = 10",
+        "constraint-violation",
+        "10",
+    );
+    assert!(message.contains("`s`"), "{message}");
+    assert!(message.contains("`int where <= 9`"), "{message}");
+}
+
+#[test]
+fn a_separator_comma_after_a_constraint_is_a_plain_syntax_error() {
+    for source in [
+        "type Box = { a: int where >= 0, b: int }",
+        "type Box = { a: int where in 0..=9, b: string }",
+        "type Box = { a: int where in 0..=9, }",
+        "let f(x: int where >= 0,) = { x }",
+        "let f(x: int where >= 0, , y: int) = { x }",
+    ] {
+        let found = diagnostics(source);
+        assert!(
+            found.iter().all(|(code, ..)| code != "invalid-constraint"),
+            "`{source}` named a separator as alternatives: {found:#?}"
+        );
+        assert!(
+            found.iter().any(|(code, ..)| code == "syntax-error"),
+            "`{source}` gave no syntax error: {found:#?}"
+        );
+    }
+    // Alternatives that start with `in`, a number or a negative number are still named.
+    for source in [
+        "type Edge = int where < 0, in 5..=9",
+        "type Edge = int where < 0, -1..=2",
+    ] {
+        let found = diagnostics(source);
+        assert!(
+            found.iter().any(|(code, ..)| code == "invalid-constraint"),
+            "`{source}`: {found:#?}"
+        );
+    }
+}
+
+#[test]
 fn a_constraint_empty_only_at_its_bases_limits_is_reported() {
     for (source, at) in [
         ("type Under = int32 where < -2147483648", "< -2147483648"),

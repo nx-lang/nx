@@ -1843,11 +1843,32 @@ fn constraint_comma(source: &str, start: usize, end: usize) -> Option<usize> {
         let next_term = source[comma + 1..]
             .find(|c: char| c != ' ' && c != '\t')
             .map_or(source.len(), |offset| comma + 1 + offset);
+        // Only a second pattern after the comma lists an alternative. A field or parameter name, a
+        // closing delimiter or another comma means the comma is a separator, which the general
+        // syntax error describes better.
+        if !starts_pattern_term(&source[next_term..]) {
+            continue;
+        }
         if start <= next_term && comma < end {
             return Some(comma);
         }
     }
     None
+}
+
+/// Whether `text` starts a numeric pattern term: a comparison, `in`, or a number.
+fn starts_pattern_term(text: &str) -> bool {
+    let starts_number = |rest: &str| {
+        let rest = rest.strip_prefix('.').unwrap_or(rest);
+        rest.starts_with(|c: char| c.is_ascii_digit())
+    };
+    text.starts_with('<')
+        || text.starts_with('>')
+        || text
+            .strip_prefix("in")
+            .is_some_and(|rest| rest.starts_with([' ', '\t']))
+        || starts_number(text)
+        || text.strip_prefix('-').is_some_and(starts_number)
 }
 
 /// Reports an error or missing node as a syntax error, with a message from its context.

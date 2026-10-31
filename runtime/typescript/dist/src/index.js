@@ -608,11 +608,11 @@ function intervalAdmits(interval, value) {
     const below = high === undefined || (interval.highExclusive ? value < high : value <= high);
     return above && below;
 }
-/** The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`. */
 /** A number at the interval's base: a `float32` in its shortest digits, `0.1`, not `0.10000000149011612`. */
 function intervalNumberText(interval, value) {
     return interval.float32 ? float32Text(value) : String(value);
 }
+/** The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`. */
 function intervalText(interval) {
     const bound = (value) => {
         if (interval.integer) {

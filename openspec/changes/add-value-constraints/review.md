@@ -33,7 +33,7 @@ applies to it.
 
 ## Findings
 
-### 🟡 Fixed - RF1 A record or union-case field default computed from another field gets no check node, so its failure is reported as `nx-ir-boundary-constraint`, not `nx-ir-constraint`
+### ✅ Verified - RF1 A record or union-case field default computed from another field gets no check node, so its failure is reported as `nx-ir-boundary-constraint`, not `nx-ir-constraint`
 - **Severity:** Medium
 - **Evidence:** For `type Paint = { a: int  b: int where >= 0 = {a - 1} }`, `nxlang ir explain`
   prints `b: int where >= 0 = (a sub 1)` with no `check` node, and the same holds for a union case
@@ -62,8 +62,9 @@ applies to it.
   corpus case with a computed record default that fails (`nx-ir-constraint`, no argument), reached
   both from a host-passed record and from an in-program construction.
 - **Fix:** The checker records a check for a default whose type it cannot know when it checks the default, which is a record or union-case default read from a sibling field (`check_typed_binding_for` in `crates/nx-types/src/infer.rs`). `nxlang ir explain` now shows `(check b: (a sub 1) …)` for both. The corpus gained `Stroke` (`inset: int where >= 0 = {width - 1}`) with three cases: a passing in-program construction, a failing one, and a host-passed record. Both fail with `nx-ir-constraint` and no argument, in both runtimes.
+- **Verification:** Confirmed. `nxlang ir explain` now shows `(check b: (a sub 1) as int where >= 0)` for the record and `(check b: (a mul 2.0) …)` for the union case, and a `{a ?? -5}` and an `if` default read from a sibling get one too. The corpus `Stroke` cases record `nx-ir-constraint` with no argument for both the in-program construction and the host-passed record, and `corpus_results_match_the_interpreter`, the Rust operation/origin checks and the TypeScript `corpus.test.mjs` pass. No other corpus program's image changed, so the new path adds no checks elsewhere. The check is conservative: see RF9.
 
-### 🟡 Fixed - RF2 The interpreter matches numeric patterns against unrounded bounds, so a `float32` scrutinee can take a different arm than in the IR runtimes
+### ✅ Verified - RF2 The interpreter matches numeric patterns against unrounded bounds, so a `float32` scrutinee can take a different arm than in the IR runtimes
 - **Severity:** Medium
 - **Evidence:** `let tenth: float32 = 0.1` with `if tenth is { <= 0.1 => "in" else => "out" }` gives
   `"out"` under `nxlang run` (the interpreter) and `"in"` in both IR runtimes. The interpreter tests
@@ -78,8 +79,9 @@ applies to it.
   primitive, instead of `interval_as_written`. Add an interpreter test with a `float32` scrutinee and
   a bound that `float32` cannot hold exactly.
 - **Fix:** `numeric_pattern_matches` reads the bounds with `nx_types::pattern_interval_at` at the value's own primitive, so a `float32` value is compared with `float32`-rounded bounds, and falls back to `interval_as_written` only when that gives nothing. New interpreter test `the_interpreter_reads_a_float32_scrutinees_bounds_at_float32`.
+- **Verification:** Confirmed. The evidence program (`let tenth: float32 = 0.1`, `if tenth is { <= 0.1 => "in" … }`) now gives `"in"` under `nxlang run`, as the IR runtimes do, and `the_interpreter_reads_a_float32_scrutinees_bounds_at_float32` passes, covering an inclusive and an exclusive end.
 
-### 🟡 Fixed - RF3 The source tree drops `bounds` when the constrained base is an alias of an unconstrained primitive, so the viewer and hover lose the constraint
+### ✅ Verified - RF3 The source tree drops `bounds` when the constrained base is an alias of an unconstrained primitive, so the viewer and hover lose the constraint
 - **Severity:** Medium
 - **Evidence:** With `type Weight = int`, `type Heavy = Weight where >= 10` and
   `type Paint = { w: Weight where in 1..=1000  h: Heavy … }`, the source tree gives `bounds: null` for
@@ -98,8 +100,9 @@ applies to it.
   chain: return `(primitive, Interval::ALL)` when an alias target is a primitive name, rather than
   `None`. Add source-tree tests for `Weight where …` and for an alias of it.
 - **Fix:** `type_interval` now goes through `numeric_interval`, which resolves a primitive name at the end of an alias chain to `(primitive, Interval::ALL)`; `type_interval` keeps only a result that is constrained. Hover's alias note uses the same helper. New source-tree tests for `Weight where …`, an alias of it, and union-case bounds.
+- **Verification:** Confirmed. `numeric_interval` resolves `Weight` to `(int, ALL)`, and `type_interval` keeps only a constrained result, so a plain alias still has no `bounds`. `a_constraint_on_an_alias_of_a_plain_number_carries_its_bounds` covers `Weight where …`, `Heavy` (an alias of it) and a plain `Weight` property, and passes with the rest of the language-service bound, constraint and hover tests (93 passed). Hover's `alias_constraint_note` goes through the same helper.
 
-### 🟡 Fixed - RF4 A comma in a `where` clause is a bare syntax error, not `invalid-constraint`
+### ✅ Verified - RF4 A comma in a `where` clause is a bare syntax error, not `invalid-constraint`
 - **Severity:** Low
 - **Evidence:** `type Edge = int where < 0, > 9` reports only "Syntax error" at the comma, and in a
   record field (`{ a: int where < 0, > 9 }`) the error is "Invalid record definition". The
@@ -114,8 +117,9 @@ applies to it.
   In a parameter list the comma has to stay a separator; say so in the spec, or report the
   unparsable result there with the same hint. Add a test.
 - **Fix:** `walk_and_collect_errors` (`crates/nx-syntax/src/validation.rs`) recognizes a parse failure at a comma that follows a `where` clause's pattern on the same line, and reports `invalid-constraint` ("A constraint has one interval and cannot list alternatives", with an `&&` hint) at the comma instead of a syntax error, once per comma. Tested for an alias target, a record field, a `let` annotation and a parameter list.
+- **Verification:** Confirmed for the evidence: `type Edge = int where < 0, > 9`, the record field, the `let` annotation and the parameter list each give `invalid-constraint` at the comma with the `&&` hint and no `syntax-error`; a valid parameter list after a `where` clause (`let f(x: int where >= 0, y: int)`) is untouched, and an unrelated error later on the line is still a syntax error. The heuristic also claims commas that are not alternatives: see RF10.
 
-### 🟡 Fixed - RF5 Bounds that are empty, or out of range, only at the base type's limits are accepted, and the IR and schema then carry them
+### ✅ Verified - RF5 Bounds that are empty, or out of range, only at the base type's limits are accepted, and the IR and schema then carry them
 - **Severity:** Low
 - **Evidence:** All of these compile with no diagnostic:
   - `int32 where < -2147483648` emits `int32 where <= -2147483649`, and `int32 where > 2147483647`
@@ -136,8 +140,9 @@ applies to it.
   nothing is left, and reject an integer bound on a `float32` base that `float32` cannot hold
   exactly, as the literal rule does. For `float32`, test emptiness on the rounded neighbours.
 - **Fix:** New `admits_none` intersects the interval with the base's own range (`int32` limits, ±(2^53−1), finite `float32`) and reads a `float32`'s exclusive ends as the adjacent `float32`, for the emptiness test only, so `int32 where >= 0` gains no upper bound. All three emptiness checks use it. An integer bound a `float32` cannot hold exactly is now `invalid-constraint`, naming the nearest one it can. Tests cover each case in the evidence.
+- **Verification:** Confirmed. Each evidence case now reports: `int32 where < -2147483648` and `> 2147483647`, `int where > 9007199254740991` and `float32 where > 0.99999994 && < 1.0` are `empty-constraint`, as are `float32 where > 3.4028235e38` and the matching match-arm patterns; `float32 where <= 16777217` is `invalid-constraint` naming `16777216`. `int32 where >= 0` still admits `2147483647`, and `> 0.99999994 && <= 1.0` admits `1.0`, so the base's range narrows only the emptiness test. `f32::next_up` is within the crate's `rust-version` (1.98.1).
 
-### 🟡 Fixed - RF6 Diagnostics, hover and runtime messages show `float32` bounds rounded and the resolved type, not the interval as written
+### ✅ Verified - RF6 Diagnostics, hover and runtime messages show `float32` bounds rounded and the resolved type, not the interval as written
 - **Severity:** Low
 - **Evidence:** For `type Tenth = float32 where in 0.0..=0.1`, `let t: Tenth = 0.2` reports
   "`0.2` is outside the constraint for `t`: `float32 where in 0.0..=0.10000000149011612` admits values
@@ -153,8 +158,9 @@ applies to it.
   shortest-print through `Math.fround`), or carry the written spelling beside the interval. Name the
   alias when the site's type was written as one, and drop the duplicated interval from the message.
 - **Fix:** Partly fixed. A `float32` bound is spelled with the shortest digits that round to it in the checker (`Type` display, so hover too, and `constraint-violation`), in the Rust and TypeScript runtimes' check and boundary messages (bounds and the value), and in the source tree's pattern text. The violation message no longer repeats the interval: "`0.2` is outside the constraint for `t`: `float32 where in 0.0..=0.1`". The `name?:` fix-it now names a constrained item as written (`r?:Ratio`). Not changed: the violation message still names the resolved type rather than the alias, since the site's written alias is not available where constants are checked, and `nxlang ir explain` still prints the stored constant, which is the IR's exact value.
+- **Verification:** Confirmed, and what remains is acceptable. `let t: Tenth = 0.2` now reports "`0.2` is outside the constraint for `t`: `float32 where in 0.0..=0.1`"; both runtimes say "Expected x to be in <= 0.1, got 0.2." and "The value 0.2 for 'x' is outside its constraint <= 0.1." (the Rust test asserts both, the TypeScript test the boundary message); the duplicated interval is gone; `r: Ratio?` suggests `r?:Ratio` and `r: Ratio*` suggests `r?:Ratio+`. The message still spells the site's type rather than its alias, and `nxlang ir explain` still prints the exact stored constant. Neither misleads: the message names the value, the interval and the site, and `ir explain` shows what the IR holds. The spec's "as written" no longer quite matches the message for other reasons: see RF11.
 
-### 🟡 Fixed - RF7 The viewer checks `float32` bounds as `float64`, so it can commit a value the checker rejects
+### ✅ Verified - RF7 The viewer checks `float32` bounds as `float64`, so it can commit a value the checker rejects
 - **Severity:** Low
 - **Evidence:** The source tree carries `float32` bounds already rounded, for example
   `f: float32 where < 0.1` → `{"max":0.10000000149011612,"maxExclusive":true}`. `rangeProblem`
@@ -169,8 +175,9 @@ applies to it.
   the source tree carry the written bound). Add a viewer test with an exclusive `float32` end that
   `float32` cannot hold exactly.
 - **Fix:** `boundedHints` reads a `float32`'s bounds as their shortest `float32` number and marks the hints `float32`; `rangeProblem` then compares the value and the bounds after `Math.fround`. Typing `0.1` for `float32 where < 0.1` is refused with `Below 0.1`. New viewer test.
+- **Verification:** Confirmed. `boundedHints` gives `{ max: 0.1, maxExclusive: true, float32: true }` for `fine: float32 where < 0.1`, `rangeProblem` (and so `stepNumber`) compares after `Math.fround`, and the new viewer test refuses `0.1` with `Below 0.1` and commits `0.09`. `npm test` in `packages/viewer` passes (231 tests).
 
-### 🟡 Fixed - RF8 Several risky paths and listed scenarios have no tests
+### ✅ Verified - RF8 Several risky paths and listed scenarios have no tests
 - **Severity:** Low
 - **Evidence:**
   - Host-boundary constraint failures for component props, component state, state patches and
@@ -195,6 +202,75 @@ applies to it.
   kind-7 entry and a `check`. Fix the stale comment, and add the signature-help and union-case
   bounds tests.
 - **Fix:** Added: component props, state and dispatched-action boundary failures and an in-handler update overflow, in both runtimes (`a_component_boundary_outside_its_constraint_is_refused` in Rust; the `Meter` component in the constraints corpus, driven by a TypeScript runtime test); an IR test building from a library loaded from a directory; source-tree bounds on union-case properties; the computed-default corpus cases (RF1). The stale comment at `builder.rs` is rewritten. Signature help: the language service has none (it is a reserved query), so the requirement now covers hover only and `specs/future.md` records signature help for later.
+- **Verification:** Confirmed. `a_component_boundary_outside_its_constraint_is_refused` (Rust) and the TypeScript test over the corpus's `Meter` assert the same codes and messages for props, state, a dispatched action and an in-handler update, so the runtimes are compared even though `Meter` is not a corpus lifecycle. `a_constrained_alias_from_a_library_read_as_an_interface_is_written_as_its_entry`, the union-case bounds test and the `Stroke` corpus cases pass, and the comment at `builder.rs:3153` now describes `type_alias_target`. Narrowing the requirement to hover, with signature help recorded in `specs/future.md` and the proposal, design and task 5.2 updated, is a fair resolution: the language service has no signature help to test. `openspec validate --strict` passes.
+
+## New Findings Discovered During 2026-10-31 03:15 Verification
+
+### 🟡 Fixed - RF9 A record or union-case default read from a sibling field is checked even when the sibling's type already satisfies the constraint
+- **Severity:** Low
+- **Evidence:** The RF1 fix records a check whenever the default's type is `Error` at validation
+  time (`check_typed_binding_for`, `crates/nx-types/src/infer.rs:6972-6988`), which is every default
+  that reads a sibling field, since the sibling is not in scope there. So
+  `type T = { a: int where >= 0  c: int where >= 0 = {a} }` emits
+  `c: int where >= 0 = (check c: a as int where >= 0)`, and the union case
+  `c { a: float64 where >= 0.0  b: float64 where >= 0.0 = {a} }` likewise checks `b`. `a`'s type
+  satisfies the site with no check, so `value-constraints` requires none ("whenever the value is
+  bound to a constrained site its type does not satisfy with no check"), and `nx-ir-format` says the
+  emitter "SHALL write the node exactly where `value-constraints` requires a runtime check and
+  nowhere else". The extra node never fails and costs two operations per construction, so the
+  behaviour is right, but the IR and the cost model disagree with the spec.
+- **Recommendation:** Check record and union-case defaults where the earlier fields are in scope
+  (with their declared types), so a default proven by its type gets no check, and keep the
+  `Error` fallback only for what is still unknown there. Or, if that is not worth it now, say in
+  `value-constraints` that a default read from a sibling field is always checked, and record the
+  sharper rule in `specs/future.md`. Either way, add an IR test for the `{a}` case.
+- **Fix:** Took the second option. Binding the earlier fields while checking defaults was tried and drops the `{a}` check, but it also types every default against its siblings, so a default that does not fit its field becomes a compile error: the runtime tests' `type Unfit = { n:int label:string = { n } }` and the corpus's `Stepper` default `{ step(1) }` stop compiling. That changes what programs compile, beyond this change. `value-constraints` now says a record or union-case default that reads a sibling field is checked when it runs, whatever the sibling's type, with a `Stroke` scenario; `specs/future.md` records typing a default against its siblings as its own change. New IR test `a_default_read_from_a_sibling_field_is_always_checked` pins the `{a}` case.
+
+### 🟡 Fixed - RF10 The comma heuristic reports a field separator or a stray parameter comma as a constraint listing alternatives
+- **Severity:** Low
+- **Evidence:** `constraint_comma` (`crates/nx-syntax/src/validation.rs`) claims any comma that
+  follows a `where` clause's pattern on the line of an error node, whatever comes after it:
+  - `type Box = { a: int where >= 0, b: int }` and `type Box = { a: int where in 0..=9, b: string }`
+    report "A constraint has one interval and cannot list alternatives" with the hint "Join bounds
+    with `&&`". The author used a comma as a field separator, which NX does not have; without the
+    `where` clause, `{ a: int, b: int }` reports "Invalid record definition" with the expected
+    shape, which is the useful message here.
+  - A trailing comma, `{ a: int where in 0..=9, }` or `let f(x: int where >= 0,) = …`, gets the same
+    message, where `let f(x: int,)` gets "Invalid function definition".
+  - `let f(x: int where >= 0, , y: int)` attributes the error to the first comma, which is a valid
+    parameter separator, as listing alternatives.
+
+  None of these is a constraint with alternatives, and the `&&` hint points the author the wrong
+  way.
+- **Recommendation:** Claim the comma only when the text after it starts a pattern term (`<`, `>`,
+  `in`, a digit, `-` or `.`), not a field or parameter name followed by `:`, a closing delimiter or
+  another comma; otherwise fall through to `push_syntax_error`. Add the record-separator and
+  trailing-comma cases as negative tests.
+- **Fix:** `constraint_comma` claims a comma only when `starts_pattern_term` holds for the text after it: `<`, `>`, `in` and a space, a number, or `-`/`.` and a digit. Anything else falls through to `push_syntax_error`. New test `a_separator_comma_after_a_constraint_is_a_plain_syntax_error` covers the two record separators, the trailing commas in a record and a parameter list, and the doubled parameter comma, and checks that alternatives starting with `in` or a negative number are still named.
+
+### 🟡 Fixed - RF11 `constraint-violation` still promises "the interval as written", but the message spells the site's resolved interval
+- **Severity:** Low
+- **Evidence:** `value-constraints` (spec line 150) requires a `constraint-violation` message
+  "naming the value, the interval as written and the site". After the RF6 fix the message spells
+  the resolved type's interval, which differs from what was written in ways the design intends:
+  `type Small = int where < 10` with `let s: Small = 10` reports "`10` is outside the constraint for
+  `s`: `int where <= 9`" (integer exclusive ends are inclusive, `design.md` "Typing"), and
+  `type Low = Ratio where <= 0.5` with `let l: Low = 0.75` reports `float32 where in 0.0..=0.5` (the
+  alias's terms intersected), naming neither `Low` nor `<= 0.5`. The behaviour is reasonable; the
+  requirement's wording is what overstates it.
+- **Recommendation:** Reword the requirement to what the checker can give: the value, the site and
+  the site's interval, spelled as its type is (integer ends inclusive, `float32` bounds in their
+  shortest digits). Naming the alias, as RF6 originally suggested, can go to `specs/future.md`.
+- **Fix:** The requirement now says the message names the value, the site, and the site's constrained type as resolved (an integer's exclusive end as the inclusive end next to it, an alias's terms intersected, a `float32` bound in its shortest digits), with a scenario for `type Small = int where < 10` naming `int where <= 9`, tested by `a_violation_spells_the_sites_resolved_interval`. Naming the alias is in `specs/future.md`.
+
+### 🟡 Fixed - RF12 The TypeScript runtime's `intervalText` lost its doc comment to the new helper
+- **Severity:** Low
+- **Evidence:** The RF6 fix inserted `intervalNumberText` between `intervalText` and its doc comment
+  (`runtime/typescript/src/index.ts:843-849`): two JSDoc blocks now stand above
+  `intervalNumberText`, and `intervalText` has none.
+- **Recommendation:** Move "The interval as a constraint spells it: …" back above `intervalText`,
+  and rebuild `dist`.
+- **Fix:** The doc comment is back above `intervalText`, `intervalNumberText` has its own above it, and `dist` is rebuilt.
 
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
@@ -224,3 +300,14 @@ applies to it.
   - RF3: the source tree and hover lose constraints whose base is an alias of a plain primitive.
 - The Low findings are spec-edge correctness (RF4, RF5), messages that do not show the interval as
   written (RF6), a viewer rounding mismatch (RF7), and test gaps (RF8).
+- Verification (2026-10-31, commit `09a74f8`): RF1–RF8 are verified. RF6's remainder (the message
+  names the resolved type, not the alias; `ir explain` prints the exact constant) is acceptable.
+  Four Low findings are new: RF9 (a sibling-reading default is checked even when proven by its
+  type), RF10 (the comma heuristic misreads field separators and stray commas) and RF11 (the
+  `constraint-violation` wording promises "as written") and RF12 (a misplaced doc comment in
+  the TypeScript runtime). None blocks the change. Re-run for this
+  verification: `cargo test -p nx-types --test value_constraints`, `-p nx-interpreter --test
+  value_constraints`, `-p nx-codegen --lib` (constraint, corpus, interface and component tests),
+  `-p nx-language-service` (bound, constraint and hover tests), `-p nx-syntax`, the TypeScript
+  runtime's `runtime.test.js` and `corpus.test.mjs` (the committed `dist` matches a fresh `tsc`
+  build), `packages/viewer` `npm test`, and `openspec validate --strict`.

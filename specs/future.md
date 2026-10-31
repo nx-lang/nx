@@ -1028,6 +1028,17 @@ It left these for later:
 - **Signature help.** The language service offers no signature help yet (it is a reserved query).
   When it does, a constrained parameter is to read as hover spells it, `amount: float32 where in
   0.0..=1.0`.
+- **Typing a default against its sibling fields.** A record or union-case default that reads a
+  sibling field is typed without that sibling in scope, so its type is unknown and a constrained
+  field's default is always checked when it runs: `{ a: int where >= 0  c: int where >= 0 = {a} }`
+  checks `c` though `a` already satisfies it. Typing a default with the fields before it in scope
+  would drop that check and would also report a default that does not fit its field, such as
+  `{ n: int  label: string = {n} }`, at compile time rather than when it runs. That second effect
+  changes what programs compile (some runtime tests rely on such a default), so it is its own change.
+- **Naming the alias in `constraint-violation`.** The message spells the site's resolved type, so
+  `type Low = Ratio where <= 0.5` with `let l: Low = 0.75` names `float32 where in 0.0..=0.5`, not
+  `Low`. Naming the alias the site was written with, beside the resolved interval, would point the
+  author at the declaration to read.
 
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 

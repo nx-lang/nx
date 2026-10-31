@@ -3156,6 +3156,22 @@ fn no_check_where_the_type_already_satisfies_the_site() {
 }
 
 #[test]
+fn a_default_read_from_a_sibling_field_is_always_checked() {
+    // The checker types a default without its siblings in scope, so even a sibling whose type
+    // satisfies the field leaves the default checked when it runs.
+    let text = explain_source(
+        "type Box = { a: int where >= 0  same: int where >= 0 = {a}  less: int where >= 0 = {a - 1} }\n\
+         let main(): Box = <Box a=1 />",
+    );
+    assert_contains(
+        &text,
+        "same: int where >= 0 = (check same: a as int where >= 0)",
+    );
+    assert_contains(&text, "less: int where >= 0 = (check less: (a sub 1)");
+    assert_eq!(text.matches("check ").count(), 2, "{text}");
+}
+
+#[test]
 fn a_sequence_is_checked_by_one_node_over_its_items() {
     let text = explain_source(
         "type Score = int where >= 0\nlet scores(xs: int+): Score+ = { for x in xs { x - 1 } }",
