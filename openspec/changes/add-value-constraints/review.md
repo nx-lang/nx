@@ -225,8 +225,30 @@ applies to it.
   `value-constraints` that a default read from a sibling field is always checked, and record the
   sharper rule in `specs/future.md`. Either way, add an IR test for the `{a}` case.
 - **Fix:** Took the second option. Binding the earlier fields while checking defaults was tried and drops the `{a}` check, but it also types every default against its siblings, so a default that does not fit its field becomes a compile error: the runtime tests' `type Unfit = { n:int label:string = { n } }` and the corpus's `Stepper` default `{ step(1) }` stop compiling. That changes what programs compile, beyond this change. `value-constraints` now says a record or union-case default that reads a sibling field is checked when it runs, whatever the sibling's type, with a `Stroke` scenario; `specs/future.md` records typing a default against its siblings as its own change. New IR test `a_default_read_from_a_sibling_field_is_always_checked` pins the `{a}` case.
+- **Verification:** The resolution is fair: typing defaults against their siblings would turn defaults
+  such as `Unfit`'s into compile errors, which is a language change of its own, and components and
+  parameters already type defaults with earlier props and parameters in scope (`b: int where >= 0
+  = {a}` emits no check there), so only records and union cases need the exception. The test passes
+  and `{a}` and `{a - 1}` are checked as described. But the new sentence overstates what the emitter
+  does, so `value-constraints` and `nx-ir-format` ("exactly where … and nowhere else") still
+  disagree, now in the other direction: with `let abs0(x: int): int where >= 0 = …`,
+  `type Box = { a: int  viaFn: int where >= 0 = {abs0(a)}  cond: int where >= 0 = { if a > 0 {
+  abs0(1) } else { abs0(2) } } }` and the union case `dot { a: int  c: int where >= 0 = {abs0(a)} }`
+  each read a sibling field, yet `nxlang ir explain` shows no check on `viaFn`, `cond` or `c` (which
+  is the right behaviour: their types satisfy the field). The spec says they "SHALL be checked when
+  it runs, whatever the sibling's type". `specs/future.md` repeats the overstatement ("a
+  constrained field's default is always checked"). The wording follows this review's own
+  recommendation, which was too loose. Still to do: say that a record or union-case default is
+  typed without its sibling fields in scope, so one whose type depends on a sibling's (`{a}`,
+  `{a - 1}`) is checked when it runs whatever that sibling's type, while one whose type satisfies
+  the field without them (a call whose result type satisfies it) is not; match `specs/future.md`;
+  and, for consistency, add the exception to `design.md` decision 5 ("A value of a type that is
+  already inside the interval needs nothing") and to the website's "Where values are checked"
+  (`reference/syntax/types.md`), which state the general rule with no exception. An IR assertion
+  that `{abs0(a)}` gets no check would pin the boundary.
+- **Fix (2):** The sentence now says what the emitter does: a record or union-case default is typed without its sibling fields in scope, so a default whose type depends on a sibling field's type is checked when it runs, and one whose type does not (a call with a constrained return type) is not. The `Stroke` scenario gains an `{abs0(width)}` case with no check. `specs/future.md`, `design.md` decision 5 and the website's "Where values are checked" say the same. The IR test, renamed `a_default_whose_type_depends_on_a_sibling_field_is_always_checked`, also asserts `viaFn = {abs0(a)}` gets no check.
 
-### 🟡 Fixed - RF10 The comma heuristic reports a field separator or a stray parameter comma as a constraint listing alternatives
+### ✅ Verified - RF10 The comma heuristic reports a field separator or a stray parameter comma as a constraint listing alternatives
 - **Severity:** Low
 - **Evidence:** `constraint_comma` (`crates/nx-syntax/src/validation.rs`) claims any comma that
   follows a `where` clause's pattern on the line of an error node, whatever comes after it:
@@ -247,8 +269,18 @@ applies to it.
   another comma; otherwise fall through to `push_syntax_error`. Add the record-separator and
   trailing-comma cases as negative tests.
 - **Fix:** `constraint_comma` claims a comma only when `starts_pattern_term` holds for the text after it: `<`, `>`, `in` and a space, a number, or `-`/`.` and a digit. Anything else falls through to `push_syntax_error`. New test `a_separator_comma_after_a_constraint_is_a_plain_syntax_error` covers the two record separators, the trailing commas in a record and a parameter list, and the doubled parameter comma, and checks that alternatives starting with `in` or a negative number are still named.
+- **Verification:** Confirmed. `starts_pattern_term` gates the claim as described, and the loop
+  moves on to a later `where` on the line. Re-tried through `nxlang codegen`: the record separators
+  (`, b: int`, `, inset: int`, `, in_range: int`), the union-case separator, the trailing and
+  doubled commas all give the general syntax error ("Invalid record definition", "Invalid
+  discriminated union definition", "Invalid function definition"); `< 0, 5`, `< 0,> 9`, `< 0,\t> 9`,
+  `< 0.5, .5`, `< 0 && > -5, in 7..=9`, and `y: int where < 0, > 9` after a valid
+  `x: int where >= 0,` parameter are still named `invalid-constraint` at the right comma. A
+  field or parameter name that starts with `in` is not mistaken for `in`. `cargo test -p nx-syntax`
+  and `-p nx-types --test value_constraints` pass. One regression for alternatives that continue
+  on the next line: see RF13.
 
-### 🟡 Fixed - RF11 `constraint-violation` still promises "the interval as written", but the message spells the site's resolved interval
+### ✅ Verified - RF11 `constraint-violation` still promises "the interval as written", but the message spells the site's resolved interval
 - **Severity:** Low
 - **Evidence:** `value-constraints` (spec line 150) requires a `constraint-violation` message
   "naming the value, the interval as written and the site". After the RF6 fix the message spells
@@ -262,8 +294,15 @@ applies to it.
   the site's interval, spelled as its type is (integer ends inclusive, `float32` bounds in their
   shortest digits). Naming the alias, as RF6 originally suggested, can go to `specs/future.md`.
 - **Fix:** The requirement now says the message names the value, the site, and the site's constrained type as resolved (an integer's exclusive end as the inclusive end next to it, an alias's terms intersected, a `float32` bound in its shortest digits), with a scenario for `type Small = int where < 10` naming `int where <= 9`, tested by `a_violation_spells_the_sites_resolved_interval`. Naming the alias is in `specs/future.md`.
+- **Verification:** Confirmed. The requirement and its new scenario match the checker:
+  `let s: Small = 10` reports "`10` is outside the constraint for `s`: `int where <= 9`",
+  `let l: Low = 0.75` names `float32 where in 0.0..=0.5`, a `float32` `0.1` bound prints as `0.1`,
+  `int where > 0 && < 5` prints as `in 1..=4`, and the `Paint` scenario's message still contains
+  `0.0..=1.0` and `opacity`. `a_violation_spells_the_sites_resolved_interval` passes, and the alias
+  naming is recorded in `specs/future.md`. No other artifact promises "as written" for this message
+  (the remaining "as written" in hover, source-tree and schema export are other requirements).
 
-### 🟡 Fixed - RF12 The TypeScript runtime's `intervalText` lost its doc comment to the new helper
+### ✅ Verified - RF12 The TypeScript runtime's `intervalText` lost its doc comment to the new helper
 - **Severity:** Low
 - **Evidence:** The RF6 fix inserted `intervalNumberText` between `intervalText` and its doc comment
   (`runtime/typescript/src/index.ts:843-849`): two JSDoc blocks now stand above
@@ -271,6 +310,32 @@ applies to it.
 - **Recommendation:** Move "The interval as a constraint spells it: …" back above `intervalText`,
   and rebuild `dist`.
 - **Fix:** The doc comment is back above `intervalText`, `intervalNumberText` has its own above it, and `dist` is rebuilt.
+- **Verification:** Confirmed. Each of `intervalNumberText` and `intervalText` has its own doc
+  comment in `src/index.ts` and `dist/src/index.js`. `npm test` (which rebuilds with `tsc`) passes
+  and leaves the working tree clean, so the committed `dist` matches the source.
+
+## New Findings Discovered During 2026-10-31 03:32 Verification
+
+### 🟡 Fixed - RF13 A constraint whose alternative is on the next line is no longer named
+- **Severity:** Low
+- **Evidence:** The RF10 fix finds the text after the comma by skipping only spaces and tabs
+  (`constraint_comma`, `crates/nx-syntax/src/validation.rs:1843-1845`), then requires
+  `starts_pattern_term` there. When the next term is on the following line, that text starts with
+  `\n` (or `\r\n`), so the comma is not claimed:
+  ```nx
+  type Edge = int where < 0,
+    > 9
+  ```
+  now reports a bare "Syntax error … Check the syntax and try again" at the comma. Before the fix the
+  same comma was claimed (the error node starts at the comma, so `start <= next_term` held) and
+  reported as `invalid-constraint` with the `&&` hint. A one-line `int where < 0, > 9` is still
+  named.
+- **Recommendation:** Skip all whitespace, newlines included, when finding the text after the comma
+  (`c.is_whitespace()`). A separator followed by a field on the next line still starts with a name,
+  so it still falls through to the syntax error. Add the two-line case to
+  `a_comma_in_a_constraint_is_named_not_a_parse_error` and a record with one field per line
+  (`a: int where >= 0,` then `b: int`) to `a_separator_comma_after_a_constraint_is_a_plain_syntax_error`.
+- **Fix:** `constraint_comma` skips all whitespace after the comma, newlines included. The two-line `type Edge = int where < 0,` / `> 9` case is in `a_comma_in_a_constraint_is_named_not_a_parse_error`, and a record with one field per line (`a: int where >= 0,` then `b: int`) is in `a_separator_comma_after_a_constraint_is_a_plain_syntax_error`; both pass.
 
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
@@ -311,3 +376,12 @@ applies to it.
   `-p nx-language-service` (bound, constraint and hover tests), `-p nx-syntax`, the TypeScript
   runtime's `runtime.test.js` and `corpus.test.mjs` (the committed `dist` matches a fresh `tsc`
   build), `packages/viewer` `npm test`, and `openspec validate --strict`.
+- Verification (2026-10-31, commit `b5f0d2c`): RF10, RF11 and RF12 are verified. RF9 is reopened:
+  documenting the rule rather than changing what compiles is a fair resolution, but the new sentence
+  says every sibling-reading default is checked, and a default such as `{abs0(a)}` whose type
+  satisfies the field is (rightly) not, so the spec still disagrees with the emitter; `design.md`
+  and the website state the general rule with no exception. RF13 (Low) is new: the RF10 fix stops
+  naming an alternative written on the next line. Re-run: `cargo test -p nx-types --test
+  value_constraints`, `-p nx-codegen --lib` (check, constraint, default and corpus tests),
+  `-p nx-syntax`, the TypeScript runtime's `npm test` (the rebuilt `dist` matches the commit), and
+  `openspec validate --strict`.

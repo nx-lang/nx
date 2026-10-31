@@ -1029,9 +1029,11 @@ It left these for later:
   When it does, a constrained parameter is to read as hover spells it, `amount: float32 where in
   0.0..=1.0`.
 - **Typing a default against its sibling fields.** A record or union-case default that reads a
-  sibling field is typed without that sibling in scope, so its type is unknown and a constrained
-  field's default is always checked when it runs: `{ a: int where >= 0  c: int where >= 0 = {a} }`
-  checks `c` though `a` already satisfies it. Typing a default with the fields before it in scope
+  sibling field is typed without that sibling in scope, so a constrained field's default whose type
+  depends on a sibling's type is checked when it runs, whatever that type is:
+  `{ a: int where >= 0  c: int where >= 0 = {a} }` checks `c` though `a` already satisfies it. (A
+  default whose type does not depend on a sibling, such as a call with a constrained return type, is
+  proven by that type as anywhere else.) Typing a default with the fields before it in scope
   would drop that check and would also report a default that does not fit its field, such as
   `{ n: int  label: string = {n} }`, at compile time rather than when it runs. That second effect
   changes what programs compile (some runtime tests rely on such a default), so it is its own change.

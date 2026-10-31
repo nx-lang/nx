@@ -1841,7 +1841,7 @@ fn constraint_comma(source: &str, start: usize, end: usize) -> Option<usize> {
         }
         let comma = line_start + pattern_end;
         let next_term = source[comma + 1..]
-            .find(|c: char| c != ' ' && c != '\t')
+            .find(|c: char| !c.is_whitespace())
             .map_or(source.len(), |offset| comma + 1 + offset);
         // Only a second pattern after the comma lists an alternative. A field or parameter name, a
         // closing delimiter or another comma means the comma is a separator, which the general

@@ -220,7 +220,13 @@ annotation, a returned value, an item of a sequence whose item type is constrain
 - **A literal or constant expression** is checked by the type checker. One outside the interval
   is an error, `constraint-violation`, on the value: "1.5 is outside `0.0..=1.0`, the range of
   `opacity`". Defaults are checked the same way where they are declared.
-- **A value of a type that is already inside the interval** (decision 4) needs nothing.
+- **A value of a type that is already inside the interval** (decision 4) needs nothing. A record or
+  union-case default is typed without its sibling fields in scope, so one whose type depends on a
+  sibling's type (`{a}`, `{width - 1}`) is checked when it runs even when that sibling's type would
+  satisfy the field; typing defaults against their siblings would also make a default that does not
+  fit its field a compile error, which is a change of its own (`specs/future.md`). Component and
+  function defaults already see the earlier props and parameters, so they are proven as anywhere
+  else.
 - **Any other value** is checked when the program runs, where it enters the site. The emitter
   inserts the check; the author writes nothing. This is the third motivation: `fade(x, 3)` checks
   `x` once, at the call, and the body of `fade` can rely on `amount`.

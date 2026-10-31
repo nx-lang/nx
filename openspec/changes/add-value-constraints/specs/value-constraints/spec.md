@@ -184,8 +184,9 @@ nothing for the check. The sites SHALL be the ones the constant check covers, pl
 property, and a field of an update record derived from a record or component state with a
 constrained field. For a sequence or a value that may be empty, the check SHALL apply to each item,
 and the empty value SHALL pass. `NaN` SHALL fail every constraint. A record or union-case default
-that reads a sibling field SHALL be checked when it runs, whatever the sibling's type, since the
-checker does not type a default against its siblings.
+is typed without its sibling fields in scope, so a default whose type depends on a sibling field's
+type (such as `{width - 1}` or `{a}`) SHALL be checked when it runs, whatever the sibling's type,
+and a default whose type does not (such as a call whose return type satisfies the field) SHALL NOT.
 
 #### Scenario: A computed argument
 - **WHEN** a file contains `let fade(amount: float64 where in 0.0..=1.0) = { amount }` and `let twice(x: float64) = { fade(x * 2.0) }`, and `twice(0.75)` runs
@@ -199,6 +200,7 @@ checker does not type a default against its siblings.
 #### Scenario: A default read from a sibling field
 - **WHEN** a file contains `type Stroke = { width: int  inset: int where >= 0 = {width - 1} }` and `<Stroke width=0 />` runs
 - **THEN** evaluation SHALL fail with `nx-ir-constraint`
+- **AND** with `let abs0(x: int): int where >= 0 = { if x < 0 { 0 - x } else { x } }`, a default `{abs0(width)}` for `inset` SHALL get no check
 
 #### Scenario: Each item of a computed sequence
 - **WHEN** a file contains `type Score = int where >= 0` and `let scores(xs: int+): Score+ = { for x in xs { x - 1 } }`, and `scores({ 1 0 })` runs

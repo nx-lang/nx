@@ -3156,19 +3156,23 @@ fn no_check_where_the_type_already_satisfies_the_site() {
 }
 
 #[test]
-fn a_default_read_from_a_sibling_field_is_always_checked() {
+fn a_default_whose_type_depends_on_a_sibling_field_is_always_checked() {
     // The checker types a default without its siblings in scope, so even a sibling whose type
-    // satisfies the field leaves the default checked when it runs.
+    // satisfies the field leaves the default checked when it runs. A default whose type does not
+    // depend on a sibling, such as a call with a constrained return type, is proven by that type.
     let text = explain_source(
-        "type Box = { a: int where >= 0  same: int where >= 0 = {a}  less: int where >= 0 = {a - 1} }\n\
+        "let abs0(x: int): int where >= 0 = { if x < 0 { 0 - x } else { x } }\n\
+         type Box = { a: int where >= 0  same: int where >= 0 = {a}  less: int where >= 0 = {a - 1}  \
+         viaFn: int where >= 0 = {abs0(a)} }\n\
          let main(): Box = <Box a=1 />",
     );
+    assert_contains(&text, "viaFn: int where >= 0 = abs0(a)");
     assert_contains(
         &text,
         "same: int where >= 0 = (check same: a as int where >= 0)",
     );
     assert_contains(&text, "less: int where >= 0 = (check less: (a sub 1)");
-    assert_eq!(text.matches("check ").count(), 2, "{text}");
+    assert!(!text.contains("check viaFn"), "{text}");
 }
 
 #[test]

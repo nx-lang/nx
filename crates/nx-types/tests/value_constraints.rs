@@ -157,6 +157,7 @@ fn a_comma_in_a_constraint_is_named_not_a_parse_error() {
         "type Box = { a: int where < 0, > 9 }",
         "let edge: int where < 0, > 9 = 5",
         "let f(x: int where < 0, > 9) = { x }",
+        "type Edge = int where < 0,\n  > 9",
     ] {
         let message = reported(source, "invalid-constraint", ",");
         assert!(message.contains("one interval"), "{message}");
@@ -189,6 +190,7 @@ fn a_separator_comma_after_a_constraint_is_a_plain_syntax_error() {
         "type Box = { a: int where in 0..=9, }",
         "let f(x: int where >= 0,) = { x }",
         "let f(x: int where >= 0, , y: int) = { x }",
+        "type Box = {\n  a: int where >= 0,\n  b: int\n}",
     ] {
         let found = diagnostics(source);
         assert!(
