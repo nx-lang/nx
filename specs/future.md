@@ -1000,6 +1000,32 @@ the second engine and grammar and keeps the themes in one place; readers see no 
 the two already color alike. Left out of `add-visual-view-to-drawnui-fiddle` (design decision 3,
 review finding RF7) because it adds to `@nx-lang/monaco`'s API for a one-time cost.
 
+## Value Constraints: What `add-value-constraints` Left For Later
+
+`add-value-constraints` gave numeric types a `where` clause, `float32 where in 0.0..=1.0`, checked
+when a program is compiled and, in the IR runtimes, when it runs (`openspec/specs/value-constraints`).
+It left these for later:
+
+- **Strings.** Length and pattern constraints, `string where length in 1..=80`, need a different
+  term vocabulary and a JSON Schema mapping (`minLength`, `pattern`).
+- **Sequence counts.** `int+ where count <= 10` is rejected today, since a constraint applies to one
+  value; a count constraint would bound the sequence itself (`minItems`, `maxItems`).
+- **Named bounds.** A bound is a literal. Allowing a named constant, `in 0..=MaxColumns`, needs
+  constant evaluation across modules.
+- **General predicates.** `||`, `!=` and calls are refused with `invalid-constraint`. A union of
+  intervals or an arbitrary predicate would lose the one-interval shape the schema, the viewer and
+  the IR entry rely on.
+- **Integer overflow on the same node.** Overflow checking ("Bounds checks are specified but not
+  enforced" above) could ride on the `check` node, `[28, operand, type, site]`, which is shaped so
+  it can (design open question 2).
+- **The interpreter.** The tree-walking interpreter reports every compile-time diagnostic but does
+  not check values when a program runs. It is being retired, so the checks live only in the IR
+  runtimes.
+- **Executable source codegen.** Generated JavaScript and TypeScript check values bound inside the
+  program (`nxCheckConstraint`), but their host types and schemas keep the base type, so a value a
+  host passes in is not checked at the boundary, and a numeric match pattern is refused there as
+  every match is.
+
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 
 NX is a language of the DrawnUI fiddle engine (`DrawnUi.FiddleEngine`, the engine behind

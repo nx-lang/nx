@@ -7525,8 +7525,7 @@ pub fn lower_with_color_runtime(
 pub(crate) fn lower_numeric_pattern(node: SyntaxNode) -> NumericPattern {
     let mut terms = Vec::new();
     if node.kind() == SyntaxKind::NUMERIC_PATTERN {
-        let mut children = node.children_with_tokens().peekable();
-        while let Some(child) = children.next() {
+        for child in node.children_with_tokens() {
             match child.kind() {
                 SyntaxKind::RANGE_PATTERN => terms.push(lower_range_term(child)),
                 SyntaxKind::COMPARISON_PATTERN => terms.push(lower_comparison_term(child)),

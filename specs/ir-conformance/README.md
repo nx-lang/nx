@@ -143,7 +143,10 @@ construct at run time. A function value in generated JavaScript is the JavaScrip
 knows its name and not its module, so a recorded `Function` record is compared with it by name.
 `occurrences` and `occurrence-lifting` avoid all of them so that the
 occurrence rules are checked in all three engines, which is why the `{}` pattern has a program of
-its own, `occurrence-patterns`.
+its own, `occurrence-patterns`. `constraints` holds value constraints' checks that pass and fail at
+inclusive and exclusive ends, `NaN`, a host value outside its interval, nested fields, sequences and
+interval patterns, with their operation counts; its match arms keep it out of generated JavaScript,
+whose checks the emitter's own tests cover.
 
 The size budget lives here too: every image emitted without its debug section is at most six
 times the UTF-8 length of its module's compiler input: source plus canonical typed runtime-function descriptors when present. Math counts its descriptors alongside its source constants; it is not exempt from the size budget. The images are marked binary in `.gitattributes`;

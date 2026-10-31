@@ -107,11 +107,30 @@ VisibilityModifier ::=
     | "export"
 
 TypeDeclaration ::=
-    PrimitiveType [OccurrenceSuffix]
+    ( PrimitiveType [OccurrenceSuffix]
     | UserDefinedType [OccurrenceSuffix]
     | FunctionType [OccurrenceSuffix]
     | AppliedType [OccurrenceSuffix]
-    | ParenthesizedType [OccurrenceSuffix]
+    | ParenthesizedType [OccurrenceSuffix] ) [WhereClause]
+
+(* A value constraint, `float32 where in 0.0..=1.0`. "where" is a keyword only here, after a type;
+   a field or parameter named `where` that follows a type is told apart by the ":" or "?:" after it.
+   The clause ends at the first token that cannot continue the pattern. Analysis accepts it only on
+   a numeric type with no occurrence suffix and reports anything else the parser reads here, such
+   as a leading operand or "||", as `invalid-constraint`. *)
+WhereClause ::=
+    "where" NumericPattern
+
+(* Terms intersect: the pattern is one interval whose ends are each inclusive, exclusive or open. *)
+NumericPattern ::=
+    NumericPatternTerm {"&&" NumericPatternTerm}
+
+NumericPatternTerm ::=
+    "in" NumericBound (".." | "..=") NumericBound
+    | ("<" | "<=" | ">" | ">=") NumericBound
+
+NumericBound ::=
+    IntegerLiteral | RealLiteral | HexLiteral | SignedNumericLiteral
 
 OccurrenceSuffix ::=
     "?"             (* zero or one *)
@@ -489,7 +508,7 @@ ParenFunctionCall ::=
     ValueExpression "(" [ ValueOrValuesBracedExpression { "," ValueOrValuesBracedExpression } ] ")"
 
 Pattern ::=
-    Literal | SignedNumericLiteral | QualifiedName | "{" "}"
+    Literal | SignedNumericLiteral | NumericPattern | QualifiedName | "{" "}"
     (* A single-segment name in pattern position is a ContextualName resolved against the
        scrutinee's type, in preference to any lexically visible binding of that name. The `{}`
        pattern matches the empty value; the arms after it, and an `else` arm, read a path
@@ -517,6 +536,12 @@ Match-style `if value is { ... }` arms accept qualified union case patterns such
 `LoadState.failed`. When the scrutinee is a local identifier, a matching arm narrows that identifier
 to the selected case inside the arm body. A match over a union-typed scrutinee must cover all cases
 unless it has an `else` arm.
+
+A numeric scrutinee may be matched against a `NumericPattern`, `in 0.0..1.0` or `> 0 && <= 10`, the
+patterns a `WhereClause` takes; a comma still separates alternatives. Within an arm whose only
+pattern is numeric, a local identifier scrutinee is narrowed to the pattern's interval. An unbraced
+arm body ends where the next arm's pattern begins, decided by the "=>" after it, so `1 => 5 -1 => 6`
+is two arms, not `5 - 1`.
 
 <a id="elements"></a>
 ## Elements

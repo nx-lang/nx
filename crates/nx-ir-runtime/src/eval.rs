@@ -735,7 +735,10 @@ impl<'p> Machine<'p> {
                     self.charge(cx, Some(node), 2)?;
                     let interval = self.interval(cx, node, *ty)?;
                     let item = match &scrutinee {
-                        Value::Seq(items) if items.len() == 1 => &items[0],
+                        Value::Seq(items) => match &items[..] {
+                            [only] => only,
+                            _ => &scrutinee,
+                        },
                         other => other,
                     };
                     let matched = match item {

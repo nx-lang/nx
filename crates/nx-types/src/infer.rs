@@ -6901,6 +6901,7 @@ impl<'a> InferenceContext<'a> {
     /// Sites that know which expression they are checking pass it, so a resolved contextual name
     /// can be rewritten to its qualified form after analysis. Sites that do not pass `None`, and a
     /// contextual name reaching one of those is reported rather than silently accepted.
+    #[allow(clippy::too_many_arguments)]
     fn check_typed_binding_for(
         &mut self,
         expr: Option<ExprId>,

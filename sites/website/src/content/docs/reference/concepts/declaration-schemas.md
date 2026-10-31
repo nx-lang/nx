@@ -57,7 +57,24 @@ asked only for the canonical one.
 | An abstract record | `anyOf` every concrete record and union case in the program that extends it |
 | An applied generic record, `<Page T=Plan />` | Its own definition, `Page_Plan`, with the argument substituted |
 | A type alias | The schema of its target |
+| A [constrained type](/reference/syntax/types/#constrained-types), `int where in 1..=10` | Its base's schema with its bounds, as below |
 | `<Target>.Update` | Every field optional; a field the target marks `?` also admits `null`, which clears it |
+
+A constrained type adds its interval's ends to its base's schema: an inclusive low end as `minimum`,
+an exclusive one as `exclusiveMinimum`, and likewise `maximum` and `exclusiveMaximum` for the high
+end; an open end adds nothing. A bound replaces the base's own `minimum` or `maximum` on the same
+side, as `int32` has. On an integer type an exclusive end is written as the inclusive one next to it,
+and on a `float32` type every end is an inclusive `float32` value, an exclusive end becoming the
+nearest `float32` inside the interval, so no number the schema admits rounds to one outside it. A
+parameter entry's NX spelling keeps the constraint as written.
+
+| NX | JSON Schema |
+| -- | ----------- |
+| `int where in 1..=10` | `{ "type": "integer", "minimum": 1, "maximum": 10 }` |
+| `int where > 0` | `{ "type": "integer", "minimum": 1 }` |
+| `float64 where > 0.0 && < 1.0` | `{ "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }` |
+| `float32 where < 1.0` | `{ "type": "number", "maximum": 0.9999999403953552 }` |
+| `int32 where >= 0` | `{ "type": "integer", "minimum": 0, "maximum": 2147483647 }` |
 
 Records, unions, payload cases and applied generic records are entries of the document's `$defs`,
 referred to by `$ref`, so a type that refers to itself is described once. A field is `required`

@@ -52,10 +52,43 @@ let statusBadge(status:ReviewStatus) = {
 ```
 
 - Multiple patterns can share a body: `"saturday", "sunday" => <WeekendIcon/>`.
-- Constant-case and literal matches may omit `else`; a match with no arm taken is the empty value,
+- Constant-case, literal and [numeric](#numeric-patterns) matches may omit `else`; a match with no arm taken is the empty value,
   as [described below](#when-there-is-no-else). Use `else` when a fallback is meaningful.
 - Union matches without `else` must cover every case in the union.
 - `{}` is a pattern that matches the empty value; see [Matching the empty value](#matching-the-empty-value).
+
+### Numeric patterns
+
+A number may be matched against ranges and comparisons, the same patterns a
+[constrained type](/reference/syntax/types/#constrained-types) takes: `in a..b`, `in a..=b`, `>= a`,
+`> a`, `<= a` and `< a`, joined by `&&`. A comma gives alternatives, as for any pattern.
+
+```nx
+let describe(x: float64) = {
+  if x is {
+    in 0.0..1.0 => "valid"
+    > 1.0 => "too big"
+    < 0.0 => "too small"
+    else => "one"
+  }
+}
+
+let flag(n: int) = { if n is { < 0, > 100 => "out" > 0 && <= 10 => "low" } }
+```
+
+- The scrutinee must be numeric, and each bound is checked as a literal at its type.
+- `NaN` matches no numeric pattern, and neither does the empty value of an `int?` scrutinee.
+- Like literal matches, a numeric match may omit `else`; `flag(50)` above is the empty value.
+- A pattern that matches no value is rejected as `empty-constraint`, and one that matches none the
+  scrutinee's constrained type admits is reported as the warning `unreachable-pattern`.
+- Within an arm whose scrutinee is a local identifier and whose only pattern is numeric, the
+  identifier is narrowed to the pattern, so passing it to a site with that constraint needs no
+  check:
+
+```nx
+let fade(amount: float64 where in 0.0..=1.0) = { amount }
+let safe(x: float64) = { if x is { in 0.0..=1.0 => fade(x) else => 0.0 } }
+```
 
 ### Discriminated Union Narrowing
 

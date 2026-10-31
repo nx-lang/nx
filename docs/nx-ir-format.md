@@ -93,6 +93,7 @@ are non-decreasing, start at `0` and end at the pool's length.
 | 4 | function | `[4, type, [[str, type, flags]...]]` | A function type, `<function Item:Contact Index:int />: DrawnNode`: the result type, then each parameter's name, type and flags (bit 0: the parameter takes body content; bit 1: the parameter is optional, `p?:T`), in declared order. A function satisfies it by parameter name, so a function may declare fewer parameters than the type. |
 | 5 | seq | `[5, type, occurrence]` | An item type under an occurrence, `string?`, `Person+`, `object*`: the item type, then an occurrence cell whose bit 0 says the type may be empty and bit 1 that it may hold many, so `?` is `1`, `+` is `2` and `*` is `3`. `0` is not written: a type that is exactly one has no wrapper. The item type is never itself a `seq`. |
 | 6 | anyFunction | `[6, type]` | A function reference type, `<function ... />: HttpArguments`: a function type whose parameters are not stated, with the result type as its one operand. A function of any parameters whose result satisfies the result type satisfies it; `<function ... />: object*` is the type every function satisfies. A module whose type table holds an entry of this kind lists `function-reference-type-v1`. |
+| 7 | constrained | `[7, type, const?, const?, flags]` | A numeric type under a value constraint, `float32 where in 0.0..=1.0`: the unconstrained base type, a numeric `primitive`; the low and the high bound, each a constant or `-1` for an open end; and flags whose bit 0 makes the low end exclusive and bit 1 the high end. A bound is an `int` constant on an integer base and a `float` constant on a floating-point one, already rounded for `float32`, so comparing a rounded value with it is exact. An integer base's exclusive ends are written as the inclusive ends next to them, so on an integer base `flags` is `0`. One entry holds the intersection of every term and alias that contributed, so its base is never itself constrained, and a constrained alias from another module is written as its entry, never as a reference. Everywhere else a rule reads a type, the entry reads as its base. A module with one lists `constraints-v1`. |
 
 A type is written once: two fields of type `string?` share one `seq` entry, which itself refers to
 one `primitive` entry. A `seq` entry's item type precedes it in the table, so no type reaches
@@ -155,6 +156,8 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 25 | coalesce | `[25, node, node]` | `x ?? y`: the left operand when it holds at least one item, otherwise the right, which is evaluated only when the left is empty. Requires `occurrence-v1`. |
 | 26 | standardMath | `[26, operation, [node...]]` | A closed numerical body in a compiler-owned standard function. Requires `standard-math-v1`; see [Standard math bodies](#standard-math-bodies-standard-math-v1) for operation IDs and arities. |
 | 27 | standardColor | `[27, operation, [node...]]` | A closed color body in a compiler-owned standard function. Requires `standard-color-v1`; see [Standard color bodies](#standard-color-bodies-standard-color-v1). |
+| 28 | check | `[28, node, type, str]` | A constraint check, written where a value is bound to a constrained site its type does not already satisfy: the operand, a `constrained` type entry, and the name of the site, such as a parameter or field. Yields the operand's value when the interval admits it, comparing at the base type, and otherwise fails with `nx-ir-constraint`, naming the site, the value and the interval. A sequence operand is checked item by item and the empty value passes, so one node serves an optional site and a `+` or `*` site whose item type is constrained. `NaN` fails. Requires `constraints-v1`. |
+| 29 | interval | `[29, type]` | A numeric pattern, `in 0.0..1.0` or `> 0 && <= 10`, in an `ifIs` arm's pattern list, and nowhere else: a `constrained` type entry whose base is the scrutinee's base type and whose interval is the pattern's. It matches when the scrutinee lies in the interval, and never matches `NaN` or the empty value. Requires `constraints-v1`. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
@@ -478,7 +481,10 @@ are well formed, that every offset array is non-decreasing and ends at its pool,
 blob is UTF-8 and every string offset is a character boundary, and that every entry of every table
 follows its kind's layout with every index inside the table it names: strings, types, constants,
 nodes, declarations and module slots, with `none` allowed only where the layout says so; an entry
-of a retired kind, `array`, `nullable` or `null`, is malformed. A node's child indices and a `seq`
+of a retired kind, `array`, `nullable` or `null`, is malformed. A `constrained` entry's base must
+be a numeric `primitive` and its bounds numeric constants; a `check` or `interval` node must name a
+`constrained` entry; and an `interval` node anywhere but in an `ifIs` arm's pattern list is
+malformed. A node's child indices and a `seq`
 type's item index are bounded by the entry's own index rather than the table's count, so an entry
 that names itself or a later entry is refused and every walk over children terminates. After that
 pass every read is in bounds, so evaluation reads cells without further checks. A malformed or
@@ -513,7 +519,8 @@ predates the kind refuses the module by name rather than as malformed, and lists
 `function-values-v1` too only on that feature's own terms; one that contains a `forRange`
 lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
 arm with the `{}` pattern, lists `occurrence-v1`; one that contains a `standardMath` node lists
-`standard-math-v1`; a `standardColor` node lists `standard-color-v1`. Constructing a range needs no feature: that is an
+`standard-math-v1`; a `standardColor` node lists `standard-color-v1`; one whose type table holds a
+`constrained` entry, or whose nodes hold a `check` or an `interval`, lists `constraints-v1`. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
 needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
 never tests, steps through or falls back from one lists nothing. A runtime that does not know a
@@ -588,6 +595,11 @@ be given something the host did not write. A host converts what it has, which fo
 class is to spread it. A host's type joins a form when NX has the kind of value it would spell,
 and not before, so what is refused today can be accepted later without changing what any working
 host gets. Rust needs no such rule: an `NxValue` can hold nothing else.
+
+A value a host passes at a `constrained` type is read as a value of its base type and then tested
+against the interval, item by item for a sequence. One outside it, `NaN` included, is refused with
+`nx-ir-boundary-constraint`, naming the path to it and the interval, so an argument the host got
+wrong is reported as the host's error and never as the program's `nx-ir-constraint`.
 
 What holds the values a host passes is read by the same rule. Positional arguments, content and a
 batch are each an array, and props, a state, a patch and arguments by name are each a plain
@@ -682,7 +694,11 @@ it visits. A value nobody walks costs only what building it cost.
 A value is checked against a type wherever evaluation gives it one: an argument or a default
 against its parameter, a function's result against its declared result type, a value declaration's
 value against its declared type, each field of a `record`, `unionCase` or `component` construction,
-and every value the host supplies to a typed site. Two values are compared by `eq` and `ne`, by a
+and every value the host supplies to a typed site. A `check` node costs 1 as a node and 1 more per
+value it checks, one for a single value and one per item for a sequence, the empty value none. A
+host value at a `constrained` type costs what its base costs: the constraint is tested in the same
+step. An `interval` pattern costs what a literal pattern does, 1 for the node and 1 for the
+comparison. Two values are compared by `eq` and `ne`, by a
 pattern of an `ifIs` arm that matches by equality, and by `diff` for each field, a field one record
 does not hold comparing as the empty value. A pattern matches by equality unless the pattern or the
 scrutinee is the empty value, or both are records and the pattern names a type: those are decided

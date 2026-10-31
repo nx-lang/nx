@@ -32,6 +32,7 @@ Keywords
 - FOR ("for"), IN ("in")
 - RAW ("raw")
 - VISUALIZER ("visualizer"; a keyword only as the first token of a module member, an IDENTIFIER elsewhere)
+- WHERE ("where"; a keyword only directly after a type, an IDENTIFIER elsewhere)
 
 Primitive types (keywords)
 - STRING ("string")
@@ -296,7 +297,24 @@ Type (AST: TypeSyntax)
 - Type → FunctionType OccurrenceSuffix?
 - Type → AppliedType OccurrenceSuffix?
 - Type → ParenthesizedType OccurrenceSuffix?
-  - fields: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], occurrence: "one"|"optional"|"oneOrMore"|"zeroOrMore"
+- Type → Type WhereClause
+  - fields: kind: "primitive"|"user"|"function"|"applied", name?: string (qualified), params?: FunctionTypeParamSyntax[], result?: TypeSyntax, args?: TypeArgumentSyntax[], occurrence: "one"|"optional"|"oneOrMore"|"zeroOrMore", constraint?: NumericPatternSyntax
+
+WhereClause
+- WhereClause → WHERE NumericPattern
+  - The clause ends at the first token that cannot continue the pattern, so a whitespace-separated
+    field list needs no separator after it. A field or parameter named `where` right after a type is
+    an IDENTIFIER when COLON or QMARK COLON follows it.
+  - Analysis accepts it only on a numeric type with no occurrence suffix; a leading operand,
+    PIPE_PIPE, COMMA or any other expression parses here and is reported as `invalid-constraint`.
+
+NumericPattern (AST: NumericPatternSyntax)
+- NumericPattern → NumericPatternTerm (AMP_AMP NumericPatternTerm)*
+- NumericPatternTerm → IN NumericBound (DOT_DOT | DOT_DOT_EQ) NumericBound
+- NumericPatternTerm → (LT | LT_EQ | GT | GT_EQ) NumericBound
+- NumericBound → INT_LITERAL | REAL_LITERAL | HEX_LITERAL | SignedNumericLiteral
+  - fields: terms: { kind: "range"|"rangeInclusive"|"lt"|"le"|"gt"|"ge", low?: literal, high?: literal }[]
+  - The terms intersect into one interval whose ends are each inclusive, exclusive or open.
 
 OccurrenceSuffix
 - OccurrenceSuffix → QMARK        (zero or one)
@@ -797,8 +815,13 @@ QualifiedMarkupName (AST: QualifiedMarkupNameSyntax)
 Pattern (AST: PatternSyntax)
 - Pattern → Literal
 - Pattern → QualifiedName
+- Pattern → NumericPattern
 - Pattern → LBRACE RBRACE
-  - fields: kind: "literal"|"name"|"empty", value?: LiteralExpressionSyntax|QualifiedNameSyntax
+  - fields: kind: "literal"|"name"|"numeric"|"empty", value?: LiteralExpressionSyntax|QualifiedNameSyntax|NumericPatternSyntax
+  - A numeric pattern needs a numeric scrutinee. Within an arm whose only pattern is numeric, a
+    local identifier scrutinee is narrowed to the pattern's interval.
+  - An unbraced arm body ends where the next arm's pattern begins, decided by the ARROW after it,
+    so a body followed by an arm starting with LT, GT, LT_EQ, GT_EQ or MINUS is not continued by it.
   - `{}` matches the empty value. It is permitted only where the scrutinee admits zero; the arms
     after it, and an `else` arm, read a path scrutinee as present.
 

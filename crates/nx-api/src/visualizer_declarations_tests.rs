@@ -233,6 +233,24 @@ fn each_hint_is_checked_against_its_type() {
     }
 }
 
+/// A constrained number takes number hints as its base does, inline or through an alias, and a hint
+/// outside the constraint is not reported: the viewer intersects the two.
+#[test]
+fn a_constrained_number_takes_number_hints() {
+    assert_clean(
+        "type Grid = { columns: int where in 1..=1000 }\n\
+         visualizer Grid = <ElementVisualizer><PropertyVisualizer property=columns max=12 /></ElementVisualizer>",
+    );
+    assert_clean(
+        "type Ratio = float32 where in 0.0..=1.0\n\
+         type Fade = { opacity: Ratio }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=opacity editor=field step=0.05 min=-5 max=5><ValueChoice value=0.5 /></PropertyVisualizer></ElementVisualizer>",
+    );
+    assert_clean(
+        "type Ratio = float32 where in 0.0..=1.0\nvisualizer Ratio = <ValueVisualizer min=0 max=2 step=0.1 />",
+    );
+}
+
 #[test]
 fn a_mismatched_choice_names_its_property() {
     let warnings = warnings_of(

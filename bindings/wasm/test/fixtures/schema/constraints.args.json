@@ -1,0 +1,9 @@
+{
+  "pick": [{ "args": { "count": 10 }, "result": 10 }, { "args": { "count": 1 }, "result": 1 }],
+  "shade": [
+    { "args": { "r": 1, "b": 0.9999999403953552, "u": 0.5, "n": 1, "p": 2147483647 }, "result": 0.5 },
+    { "args": { "r": 0, "b": -1, "u": 1e-9, "n": 9007199254740991, "p": 0 } }
+  ],
+  "paint": [{ "args": { "p": { "opacity": 0.5 } }, "result": { "$type": "Paint", "opacity": 0.5, "layers": 1 } }],
+  "counts": [{ "args": { "ns": [1, 2] }, "result": [1, 2] }]
+}

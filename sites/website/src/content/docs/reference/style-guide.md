@@ -244,6 +244,19 @@ Write numbers with enough precision to preserve their intended value. Avoid unne
 but do not round numerical constants as part of a formatting edit without verifying that their
 stored value is unchanged.
 
+## Constrained types
+
+Write a constraint after the type with one space on each side of `where`, `&&` and each comparison,
+and none inside a range: `float32 where in 0.0..=1.0`, `int where >= 1 && < 100`. Write a
+floating-point bound with its decimal point, `0.0..=1.0` rather than `0..=1`, so it reads as the
+type it bounds. Name a constrained type that is used more than once, and use the name:
+
+```nx
+type Ratio = float32 where in 0.0..=1.0
+
+type Fade = { from: Ratio  to: Ratio }
+```
+
 ## Applying the guide
 
 Apply these conventions to new NX source and to declarations you edit. Keep broad formatting

@@ -337,6 +337,105 @@ comparison is almost certainly a mistake; declare `n` as an `int` if the compari
 A constant expression that no site gives another type is left as written and computed when the
 program runs, like any other expression: `let half = { 7 / 2 }` is the `int` `3`.
 
+## Constrained types
+A numeric type may be followed by `where` and a value pattern that limits the values it admits. The
+pattern has no operand: it is matched against the value, as a match arm's pattern is matched against
+its scrutinee.
+
+```nx
+type Ratio = float32 where in 0.0..=1.0
+type Unit = float64 where >= 0.0 && < 1.0
+type Count = int where >= 1
+
+type Paint = {
+  opacity: float64 where in 0.0..=1.0 = 1.0
+  layers: Count = 1
+}
+
+let fade(amount: Ratio, steps: int where >= 1): int where >= 0 = { steps }
+let half: float64 where <= 1.0 = 0.5
+```
+
+A pattern is one or more terms joined by `&&`, each one of:
+
+| Term | Admits |
+| --- | --- |
+| `in a..b` | `a` up to but not including `b` |
+| `in a..=b` | `a` through `b` |
+| `>= a`, `> a` | values at least, or greater than, `a` |
+| `<= a`, `< a` | values at most, or less than, `a` |
+
+Each bound is a numeric literal, optionally negative (`in -1.0..=1.0`). The terms intersect, so a
+pattern always describes one interval whose ends are each inclusive, exclusive or open. `where` is a
+keyword only after a type, so a field or parameter may still be named `where`.
+
+### What may be constrained
+The base is `int`, `int32`, `int64`, `float32` or `float64`, or an alias of one. Each bound is
+checked as a literal written at the base type: a real bound on an integer type, a bound outside the
+base's range, and an `int64` bound outside ±(2^53−1) are rejected. On an integer type an exclusive end
+is the inclusive one next to it, so `int where > 0` and `int where >= 1` are the same type.
+
+A constraint applies to one value, so it cannot follow an occurrence: name the item type instead,
+and constrain each item.
+
+```nx
+type Score = int where >= 0
+type Results = { scores: Score+ }
+```
+
+These are rejected with `invalid-constraint`, or `empty-constraint` for a pattern no value matches:
+
+```nx invalid
+type Scores = int+ where >= 0         // name the item type: Score+
+type Name = string where >= 1         // constraints apply to numeric types
+type Half = int where <= 0.5          // a real bound on an integer
+type Edge = int where < 0 || > 9      // only `&&` joins terms
+type Count = int where value >= 1     // no operand: write `int where >= 1`
+type None = int where > 5 && < 6      // matches no int
+```
+
+A constrained type cannot be a type argument or appear inside a function type.
+
+### A constrained type is its base type
+A value of a constrained type is a value of its base type: the same encoding, equality, operations
+and host representation. A constrained type satisfies its base and every type the base widens to,
+and a type whose values all lie in another's interval satisfies it, both with no check. An alias may
+add terms, which intersect with its own:
+
+```nx
+type Ratio = float32 where in 0.0..=1.0
+type Low = Ratio where <= 0.5           // 0.0..=0.5
+
+let wide(x: float64) = { x }
+let f(r: Ratio) = { wide(r) }           // no check: every Ratio is a float64
+let twice(r: Ratio) = { r * 2 }         // float32: arithmetic gives the base type
+```
+
+A join (the branches of an `if` or a match, the operands of `??`, the items of a sequence) is the
+narrowest type every branch satisfies with no check, and otherwise the unconstrained join of the
+base types. An optional property or a `?` or `*` item may have a constrained type; the constraint
+applies to each value present, and the empty value satisfies it.
+
+### Where values are checked
+A literal or [constant expression](#constant-expressions) bound to a constrained site is checked
+when the program is compiled, and one outside the interval is reported as `constraint-violation`:
+
+```nx invalid
+type Paint = { opacity: float64 where in 0.0..=1.0 }
+let p = <Paint opacity=1.5 />   // 1.5 is outside 0.0..=1.0 for opacity
+```
+
+Any other value is checked when the program runs, where it is bound to a constrained site its type
+does not already satisfy: a property, field, argument, `let` value, returned value or sequence item.
+A value outside the interval fails evaluation with `nx-ir-constraint`, and a value a host passes in
+fails with `nx-ir-boundary-constraint`, naming the argument. `NaN` fails every constraint. The author
+writes nothing for these checks, and a value checked once is not checked again where it is passed on.
+A [match arm](/reference/syntax/if/#numeric-patterns) narrows its scrutinee to its pattern, so a value
+matched there needs no check.
+
+The tree-walking interpreter reports every compile-time diagnostic but does not check values when
+the program runs; the IR runtimes do.
+
 ## Record Types
 Record types use `type Name = { ... }` declarations. Record inheritance is limited to single-base
 inheritance from abstract records.
