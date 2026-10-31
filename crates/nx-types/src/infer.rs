@@ -7627,7 +7627,10 @@ impl<'a> InferenceContext<'a> {
         seen.insert(name.clone());
         let enclosing_span = std::mem::replace(&mut self.type_ref_span, span);
         let enclosing_ordinals = std::mem::take(&mut self.type_name_ordinals);
-        let origin = self.type_aliases.get(name).map(|alias| alias.origin.clone());
+        let origin = self
+            .type_aliases
+            .get(name)
+            .map(|alias| alias.origin.clone());
         if let Some(origin) = &origin {
             self.foreign_alias_stack.insert(origin.clone());
         }
@@ -8130,8 +8133,7 @@ impl<'a> InferenceContext<'a> {
                     .extend(self.foreign_alias_stack.iter().cloned());
             }
             self.foreign_alias_depth += usize::from(foreign);
-            let ty =
-                self.type_from_type_ref_walk(Some(&declaring_module), &target, seen, false);
+            let ty = self.type_from_type_ref_walk(Some(&declaring_module), &target, seen, false);
             self.foreign_alias_depth -= usize::from(foreign);
             if inserted {
                 self.foreign_alias_stack.remove(&origin);

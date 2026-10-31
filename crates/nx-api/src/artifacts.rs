@@ -7221,27 +7221,49 @@ export let <Edge o: Outline /> = <div weight={o.weight} />"#
     #[test]
     fn cross_module_alias_cycles_report_errors_in_the_defining_modules() {
         let workspace = workspace(vec![
-            workspace_module("main.nx", br#"import "./b.nx" as b
+            workspace_module(
+                "main.nx",
+                br#"import "./b.nx" as b
 let value: b.X = 42
 let constructed: b.X = <b.X />
-let root() = { value constructed }"#.to_vec()),
-            workspace_module("a.nx", b"import \"./b.nx\" as other\nexport type Y = other.X".to_vec()),
-            workspace_module("b.nx", b"import \"./a.nx\" as base\nexport type X = base.Y".to_vec()),
+let root() = { value constructed }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "a.nx",
+                b"import \"./b.nx\" as other\nexport type Y = other.X".to_vec(),
+            ),
+            workspace_module(
+                "b.nx",
+                b"import \"./a.nx\" as base\nexport type X = base.Y".to_vec(),
+            ),
         ]);
         let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
         for file in ["a.nx", "b.nx"] {
-            assert!(diagnostics.iter().any(|d| d.code.as_deref() == Some("type-alias-cycle")
-                && d.labels.iter().any(|label| label.file == file)), "{diagnostics:?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.code.as_deref() == Some("type-alias-cycle")
+                        && d.labels.iter().any(|label| label.file == file)),
+                "{diagnostics:?}"
+            );
         }
     }
 
     #[test]
     fn identical_alias_names_in_different_modules_do_not_form_a_cycle() {
         let workspace = workspace(vec![
-            workspace_module("main.nx", br#"import "./a.nx" as a
+            workspace_module(
+                "main.nx",
+                br#"import "./a.nx" as a
 let value: a.X = 42
-let root() = { value }"#.to_vec()),
-            workspace_module("a.nx", b"import \"./b.nx\" as other\nexport type X = other.X".to_vec()),
+let root() = { value }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "a.nx",
+                b"import \"./b.nx\" as other\nexport type X = other.X".to_vec(),
+            ),
             workspace_module("b.nx", b"export type X = int".to_vec()),
         ]);
         let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());

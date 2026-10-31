@@ -1013,7 +1013,9 @@ pub fn display_type_pair(lhs: &Type, rhs: &Type) -> (String, String) {
 
 /// Hides compiler-synthesized import aliases in both display and collision detection.
 fn public_type_name(name: &Name) -> &str {
-    name.as_str().strip_prefix("$nxColor.").unwrap_or(name.as_str())
+    name.as_str()
+        .strip_prefix("$nxColor.")
+        .unwrap_or(name.as_str())
 }
 
 /// Returns true when the two types spell one display name for two different declarations.
