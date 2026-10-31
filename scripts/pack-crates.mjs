@@ -3,7 +3,7 @@
  *
  * `node scripts/pack-crates.mjs <version> <output-dir>` sets the workspace's version to `<version>`
  * and the requirements the runtime crates have on each other to exactly `<version>`, runs
- * `cargo package` for `nx-ir`, `nx-value` and `nx-ir-runtime`, writes the `.crate` files to
+ * `cargo package` for `nx-value`, `nx-ir` and `nx-ir-runtime`, writes the `.crate` files to
  * `<output-dir>`, and then restores the manifest and the lock file, so a local run leaves the tree
  * as it found it. It is the crates' counterpart of `pack-packages.mjs` and takes the same version.
  *
