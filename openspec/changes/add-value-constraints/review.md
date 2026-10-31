@@ -481,7 +481,7 @@ way in the spec delta, `design.md`, `proposal.md`, `tasks.md` and the website; t
 leaves out only an empty resolved range, so a hint that now warns still reaches the viewer, which
 intersects it with the bounds as `viewer` requires.
 
-### 🟡 Fixed - RF15 A hint outside a constrained alias that also empties the merged range gets two `editor-hint-range` warnings at one span, with messages that disagree on what the viewer does
+### ✅ Verified - RF15 A hint outside a constrained alias that also empties the merged range gets two `editor-hint-range` warnings at one span, with messages that disagree on what the viewer does
 - **Severity:** Low
 - **Evidence:** With `type Spacing = int where in 0..=64`, `visualizer Spacing = <ValueVisualizer
   max=64 />` and `<PropertyVisualizer property=padding min=100 />` on `padding: Spacing`, analysis
@@ -499,8 +499,9 @@ intersects it with the bounds as `viewer` requires.
   accept the pair and say so in `merged_range_warnings`'s doc and the `visualizer-declarations`
   requirement. Add a language-service test for the constrained-alias case either way.
 - **Fix:** `merged_range_warning` takes the value's constraint (`type_interval` of the alias or the property's type) and leaves a `min` or `max` the constraint does not admit to analysis, so that hint gets one `editor-hint-range`, the "outside the constraint" one. The doc comment of `merged_range_warnings` says so. New language-service test `a_hint_outside_the_constraint_warns_once_as_outside` (the `Spacing = int where in 0..=64` case).
+- **Verification:** Verified. Each `editor-hint-range` from the merged-range pass now skips a hint the constraint does not admit, by the same `contains` test (with the `float32` rounding) analysis uses. Checked with temporary language-service cases: an alias-typed, an optional alias-typed (`Spacing?`), a sequence (`Spacing+`) and an inherited inline-constrained property hinted `min=100` (and `max=-5`) over `0..=64` each get one warning, analysis's "outside the constraint"; a `min=64` against `< 64` and a `float32` `min=0.2` against `0.0..=0.1` likewise. A merged-empty range inside the constraint (`min=50` over the alias's `max=40`, plain and optional; inherited `min=20` over the base's `max=10`; `float32` `min=0.1` at the inclusive end) still gets the merged warning. The Value path cannot merge with another alias's hints (an alias of an alias may not have a visualizer), so it has no duplicate to remove. `cargo test -p nx-language-service`: 324 passed.
 
-### 🟡 Fixed - RF16 A float's derived step now depends on whether any constraint exists, not on the range offered: `float64 where >= 0.0` hinted `min=0 max=1` steps by `0.1`, a plain `float64` with the same hints by `1`
+### ✅ Verified - RF16 A float's derived step now depends on whether any constraint exists, not on the range offered: `float64 where >= 0.0` hinted `min=0 max=1` steps by `0.1`, a plain `float64` with the same hints by `1`
 - **Severity:** Low
 - **Evidence:** `packages/viewer/src/edit.ts:121-125` now derives the step from `low`/`high` after
   the hints narrow the bounds, so a half-bounded constraint whose other end comes from a hint gets a
@@ -515,8 +516,9 @@ intersects it with the bounds as `viewer` requires.
   `viewer` wording beyond the constraint requirement), or keep requiring both constraint ends and
   say so in the spec. Add a test for the half-bounded case whichever is chosen.
 - **Fix:** `boundedHints` derives the step through one `derivedStep` helper for every float: from the narrowed range when there are bounds, and from the hints alone when there are none, so a plain `float64` hinted `min=0 max=1` steps by `0.1`, as `float64 where >= 0.0` with the same hints does. The viewer delta says the hints alone give the range when there are no bounds, with an added `AND` clause, and the visualizer reference says the same. The viewer fixture gains `plain` and `upper` properties asserting both.
+- **Verification:** Verified. Called the built `boundedHints` directly: a plain `float64` hinted `min=0 max=1` and a half-bounded one give `step: 0.1`; integers, an explicit `step` hint, one-ended hints, an empty hint range with no bounds (`min=2 max=1`, no step), equal ends and a missing base give no derived step; an empty or non-overlapping hint range with bounds falls back to the bounds and steps from them; a `float32` without bounds hinted `0..0.3` steps by `0.01`, and with bounds keeps its `float32` flag and shortest ends. `resolveType` follows aliases, so an unconstrained alias of `float64` steps too. With no bounds the only change is the added `step`, as the delta's "but for the step below, change nothing for one without" says; the delta's scenario `AND` clause and the visualizer reference describe the same rule. Viewer `npm test`: 231 passed; `openspec validate --strict` passes.
 
-### 🟡 Fixed - RF17 No checker test covers the new warning through an alias-typed, optional, sequence or inherited property
+### ✅ Verified - RF17 No checker test covers the new warning through an alias-typed, optional, sequence or inherited property
 - **Severity:** Low
 - **Evidence:** `a_hint_wider_than_the_constraint_is_a_warning`
   (`crates/nx-api/src/visualizer_declarations_tests.rs:261-288`) covers inline-constrained
@@ -530,6 +532,7 @@ intersects it with the bounds as `viewer` requires.
   sequence one (`maybe?: Ratio max=5`, `many: Ratio+ max=5`), each expecting one
   `editor-hint-range` that names `float32 where in 0.0..=1.0`.
 - **Fix:** `a_hint_wider_than_the_constraint_is_a_warning` now also covers a `PropertyVisualizer` on a property typed `Ratio`, `Ratio?` and `Ratio+`, and on a field inherited from an abstract base; each gets one warning.
+- **Verification:** Verified. The four new bodies (`Ratio`, `Ratio?`, `Ratio+`, inherited `int where in 1..=5`) each assert one `editor-hint-range`; checked temporarily that each is the "outside the constraint" warning naming the property and constraint and that none of the bodies has an error. The test asserts only the count, not the message, which is adequate since the code filter and the single hint leave no other source. `cargo test -p nx-api --lib visualizer_declarations`: 44 passed.
 
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
