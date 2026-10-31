@@ -1,0 +1,167 @@
+{
+  "pick": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "diagnostics": []
+  },
+  "shade": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "r": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "b": {
+          "type": "number",
+          "maximum": 0.9999999403953552
+        },
+        "u": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "exclusiveMaximum": 1.0
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "p": {
+          "type": "integer",
+          "maximum": 2147483647,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "r",
+        "b",
+        "u",
+        "n",
+        "p"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "number"
+    },
+    "diagnostics": []
+  },
+  "paint": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "p": {
+          "$ref": "#/$defs/Paint"
+        }
+      },
+      "required": [
+        "p"
+      ],
+      "additionalProperties": false,
+      "$defs": {
+        "Paint": {
+          "type": "object",
+          "properties": {
+            "opacity": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "layers": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          "required": [
+            "opacity"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/Paint",
+      "$defs": {
+        "Paint": {
+          "type": "object",
+          "properties": {
+            "$type": {
+              "const": "Paint"
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "layers": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          "required": [
+            "$type",
+            "opacity",
+            "layers"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "diagnostics": []
+  },
+  "counts": {
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "ns": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "ns"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 1
+    },
+    "diagnostics": []
+  }
+}

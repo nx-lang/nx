@@ -412,7 +412,9 @@ fn type_ref_holds_function_ref(ty: &TypeRef) -> bool {
         TypeRef::AnyFunction { .. } => true,
         TypeRef::Name(_) => false,
         TypeRef::Applied { args, .. } => args.iter().any(|(_, ty)| type_ref_holds_function_ref(ty)),
-        TypeRef::Seq { inner, .. } => type_ref_holds_function_ref(inner),
+        TypeRef::Seq { inner, .. } | TypeRef::Constrained { base: inner, .. } => {
+            type_ref_holds_function_ref(inner)
+        }
         TypeRef::Function {
             params,
             return_type,
@@ -1006,6 +1008,8 @@ fn ts_type(ty: &TypeRef, types: ModuleTypes<'_>) -> String {
         // `T?` in a type position is `T | null`; `T+` and `T*` are both `T[]`, since TypeScript
         // has no static spelling for non-emptiness — the runtime checks that at the NX boundary.
         TypeRef::Seq { inner, occ } if !occ.admits_many() => ts_nullable(ts_type(inner, types)),
+        // A host type keeps the base: the runtime checks the constraint at the NX boundary.
+        TypeRef::Constrained { base, .. } => ts_type(base, types),
         TypeRef::Seq { inner, .. } => {
             let inner = ts_type(inner, types);
             // `(args) => string[]` would make the result an array, not the function.

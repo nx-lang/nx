@@ -2339,6 +2339,29 @@ visualizer Box = <ElementVisualizer>
 }
 
 #[test]
+fn a_hint_outside_the_constraint_warns_once_as_outside() {
+    let warnings = merged_range_warnings_of(
+        r#"import "@nx/visualizer"
+
+export type Spacing = int where in 0..=64
+export type Box = { padding:Spacing = 8 }
+
+visualizer Spacing = <ValueVisualizer max=64 />
+visualizer Box = <ElementVisualizer>
+  <PropertyVisualizer property=padding min=100 />
+</ElementVisualizer>
+"#,
+    );
+    assert_eq!(warnings.len(), 1, "analysis's alone: {warnings:?}");
+    assert_eq!(warnings[0].0, "min=100");
+    assert!(
+        warnings[0].1.contains("outside the constraint"),
+        "{}",
+        warnings[0].1
+    );
+}
+
+#[test]
 fn preview_metadata_resolves_inheritance_and_entry_overrides() {
     let source = "import \"@nx/visualizer\"\nabstract external component <Base/>\nexternal component <Derived extends Base/>\nvisualizer Base = <ElementVisualizer icon=\"frame\" preview=<PreviewVisualizer renderer=\"base.renderer\"/>/>\nvisualizer Derived = <ElementVisualizer icon=\"circle\"/>\n<Derived/>";
     let snapshot = snapshot_for(source);
@@ -2470,4 +2493,152 @@ visualizer g.Rect = <ElementVisualizer icon="host-rect"/>"#,
         .declarations
         .iter()
         .any(|d| d.module.starts_with("@nx/graphics/")));
+}
+
+// ---- Value constraints --------------------------------------------------------------------------
+
+#[test]
+fn a_constrained_property_carries_its_bounds_through_aliases_too() {
+    let tree = tree_for(
+        "type Unit = float64 where >= 0.0 && < 1.0
+type Count = int where > 0
+type Paint = { opacity: float64 where in 0.0..=1.0 layer: Unit counts: Count* plain: float64 }
+let paint = <Paint opacity=0.5 layer=0.25 counts={ 1 2 } plain=3.0 />
+",
+    );
+    let paint = entry(&tree, "Paint");
+    let property = |name: &str| {
+        paint
+            .properties
+            .iter()
+            .find(|property| property.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    assert_eq!(property("opacity").ty, "float64 where in 0.0..=1.0");
+    assert_eq!(
+        property("opacity").bounds,
+        Some(SourceBounds {
+            min: Some(SourceNumber(0.0)),
+            max: Some(SourceNumber(1.0)),
+            min_exclusive: None,
+            max_exclusive: None,
+        })
+    );
+    let layer = SourceBounds {
+        min: Some(SourceNumber(0.0)),
+        max: Some(SourceNumber(1.0)),
+        min_exclusive: None,
+        max_exclusive: Some(true),
+    };
+    assert_eq!(property("layer").bounds, Some(layer.clone()));
+    // An integer's exclusive end reads as the inclusive one next to it, for a sequence's items too.
+    assert_eq!(
+        property("counts").bounds,
+        Some(SourceBounds {
+            min: Some(SourceNumber(1.0)),
+            ..SourceBounds::default()
+        })
+    );
+    assert_eq!(property("plain").bounds, None);
+    let json = serde_json::to_value(property("layer")).unwrap();
+    assert_eq!(
+        json["bounds"],
+        serde_json::json!({ "min": 0.0, "max": 1.0, "maxExclusive": true })
+    );
+    assert_eq!(entry(&tree, "Unit").bounds, Some(layer));
+}
+
+#[test]
+fn a_constrained_alias_and_value_carry_their_bounds() {
+    let tree = tree_for(
+        "type Unit = float64 where >= 0.0 && < 1.0
+let half: Unit = 0.5
+let shown = <Show value={half} />
+type Show = { value: Unit }
+",
+    );
+    let unit = entry(&tree, "Unit");
+    assert_eq!(unit.ty.as_deref(), Some("float64 where >= 0.0 && < 1.0"));
+    assert_eq!(
+        unit.bounds.as_ref().and_then(|bounds| bounds.max_exclusive),
+        Some(true)
+    );
+    let half = entry(&tree, "half");
+    assert_eq!(half.bounds, unit.bounds);
+}
+
+#[test]
+fn a_constraint_on_an_alias_of_a_plain_number_carries_its_bounds() {
+    let tree = tree_for(
+        "type Weight = int
+type Heavy = Weight where >= 10
+type Load = { w: Weight where in 1..=1000 h: Heavy plain: Weight }
+let load = <Load w=5 h=20 plain=3 />
+",
+    );
+    let at_least_ten = SourceBounds {
+        min: Some(SourceNumber(10.0)),
+        ..SourceBounds::default()
+    };
+    assert_eq!(entry(&tree, "Weight").bounds, None);
+    assert_eq!(entry(&tree, "Heavy").bounds, Some(at_least_ten.clone()));
+    let load = entry(&tree, "Load");
+    let property = |name: &str| {
+        load.properties
+            .iter()
+            .find(|property| property.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    assert_eq!(
+        property("w").bounds,
+        Some(SourceBounds {
+            min: Some(SourceNumber(1.0)),
+            max: Some(SourceNumber(1000.0)),
+            ..SourceBounds::default()
+        })
+    );
+    assert_eq!(property("h").bounds, Some(at_least_ten));
+    assert_eq!(property("plain").bounds, None);
+}
+
+#[test]
+fn a_union_case_property_carries_its_bounds() {
+    let tree = tree_for(
+        "type Shape =
+  | dot { radius: float64 where > 0.0 }
+  | plain { size: float64 }
+let shape = Shape.dot { radius: 1.0 }
+",
+    );
+    let shape = entry(&tree, "Shape");
+    let case = |name: &str| {
+        shape
+            .cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    assert_eq!(
+        case("dot").properties[0].bounds,
+        Some(SourceBounds {
+            min: Some(SourceNumber(0.0)),
+            min_exclusive: Some(true),
+            ..SourceBounds::default()
+        })
+    );
+    assert_eq!(case("plain").properties[0].bounds, None);
+}
+
+#[test]
+fn a_numeric_pattern_is_one_literal_spelled_as_written() {
+    let tree = tree_for(
+        "let band(x: float64) = { if x is { in 0.0..0.5 => \"low\" > 0.5 && <= 1.0 => \"high\" else => \"off\" } }\n",
+    );
+    let values = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == SourceRole::Literal && node.key.contains(".pattern["))
+        .map(|node| node.value.clone().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(values, ["in 0.0..0.5", "> 0.5 && <= 1.0"]);
 }

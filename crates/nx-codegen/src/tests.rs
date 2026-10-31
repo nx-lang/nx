@@ -3275,3 +3275,32 @@ let root() = <Brand accent=#1234/>
     );
     assert_generated_typescript_artifact_type_checks(&artifact);
 }
+
+/// Generated JavaScript checks a value bound to a constrained site as the IR runtimes do, and both
+/// targets type-check.
+#[test]
+fn generated_javascript_checks_a_value_constraint() {
+    let artifact = artifact_from_source(
+        "type Unit = float64 where >= 0.0 && < 1.0\n\
+         let fade(amount: Unit) = { amount }\n\
+         let twice(x: float64) = { fade(x * 2.0) }\n\
+         let root(x: float64) = { twice(x) }\n",
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        "console.log(JSON.stringify(m.root(0.25))); \
+         for (const x of [0.5, NaN]) { \
+           try { m.root(x); console.log(\"passed\"); } \
+           catch (error) { console.log(String(error.message ?? error)); } \
+         }",
+    );
+    let lines = output.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], "0.5", "{output}");
+    for line in &lines[1..] {
+        assert!(
+            line.contains("amount") && !line.contains("passed"),
+            "{output}"
+        );
+    }
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}

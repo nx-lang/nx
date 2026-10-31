@@ -136,6 +136,19 @@ let ratio = 1.5
 let greeting = "Say \"hi\" \\ bye"
 let lines = "one\ntwo"
 
+// Constraints: opacity is a float64 where in 0.0..=1.0, so its steppers move by 0.1 and stop at 1.0,
+// and typing 1.5 reads "At most 1". layer's type, Unit, stops short of 1: a step onto 1.0 leaves the
+// value as it is, and typing 1 reads "Below 1". columns is an int where in 1..=1000 with a max=12
+// hint, so 20 reads "At most 12". Hover a property's name for its constraint.
+type Unit = float64 where >= 0.0 && < 1.0
+type Layout = {
+  opacity: float64 where in 0.0..=1.0 = 1.0
+  layer: Unit = 0.5
+  columns: int where in 1..=1000 = 4
+}
+visualizer Layout = <ElementVisualizer><PropertyVisualizer property=columns max=12 /></ElementVisualizer>
+let layout = <Layout opacity=0.9 layer=0.5 columns=4 />
+
 // Text content: each run edits as one line, and the space before {total} stays. Typing a < b is
 // refused, and the run over two lines does not edit.
 let welcome = <Note>Welcome back</Note>

@@ -4,7 +4,7 @@
  */
 import type { SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
 
-import { isHexColor, isNumericLiteral, type EditTarget, type TypeEditor } from "./edit.js";
+import { isHexColor, isNumericLiteral, type EditorHints, type EditTarget, type TypeEditor } from "./edit.js";
 import { decodeString } from "./source.js";
 
 /** A boolean's mark, as the reading draws it. */
@@ -95,9 +95,10 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
 /**
  * `text`, a numeric literal, moved by `steps` of `hints.step`, or of one: an integer stays one, and a
  * real keeps as many decimals as it or the step has; it stays within `hints.min` and `hints.max`,
- * and unless `signed`, it stops at zero. Nothing when `text` is not a decimal number.
+ * and unless `signed`, it stops at zero. A step onto or past an exclusive end leaves `text` as it
+ * is. Nothing when `text` is not a decimal number.
  */
-export function stepNumber(text: string, steps: number, signed = true, hints?: SourceEditorHints): string | undefined {
+export function stepNumber(text: string, steps: number, signed = true, hints?: EditorHints): string | undefined {
   const trimmed = text.trim();
   if (!isNumericLiteral(trimmed) || /[xXeE]/.test(trimmed)) {
     return undefined;
@@ -110,12 +111,16 @@ export function stepNumber(text: string, steps: number, signed = true, hints?: S
     next = Math.max(0, next);
   }
   next = clamp(next, hints);
-  return decimals === 0 ? String(Math.round(next)) : next.toFixed(decimals);
+  const shown = decimals === 0 ? String(Math.round(next)) : next.toFixed(decimals);
+  return rangeProblem(shown, hints) === undefined || rangeProblem(trimmed, hints) !== undefined ? shown : trimmed;
 }
 
-/** How many decimals a number is written with. */
+/** How many decimals a number is written with, `1e-7` with seven. */
 function decimalsOf(text: string): number {
-  return text.includes(".") ? text.length - text.indexOf(".") - 1 : 0;
+  const exponent = /[eE]([+-]?\d+)$/.exec(text);
+  const mantissa = exponent === null ? text : text.slice(0, exponent.index);
+  const written = mantissa.includes(".") ? mantissa.length - mantissa.indexOf(".") - 1 : 0;
+  return Math.max(0, written - Number(exponent?.[1] ?? 0));
 }
 
 /** `value` kept within the range `hints` gives, if any. */
@@ -125,20 +130,33 @@ function clamp(value: number, hints: SourceEditorHints | undefined): number {
   return low > high ? value : Math.min(high, Math.max(low, value));
 }
 
-/** Why the number `entry` is outside the range its hints give, as `At most 64`, or nothing. */
-export function rangeProblem(entry: string, hints: SourceEditorHints | undefined): string | undefined {
-  const value = Number(entry);
-  if (hints === undefined || !Number.isFinite(value)) {
+/**
+ * Why the number `entry` is outside the range its hints give, as `At most 64`, or `Below 1` for an
+ * exclusive end, or nothing.
+ */
+export function rangeProblem(entry: string, hints: EditorHints | undefined): string | undefined {
+  if (hints === undefined || !Number.isFinite(Number(entry))) {
     return undefined;
   }
+  // A `float32` is compared as the checker compares it: the value and the bounds rounded to `float32`.
+  const at = (number: number): number => (hints.float32 === true ? Math.fround(number) : number);
+  const value = at(Number(entry));
+  const min = hints.min === undefined ? undefined : at(hints.min);
+  const max = hints.max === undefined ? undefined : at(hints.max);
   if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
     // An empty range bounds nothing.
     return undefined;
   }
-  if (hints.min !== undefined && value < hints.min) {
+  if (min !== undefined && hints.minExclusive === true && value <= min) {
+    return `Above ${hints.min}`;
+  }
+  if (min !== undefined && value < min) {
     return `At least ${hints.min}`;
   }
-  if (hints.max !== undefined && value > hints.max) {
+  if (max !== undefined && hints.maxExclusive === true && value >= max) {
+    return `Below ${hints.max}`;
+  }
+  if (max !== undefined && value > max) {
     return `At most ${hints.max}`;
   }
   return undefined;

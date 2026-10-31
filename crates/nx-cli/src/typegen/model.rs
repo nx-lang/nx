@@ -1937,6 +1937,7 @@ impl CachedImportedLibrary {
             TypeRef::Seq { inner, occ } if !occ.admits_many() => {
                 self.type_ref_is_reference(inner, seen_aliases)
             }
+            TypeRef::Constrained { base, .. } => self.type_ref_is_reference(base, seen_aliases),
             TypeRef::Seq { .. } | TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => true,
             // An applied type is its record: a record is always a reference type.
             TypeRef::Applied { name, .. } | TypeRef::Name(name) => {
@@ -2303,7 +2304,9 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
                 rewrite_type_ref_names(arg, rename);
             }
         }
-        TypeRef::Seq { inner, .. } => rewrite_type_ref_names(inner, rename),
+        TypeRef::Seq { inner, .. } | TypeRef::Constrained { base: inner, .. } => {
+            rewrite_type_ref_names(inner, rename)
+        }
         TypeRef::Function {
             params,
             return_type,

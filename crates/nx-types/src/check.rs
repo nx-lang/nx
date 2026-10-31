@@ -255,6 +255,20 @@ pub fn analyze_prepared_module(
         .iter()
         .filter_map(|(expr, primitive)| Some((*expr, primitive.hir_type()?)))
         .collect();
+    let constraint_checks: FxHashMap<_, _> = ctx
+        .constraint_checks()
+        .iter()
+        .filter_map(|(expr, check)| {
+            Some((
+                *expr,
+                nx_hir::ConstraintCheckRewrite {
+                    base: check.base.hir_type()?,
+                    interval: check.interval,
+                    site: check.site.clone(),
+                },
+            ))
+        })
+        .collect();
     let consumed_type_arguments = ctx.consumed_type_arguments().clone();
     let range_for_expressions = ctx.range_for_expressions().clone();
     let element_type_arguments = ctx.resolved_type_arguments().clone();
@@ -362,6 +376,28 @@ pub fn analyze_prepared_module(
     // like for every other expression.
     for created in nx_hir::apply_range_constructions(&mut prepared_module) {
         type_env.set_expr_type(created, Type::boolean());
+    }
+
+    // A value that binds to a constrained site its own type does not prove is wrapped in a
+    // runtime check, last, so the check holds the value every other rewrite produced. The check
+    // takes the value's id and the value moves; what is keyed by the id moves with it.
+    let mut range_for_expressions = range_for_expressions;
+    for (check, moved) in nx_hir::apply_constraint_checks(&mut prepared_module, &constraint_checks)
+    {
+        let value_ty = type_env
+            .get_expr_type(check)
+            .cloned()
+            .unwrap_or(Type::Error);
+        let rewrite = &constraint_checks[&check];
+        let item = Type::constrained(
+            crate::Primitive::from_hir_type(rewrite.base),
+            rewrite.interval,
+        );
+        type_env.set_expr_type(moved, value_ty.clone());
+        type_env.set_expr_type(check, Type::seq(item, value_ty.occurrence()));
+        if range_for_expressions.remove(&check) {
+            range_for_expressions.insert(moved);
+        }
     }
 
     let prepared_bindings = collect_prepared_bindings(&prepared_module);

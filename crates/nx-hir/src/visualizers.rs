@@ -172,7 +172,12 @@ fn classify(
             not_allowed("it is a derived property union")
         }
         Item::Union(_) => not_allowed("it is a union, and unions cannot have visualizers yet"),
-        Item::TypeAlias(alias) => match &alias.ty {
+        // A constrained alias of a primitive, `type Ratio = float32 where in 0.0..=1.0`, is still
+        // an alias of that primitive.
+        Item::TypeAlias(alias) => match match &alias.ty {
+            ast::TypeRef::Constrained { base, .. } => base.as_ref(),
+            ty => ty,
+        } {
             ast::TypeRef::Name(name) if is_primitive_type_name(name.as_str()) => Ok(VisualizerTarget {
                 origin,
                 declared_name: alias.name.clone(),

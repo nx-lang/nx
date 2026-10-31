@@ -262,6 +262,10 @@ impl<'a> Explainer<'a> {
                 "<function ... />: {}",
                 self.ty(self.int_operand(entry, 1, "function reference result")?)?
             ),
+            kinds::ty::CONSTRAINED => {
+                let base = self.ty(self.int_operand(entry, 1, "constrained base")?)?;
+                format!("{base} where {}", self.interval(entry)?)
+            }
             other => return Err(self.malformed(format!("unknown type kind {other}"))),
         })
     }
@@ -276,7 +280,10 @@ impl<'a> Explainer<'a> {
             .and_then(|entry| entry.as_list())
             .and_then(|entry| entry.first())
             .and_then(IrItem::as_int);
-        let is_function = matches!(kind, Some(kinds::ty::FUNCTION | kinds::ty::ANY_FUNCTION));
+        let is_function = matches!(
+            kind,
+            Some(kinds::ty::FUNCTION | kinds::ty::ANY_FUNCTION | kinds::ty::CONSTRAINED)
+        );
         Ok(if is_function {
             format!("({text})")
         } else {
@@ -710,6 +717,30 @@ impl<'a> Explainer<'a> {
                 lines[last].push('?');
                 lines
             }
+            kinds::node::CHECK => {
+                let operand = self.node(self.int_operand(entry, 1, "check")?)?;
+                let ty = self.ty(self.int_operand(entry, 2, "check")?)?;
+                let site = self.string(self.int_operand(entry, 3, "check")?)?;
+                join_inline(
+                    &[
+                        vec![format!("check {site}:")],
+                        operand,
+                        vec![format!("as {ty}")],
+                    ],
+                    "(",
+                    " ",
+                    ")",
+                )
+            }
+            kinds::node::INTERVAL => {
+                let index = self.int_operand(entry, 1, "interval")?;
+                let ty = usize::try_from(index)
+                    .ok()
+                    .and_then(|index| self.artifact.types.get(index))
+                    .ok_or_else(|| self.malformed(format!("type index {index} is out of range")))?;
+                let ty = self.list(ty, "type")?;
+                vec![self.interval(ty)?]
+            }
             kinds::node::COALESCE => {
                 let lhs = self.node(self.int_operand(entry, 1, "coalesce")?)?;
                 let rhs = self.node(self.int_operand(entry, 2, "coalesce")?)?;
@@ -792,6 +823,33 @@ impl<'a> Explainer<'a> {
             .iter()
             .map(|index| self.node(self.int(index, "node index")?))
             .collect()
+    }
+
+    /// A constrained type entry's interval, spelled as the pattern source writes.
+    fn interval(&self, entry: &[IrItem]) -> Result<String, ExplainError> {
+        let low = self.int_operand(entry, 2, "constrained low end")?;
+        let high = self.int_operand(entry, 3, "constrained high end")?;
+        let flags = self.int_operand(entry, 4, "constrained flags")?;
+        let low_exclusive = flags & kinds::ty::CONSTRAINED_LOW_EXCLUSIVE != 0;
+        let high_exclusive = flags & kinds::ty::CONSTRAINED_HIGH_EXCLUSIVE != 0;
+        let mut terms = Vec::new();
+        if low >= 0 && high >= 0 && !low_exclusive {
+            return Ok(format!(
+                "in {}{}{}",
+                self.constant(low)?,
+                if high_exclusive { ".." } else { "..=" },
+                self.constant(high)?
+            ));
+        }
+        if low >= 0 {
+            let op = if low_exclusive { ">" } else { ">=" };
+            terms.push(format!("{op} {}", self.constant(low)?));
+        }
+        if high >= 0 {
+            let op = if high_exclusive { "<" } else { "<=" };
+            terms.push(format!("{op} {}", self.constant(high)?));
+        }
+        Ok(terms.join(" && "))
     }
 
     fn constant(&self, index: i64) -> Result<String, ExplainError> {

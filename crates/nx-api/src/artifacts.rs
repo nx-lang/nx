@@ -4317,9 +4317,62 @@ fn type_from_function_binding(ty: &Type) -> Option<TypeRef> {
     }
 }
 
+/// The pattern that spells `interval` on `base`: comparison terms for each end.
+fn interval_pattern(
+    base: nx_types::Primitive,
+    interval: &nx_types::Interval,
+) -> nx_hir::ast::NumericPattern {
+    use nx_hir::ast::{CompareOp, Literal, OrderedFloat, PatternBound, PatternTerm};
+    let bound = |value: f64| PatternBound {
+        value: Some(if base.is_integer() {
+            Literal::Int(value as i64)
+        } else {
+            Literal::Float(OrderedFloat(value))
+        }),
+        text: if base == nx_types::Primitive::Float32 {
+            nx_hir::ast::spell_float32_bound(value)
+        } else {
+            nx_hir::ast::spell_bound(value, base.is_float())
+        }
+        .into(),
+        span: nx_diagnostics::TextSpan::default(),
+    };
+    let mut terms = Vec::new();
+    if let Some(low) = interval.low {
+        terms.push(PatternTerm::Compare {
+            op: if low.exclusive {
+                CompareOp::Gt
+            } else {
+                CompareOp::Ge
+            },
+            bound: bound(low.value.0),
+        });
+    }
+    if let Some(high) = interval.high {
+        terms.push(PatternTerm::Compare {
+            op: if high.exclusive {
+                CompareOp::Lt
+            } else {
+                CompareOp::Le
+            },
+            bound: bound(high.value.0),
+        });
+    }
+    nx_hir::ast::NumericPattern {
+        terms,
+        span: nx_diagnostics::TextSpan::default(),
+    }
+}
+
 fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
     match ty {
         Type::Primitive(primitive) => Some(TypeRef::name(primitive.as_str())),
+        // A constrained type publishes as its base and the pattern its interval spells, so an
+        // importing module resolves the same constraint.
+        Type::Constrained { base, interval } => Some(TypeRef::Constrained {
+            base: Box::new(TypeRef::name(base.as_str())),
+            pattern: interval_pattern(*base, interval),
+        }),
         Type::Seq { item, occ } => Some(TypeRef::seq(type_to_type_ref(item)?, *occ)),
         Type::Function { params, ret } => Some(TypeRef::function(
             params
@@ -7221,27 +7274,49 @@ export let <Edge o: Outline /> = <div weight={o.weight} />"#
     #[test]
     fn cross_module_alias_cycles_report_errors_in_the_defining_modules() {
         let workspace = workspace(vec![
-            workspace_module("main.nx", br#"import "./b.nx" as b
+            workspace_module(
+                "main.nx",
+                br#"import "./b.nx" as b
 let value: b.X = 42
 let constructed: b.X = <b.X />
-let root() = { value constructed }"#.to_vec()),
-            workspace_module("a.nx", b"import \"./b.nx\" as other\nexport type Y = other.X".to_vec()),
-            workspace_module("b.nx", b"import \"./a.nx\" as base\nexport type X = base.Y".to_vec()),
+let root() = { value constructed }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "a.nx",
+                b"import \"./b.nx\" as other\nexport type Y = other.X".to_vec(),
+            ),
+            workspace_module(
+                "b.nx",
+                b"import \"./a.nx\" as base\nexport type X = base.Y".to_vec(),
+            ),
         ]);
         let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
         for file in ["a.nx", "b.nx"] {
-            assert!(diagnostics.iter().any(|d| d.code.as_deref() == Some("type-alias-cycle")
-                && d.labels.iter().any(|label| label.file == file)), "{diagnostics:?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.code.as_deref() == Some("type-alias-cycle")
+                        && d.labels.iter().any(|label| label.file == file)),
+                "{diagnostics:?}"
+            );
         }
     }
 
     #[test]
     fn identical_alias_names_in_different_modules_do_not_form_a_cycle() {
         let workspace = workspace(vec![
-            workspace_module("main.nx", br#"import "./a.nx" as a
+            workspace_module(
+                "main.nx",
+                br#"import "./a.nx" as a
 let value: a.X = 42
-let root() = { value }"#.to_vec()),
-            workspace_module("a.nx", b"import \"./b.nx\" as other\nexport type X = other.X".to_vec()),
+let root() = { value }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "a.nx",
+                b"import \"./b.nx\" as other\nexport type X = other.X".to_vec(),
+            ),
             workspace_module("b.nx", b"export type X = int".to_vec()),
         ]);
         let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());

@@ -3,6 +3,7 @@
 //! Defines the core `Type` enum and related types.
 
 pub use nx_hir::ast::Occurrence;
+pub use nx_hir::ast::{Interval, IntervalEnd};
 use nx_hir::{same_declaration, Name};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -60,6 +61,20 @@ impl Primitive {
             Primitive::Boolean => "boolean",
             Primitive::Never => "never",
         }
+    }
+
+    /// The primitive a source name spells, or `None` for any other name.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "int" => Primitive::Int,
+            "int32" => Primitive::Int32,
+            "int64" => Primitive::Int64,
+            "float32" => Primitive::Float32,
+            "float64" => Primitive::Float64,
+            "string" => Primitive::String,
+            "boolean" => Primitive::Boolean,
+            _ => return None,
+        })
     }
 
     /// Returns true if this is any integer type (int, int32, int64).
@@ -274,6 +289,23 @@ pub enum Type {
     /// replaced by the resolved union case type at the binding site, and reaching a
     /// site that supplies no expected type is a diagnostic rather than a silent success.
     ContextualName(Name),
+
+    /// A numeric primitive narrowed to an interval: its base type plus a check.
+    ///
+    /// <para>A value of the type is a value of the base, with the same representation and
+    /// operations. The type is structural: an alias of one and the same constraint written inline
+    /// are equal, and on an integer base the interval's ends are always inclusive, so
+    /// `int where > 0` and `int where >= 1` are one type. [`Type::constrained`] is the one
+    /// constructor and keeps that normalization; it never builds one with an unbounded
+    /// interval.</para>
+    ///
+    /// Example: `float32 where in 0.0..=1.0`, `int where >= 1`
+    Constrained {
+        /// The numeric primitive the values belong to.
+        base: Primitive,
+        /// The values of the base the type admits.
+        interval: Interval,
+    },
 
     /// Unknown type (inference failed or error)
     ///
@@ -722,6 +754,54 @@ impl Type {
         }
     }
 
+    /// The numeric `base` narrowed to `interval`: the one constructor of [`Type::Constrained`].
+    ///
+    /// <para>On an integer base each exclusive end becomes the inclusive one next to it. An
+    /// unbounded interval adds nothing, so it gives the base itself.</para>
+    pub fn constrained(base: Primitive, interval: Interval) -> Self {
+        let interval = if base.is_integer() {
+            interval.normalized_for_integers()
+        } else {
+            interval
+        };
+        if interval.is_all() {
+            Type::Primitive(base)
+        } else {
+            Type::Constrained { base, interval }
+        }
+    }
+
+    /// The base and interval of a constrained item type, or `None` for any other item.
+    pub fn constraint(&self) -> Option<(Primitive, Interval)> {
+        match self.item() {
+            Type::Constrained { base, interval } => Some((*base, *interval)),
+            _ => None,
+        }
+    }
+
+    /// The type with any constraint on its item removed, its occurrence kept: `float32?` for
+    /// `(float32 where in 0.0..=1.0)?`. What an operation on a constrained value computes at.
+    pub fn unconstrained(&self) -> Type {
+        match self {
+            Type::Constrained { base, .. } => Type::Primitive(*base),
+            Type::Seq { item, occ } if matches!(**item, Type::Constrained { .. }) => {
+                Type::seq(item.unconstrained(), *occ)
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// The numeric primitive of the item type, constrained or not.
+    pub fn numeric_item(&self) -> Option<Primitive> {
+        match self.item() {
+            Type::Primitive(primitive)
+            | Type::Constrained {
+                base: primitive, ..
+            } if primitive.is_numeric() => Some(*primitive),
+            _ => None,
+        }
+    }
+
     /// Creates a `T?` type.
     pub fn optional(item: Type) -> Self {
         Type::seq(item, Occurrence::OPTIONAL)
@@ -926,6 +1006,25 @@ impl Type {
             }
         }
 
+        // A constrained value is a value of its base, so it satisfies whatever its base does; it
+        // satisfies another constrained type when every value it admits lies in that one's
+        // interval. An unconstrained value never satisfies a constrained type here: whether one
+        // may be bound there with a check is the binding site's decision.
+        match (self, other) {
+            (Type::Constrained { base, .. }, Type::Primitive(target)) => {
+                return base.widens_to(*target);
+            }
+            (
+                Type::Constrained { base, interval },
+                Type::Constrained {
+                    base: target,
+                    interval: wanted,
+                },
+            ) => return base.widens_to(*target) && interval.is_within(wanted),
+            (_, Type::Constrained { .. }) if !matches!(self, Type::Seq { .. }) => return false,
+            _ => {}
+        }
+
         // Occurrences follow the lattice, and the items follow this relation. An exactly-one
         // value at a suffixed site is a sequence of one — the one-level lift — which is the
         // `(item, Seq)` pairing below; a suffixed value never satisfies an exactly-one site.
@@ -988,6 +1087,14 @@ impl fmt::Display for Type {
             Type::Parameter(param) => write!(f, "{}", param.name),
             Type::Variable(id) => write!(f, "T{}", id),
             Type::ContextualName(name) => write!(f, "{}", name),
+            Type::Constrained { base, interval } => {
+                let spelling = if *base == Primitive::Float32 {
+                    interval.spelling_float32()
+                } else {
+                    interval.spelling(base.is_float())
+                };
+                write!(f, "{} where {}", base, spelling)
+            }
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),
         }
@@ -1013,7 +1120,9 @@ pub fn display_type_pair(lhs: &Type, rhs: &Type) -> (String, String) {
 
 /// Hides compiler-synthesized import aliases in both display and collision detection.
 fn public_type_name(name: &Name) -> &str {
-    name.as_str().strip_prefix("$nxColor.").unwrap_or(name.as_str())
+    name.as_str()
+        .strip_prefix("$nxColor.")
+        .unwrap_or(name.as_str())
 }
 
 /// Returns true when the two types spell one display name for two different declarations.
@@ -1112,7 +1221,9 @@ fn qualified_postfix_display(inner: &Type, suffix: &str) -> String {
 
 fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) -> fmt::Result {
     match inner {
-        Type::Function { .. } | Type::AnyFunction { .. } => write!(f, "({inner}){suffix}"),
+        Type::Function { .. } | Type::AnyFunction { .. } | Type::Constrained { .. } => {
+            write!(f, "({inner}){suffix}")
+        }
         _ => write!(f, "{inner}{suffix}"),
     }
 }

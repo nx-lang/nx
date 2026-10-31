@@ -246,9 +246,9 @@ function sample(schema: NxJsonSchemaValue, defs: Record<string, NxJsonSchema>, o
     case "boolean":
       return true;
     case "integer":
-      return 1;
+      return bounded(node, 1, options);
     case "number":
-      return 1.5;
+      return bounded(node, 1.5, options);
     case "null":
       return null;
     case "array":
@@ -270,6 +270,34 @@ function sample(schema: NxJsonSchemaValue, defs: Record<string, NxJsonSchema>, o
       // `{}`: the top type admits anything.
       return { any: [1] };
   }
+}
+
+/**
+ * A number valid against `node`'s bounds: an inclusive end itself, the high one when every property
+ * is sampled and the low one otherwise, so both ends of a constraint reach the runtime; between two
+ * exclusive ends, their midpoint; past one exclusive end, one beyond it; and `fallback` when it has
+ * no bounds.
+ */
+function bounded(node: NxJsonSchema, fallback: number, options: SampleOptions): number {
+  const number = (key: string): number | undefined => (typeof node[key] === "number" ? (node[key] as number) : undefined);
+  const minimum = number("minimum");
+  const maximum = number("maximum");
+  const exclusiveMinimum = number("exclusiveMinimum");
+  const exclusiveMaximum = number("exclusiveMaximum");
+  const preferred = options.all ? (maximum ?? minimum) : (minimum ?? maximum);
+  if (preferred !== undefined) {
+    return preferred;
+  }
+  if (exclusiveMinimum !== undefined && exclusiveMaximum !== undefined) {
+    return (exclusiveMinimum + exclusiveMaximum) / 2;
+  }
+  if (exclusiveMinimum !== undefined) {
+    return exclusiveMinimum + 1;
+  }
+  if (exclusiveMaximum !== undefined) {
+    return exclusiveMaximum - 1;
+  }
+  return fallback;
 }
 
 function widestAnyOf(schema: NxJsonSchemaValue, defs: Record<string, NxJsonSchema>, seen: Set<string>): number {

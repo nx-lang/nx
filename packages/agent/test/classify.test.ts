@@ -35,6 +35,14 @@ test("a boundary failure in an argument the model sent is invalid input", () => 
   assert.deepEqual(classifyRuntimeFailure([diagnostic("nx-ir-boundary-type", "context")], new Set()), { code: "invalid-input" });
 });
 
+test("a value outside its parameter's constraint is invalid input, and one inside the function is not", () => {
+  // `count: int where in 1..=10` sent `11`: the runtime names the argument, as for any boundary failure.
+  assert.deepEqual(classify(diagnostic("nx-ir-boundary-constraint", "count")), { code: "invalid-input" });
+  assert.deepEqual(classify(diagnostic("nx-ir-boundary-constraint", "context")), { code: "invalid-context" });
+  // A check inside the function names no argument: the model's input did not cause it directly.
+  assert.deepEqual(classify(diagnostic("nx-ir-constraint")), { code: "evaluation-failed" });
+});
+
 test("a boundary failure in a context parameter is invalid context", () => {
   for (const code of ["nx-ir-boundary-type", "nx-ir-boundary-field", "nx-ir-arguments"]) {
     assert.deepEqual(classify(diagnostic(code, "context")), { code: "invalid-context" }, code);

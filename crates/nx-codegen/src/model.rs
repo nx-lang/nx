@@ -205,6 +205,14 @@ pub enum CodegenTypeRef {
     AnyFunction {
         return_type: Box<CodegenTypeRef>,
     },
+    /// A numeric primitive narrowed to an interval, `float32 where in 0.0..=1.0`, with every alias
+    /// and term that contributed already intersected. An integer base's exclusive ends are already
+    /// the inclusive ends next to them.
+    Constrained {
+        /// The base primitive's IR name.
+        base: String,
+        interval: ast::Interval,
+    },
 }
 
 /// One parameter of a resolved function type.
@@ -458,6 +466,20 @@ pub enum CodegenExpressionKind {
     /// <para>Nothing here is evaluated when the binding is built: the body runs when a host
     /// dispatches the action, against the locals captured where the binding was written.</para>
     ActionHandler(CodegenActionHandler),
+    /// A runtime constraint check the checker placed where a value enters a constrained site. The
+    /// value is yielded when every item lies in `ty`'s interval; `site` names what is bound.
+    ConstraintCheck {
+        operand: Box<CodegenExpression>,
+        /// Always a [`CodegenTypeRef::Constrained`].
+        ty: CodegenTypeRef,
+        site: String,
+    },
+    /// A numeric value pattern in a match arm's pattern list, `in 0..10` or `> 100`: it matches a
+    /// scrutinee that lies in `ty`'s interval.
+    IntervalPattern {
+        /// Always a [`CodegenTypeRef::Constrained`].
+        ty: CodegenTypeRef,
+    },
     Unsupported(CodegenUnsupportedConstruct),
 }
 

@@ -128,7 +128,8 @@ visualizer Theme =
 
 A `PropertyVisualizer` and a `ValueVisualizer` can also say how a value is edited. Each hint changes
 how a viewer edits a value, never what the value is: `min` and `max` are not constraints, and a
-document may still write a number outside them.
+document may still write a number outside them. To limit what a value may be, give its type a
+[constraint](/reference/syntax/types/#constrained-types), such as `int where in 1..=1000`.
 
 | Hint | Applies to | Says |
 | --- | --- | --- |
@@ -179,6 +180,24 @@ replaced (its base visualizer's, or its type's) stays in force. A `min` above it
 as `editor-hint-range`, and so is a range that only merging empties: with `Spacing` at `max=64`
 above, `<PropertyVisualizer property=gap min=100 />` warns at `min=100`.
 Warnings, because a hint never changes what a program means.
+
+A constrained number, written inline or through an alias, takes number hints as its base type does.
+The viewer keeps its editor within both: a `min` or `max` hint may narrow the range the constraint
+allows but never widen it, a hint range that misses the constraint is ignored, and an exclusive end
+reads `Above` or `Below` and is never stepped onto. A floating-point number with no `step` hint,
+whose offered range has both ends, steps by the largest power of ten not above a tenth of that
+range, so `0.0..=1.0` steps by `0.1`, and so do `0.0..=1000.0` with `max=1` and a plain `float64`
+with `min=0 max=1`. A `min` or `max` the constraint does not admit warns as `editor-hint-range`,
+since the viewer will not offer it.
+
+```nx
+import "@nx/visualizer"
+
+export type Grid = { columns: int where in 1..=1000 = 4 }
+
+// The editor keeps columns within 1 to 12; the constraint alone would allow 1000.
+visualizer Grid = <ElementVisualizer><PropertyVisualizer property=columns max=12 /></ElementVisualizer>
+```
 
 ## Preview descriptors
 
@@ -286,8 +305,10 @@ export type PropertyVisualizer = {
   /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
   editor?: ValueEditor
   /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
@@ -310,8 +331,10 @@ export type ValueVisualizer = {
   /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
   editor?: ValueEditor
   /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64

@@ -233,6 +233,74 @@ fn each_hint_is_checked_against_its_type() {
     }
 }
 
+/// A constrained number takes number hints as its base does, inline or through an alias, and a hint
+/// inside the constraint narrows it with no report.
+#[test]
+fn a_constrained_number_takes_number_hints() {
+    assert_clean(
+        "type Grid = { columns: int where in 1..=1000 }\n\
+         visualizer Grid = <ElementVisualizer><PropertyVisualizer property=columns max=12 /></ElementVisualizer>",
+    );
+    assert_clean(
+        "type Ratio = float32 where in 0.0..=1.0\n\
+         type Fade = { opacity: Ratio }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=opacity editor=field step=0.05 min=0.25 max=0.75><ValueChoice value=0.5 /></PropertyVisualizer></ElementVisualizer>",
+    );
+    assert_clean(
+        "type Ratio = float32 where in 0.0..=1.0\nvisualizer Ratio = <ValueVisualizer min=0 max=1 step=0.1 />",
+    );
+    // A float32 hint is compared as the float32 it rounds to, as the bound is.
+    assert_clean(
+        "type Fine = { f: float32 where <= 0.1 }\n\
+         visualizer Fine = <ElementVisualizer><PropertyVisualizer property=f max=0.1 /></ElementVisualizer>",
+    );
+}
+
+/// A min or max hint the constraint does not admit is a warning, at each such hint; the viewer
+/// keeps within the constraint.
+#[test]
+fn a_hint_wider_than_the_constraint_is_a_warning() {
+    let warnings = warnings_of(
+        "type Grid = { columns: int where in 1..=1000 }\n\
+         visualizer Grid = <ElementVisualizer><PropertyVisualizer property=columns min=0 max=2000 /></ElementVisualizer>",
+        "editor-hint-range",
+    );
+    assert_eq!(warnings.len(), 2, "{warnings:#?}");
+    assert!(
+        warnings[1].message.contains("'max' (2000)")
+            && warnings[1].message.contains("'columns'")
+            && warnings[1].message.contains("`int where in 1..=1000`"),
+        "{warnings:#?}"
+    );
+    let warnings = warnings_of(
+        "type Ratio = float32 where in 0.0..=1.0\nvisualizer Ratio = <ValueVisualizer min=-5 max=5 />",
+        "editor-hint-range",
+    );
+    assert_eq!(warnings.len(), 2, "{warnings:#?}");
+    assert!(warnings[0].message.contains("this type"), "{warnings:#?}");
+    // An exclusive end the hint reaches is outside too.
+    let warnings = warnings_of(
+        "type Unit = { u: float64 where >= 0.0 && < 1.0 }\n\
+         visualizer Unit = <ElementVisualizer><PropertyVisualizer property=u max=1 /></ElementVisualizer>",
+        "editor-hint-range",
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    // A property typed through an alias, optional, as a sequence, or inherited.
+    for body in [
+        "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { opacity: Ratio }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=opacity max=2 /></ElementVisualizer>",
+        "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { opacity?: Ratio }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=opacity max=2 /></ElementVisualizer>",
+        "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { stops: Ratio+ }\n\
+         visualizer Fade = <ElementVisualizer><PropertyVisualizer property=stops max=2 /></ElementVisualizer>",
+        "abstract type Base = { level: int where in 1..=5 }\ntype Meter extends Base = { label: string }\n\
+         visualizer Meter = <ElementVisualizer><PropertyVisualizer property=level max=9 /></ElementVisualizer>",
+    ] {
+        let warnings = warnings_of(body, "editor-hint-range");
+        assert_eq!(warnings.len(), 1, "{body}: {warnings:#?}");
+    }
+}
+
 #[test]
 fn a_mismatched_choice_names_its_property() {
     let warnings = warnings_of(

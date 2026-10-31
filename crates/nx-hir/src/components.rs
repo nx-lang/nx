@@ -866,6 +866,49 @@ pub fn apply_join_lifts(
     created
 }
 
+/// One runtime constraint check the type checker asks for: the base and interval to compare at,
+/// and the name of what is being bound.
+#[derive(Debug, Clone)]
+pub struct ConstraintCheckRewrite {
+    pub base: ast::PrimitiveType,
+    pub interval: ast::Interval,
+    pub site: Name,
+}
+
+/// Wraps each value the checker found to need a runtime constraint check in an
+/// `Expr::ConstraintCheck`, and returns `(check, moved)` for each: the check takes the value's own
+/// id, so every parent that referred to the value now refers to the check, and the value moves to
+/// a new id.
+///
+/// <para>Swapping in place rather than rewriting each parent is what lets one pass reach every
+/// binding site, of which there are many kinds: arguments, props, fields, results, defaults and
+/// annotated values. The caller moves whatever it keys by the value's id to the new one.</para>
+pub fn apply_constraint_checks(
+    module: &mut PreparedModule,
+    checks: &FxHashMap<ExprId, ConstraintCheckRewrite>,
+) -> Vec<(ExprId, ExprId)> {
+    let mut created = Vec::new();
+    let raw_module = module.raw_module_mut();
+    let mut ids: Vec<_> = checks.keys().copied().collect();
+    ids.sort_by_key(|id| id.into_raw().into_u32());
+    for id in ids {
+        let check = &checks[&id];
+        let span = raw_module.expr_span(id);
+        let value = raw_module.expr(id).clone();
+        let moved = raw_module.alloc_expr(value);
+        raw_module.set_expr_span(moved, span);
+        *raw_module.expr_mut(id) = ast::Expr::ConstraintCheck {
+            expr: moved,
+            base: check.base,
+            interval: check.interval,
+            site: check.site.clone(),
+            span,
+        };
+        created.push((id, moved));
+    }
+    created
+}
+
 /// Wraps each branch of a join that type analysis found to widen in an [`ast::Expr::Widen`].
 ///
 /// <para>Runs on the same terms as [`apply_string_conversions`]. `widened` maps a branch of an
@@ -1274,6 +1317,10 @@ pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef
         ast::TypeRef::AnyFunction { return_type } => {
             ast::TypeRef::any_function(erase_type_parameters(return_type, params))
         }
+        ast::TypeRef::Constrained { base, pattern } => ast::TypeRef::Constrained {
+            base: Box::new(erase_type_parameters(base, params)),
+            pattern: pattern.clone(),
+        },
     }
 }
 
@@ -1433,7 +1480,11 @@ fn collect_handler_rewrites_in_expr(
         | ast::Expr::Ident(_)
         | ast::Expr::ContextualName { .. }
         | ast::Expr::ResolvedUnionCase { .. }
+        | ast::Expr::NumericPattern { .. }
         | ast::Expr::Error(_) => {}
+        ast::Expr::ConstraintCheck { expr, .. } => {
+            collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
+        }
         ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);
             collect_handler_rewrites_in_expr(module, *rhs, owner, rewrites);

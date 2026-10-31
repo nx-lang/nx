@@ -20,7 +20,7 @@ const SWEPT_IMAGE_LIMIT: usize = 16 * 1024;
 
 /// The programs the sweep leaves out. A program that grows past the limit fails the test until
 /// it is named here, so that none leaves the sweep unnoticed.
-const LEFT_OUT_OF_THE_SWEEP: [&str; 2] = ["large-catalog", "question-flow"];
+const LEFT_OUT_OF_THE_SWEEP: [&str; 3] = ["color-library", "large-catalog", "question-flow"];
 
 #[test]
 fn every_truncated_corpus_image_is_refused() {

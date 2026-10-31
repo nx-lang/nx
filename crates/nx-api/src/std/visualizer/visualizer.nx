@@ -62,8 +62,10 @@ export type PropertyVisualizer = {
   /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
   editor?: ValueEditor
   /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64
@@ -86,8 +88,10 @@ export type ValueVisualizer = {
   /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
   editor?: ValueEditor
   /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   min?: float64
   /// The largest number the editor offers. Not a constraint: a document may write a larger one.
+  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
   /// How far one step of the editor moves a number, as an arrow key or a stepper does.
   step?: float64

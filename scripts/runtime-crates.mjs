@@ -12,12 +12,12 @@ import { join } from "node:path";
  * The crates a Rust host needs to run compiled NX, in dependency order: a crate after every crate
  * of the list it depends on. Every other member of the workspace is `publish = false`.
  */
-export const runtimeCrates = ["nx-ir", "nx-value", "nx-ir-runtime"];
+export const runtimeCrates = ["nx-value", "nx-ir", "nx-ir-runtime"];
 
 /** The crates of the list each crate depends on, which its packed manifest must pin exactly. */
 const internalDependencies = {
-  "nx-ir": [],
   "nx-value": [],
+  "nx-ir": ["nx-value"],
   "nx-ir-runtime": ["nx-ir", "nx-value"],
 };
 

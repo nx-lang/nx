@@ -1,0 +1,25 @@
+{
+  "main.nx::bands": [
+    "low",
+    "high",
+    "high"
+  ],
+  "main.nx::faded": 0.5,
+  "main.nx::flags": [
+    "out",
+    "in",
+    "in",
+    "out"
+  ],
+  "main.nx::paint#inside": 1.0,
+  "main.nx::pick#inside": 10,
+  "main.nx::scores#items": [
+    0,
+    1,
+    2
+  ],
+  "main.nx::stroke#computedDefault": 1,
+  "main.nx::tenth#float32Bound": 0.10000000149011612,
+  "main.nx::toUnit#inside": 0.5,
+  "main.nx::twice#passes": 1.0
+}

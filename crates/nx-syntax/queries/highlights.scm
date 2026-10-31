@@ -22,6 +22,7 @@
   "for"
   "in"
   "is"
+  "where"
   "raw"
 ] @keyword
 

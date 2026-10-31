@@ -556,6 +556,10 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             ast::Expr::Exists { operand, .. } => {
                 self.check_expr(*operand, scope);
             }
+            ast::Expr::ConstraintCheck { expr, .. } => {
+                self.check_expr(*expr, scope);
+            }
+            ast::Expr::NumericPattern { .. } => {}
             ast::Expr::Coalesce { left, right, .. } => {
                 self.check_expr(*left, scope);
                 self.check_expr(*right, scope);

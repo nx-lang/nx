@@ -3029,3 +3029,250 @@ fn in_memory_and_directory_loads_of_the_same_sources_emit_the_same_ir() {
     assert!(!memory_diagnostics.is_empty());
     assert_eq!(directory_diagnostics, memory_diagnostics);
 }
+
+// ---- Value constraints --------------------------------------------------------------------------
+
+/// The cells of every constrained type entry of `artifact`, `[7, base, low, high, flags]`, with the
+/// base's name and each bound as a number in place of their indexes.
+fn constrained_entries(artifact: &NxIrArtifact) -> Vec<(String, Option<f64>, Option<f64>, i64)> {
+    let int = |item: &nx_ir::IrItem| match item {
+        nx_ir::IrItem::Int(value) => *value,
+        other => panic!("not an int cell: {other:?}"),
+    };
+    let bound = |index: i64| -> Option<f64> {
+        (index >= 0).then(|| {
+            let constant = artifact.constants[index as usize]
+                .as_list()
+                .expect("constant");
+            match (&constant[0], &constant[1]) {
+                (nx_ir::IrItem::Int(0), nx_ir::IrItem::Int(value)) => *value as f64,
+                (nx_ir::IrItem::Int(2), nx_ir::IrItem::Float(value)) => *value,
+                other => panic!("not a numeric constant: {other:?}"),
+            }
+        })
+    };
+    artifact
+        .types
+        .iter()
+        .filter_map(|entry| {
+            let cells = entry.as_list()?;
+            (int(&cells[0]) == 7).then(|| {
+                let base = artifact.types[int(&cells[1]) as usize]
+                    .as_list()
+                    .expect("base entry");
+                assert_eq!(int(&base[0]), 0, "the base is a primitive");
+                let name = artifact.strings[int(&base[1]) as usize].clone();
+                (
+                    name,
+                    bound(int(&cells[2])),
+                    bound(int(&cells[3])),
+                    int(&cells[4]),
+                )
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn a_constrained_parameter_is_a_kind_7_entry_behind_its_feature() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "let fade(amount: float32 where in 0.0..=1.0) = { amount }",
+    ));
+    assert!(
+        artifact
+            .required_features
+            .iter()
+            .any(|feature| feature == "constraints-v1"),
+        "{:?}",
+        artifact.required_features
+    );
+    assert_eq!(
+        constrained_entries(&artifact),
+        [("float32".to_string(), Some(0.0), Some(1.0), 0)]
+    );
+    // A module with no constraint lists no feature for one.
+    let plain = entry_artifact(&artifact_from_source(
+        "let fade(amount: float32) = { amount }",
+    ));
+    assert!(!plain
+        .required_features
+        .iter()
+        .any(|feature| feature == "constraints-v1"));
+}
+
+#[test]
+fn an_open_end_and_an_exclusive_end() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "type Unit = float64 where > 0.0\nlet u(x: Unit) = { x }\n\
+         type Count = int where > 0 && < 10\nlet c(n: Count) = { n }\n\
+         type Below = float32 where < 0.1\nlet b(x: Below) = { x }",
+    ));
+    let entries = constrained_entries(&artifact);
+    assert!(
+        entries.contains(&("float64".to_string(), Some(0.0), None, 1)),
+        "{entries:?}"
+    );
+    // An integer's exclusive ends are written as the inclusive ends next to them.
+    assert!(
+        entries.contains(&("int".to_string(), Some(1.0), Some(9.0), 0)),
+        "{entries:?}"
+    );
+    // A float32 bound is written already rounded.
+    assert!(
+        entries.contains(&("float32".to_string(), None, Some(0.1f32 as f64), 2)),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn a_check_is_written_where_a_value_enters_a_constrained_site_and_only_there() {
+    let text = explain_source(
+        "let fade(amount: float64 where in 0.0..=1.0) = { inner(amount) }\n\
+         let inner(a: float64 where in 0.0..=1.0) = { a }\n\
+         let twice(x: float64) = { fade(x * 2.0) }\n\
+         let safe(x: float64) = { if x is { in 0.0..=1.0 => fade(x) else => 0.0 } }",
+    );
+    assert_contains(
+        &text,
+        "fade((check amount: (x mul 2.0) as float64 where in 0.0..=1.0))",
+    );
+    // The body relies on its parameter, and an arm narrows its scrutinee: neither checks again.
+    assert_eq!(text.matches("check ").count(), 1, "{text}");
+}
+
+#[test]
+fn no_check_where_the_type_already_satisfies_the_site() {
+    for source in [
+        // A constrained value where its base, or a wider type, is expected.
+        "type Ratio = float32 where in 0.0..=1.0\nlet wide(x: float64) = { x }\nlet f(r: Ratio) = { wide(r) }",
+        // A narrower interval where a wider one is expected.
+        "type Ratio = float32 where in 0.0..=1.0\nlet g(x: float64 where >= 0.0) = { x }\nlet f(r: Ratio) = { g(r) }",
+        // An integer's exclusive end is the inclusive end next to it.
+        "type A = int where > 0\ntype B = int where >= 1\nlet f(a: A) = { a }\nlet g(b: B) = { f(b) }",
+    ] {
+        let text = explain_source(source);
+        assert!(!text.contains("check "), "{source}\n{text}");
+    }
+}
+
+#[test]
+fn a_default_whose_type_depends_on_a_sibling_field_is_always_checked() {
+    // The checker types a default without its siblings in scope, so even a sibling whose type
+    // satisfies the field leaves the default checked when it runs. A default whose type does not
+    // depend on a sibling, such as a call with a constrained return type, is proven by that type.
+    let text = explain_source(
+        "let abs0(x: int): int where >= 0 = { if x < 0 { 0 - x } else { x } }\n\
+         type Box = { a: int where >= 0  same: int where >= 0 = {a}  less: int where >= 0 = {a - 1}  \
+         viaFn: int where >= 0 = {abs0(a)} }\n\
+         let main(): Box = <Box a=1 />",
+    );
+    assert_contains(&text, "viaFn: int where >= 0 = abs0(a)");
+    assert_contains(
+        &text,
+        "same: int where >= 0 = (check same: a as int where >= 0)",
+    );
+    assert_contains(&text, "less: int where >= 0 = (check less: (a sub 1)");
+    assert!(!text.contains("check viaFn"), "{text}");
+}
+
+#[test]
+fn a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name() {
+    // The top-level `a` would prove the default; the sibling it reads at run time does not.
+    for source in [
+        "let a: int where >= 0 = 5\n\
+         type Box = { a: int  c: int where >= 0 = {a} }\n\
+         let main(): Box = <Box a=1 />",
+        "let a: int where >= 0 = 5\n\
+         type Shape =\n\
+         \x20 | dot { a: int  c: int where >= 0 = {a} }\n\
+         let main(): Shape = <Shape.dot a=1 />",
+        // A field the case inherits from the union's abstract base.
+        "let a: int where >= 0 = 5\n\
+         abstract type Base = { a: int }\n\
+         type Shape extends Base =\n\
+         \x20 | dot { r: int  c: int where >= 0 = {a} }\n\
+         let main(): Shape = <Shape.dot a=1 r=2 />",
+    ] {
+        let text = explain_source(source);
+        assert_contains(&text, "(check c: a as int where >= 0)");
+    }
+}
+
+#[test]
+fn a_sequence_is_checked_by_one_node_over_its_items() {
+    let text = explain_source(
+        "type Score = int where >= 0\nlet scores(xs: int+): Score+ = { for x in xs { x - 1 } }",
+    );
+    assert_contains(&text, "check result:");
+    assert_contains(&text, "as int where >= 0");
+    assert_eq!(text.matches("check ").count(), 1, "{text}");
+}
+
+#[test]
+fn alternatives_in_one_arm_are_two_interval_patterns() {
+    let text =
+        explain_source("let flag(n: int) = { if n is { < 0, > 100 => \"out\" else => \"in\" } }");
+    assert_contains(&text, "<= -1 | >= 101 =>");
+    let artifact = entry_artifact(&artifact_from_source(
+        "let flag(n: int) = { if n is { < 0, > 100 => \"out\" else => \"in\" } }",
+    ));
+    let entries = constrained_entries(&artifact);
+    assert!(
+        entries.contains(&("int".to_string(), None, Some(-1.0), 0)),
+        "{entries:?}"
+    );
+    assert!(
+        entries.contains(&("int".to_string(), Some(101.0), None, 0)),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn a_constrained_alias_from_another_module_is_written_as_its_entry() {
+    let artifact = artifact_from_workspace(
+        &[
+            ("lib.nx", "export type Ratio = float32 where in 0.0..=1.0\n"),
+            (
+                "main.nx",
+                "import \"./lib.nx\"\nlet fade(amount: Ratio) = { amount }\nlet twice(x: float32) = { fade(x * 2.0) }\n",
+            ),
+        ],
+        "main.nx",
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(
+        constrained_entries(&entry),
+        [("float32".to_string(), Some(0.0), Some(1.0), 0)]
+    );
+    assert_contains(&explain(&entry), "check amount:");
+}
+
+#[test]
+fn a_constrained_alias_from_a_library_read_as_an_interface_is_written_as_its_entry() {
+    let temp = TempDir::new().expect("temp dir");
+    let units = temp.path().join("units");
+    fs::create_dir_all(&units).expect("dir");
+    fs::write(
+        units.join("Ratio.nx"),
+        "export type Ratio = float64 where in 0.0..=1.0",
+    )
+    .expect("write");
+    let registry = LibraryRegistry::new();
+    registry
+        .load_library_from_directory(&units)
+        .expect("units library");
+    let artifact = artifact_from_workspace_with(
+        &[(
+            "app/main.nx",
+            "import { Ratio } from \"../units\"\nlet fade(amount: Ratio) = { amount }\nlet twice(x: float64) = { fade(x * 2.0) }",
+        )],
+        "app/main.nx",
+        &registry.build_context(),
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(
+        constrained_entries(&entry),
+        [("float64".to_string(), Some(0.0), Some(1.0), 0)]
+    );
+    assert_contains(&explain(&entry), "check amount:");
+}

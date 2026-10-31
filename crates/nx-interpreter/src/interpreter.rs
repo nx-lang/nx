@@ -2208,6 +2208,95 @@ impl Interpreter {
             .map_err(|error| self.locate_error(error, module, expr_id))
     }
 
+    /// Evaluates a standard math call such as `Math.sqrt(x)`: its arguments as numbers, then the
+    /// operation.
+    #[inline(never)]
+    fn eval_standard_math(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        op: nx_value::math::MathOp,
+        args: &[ExprId],
+    ) -> Result<Value, RuntimeError> {
+        let values = args
+            .iter()
+            .map(|arg| {
+                let value = self.eval_expr(module, ctx, *arg)?;
+                match value {
+                    Value::Float(x) => Ok(x),
+                    Value::Int(x) => Ok(x as f64),
+                    Value::Int32(x) => Ok(f64::from(x)),
+                    Value::Float32(x) => Ok(f64::from(x)),
+                    _ => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: "float64".into(),
+                        actual: value.type_name().into(),
+                        operation: op.name().into(),
+                    })),
+                }
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?;
+        nx_value::math::evaluate(op, &values)
+            .map(Value::Float)
+            .map_err(|e| RuntimeError::new(RuntimeErrorKind::Math(e)))
+    }
+
+    /// Evaluates `expr` and widens its number to the primitive `ty`.
+    #[inline(never)]
+    fn eval_widen(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        expr: ExprId,
+        ty: ast::PrimitiveType,
+    ) -> Result<Value, RuntimeError> {
+        let value = self.eval_expr(module, ctx, expr)?;
+        Ok(Self::widened_value(
+            value,
+            &Type::Primitive(Primitive::from_hir_type(ty)),
+        ))
+    }
+
+    /// Evaluates an array literal, spreading each item that is itself a sequence.
+    #[inline(never)]
+    fn eval_array(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        elements: &[ExprId],
+    ) -> Result<Value, RuntimeError> {
+        let mut values = Vec::with_capacity(elements.len());
+        for elem_expr in elements {
+            self.eval_item_into(module, ctx, *elem_expr, &mut values)?;
+        }
+        Ok(Value::Array(values))
+    }
+
+    /// Evaluates a constraint check or a numeric pattern. The interpreter checks constraints at
+    /// compile time only, so a check yields its value unchecked; new runtime work targets the IR
+    /// runtimes. A numeric pattern is read only by a match arm, so evaluating one as a value is an
+    /// error. Kept out of `eval_expr_arms` so these rare arms do not grow the frame every nested
+    /// call repeats.
+    #[cold]
+    #[inline(never)]
+    fn eval_constraint_expr(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        expr_id: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        match module.expr(expr_id) {
+            ast::Expr::ConstraintCheck { expr, .. } => self.eval_expr(module, ctx, *expr),
+            ast::Expr::NumericPattern { span, .. } => Err(RuntimeError::new(
+                crate::error::RuntimeErrorKind::TypeMismatch {
+                    expected: "a value".to_string(),
+                    actual: "a numeric pattern".to_string(),
+                    operation: format!("evaluating the expression at {:?}", span),
+                },
+            )),
+            _ => unreachable!("eval_constraint_expr takes a constraint check or a numeric pattern"),
+        }
+    }
+
     fn eval_expr_arms(
         &self,
         module: &LoweredModule,
@@ -2223,28 +2312,7 @@ impl Interpreter {
             ast::Expr::StandardColor { .. } => Err(Self::unchecked_expression_error(
                 "color requires the IR runtime",
             )),
-            ast::Expr::StandardMath { op, args } => {
-                let values = args
-                    .iter()
-                    .map(|arg| {
-                        let value = self.eval_expr(module, ctx, *arg)?;
-                        match value {
-                            Value::Float(x) => Ok(x),
-                            Value::Int(x) => Ok(x as f64),
-                            Value::Int32(x) => Ok(f64::from(x)),
-                            Value::Float32(x) => Ok(f64::from(x)),
-                            _ => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                expected: "float64".into(),
-                                actual: value.type_name().into(),
-                                operation: op.name().into(),
-                            })),
-                        }
-                    })
-                    .collect::<Result<Vec<_>, RuntimeError>>()?;
-                nx_value::math::evaluate(*op, &values)
-                    .map(Value::Float)
-                    .map_err(|e| RuntimeError::new(RuntimeErrorKind::Math(e)))
-            }
+            ast::Expr::StandardMath { op, args } => self.eval_standard_math(module, ctx, *op, args),
             ast::Expr::Ident(name) => self.eval_ident(module, ctx, name),
             ast::Expr::Block { stmts, expr, .. } => {
                 self.eval_block(module, ctx, stmts, expr.as_ref())
@@ -2255,13 +2323,7 @@ impl Interpreter {
             ast::Expr::UnaryOp { op, expr, .. } => self.eval_unary_op(module, ctx, *op, *expr),
             ast::Expr::Concat { lhs, rhs, .. } => self.eval_concat(module, ctx, *lhs, *rhs),
             ast::Expr::ToText { expr, .. } => self.eval_to_text(module, ctx, *expr),
-            ast::Expr::Widen { expr, ty, .. } => {
-                let value = self.eval_expr(module, ctx, *expr)?;
-                Ok(Self::widened_value(
-                    value,
-                    &Type::Primitive(Primitive::from_hir_type(*ty)),
-                ))
-            }
+            ast::Expr::Widen { expr, ty, .. } => self.eval_widen(module, ctx, *expr, *ty),
             ast::Expr::If {
                 condition,
                 then_branch,
@@ -2285,13 +2347,7 @@ impl Interpreter {
                 body,
                 ..
             } => self.eval_for(module, ctx, item, index.as_ref(), *iterable, *body),
-            ast::Expr::Array { elements, .. } => {
-                let mut values = Vec::with_capacity(elements.len());
-                for elem_expr in elements {
-                    self.eval_item_into(module, ctx, *elem_expr, &mut values)?;
-                }
-                Ok(Value::Array(values))
-            }
+            ast::Expr::Array { elements, .. } => self.eval_array(module, ctx, elements),
             ast::Expr::ActionHandler {
                 component,
                 emit,
@@ -2329,6 +2385,9 @@ impl Interpreter {
                 self.eval_optional_member(module, ctx, *base, member)
             }
             ast::Expr::Exists { operand, .. } => self.eval_exists(module, ctx, *operand),
+            ast::Expr::ConstraintCheck { .. } | ast::Expr::NumericPattern { .. } => {
+                self.eval_constraint_expr(module, ctx, expr_id)
+            }
             ast::Expr::Coalesce { left, right, .. } => {
                 self.eval_coalesce(module, ctx, *left, *right)
             }
@@ -2386,12 +2445,16 @@ impl Interpreter {
     // arm's temporaries at once, and it recurses once per nested expression, so a deep NX
     // recursion runs out of native stack when the arms carry their bodies inline.
 
+    #[cold]
+    #[inline(never)]
     fn undefined_variable_error(name: &Name) -> RuntimeError {
         RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
             name: SmolStr::new(name.as_str()),
         })
     }
 
+    #[cold]
+    #[inline(never)]
     fn unchecked_expression_error(actual: &str) -> RuntimeError {
         RuntimeError::new(RuntimeErrorKind::TypeMismatch {
             expected: "a checked expression".to_string(),
@@ -2866,6 +2929,10 @@ impl Interpreter {
         }
     }
 
+    /// Evaluates a match: the body of the first arm whose pattern matches, else the `else` branch.
+    /// Never inlined, so its arm loop does not grow `eval_expr`'s frame, which every nested call
+    /// repeats.
+    #[inline(never)]
     fn eval_match(
         &self,
         module: &LoweredModule,
@@ -2896,6 +2963,12 @@ impl Interpreter {
 
         for arm in arms {
             for pattern in &arm.patterns {
+                if let ast::Expr::NumericPattern { pattern, .. } = module.expr(*pattern) {
+                    if numeric_pattern_matches(pattern, &scrutinee_value) {
+                        return Ok(Some(arm.body));
+                    }
+                    continue;
+                }
                 let pattern_value = self.eval_match_pattern(module, ctx, *pattern)?;
                 if self.values_match(&scrutinee_value, &pattern_value)? {
                     return Ok(Some(arm.body));
@@ -5543,6 +5616,22 @@ fn integer_range(value: &Value) -> Option<IntegerRange> {
         end_inclusive,
         narrow,
     })
+}
+
+/// Whether `value` is a number in the interval `pattern` spells. The bounds are read at the value's
+/// own type, as the checker and the IR runtimes read them, so a `float32` value is compared with
+/// bounds rounded to `float32`. The empty value and `NaN` match none.
+fn numeric_pattern_matches(pattern: &ast::NumericPattern, value: &Value) -> bool {
+    let (number, base) = match value {
+        Value::Int(value) => (*value as f64, Primitive::Int),
+        Value::Int32(value) => (*value as f64, Primitive::Int32),
+        Value::Float32(value) => (*value as f64, Primitive::Float32),
+        Value::Float(value) => (*value, Primitive::Float64),
+        _ => return false,
+    };
+    nx_types::pattern_interval_at(base, pattern)
+        .or_else(|| pattern.interval_as_written())
+        .is_some_and(|interval| interval.contains(number))
 }
 
 #[cfg(test)]

@@ -68,6 +68,7 @@ export type {
   EditorRange,
   Hover,
   RelatedLocation,
+  SourceBounds,
   SourceCase,
   SourceChoice,
   SourceDeclaration,

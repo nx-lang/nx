@@ -1000,6 +1000,49 @@ the second engine and grammar and keeps the themes in one place; readers see no 
 the two already color alike. Left out of `add-visual-view-to-drawnui-fiddle` (design decision 3,
 review finding RF7) because it adds to `@nx-lang/monaco`'s API for a one-time cost.
 
+## Value Constraints: What `add-value-constraints` Left For Later
+
+`add-value-constraints` gave numeric types a `where` clause, `float32 where in 0.0..=1.0`, checked
+when a program is compiled and, in the IR runtimes, when it runs (`openspec/specs/value-constraints`).
+It left these for later:
+
+- **Strings.** Length and pattern constraints, `string where length in 1..=80`, need a different
+  term vocabulary and a JSON Schema mapping (`minLength`, `pattern`).
+- **Sequence counts.** `int+ where count <= 10` is rejected today, since a constraint applies to one
+  value; a count constraint would bound the sequence itself (`minItems`, `maxItems`).
+- **Named bounds.** A bound is a literal. Allowing a named constant, `in 0..=MaxColumns`, needs
+  constant evaluation across modules.
+- **General predicates.** `||`, `!=` and calls are refused with `invalid-constraint`. A union of
+  intervals or an arbitrary predicate would lose the one-interval shape the schema, the viewer and
+  the IR entry rely on.
+- **Integer overflow on the same node.** Overflow checking ("Bounds checks are specified but not
+  enforced" above) could ride on the `check` node, `[28, operand, type, site]`, which is shaped so
+  it can (design open question 2).
+- **The interpreter.** The tree-walking interpreter reports every compile-time diagnostic but does
+  not check values when a program runs. It is being retired, so the checks live only in the IR
+  runtimes.
+- **Executable source codegen.** Generated JavaScript and TypeScript check values bound inside the
+  program (`nxCheckConstraint`), but their host types and schemas keep the base type, so a value a
+  host passes in is not checked at the boundary, and a numeric match pattern is refused there as
+  every match is.
+- **Signature help.** The language service offers no signature help yet (it is a reserved query).
+  When it does, a constrained parameter is to read as hover spells it, `amount: float32 where in
+  0.0..=1.0`.
+- **Typing a default against its sibling fields.** A record or union-case default is typed with
+  its sibling fields as values of unknown type, so a constrained field's default whose type depends
+  on a sibling's type is checked when it runs, whatever that type is:
+  `{ a: int where >= 0  c: int where >= 0 = {a} }` checks `c` though `a` already satisfies it. (A
+  default whose type does not depend on a sibling, such as a call with a constrained return type, is
+  treated as anywhere else.) Typing a default with the fields' declared types would drop that check
+  and would also report a default that does not fit its field, such as
+  `{ n: int  label: string = {n} }`, at compile time rather than when it runs. That second effect
+  changes what programs compile (some runtime tests rely on such a default), so it is its own
+  change.
+- **Naming the alias in `constraint-violation`.** The message spells the site's resolved type, so
+  `type Low = Ratio where <= 0.5` with `let l: Low = 0.75` names `float32 where in 0.0..=0.5`, not
+  `Low`. Naming the alias the site was written with, beside the resolved interval, would point the
+  author at the declaration to read.
+
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 
 NX is a language of the DrawnUI fiddle engine (`DrawnUi.FiddleEngine`, the engine behind
@@ -1678,6 +1721,19 @@ The fix is in the checker: type a record field's default with the earlier fields
 parameter's default is typed with the earlier parameters in scope, and report the same
 diagnostic. It belongs with "A record default that reads a later field passes the checker and
 fails at run time" above, which is the same walk over a record's fields.
+
+## Generated JavaScript does not give a record default its sibling fields
+
+Code from `nxlang codegen --target javascript` fills a record or union-case field's
+default without binding the record's other fields, so the default reads whatever the name
+means at module level. `type Box = { a: int  c: int = {a} }` with a top-level `let a = 5` gives
+`c = 5` for `<Box a=1 />`, where the interpreter and both IR runtimes give `1`; with no top-level
+`a`, building a `Box` throws "a is not defined". It happens with or without constraints. The IR
+runtimes bind each field as they build the record, and the checker types such a default with the
+record's fields as unknown (see "Typing a default against its sibling fields" above), so only the
+generated source code disagrees. The fix is to emit a record's defaults with the fields before
+each one in scope, in the flattened order the runtimes use, and to add a corpus case where a
+top-level value shares a field's name.
 
 ## HIR type references carry no span and no error form
 

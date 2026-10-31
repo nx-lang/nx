@@ -9,16 +9,16 @@ use crate::error::{Diagnostic, NxIrRuntimeError, Result};
 use crate::value::Value;
 use nx_ir::{
     kinds, Cells, NxIrImage, NxIrImageBuf, NxIrImageError, Table, NONE,
-    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 10] = [
+const KNOWN_FEATURES: [&str; 11] = [
     "standard-color-v1",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
@@ -29,6 +29,7 @@ const KNOWN_FEATURES: [&str; 10] = [
     NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
     NX_IR_REQUIRED_FEATURE_RANGES_V1,
     NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
 ];
 
 /// How deeply one type may nest others. A type is a tree of shared nodes that is dropped
@@ -47,10 +48,123 @@ pub(crate) enum Primitive {
     Object,
 }
 
+/// One end of an [`Interval`]: a bound, exact in an `f64`, and whether it is excluded.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Bound {
+    pub value: f64,
+    pub exclusive: bool,
+}
+
+/// The values a constrained type admits, compared at its base. `None` is an open end.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Interval {
+    pub low: Option<Bound>,
+    pub high: Option<Bound>,
+    /// Whether the base is an integer type, which is how the bounds are spelled.
+    pub integer: bool,
+    /// Whether the base is `float32`, whose bounds are spelled with the shortest `float32` digits.
+    pub float32: bool,
+}
+
+impl Interval {
+    /// Whether `value` lies in the interval. `NaN` lies in none.
+    pub(crate) fn admits(&self, value: f64) -> bool {
+        if value.is_nan() {
+            return false;
+        }
+        let above = match self.low {
+            None => true,
+            Some(Bound {
+                value: low,
+                exclusive: true,
+            }) => value > low,
+            Some(Bound {
+                value: low,
+                exclusive: false,
+            }) => value >= low,
+        };
+        let below = match self.high {
+            None => true,
+            Some(Bound {
+                value: high,
+                exclusive: true,
+            }) => value < high,
+            Some(Bound {
+                value: high,
+                exclusive: false,
+            }) => value <= high,
+        };
+        above && below
+    }
+
+    /// A number at the base: a `float32` in its shortest digits, `0.1` rather than the widening's
+    /// `0.10000000149011612`.
+    pub(crate) fn number_text(&self, value: f64) -> String {
+        if self.float32 {
+            crate::text::float32_text(value)
+        } else {
+            crate::text::float64_text(value)
+        }
+    }
+
+    fn bound_text(&self, value: f64) -> String {
+        if self.integer {
+            format!("{}", value as i64)
+        } else {
+            let text = self.number_text(value);
+            if text.contains(['.', 'e', 'N', 'I']) {
+                text
+            } else {
+                format!("{text}.0")
+            }
+        }
+    }
+}
+
+/// The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`.
+impl std::fmt::Display for Interval {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.low, self.high) {
+            (Some(low), Some(high)) if !low.exclusive => write!(
+                formatter,
+                "{}{}{}",
+                self.bound_text(low.value),
+                if high.exclusive { ".." } else { "..=" },
+                self.bound_text(high.value)
+            ),
+            (Some(low), Some(high)) => write!(
+                formatter,
+                "> {} && {} {}",
+                self.bound_text(low.value),
+                if high.exclusive { "<" } else { "<=" },
+                self.bound_text(high.value)
+            ),
+            (Some(low), None) => write!(
+                formatter,
+                "{} {}",
+                if low.exclusive { ">" } else { ">=" },
+                self.bound_text(low.value)
+            ),
+            (None, Some(high)) => write!(
+                formatter,
+                "{} {}",
+                if high.exclusive { "<" } else { "<=" },
+                self.bound_text(high.value)
+            ),
+            (None, None) => formatter.write_str("any value"),
+        }
+    }
+}
+
 /// A type as the image spells it. A `Seq` carries an occurrence over an exactly-one item type.
 #[derive(Debug)]
 pub(crate) enum Type {
     Primitive(Primitive),
+    /// A numeric primitive narrowed to an interval. Everywhere but a check it behaves as its base.
+    Constrained {
+        base: Primitive,
+        interval: Interval,
+    },
     /// A primitive name this runtime does not know, which fails where a value meets it.
     UnknownPrimitive(Arc<str>),
     Nominal(Ref),
@@ -378,6 +492,14 @@ pub(crate) enum Node {
     },
     Exists(u32),
     Coalesce(u32, u32),
+    /// `[28, operand, type, site]`: a constraint check against the type at index `ty`.
+    Check {
+        operand: u32,
+        ty: u32,
+        site: Arc<str>,
+    },
+    /// `[29, type]`: a pattern-list entry that matches a scrutinee in the type's interval.
+    Interval(u32),
     Record(Construct),
     Component(Construct),
     UnionCase(Box<CaseConstruct>),
@@ -396,7 +518,9 @@ impl Node {
             | Node::String(_)
             | Node::Number(_)
             | Node::Slot { .. }
-            | Node::Reference(_) => {}
+            | Node::Reference(_)
+            | Node::Interval(_) => {}
+            Node::Check { operand, .. } => visit(*operand),
             Node::Binary { lhs, rhs, .. } | Node::Coalesce(lhs, rhs) => {
                 visit(*lhs);
                 visit(*rhs);
@@ -484,6 +608,8 @@ pub(crate) struct ModuleData {
     /// The declaration names this module references in each other module of its table, by slot.
     pub external_references: Vec<BTreeSet<Arc<str>>>,
     pub shapes: HashMap<Arc<str>, Vec<Shape>>,
+    /// The type table, decoded.
+    pub types: Vec<Arc<Type>>,
     strings: Vec<OnceLock<Arc<str>>>,
     nodes: Vec<OnceLock<Option<Box<Node>>>>,
 }
@@ -752,6 +878,12 @@ impl<'a> Decoder<'a> {
                 name: self.string(reader.next()?)?,
             },
             node::EXISTS => Node::Exists(reader.next()?),
+            node::CHECK => Node::Check {
+                operand: reader.next()?,
+                ty: reader.next()?,
+                site: self.string(reader.next()?)?,
+            },
+            node::INTERVAL => Node::Interval(reader.next()?),
             node::COALESCE => Node::Coalesce(reader.next()?, reader.next()?),
             node::RECORD | node::COMPONENT => {
                 let construct = Construct {
@@ -850,6 +982,56 @@ impl<'a> Decoder<'a> {
                 kinds::ty::ANY_FUNCTION => {
                     earlier(reader.next()?)?;
                     (Type::Function, 0)
+                }
+                // `[7, base, low, high, flags]`: a numeric primitive and its bounds.
+                kinds::ty::CONSTRAINED => {
+                    let (base, _) = earlier(reader.next()?)?;
+                    let base = match &*base {
+                        Type::Primitive(
+                            primitive @ (Primitive::Int
+                            | Primitive::Int32
+                            | Primitive::Int64
+                            | Primitive::Float32
+                            | Primitive::Float64),
+                        ) => *primitive,
+                        _ => {
+                            return Err(format!(
+                                "type {index} constrains a type that is not a numeric primitive"
+                            ))
+                        }
+                    };
+                    let bound =
+                        |reader: &mut Reader<'_>| -> std::result::Result<Option<f64>, Malformed> {
+                            match reader.optional()? {
+                                None => Ok(None),
+                                Some(constant) => match self.constant(constant)? {
+                                    Value::Int(value) => Ok(Some(value as f64)),
+                                    Value::Float(value) => Ok(Some(value)),
+                                    _ => Err(format!(
+                                        "type {index} has a bound that is not a number"
+                                    )),
+                                },
+                            }
+                        };
+                    let low = bound(&mut reader)?;
+                    let high = bound(&mut reader)?;
+                    let flags = i64::from(reader.next()?);
+                    let interval = Interval {
+                        low: low.map(|value| Bound {
+                            value,
+                            exclusive: flags & kinds::ty::CONSTRAINED_LOW_EXCLUSIVE != 0,
+                        }),
+                        high: high.map(|value| Bound {
+                            value,
+                            exclusive: flags & kinds::ty::CONSTRAINED_HIGH_EXCLUSIVE != 0,
+                        }),
+                        integer: matches!(
+                            base,
+                            Primitive::Int | Primitive::Int32 | Primitive::Int64
+                        ),
+                        float32: base == Primitive::Float32,
+                    };
+                    (Type::Constrained { base, interval }, 0)
                 }
                 other => return Err(format!("unknown type kind {other} at type {index}")),
             };
@@ -1065,6 +1247,7 @@ impl PreparedModule {
         }
 
         check_nodes(&image, &mut diagnostics);
+        check_constraint_nodes(&image, &mut diagnostics);
 
         let strings: Vec<OnceLock<Arc<str>>> =
             (0..image.string_count()).map(|_| OnceLock::new()).collect();
@@ -1183,6 +1366,7 @@ impl PreparedModule {
                 component_entrypoints,
                 external_references,
                 shapes,
+                types,
                 strings,
                 nodes,
             }),
@@ -1351,6 +1535,62 @@ fn check_nodes(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
         };
         if patterns.iter().any(is_empty_pattern) {
             diagnostics.push(missing(&format!("node {index} matches the '{{}}' pattern")));
+        }
+    }
+}
+
+/// What the reader's layouts do not say about constraint nodes: a `check` or `interval` node names
+/// a constrained type, and an `interval` node appears only in an `ifIs` arm's pattern list.
+fn check_constraint_nodes(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    use kinds::node;
+    let count = image.entry_count(Table::Nodes) as u32;
+    let kind_of = |table: Table, index: u32| {
+        image
+            .entry(table, index)
+            .and_then(|entry| entry.get(0))
+            .map(i64::from)
+    };
+    let mut patterns = BTreeSet::new();
+    let mut intervals = Vec::new();
+    for index in 0..count {
+        let Some(entry) = image.entry(Table::Nodes, index) else {
+            continue;
+        };
+        let kind = entry.get(0).map(i64::from).unwrap_or(node::NULL);
+        let named_type = match kind {
+            node::CHECK => entry.get(2),
+            node::INTERVAL => {
+                intervals.push(index);
+                entry.get(1)
+            }
+            node::IF_IS => {
+                let mut reader = Reader::new(entry);
+                let arms = (|| -> std::result::Result<Vec<Vec<u32>>, Malformed> {
+                    reader.next()?;
+                    reader.next()?;
+                    reader.list(|reader| {
+                        let patterns = reader.list(Reader::next)?;
+                        reader.next()?;
+                        Ok(patterns)
+                    })
+                })()
+                .unwrap_or_default();
+                patterns.extend(arms.into_iter().flatten());
+                continue;
+            }
+            _ => continue,
+        };
+        if named_type.and_then(|ty| kind_of(Table::Types, ty)) != Some(kinds::ty::CONSTRAINED) {
+            diagnostics.push(malformed(format!(
+                "node {index} names a type that is not a constrained type"
+            )));
+        }
+    }
+    for index in intervals {
+        if !patterns.contains(&index) {
+            diagnostics.push(malformed(format!(
+                "node {index} is an 'interval' node outside an 'ifIs' pattern list"
+            )));
         }
     }
 }

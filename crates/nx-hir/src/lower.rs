@@ -4,8 +4,9 @@
 //! our typed High-level Intermediate Representation (HIR).
 
 use crate::ast::{
-    BinOp, Expr, FunctionParam, Literal, MatchArm, Occurrence, OrderedFloat, RecordLiteralProperty,
-    Stmt, TypeRef, UnOp,
+    BinOp, CompareOp, Expr, FunctionParam, Literal, MatchArm, NumericPattern, Occurrence,
+    OrderedFloat, PatternBound, PatternTerm, RecordLiteralProperty, Stmt, TypeRef, UnOp,
+    UnsupportedTerm,
 };
 use crate::{
     property_union_name, props_record_name, state_record_name, update_record_name, Component,
@@ -108,6 +109,8 @@ impl TypeTag {
             // An optional primitive still has the primitive's kind for operand purposes; a
             // sequence of them has no single kind.
             TypeRef::Seq { inner, occ } if !occ.admits_many() => TypeTag::from_type_ref(inner),
+            // A constrained value is a value of its base.
+            TypeRef::Constrained { base, .. } => TypeTag::from_type_ref(base),
             _ => TypeTag::Unknown,
         }
     }
@@ -302,6 +305,12 @@ impl LoweringContext {
             });
         }
         let pattern_node = node.children().next().unwrap_or(node);
+        if pattern_node.kind() == SyntaxKind::NUMERIC_PATTERN {
+            return self.alloc_expr(Expr::NumericPattern {
+                pattern: lower_numeric_pattern(pattern_node),
+                span: pattern_node.span(),
+            });
+        }
         if pattern_node.kind() == SyntaxKind::QUALIFIED_NAME {
             // A single-segment pattern is a contextual name resolved against the scrutinee's type,
             // not a lexical identifier. Qualified patterns (`LoadState.idle`) keep their existing
@@ -2228,6 +2237,17 @@ impl LoweringContext {
                     if ty.occurrence().is_one() {
                         ty = TypeRef::seq(ty, occ);
                     }
+                }
+
+                // The clause follows the whole base, suffix included.
+                if let Some(pattern) = node
+                    .child_by_field("constraint")
+                    .and_then(|clause| clause.child_by_field("pattern"))
+                {
+                    ty = TypeRef::Constrained {
+                        base: Box::new(ty),
+                        pattern: lower_numeric_pattern(pattern),
+                    };
                 }
 
                 ty
@@ -7494,4 +7514,165 @@ pub fn lower_with_color_runtime(
     ctx.docs = nx_syntax::doc_comments(&root);
     ctx.lower_module(root);
     ctx.finish()
+}
+
+/// Lowers a numeric value pattern, or the expression a `where` clause holds in its place, into its
+/// terms.
+///
+/// <para>Nothing is reported here: `||`, `!=` and an expression become
+/// [`PatternTerm::Unsupported`], which the checker names with `invalid-constraint`, so a mistake
+/// in a constraint is one diagnostic that says what a constraint may use.</para>
+pub(crate) fn lower_numeric_pattern(node: SyntaxNode) -> NumericPattern {
+    let mut terms = Vec::new();
+    if node.kind() == SyntaxKind::NUMERIC_PATTERN {
+        for child in node.children_with_tokens() {
+            match child.kind() {
+                SyntaxKind::RANGE_PATTERN => terms.push(lower_range_term(child)),
+                SyntaxKind::COMPARISON_PATTERN => terms.push(lower_comparison_term(child)),
+                _ if child.text() == "||" => {
+                    // The term after `||` is kept too, so the pattern's spelling stays whole.
+                    terms.push(PatternTerm::Unsupported {
+                        kind: UnsupportedTerm::Or,
+                        span: child.span(),
+                        text: SmolStr::new("||"),
+                    });
+                }
+                _ => {}
+            }
+        }
+    } else {
+        terms.push(PatternTerm::Unsupported {
+            kind: UnsupportedTerm::Expression {
+                suggestion: leading_operand_suggestion(node).map(SmolStr::from),
+            },
+            span: node.span(),
+            text: SmolStr::new(node.text().split_whitespace().collect::<Vec<_>>().join(" ")),
+        });
+    }
+    NumericPattern {
+        terms,
+        span: node.span(),
+    }
+}
+
+fn lower_range_term(node: SyntaxNode) -> PatternTerm {
+    let start = node.child_by_field("start").map(lower_pattern_bound);
+    let end = node.child_by_field("end").map(lower_pattern_bound);
+    let inclusive = node
+        .child_by_field("operator")
+        .is_some_and(|op| op.text() == "..=");
+    match (start, end) {
+        (Some(start), Some(end)) => PatternTerm::Range {
+            start,
+            end,
+            inclusive,
+        },
+        _ => unsupported_term(node),
+    }
+}
+
+fn lower_comparison_term(node: SyntaxNode) -> PatternTerm {
+    let op = node.child_by_field("operator").map(|op| op.text());
+    let Some(bound) = node.child_by_field("bound").map(lower_pattern_bound) else {
+        return unsupported_term(node);
+    };
+    let op = match op {
+        Some("<") => CompareOp::Lt,
+        Some("<=") => CompareOp::Le,
+        Some(">") => CompareOp::Gt,
+        Some(">=") => CompareOp::Ge,
+        Some("!=") => {
+            return PatternTerm::Unsupported {
+                kind: UnsupportedTerm::NotEqual,
+                span: node.span(),
+                text: SmolStr::new(format!("!= {}", bound.text)),
+            }
+        }
+        _ => return unsupported_term(node),
+    };
+    PatternTerm::Compare { op, bound }
+}
+
+fn unsupported_term(node: SyntaxNode) -> PatternTerm {
+    PatternTerm::Unsupported {
+        kind: UnsupportedTerm::Expression { suggestion: None },
+        span: node.span(),
+        text: SmolStr::new(node.text()),
+    }
+}
+
+/// Reads a bound: an integer, real or hex literal, possibly preceded by `-`.
+fn lower_pattern_bound(node: SyntaxNode) -> PatternBound {
+    let (negative, literal) = if node.kind() == SyntaxKind::SIGNED_NUMERIC_LITERAL {
+        (
+            true,
+            node.children()
+                .find(|child| child.kind() != SyntaxKind::MINUS)
+                .unwrap_or(node),
+        )
+    } else {
+        (false, node)
+    };
+    let text = literal.text();
+    let value = match literal.kind() {
+        SyntaxKind::HEX_LITERAL => {
+            let digits = text.trim_start_matches("0x").trim_start_matches("0X");
+            i64::from_str_radix(digits, 16).ok().map(Literal::Int)
+        }
+        _ => text.parse::<i64>().ok().map(Literal::Int).or_else(|| {
+            text.parse::<f64>()
+                .ok()
+                .map(|v| Literal::Float(OrderedFloat(v)))
+        }),
+    };
+    let value = value.map(|value| match value {
+        Literal::Int(v) if negative => Literal::Int(v.wrapping_neg()),
+        Literal::Float(v) if negative => Literal::Float(OrderedFloat(-v.0)),
+        other => other,
+    });
+    PatternBound {
+        value,
+        text: SmolStr::new(if negative {
+            format!("-{text}")
+        } else {
+            text.to_string()
+        }),
+        span: node.span(),
+    }
+}
+
+/// The pattern a `where` clause meant when it wrote an operand: `value >= 1` is `>= 1`, and
+/// `value > 0 && value < 1` is `> 0 && < 1`. `None` for anything else.
+fn leading_operand_suggestion(node: SyntaxNode) -> Option<String> {
+    let node = if matches!(node.kind(), SyntaxKind::VALUE_EXPRESSION) {
+        node.children().next()?
+    } else {
+        node
+    };
+    if node.kind() != SyntaxKind::BINARY_EXPRESSION {
+        return None;
+    }
+    let op = node.child_by_field("operator")?.text();
+    let left = node.child_by_field("left")?;
+    let right = node.child_by_field("right")?;
+    match op {
+        "&&" => Some(format!(
+            "{} && {}",
+            leading_operand_suggestion(left)?,
+            leading_operand_suggestion(right)?
+        )),
+        "<" | "<=" | ">" | ">=" => {
+            let operand = left.text().trim();
+            if !operand.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return None;
+            }
+            let bound = right.text().trim();
+            let numeric = bound
+                .trim_start_matches('-')
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || matches!(c, '.' | 'x' | 'X' | 'e' | 'E' | '+'));
+            numeric.then(|| format!("{op} {bound}"))
+        }
+        _ => None,
+    }
 }

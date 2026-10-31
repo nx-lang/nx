@@ -1944,3 +1944,125 @@ describe("color editor revisions", () => {
     assert.deepEqual(edits,[]);
   });
 });
+
+describe("value constraints", () => {
+  /** Types `entry` in the open field of `element` and presses Enter. */
+  function enter(element: NxViewerElement, entry: string): void {
+    const input = field(element)!;
+    input.textContent = entry;
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(input, "Enter");
+  }
+
+  function note(element: NxViewerElement): string | null | undefined {
+    return root(element).querySelector(".edit-problem")?.textContent;
+  }
+
+  it("edits a constrained number as a number, through an alias and in a let, with its bounds", async () => {
+    const { tree, text } = await fixture("constraints");
+    const index = indexTree(tree, text);
+    const targets = editTargets(index);
+    assert.equal(targets.get("paint.value.opacity.value")?.kind, "number");
+    assert.deepEqual(targets.get("paint.value.opacity.value")?.hints, { min: 0, max: 1, step: 0.1 });
+    assert.deepEqual(targets.get("paint.value.layer.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
+    assert.deepEqual(targets.get("paint.value.weight.value")?.hints, { min: 0, minExclusive: true });
+    assert.deepEqual(targets.get("paint.value.columns.value")?.hints, { min: 1, max: 12 }, "an integer steps by one");
+    assert.deepEqual(targets.get("half.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
+    assert.deepEqual(
+      targets.get("paint.value.dim.value")?.hints,
+      { min: 0, max: 1, step: 0.1 },
+      "the step comes from the range the hint narrows to, not the constraint's"
+    );
+    // Hints alone, or over a constraint with one end, step by the same rule.
+    assert.deepEqual(targets.get("paint.value.plain.value")?.hints, { min: 0, max: 1, step: 0.1 });
+    assert.deepEqual(targets.get("paint.value.upper.value")?.hints, { min: 0, max: 1, step: 0.1 });
+    const extra = unwrittenProperties(index, index.byKey.get("paint.value")!).find((entry) => entry.property.name === "extra");
+    assert.equal(extra?.editor?.kind, "number");
+    assert.deepEqual(extra?.hints, { min: 1, max: 10 });
+  });
+
+  it("steps up to an inclusive end and stays there", async () => {
+    const element = show(await fixture("constraints"));
+    rendered(element, "paint.value.opacity.value").click();
+    const open = field(element)!;
+    press(open, "ArrowUp");
+    assert.equal(open.textContent, "1.0");
+    press(open, "ArrowUp");
+    assert.equal(open.textContent, "1.0", "kept at the end");
+  });
+
+  it("does not step onto an exclusive end", async () => {
+    const element = show(await fixture("constraints"));
+    rendered(element, "paint.value.layer.value").click();
+    const open = field(element)!;
+    open.textContent = "0.95";
+    press(open, "ArrowUp");
+    assert.equal(open.textContent, "0.95", "1.0 is past the end, so the value stays");
+    press(open, "ArrowDown");
+    assert.equal(open.textContent, "0.85");
+  });
+
+  it("keeps a number outside its constraint in the field with a note", async () => {
+    const element = show(await fixture("constraints"));
+    const { edits } = events(element);
+    rendered(element, "paint.value.opacity.value").click();
+    enter(element, "1.5");
+    assert.deepEqual(edits, []);
+    assert.equal(note(element), "At most 1");
+    press(field(element)!, "Escape");
+    rendered(element, "paint.value.weight.value").click();
+    enter(element, "0");
+    assert.deepEqual(edits, []);
+    assert.equal(note(element), "Above 0");
+    press(field(element)!, "Escape");
+    rendered(element, "paint.value.layer.value").click();
+    enter(element, "1");
+    assert.equal(note(element), "Below 1");
+    enter(element, "0.75");
+    assert.deepEqual(edits, [{ key: "paint.value.layer.value", edit: { kind: "setValue", value: { kind: "number", text: "0.75" } } }]);
+  });
+
+  it("compares a float32 with its bounds as a float32, and shows them as written", async () => {
+    const { tree, text } = await fixture("constraints");
+    assert.deepEqual(editTargets(indexTree(tree, text)).get("paint.value.fine.value")?.hints, {
+      max: 0.1,
+      maxExclusive: true,
+      float32: true
+    });
+    const element = show(await fixture("constraints"));
+    const { edits } = events(element);
+    rendered(element, "paint.value.fine.value").click();
+    // `0.1` rounds to the bound itself as a float32, so it is not below it.
+    enter(element, "0.1");
+    assert.deepEqual(edits, []);
+    assert.equal(note(element), "Below 0.1");
+    enter(element, "0.09");
+    assert.deepEqual(edits, [{ key: "paint.value.fine.value", edit: { kind: "setValue", value: { kind: "number", text: "0.09" } } }]);
+  });
+
+  it("lets a hint narrow the constraint but not widen it", async () => {
+    const element = show(await fixture("constraints"));
+    rendered(element, "paint.value.columns.value").click();
+    enter(element, "20");
+    assert.equal(note(element), "At most 12");
+    press(field(element)!, "Escape");
+    rendered(element, "paint.value.wide.value").click();
+    enter(element, "1500");
+    assert.equal(note(element), "At most 1000");
+    press(field(element)!, "Escape");
+    rendered(element, "paint.value.apart.value").click();
+    enter(element, "1500");
+    assert.equal(note(element), "At most 1000", "a hint range that misses the constraint is ignored");
+  });
+
+  it("refuses a choice outside the constraint", async () => {
+    const element = show(await fixture("constraints"));
+    const { edits } = events(element);
+    rendered(element, "paint.value.size.value").click();
+    const open = field(element)!;
+    press(open, "ArrowDown", { altKey: true });
+    choices(element).find((row) => row.dataset["value"] === "50")!.click();
+    assert.deepEqual(edits, []);
+    assert.equal(note(element), "At most 10");
+  });
+});

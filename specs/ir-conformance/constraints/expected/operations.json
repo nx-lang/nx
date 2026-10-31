@@ -1,0 +1,156 @@
+{
+  "counts": {
+    "main.nx::bands": 63,
+    "main.nx::faded": 6,
+    "main.nx::flags": 68,
+    "main.nx::paint#inside": 9,
+    "main.nx::pick#inside": 4,
+    "main.nx::scores#items": 28,
+    "main.nx::stroke#computedDefault": 18,
+    "main.nx::tenth#float32Bound": 3,
+    "main.nx::toUnit#inside": 9,
+    "main.nx::twice#passes": 11
+  },
+  "failures": {
+    "main.nx::bands": [
+      {
+        "budget": 31,
+        "declaration": "main.nx::band",
+        "source": {
+          "end": 1038,
+          "identity": "main.nx",
+          "start": 1027
+        }
+      },
+      {
+        "budget": 62,
+        "declaration": "main.nx::bands"
+      }
+    ],
+    "main.nx::faded": [
+      {
+        "budget": 3,
+        "declaration": "main.nx::fade"
+      },
+      {
+        "budget": 5,
+        "declaration": "main.nx::faded"
+      }
+    ],
+    "main.nx::flags": [
+      {
+        "budget": 34,
+        "declaration": "main.nx::flag",
+        "source": {
+          "end": 942,
+          "identity": "main.nx",
+          "start": 941
+        }
+      },
+      {
+        "budget": 67,
+        "declaration": "main.nx::flags"
+      }
+    ],
+    "main.nx::paint#inside": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::paint",
+        "source": {
+          "end": 804,
+          "identity": "main.nx",
+          "start": 795
+        }
+      },
+      {
+        "budget": 8,
+        "declaration": "main.nx::paint"
+      }
+    ],
+    "main.nx::pick#inside": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::pick"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::pick"
+      }
+    ],
+    "main.nx::scores#items": [
+      {
+        "budget": 14,
+        "declaration": "main.nx::scores",
+        "source": {
+          "end": 765,
+          "identity": "main.nx",
+          "start": 760
+        }
+      },
+      {
+        "budget": 27,
+        "declaration": "main.nx::scores"
+      }
+    ],
+    "main.nx::stroke#computedDefault": [
+      {
+        "budget": 9,
+        "declaration": "main.nx::Stroke",
+        "source": {
+          "end": 442,
+          "identity": "main.nx",
+          "start": 441
+        }
+      },
+      {
+        "budget": 17,
+        "declaration": "main.nx::stroke"
+      }
+    ],
+    "main.nx::tenth#float32Bound": [
+      {
+        "budget": 1,
+        "declaration": "main.nx::tenth",
+        "source": {
+          "end": 709,
+          "identity": "main.nx",
+          "start": 708
+        }
+      },
+      {
+        "budget": 2,
+        "declaration": "main.nx::tenth"
+      }
+    ],
+    "main.nx::toUnit#inside": [
+      {
+        "budget": 4,
+        "declaration": "main.nx::toUnit",
+        "source": {
+          "end": 664,
+          "identity": "main.nx",
+          "start": 663
+        }
+      },
+      {
+        "budget": 8,
+        "declaration": "main.nx::toUnit"
+      }
+    ],
+    "main.nx::twice#passes": [
+      {
+        "budget": 5,
+        "declaration": "main.nx::twice",
+        "source": {
+          "end": 593,
+          "identity": "main.nx",
+          "start": 592
+        }
+      },
+      {
+        "budget": 10,
+        "declaration": "main.nx::twice"
+      }
+    ]
+  }
+}

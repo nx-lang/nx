@@ -15,7 +15,7 @@ use nx_hir::{
     PreparedModule, PreparedNamespace, PropertyEntry, RecordField,
 };
 use nx_interpreter::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
-use nx_types::{ModuleArtifact, Type, TypeEnvironment};
+use nx_types::{ModuleArtifact, Primitive, Type, TypeEnvironment};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Builds a target-neutral code generation program from a resolved program artifact.
@@ -2093,6 +2093,51 @@ fn build_expression(
             ));
             return None;
         }
+        // The check the checker placed where a value enters a constrained site.
+        ast::Expr::ConstraintCheck {
+            expr,
+            base,
+            interval,
+            site,
+            ..
+        } => {
+            let operand = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *expr,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::ConstraintCheck {
+                operand: Box::new(operand),
+                ty: CodegenTypeRef::Constrained {
+                    base: base.as_str().to_string(),
+                    interval: *interval,
+                },
+                site: site.as_str().to_string(),
+            }
+        }
+        // A numeric pattern reads its interval from the type the checker gave it, which is at the
+        // scrutinee's base with integer ends normalized.
+        ast::Expr::NumericPattern { span, .. } => match ty.as_ref().and_then(Type::constraint) {
+            Some((base, interval)) => CodegenExpressionKind::IntervalPattern {
+                ty: CodegenTypeRef::Constrained {
+                    base: base.as_str().to_string(),
+                    interval,
+                },
+            },
+            None => {
+                diagnostics.push(unsupported_diagnostic(
+                    resolved_module,
+                    *span,
+                    "a numeric pattern without a checked interval cannot be emitted",
+                ));
+                return None;
+            }
+        },
         // A range expression is rewritten into a record construction after checking, so one
         // reaching here means analysis was skipped.
         ast::Expr::Range { span, .. } => {
@@ -3105,8 +3150,9 @@ fn build_type_ref_resolving_aliases(
             if kind == PreparedItemKind::TypeAlias {
                 let alias = (target_module_identity.clone(), definition_id);
                 if !aliases.contains(&alias) {
-                    // An alias declared by a module compiled to an interface alone has no target to
-                    // read here, and stays the nominal reference it was before.
+                    // An alias is resolved to its target, read from the declaring module's lowered
+                    // form even when the build reads that module as an interface alone. One with no
+                    // target to read stays a nominal reference.
                     if let Some(target) = type_alias_target(artifact, target_module, definition_id)
                     {
                         aliases.push(alias);
@@ -3216,6 +3262,39 @@ fn build_type_ref_resolving_aliases(
                 diagnostics,
             )?),
         }),
+        // The base resolves first, so a constrained alias's own interval is intersected with the
+        // clause's; anything other than a numeric primitive was reported by the checker and is
+        // emitted as its base.
+        ast::TypeRef::Constrained { base, pattern } => {
+            let base = build_type_ref_resolving_aliases(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                base,
+                aliases,
+                diagnostics,
+            )?;
+            let (name, outer) = match &base {
+                CodegenTypeRef::Primitive { name } => (name.clone(), ast::Interval::ALL),
+                CodegenTypeRef::Constrained { base, interval } => (base.clone(), *interval),
+                _ => return Some(base),
+            };
+            let Some(primitive) = Primitive::from_name(&name).filter(Primitive::is_numeric) else {
+                return Some(base);
+            };
+            let Some(interval) = nx_types::pattern_interval_at(primitive, pattern) else {
+                return Some(base);
+            };
+            Some(
+                match Type::constrained(primitive, interval.intersect(&outer)) {
+                    Type::Constrained { interval, .. } => CodegenTypeRef::Constrained {
+                        base: name,
+                        interval,
+                    },
+                    _ => base,
+                },
+            )
+        }
     }
 }
 
@@ -3226,8 +3305,9 @@ fn type_alias_target(
     module: &ResolvedModule,
     definition_id: LocalDefinitionId,
 ) -> Option<ast::TypeRef> {
-    let module_artifact = module_artifact_for(artifact, module)?;
-    let lowered_module = module_artifact.lowered_module.as_ref()?;
+    let lowered_module: &nx_hir::LoweredModule = module_artifact_for(artifact, module)
+        .and_then(|module_artifact| module_artifact.lowered_module.as_ref())
+        .map_or(module.lowered_module.as_ref(), |lowered| lowered);
     match lowered_module.item_by_definition(definition_id) {
         Some(Item::TypeAlias(alias)) => Some(alias.ty.clone()),
         _ => None,

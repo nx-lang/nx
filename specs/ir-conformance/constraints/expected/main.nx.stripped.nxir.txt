@@ -1,0 +1,112 @@
+module main.nx fingerprint 8929985548061571734
+requires update-records-v1 action-handlers-v1 constraints-v1
+entrypoints functions [pick fade twice unit toUnit tenth scores paint inset stroke flag band flags bands faded] components [Button Meter]
+
+alias Score
+
+alias Unit
+
+record Paint
+  opacity: float64 where in 0.0..=1.0 required
+  layers: int where in 1..=8 = 1
+
+record Stroke
+  width: int required
+  inset: int where >= 0 = (check inset: (width sub 1) as int where >= 0)
+
+function pick(count: int where in 1..=10): int =
+  count
+
+function fade(amount: float64 where in 0.0..=1.0) =
+  amount
+
+function twice(x: float64) =
+  fade((check amount: (x mul 2.0) as float64 where in 0.0..=1.0))
+
+function unit(u: float64 where > 0.0 && < 1.0) =
+  u
+
+function toUnit(x: float64) =
+  unit((check u: x as float64 where > 0.0 && < 1.0))
+
+function tenth(x: float32 where <= 0.10000000149011612) =
+  x
+
+function scores(xs: int+): (int where >= 0)+ =
+  (
+    check result:
+    for x in xs yield
+      (x sub 1)
+    as int where >= 0
+  )
+
+function paint(p: Paint) =
+  (p.opacity mul p.layers)
+
+function inset(s: Stroke) =
+  s.inset
+
+function stroke(width: int) =
+  inset(<Stroke width=width />)
+
+function flag(n: int) =
+  if n is
+    <= -1 | >= 101 =>
+      "out"
+    else =>
+      "in"
+
+function band(x: float64) (optional result) =
+  if x is
+    in 0.0..0.5 =>
+      "low"
+    in 0.5..=1.0 =>
+      "high"
+
+value samples: int+ =
+  [101, 100, 0, (0 sub 1)]
+
+function flags() =
+  for n in samples yield
+    flag(n)
+
+value points: float64+ =
+  [0.25, 0.5, 1.0, 2.0]
+
+function bands() =
+  for x in points yield
+    band(x)
+
+function faded() =
+  fade(0.5)
+
+component Button external
+  props
+    label: string?
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped
+
+record Bump
+  by: int where in 1..=5 required
+
+component Meter state Meter.State
+  props
+    step: int where in 1..=10 = 1
+  state
+    count: int where in 0..=3 = 0
+  emits
+    Bump = Bump
+  body =
+    <Button
+      onTapped=handler Button.Tapped action@2:Button.Tapped owner Meter =>
+        <Meter.State.Update count=(check count: (count add step) as int where in 0..=3) />
+    >
+    </Button>
+
+record Meter.State
+  count: int where in 0..=3 required
+
+record Meter.State.Update update of Meter.State
+  count: int where in 0..=3

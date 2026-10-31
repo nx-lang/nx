@@ -98,6 +98,8 @@ enum Op {
     OptType,
     /// One cell indexing the constant table.
     Const,
+    /// One cell indexing the constant table, or `NONE` (`-1` in the model).
+    OptConst,
     /// One cell indexing the node table.
     Node,
     /// One cell indexing the node table, or `NONE` (`-1` in the model).
@@ -181,6 +183,7 @@ impl Table {
                 ty::SEQ => &[Op::Type, Op::Int],
                 ty::FUNCTION => &[Op::Type, Op::List(PARAM)],
                 ty::ANY_FUNCTION => &[Op::Type],
+                ty::CONSTRAINED => &[Op::Type, Op::OptConst, Op::OptConst, Op::Int],
                 _ => return None,
             },
             Table::Constants => match kind {
@@ -224,6 +227,8 @@ impl Table {
                 node::MEMBER | node::OPTIONAL_MEMBER => &[Op::Node, Op::Str],
                 node::EXISTS => &[Op::Node],
                 node::COALESCE => &[Op::Node, Op::Node],
+                node::CHECK => &[Op::Node, Op::Type, Op::Str],
+                node::INTERVAL => &[Op::Type],
                 node::RECORD | node::COMPONENT => &[Op::Ref, Op::List(PROPERTY), Op::List(NODES)],
                 node::UNION_CASE => &[Op::Ref, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ELEMENT => &[Op::Int, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
@@ -430,7 +435,7 @@ fn write_op<'a>(op: Op, items: &'a [IrItem], pool: &mut Vec<u32>) -> Result<&'a 
         Op::Int | Op::Code(_) | Op::Str | Op::Type | Op::Const | Op::Node => {
             pool.push(cell(int(first)?)?);
         }
-        Op::OptNode | Op::OptSlot | Op::OptStr | Op::OptType => {
+        Op::OptNode | Op::OptSlot | Op::OptStr | Op::OptType | Op::OptConst => {
             let value = int(first)?;
             pool.push(if value == -1 { NONE } else { cell(value)? });
         }
@@ -1473,6 +1478,7 @@ fn validate_op(cursor: &mut Cursor<'_>, op: Op, bounds: &Bounds) -> Result<(), N
         Op::Node => bounds.check("node", cursor.next()?, bounds.nodes)?,
         Op::OptNode => optional(cursor, "node", bounds.nodes)?,
         Op::OptType => optional(cursor, "type", bounds.types)?,
+        Op::OptConst => optional(cursor, "constant", bounds.constants)?,
         Op::OptStr => optional(cursor, "string", bounds.strings)?,
         Op::Ref | Op::RefPair => reference(cursor)?,
         Op::OptRef => {
@@ -1554,7 +1560,8 @@ fn visit_references(cursor: &mut Cursor<'_>, ops: &[Op], visit: &mut impl FnMut(
             | Op::OptNode
             | Op::OptSlot
             | Op::OptStr
-            | Op::OptType => {
+            | Op::OptType
+            | Op::OptConst => {
                 let _ = cursor.next();
             }
             Op::I64 | Op::F64 => {
@@ -1604,7 +1611,7 @@ fn decode_op(cursor: &mut Cursor<'_>, op: Op, items: &mut Vec<IrItem>) {
         Op::Int | Op::Code(_) | Op::Str | Op::Type | Op::Const | Op::Node => {
             items.push(IrItem::Int(next()));
         }
-        Op::OptNode | Op::OptSlot | Op::OptStr | Op::OptType => {
+        Op::OptNode | Op::OptSlot | Op::OptStr | Op::OptType | Op::OptConst => {
             let cell = next();
             items.push(IrItem::Int(if cell == i64::from(NONE) { -1 } else { cell }));
         }

@@ -6,6 +6,7 @@
  * its type. The service checks again, so this decides only what the reading offers.
  */
 import type {
+  SourceBounds,
   SourceCase,
   SourceEdit,
   SourceEditorHints,
@@ -43,8 +44,11 @@ export interface EditTarget {
    * since in a sequence or inside braces `-` reads as an operator.
    */
   readonly signed?: boolean;
-  /** How its property's visualizers say it edits: a range, a unit, choices, several lines. */
-  readonly hints?: SourceEditorHints;
+  /**
+   * How its property's visualizers say it edits: a range, a unit, choices, several lines. A number's
+   * range is narrowed to its type's constraint.
+   */
+  readonly hints?: EditorHints;
   /**
    * The element and the property the value is set on, for a whole value of an attribute or of a
    * property the element does not write.
@@ -59,6 +63,102 @@ export interface EditTarget {
 
 /** The types a number field edits, and their aliases' ends. */
 const NUMBER_TYPES = new Set(["int", "int32", "int64", "float32", "float64"]);
+
+/** The floating-point types, whose step a constraint's span gives when no hint does. */
+const FLOAT_TYPES = new Set(["float32", "float64"]);
+
+/**
+ * Editor hints with a constraint's bounds folded into their range: `minExclusive` and
+ * `maxExclusive` mark an end the value may not reach.
+ */
+export interface EditorHints extends SourceEditorHints {
+  readonly minExclusive?: boolean;
+  readonly maxExclusive?: boolean;
+  /** Whether the number is a `float32`, which a value and the bounds are compared as. */
+  readonly float32?: boolean;
+}
+
+/**
+ * The hints a number of the type `base` edits with, given its constraint's `bounds`: the range of
+ * the hints narrowed to the bounds, or the bounds alone where the hints give no range or one that
+ * does not overlap them. A floating-point number with no `step` hint and two ends steps by the
+ * largest power of ten not above a tenth of that range's span, as one with hints alone does.
+ */
+export function boundedHints(
+  hints: SourceEditorHints | undefined,
+  bounds: SourceBounds | undefined,
+  base: string | undefined
+): EditorHints | undefined {
+  if (bounds === undefined || (bounds.min === undefined && bounds.max === undefined)) {
+    // With no constraint the hints alone give the range offered, and its step as above.
+    const derived = hints?.step === undefined ? derivedStep(base, hints?.min, hints?.max) : undefined;
+    return derived === undefined ? hints : { ...hints, step: derived };
+  }
+  const { min: _min, max: _max, ...rest } = hints ?? {};
+  // A `float32` bound arrives as the `float64` it widens to, `0.10000000149011612`, and reads as
+  // the shortest number that rounds to it, `0.1`.
+  const float32 = base === "float32";
+  const end = (value: number | undefined): number | undefined =>
+    value === undefined || !float32 ? value : shortestFloat32(value);
+  let low = end(bounds.min);
+  let high = end(bounds.max);
+  let lowExclusive = bounds.minExclusive === true;
+  let highExclusive = bounds.maxExclusive === true;
+  const hintLow = hints?.min;
+  const hintHigh = hints?.max;
+  const below = (value: number): boolean => low !== undefined && (value < low || (value === low && lowExclusive));
+  const above = (value: number): boolean => high !== undefined && (value > high || (value === high && highExclusive));
+  const empty = hintLow !== undefined && hintHigh !== undefined && hintLow > hintHigh;
+  const overlaps = !empty && !(hintHigh !== undefined && below(hintHigh)) && !(hintLow !== undefined && above(hintLow));
+  if (overlaps) {
+    if (hintLow !== undefined && (low === undefined || hintLow > low)) {
+      low = hintLow;
+      lowExclusive = false;
+    }
+    if (hintHigh !== undefined && (high === undefined || hintHigh < high)) {
+      high = hintHigh;
+      highExclusive = false;
+    }
+  }
+  let step = hints?.step;
+  // The step comes from the range the editor offers, the hints' where they narrow the bounds.
+  step ??= derivedStep(base, low, high);
+  return {
+    ...rest,
+    ...(low === undefined ? {} : { min: low }),
+    ...(high === undefined ? {} : { max: high }),
+    ...(step === undefined ? {} : { step }),
+    ...(lowExclusive ? { minExclusive: true } : {}),
+    ...(highExclusive ? { maxExclusive: true } : {}),
+    ...(float32 ? { float32: true } : {})
+  };
+}
+
+/**
+ * The step of a floating-point number offered `low` to `high`: the largest power of ten not above
+ * a tenth of the span, or nothing for an integer or a range without both ends.
+ */
+function derivedStep(base: string | undefined, low: number | undefined, high: number | undefined): number | undefined {
+  if (base === undefined || !FLOAT_TYPES.has(base) || low === undefined || high === undefined || !(high > low)) {
+    return undefined;
+  }
+  return 10 ** Math.floor(Math.log10((high - low) / 10));
+}
+
+/** The shortest number that rounds to the same `float32` as `value`: `0.1` for `0.10000000149011612`. */
+function shortestFloat32(value: number): number {
+  const target = Math.fround(value);
+  if (!Number.isFinite(target) || target === 0) {
+    return target;
+  }
+  for (let precision = 1; precision <= 9; precision += 1) {
+    const candidate = Number(target.toPrecision(precision));
+    if (Math.fround(candidate) === target) {
+      return candidate;
+    }
+  }
+  return target;
+}
 
 /** Whether `text` is an NX numeric literal: an integer, a real or a hex literal, with a leading minus. */
 export function isNumericLiteral(text: string): boolean {
@@ -216,7 +316,8 @@ function targetOf(
   if (isNumericLiteral(written) && (declared.base === undefined || NUMBER_TYPES.has(declared.base))) {
     const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
     const signed = (owner?.role === "attribute" || owner?.role === "declaration") && node.flags?.includes("braced") !== true;
-    return { at, key, kind: "number", value: written, signed, ...extra };
+    const bounded = boundedHints(hints, boundsOf(index, at), declared.base);
+    return { at, key, kind: "number", value: written, signed, ...extra, ...(bounded === undefined ? {} : { hints: bounded }) };
   }
   // A literal of any other kind, or a number where something else is declared, reads as it is.
   return undefined;
@@ -298,6 +399,36 @@ function declaredType(index: TreeIndex, at: number): string | undefined {
 }
 
 /**
+ * The bounds the constraint of the type the place of the whole value at `at` declares puts on it:
+ * its property's, its `let`'s, or for an item, its list's.
+ */
+function boundsOf(index: TreeIndex, at: number): SourceBounds | undefined {
+  const { tree } = index;
+  const node = tree.nodes[at]!;
+  const owner = node.parent === undefined ? undefined : tree.nodes[node.parent];
+  switch (owner?.role) {
+    case "attribute": {
+      const elementAt = attributeElement(tree, node.parent!);
+      const element = elementAt === undefined ? undefined : tree.nodes[elementAt];
+      return element?.role === "element"
+        ? elementProperties(tree, element)?.find((property) => property.name === owner.name)?.bounds
+        : undefined;
+    }
+    case "declaration":
+      return owner.declaration === undefined ? undefined : tree.declarations[owner.declaration]?.bounds;
+    case "sequence":
+      return boundsOf(index, node.parent!);
+    default:
+      return undefined;
+  }
+}
+
+/** `spelled` without its constraint: `float32 where in 0.0..=1.0` is `float32`. */
+function withoutConstraint(spelled: string): string {
+  return spelled.replace(/\s+where\s[\s\S]*$/, "");
+}
+
+/**
  * A spelled type followed through the aliases the tree declares: the type it ends at, without its
  * `?`, `+` or `*`; the format and the editor hints the first alias with a visualizer gives its
  * values; and whether it is a list anywhere along the way.
@@ -306,8 +437,9 @@ function resolveType(
   index: TreeIndex,
   spelled: string | undefined
 ): { base: string | undefined; format: SourceValueFormat | undefined; editor: SourceEditorHints | undefined; list: boolean } {
-  let name = spelled?.replace(/[?+*]+$/, "").trim();
-  let list = spelled !== undefined && /[+*]/.test(spelled.trim().slice(-2));
+  const unconstrained = spelled === undefined ? undefined : withoutConstraint(spelled);
+  let name = unconstrained?.replace(/[?+*]+$/, "").trim();
+  let list = unconstrained !== undefined && /[+*]/.test(unconstrained.trim().slice(-2));
   let format: SourceValueFormat | undefined;
   let editor: SourceEditorHints | undefined;
   for (let depth = 0; name !== undefined && name !== "" && depth < 8; depth++) {
@@ -318,8 +450,9 @@ function resolveType(
     }
     format ??= alias.visualizer?.format;
     editor ??= alias.visualizer?.editor;
-    list ||= /[+*]/.test(alias.type.trim().slice(-2));
-    name = alias.type.replace(/[?+*]+$/, "").trim();
+    const target = withoutConstraint(alias.type);
+    list ||= /[+*]/.test(target.trim().slice(-2));
+    name = target.replace(/[?+*]+$/, "").trim();
   }
   return { base: name === "" ? undefined : name, format, editor, list };
 }
@@ -404,7 +537,7 @@ export interface UnwrittenProperty {
   readonly property: SourceProperty;
   /** How its value edits, or nothing when no editor takes its type, as a record's or a list's. */
   readonly editor: TypeEditor | undefined;
-  readonly hints: SourceEditorHints | undefined;
+  readonly hints: EditorHints | undefined;
   readonly format: SourceValueFormat | undefined;
 }
 
@@ -439,11 +572,14 @@ export function unwrittenProperties(index: TreeIndex, at: number): UnwrittenProp
     .sort((a, b) => rank(a.property.name) - rank(b.property.name) || a.position - b.position)
     .map(({ property }) => {
       const visualizer = declaration.visualizer?.properties?.find((candidate) => candidate.name === property.name);
-      const format = visualizer?.format ?? resolveType(index, property.type).format;
+      const declared = resolveType(index, property.type);
+      const format = visualizer?.format ?? declared.format;
+      const editor = editorOfType(index, property.type, format);
+      const hints = visualizer?.editor ?? declared.editor;
       return {
         property,
-        editor: editorOfType(index, property.type, format),
-        hints: visualizer?.editor ?? resolveType(index, property.type).editor,
+        editor,
+        hints: editor?.kind === "number" ? boundedHints(hints, property.bounds, declared.base) : hints,
         format
       };
     });

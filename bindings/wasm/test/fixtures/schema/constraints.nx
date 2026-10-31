@@ -1,0 +1,17 @@
+// Value constraints: each end of an interval is a JSON Schema bound keyword.
+
+type Ratio = float32 where in 0.0..=1.0
+type Below = float32 where < 1.0
+type Unit = float64 where > 0.0 && < 1.0
+type Count = int where >= 1
+type Port = int32 where >= 0
+
+type Paint = { opacity: Ratio layers: Count = 1 }
+
+let pick(count: int where in 1..=10): int where in 1..=10 = { count }
+
+let shade(r: Ratio, b: Below, u: Unit, n: Count, p: Port): float64 = { u }
+
+let paint(p: Paint): Paint = { p }
+
+let counts(ns: Count+): Count+ = { ns }
