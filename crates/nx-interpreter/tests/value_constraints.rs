@@ -74,3 +74,16 @@ fn a_body_is_not_continued_by_the_next_arm() {
         Value::Int(7)
     ));
 }
+
+#[test]
+fn the_interpreter_reads_a_float32_scrutinees_bounds_at_float32() {
+    // `0.1` rounds up as a `float32`, so the value is above `0.1` as a `float64`. The IR runtimes
+    // round the bound to `float32` too and take the first arm.
+    let source = "let near(x: float32) = { if x is { <= 0.1 => \"in\" else => \"out\" } }\n\
+                  let below(x: float32) = { if x is { < 0.1 => \"below\" else => \"not below\" } }";
+    assert_eq!(text(run(source, "near", vec![Value::Float32(0.1)])), "in");
+    assert_eq!(
+        text(run(source, "below", vec![Value::Float32(0.1)])),
+        "not below"
+    );
+}

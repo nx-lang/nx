@@ -6,6 +6,7 @@
     "main.nx::paint#inside": 9,
     "main.nx::pick#inside": 4,
     "main.nx::scores#items": 28,
+    "main.nx::stroke#computedDefault": 18,
     "main.nx::tenth#float32Bound": 3,
     "main.nx::toUnit#inside": 9,
     "main.nx::twice#passes": 11
@@ -16,9 +17,9 @@
         "budget": 31,
         "declaration": "main.nx::band",
         "source": {
-          "end": 873,
+          "end": 1038,
           "identity": "main.nx",
-          "start": 862
+          "start": 1027
         }
       },
       {
@@ -41,9 +42,9 @@
         "budget": 34,
         "declaration": "main.nx::flag",
         "source": {
-          "end": 777,
+          "end": 942,
           "identity": "main.nx",
-          "start": 776
+          "start": 941
         }
       },
       {
@@ -56,9 +57,9 @@
         "budget": 4,
         "declaration": "main.nx::paint",
         "source": {
-          "end": 737,
+          "end": 804,
           "identity": "main.nx",
-          "start": 728
+          "start": 795
         }
       },
       {
@@ -81,9 +82,9 @@
         "budget": 14,
         "declaration": "main.nx::scores",
         "source": {
-          "end": 698,
+          "end": 765,
           "identity": "main.nx",
-          "start": 693
+          "start": 760
         }
       },
       {
@@ -91,14 +92,29 @@
         "declaration": "main.nx::scores"
       }
     ],
+    "main.nx::stroke#computedDefault": [
+      {
+        "budget": 9,
+        "declaration": "main.nx::Stroke",
+        "source": {
+          "end": 442,
+          "identity": "main.nx",
+          "start": 441
+        }
+      },
+      {
+        "budget": 17,
+        "declaration": "main.nx::stroke"
+      }
+    ],
     "main.nx::tenth#float32Bound": [
       {
         "budget": 1,
         "declaration": "main.nx::tenth",
         "source": {
-          "end": 642,
+          "end": 709,
           "identity": "main.nx",
-          "start": 641
+          "start": 708
         }
       },
       {
@@ -111,9 +127,9 @@
         "budget": 4,
         "declaration": "main.nx::toUnit",
         "source": {
-          "end": 597,
+          "end": 664,
           "identity": "main.nx",
-          "start": 596
+          "start": 663
         }
       },
       {
@@ -126,9 +142,9 @@
         "budget": 5,
         "declaration": "main.nx::twice",
         "source": {
-          "end": 526,
+          "end": 593,
           "identity": "main.nx",
-          "start": 525
+          "start": 592
         }
       },
       {

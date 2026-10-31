@@ -11,6 +11,8 @@ type Paint = {
   layers: int where in 1..=8 = 1
 }
 
+type Stroke = { width: int  inset: int where >= 0 = {width - 1} }
+
 let pick(count: int where in 1..=10): int = { count }
 
 let fade(amount: float64 where in 0.0..=1.0) = { amount }
@@ -26,6 +28,10 @@ let tenth(x: float32 where <= 0.1) = { x }
 let scores(xs: int+): Score+ = { for x in xs { x - 1 } }
 
 let paint(p: Paint) = { p.opacity * p.layers }
+
+let inset(s: Stroke) = { s.inset }
+
+let stroke(width: int) = { inset(<Stroke width={width} />) }
 
 let flag(n: int) = { if n is { < 0, > 100 => "out" else => "in" } }
 
@@ -45,3 +51,14 @@ let points: float64+ = { 0.25 0.5 1.0 2.0 }
 let bands() = { for x in points { band(x) } }
 
 let faded() = { fade(0.5) }
+
+// A component's props, state and dispatched actions are checked where the host passes them, and a
+// state update its handler computes is checked inside the program.
+external component <Button label?: string emits { Tapped { } } />
+
+action Bump = { by: int where in 1..=5 }
+
+component <Meter step: int where in 1..=10 = 1 emits { Bump } /> = {
+  state { count: int where in 0..=3 = 0 }
+  <Button onTapped=<State.Update count={count + step} /> />
+}

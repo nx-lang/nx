@@ -244,11 +244,11 @@ subtraction; this SHALL hold for the signed literal patterns arms already accept
 - **WHEN** a file contains `let fade(amount: float64 where in 0.0..=1.0) = { amount }` and `let safe(x: float64) = { if x is { in 0.0..=1.0 => fade(x) else => 0.0 } }`
 - **THEN** analysis SHALL accept `fade(x)` and the emitted IR SHALL contain no check for it
 
-### Requirement: Hover and signature help show the constraint
-Hover and signature help SHALL spell the type with its constraint as written, for hover on a
-constrained property, parameter, field or alias and for signature help on a constrained parameter.
-Hover on a property whose type is an
-alias of a constrained type SHALL show the alias name and its constraint.
+### Requirement: Hover shows the constraint
+Hover SHALL spell the type with its constraint as written, for hover on a constrained property,
+parameter, field or alias. Hover on a property whose type is an alias of a constrained type SHALL
+show the alias name and its constraint. The language service has no signature help yet; when it
+gains one, it is to spell a constrained parameter the same way.
 
 #### Scenario: Hover through an alias
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0` and `type Fade = { amount: Ratio }`, and hover is asked on `amount`

@@ -135,24 +135,28 @@ function clamp(value: number, hints: SourceEditorHints | undefined): number {
  * exclusive end, or nothing.
  */
 export function rangeProblem(entry: string, hints: EditorHints | undefined): string | undefined {
-  const value = Number(entry);
-  if (hints === undefined || !Number.isFinite(value)) {
+  if (hints === undefined || !Number.isFinite(Number(entry))) {
     return undefined;
   }
+  // A `float32` is compared as the checker compares it: the value and the bounds rounded to `float32`.
+  const at = (number: number): number => (hints.float32 === true ? Math.fround(number) : number);
+  const value = at(Number(entry));
+  const min = hints.min === undefined ? undefined : at(hints.min);
+  const max = hints.max === undefined ? undefined : at(hints.max);
   if (hints.min !== undefined && hints.max !== undefined && hints.min > hints.max) {
     // An empty range bounds nothing.
     return undefined;
   }
-  if (hints.min !== undefined && hints.minExclusive === true && value <= hints.min) {
+  if (min !== undefined && hints.minExclusive === true && value <= min) {
     return `Above ${hints.min}`;
   }
-  if (hints.min !== undefined && value < hints.min) {
+  if (min !== undefined && value < min) {
     return `At least ${hints.min}`;
   }
-  if (hints.max !== undefined && hints.maxExclusive === true && value >= hints.max) {
+  if (max !== undefined && hints.maxExclusive === true && value >= max) {
     return `Below ${hints.max}`;
   }
-  if (hints.max !== undefined && value > hints.max) {
+  if (max !== undefined && value > max) {
     return `At most ${hints.max}`;
   }
   return undefined;

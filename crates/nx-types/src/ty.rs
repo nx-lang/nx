@@ -1088,7 +1088,12 @@ impl fmt::Display for Type {
             Type::Variable(id) => write!(f, "T{}", id),
             Type::ContextualName(name) => write!(f, "{}", name),
             Type::Constrained { base, interval } => {
-                write!(f, "{} where {}", base, interval.spelling(base.is_float()))
+                let spelling = if *base == Primitive::Float32 {
+                    interval.spelling_float32()
+                } else {
+                    interval.spelling(base.is_float())
+                };
+                write!(f, "{} where {}", base, spelling)
             }
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),

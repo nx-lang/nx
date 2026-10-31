@@ -1,6 +1,6 @@
-module main.nx fingerprint 15032654582476594623
-requires constraints-v1
-entrypoints functions [pick fade twice unit toUnit tenth scores paint flag band flags bands faded] components []
+module main.nx fingerprint 8929985548061571734
+requires update-records-v1 action-handlers-v1 constraints-v1
+entrypoints functions [pick fade twice unit toUnit tenth scores paint inset stroke flag band flags bands faded] components [Button Meter]
 
 alias Score @5:1-5:28
 
@@ -10,25 +10,29 @@ record Paint @9:1-12:2
   opacity: float64 where in 0.0..=1.0 required
   layers: int where in 1..=8 = 1
 
-function pick(count: int where in 1..=10): int @14:1-14:54 =
+record Stroke @14:1-14:66
+  width: int required
+  inset: int where >= 0 = (check inset: (width sub 1) as int where >= 0)
+
+function pick(count: int where in 1..=10): int @16:1-16:54 =
   count
 
-function fade(amount: float64 where in 0.0..=1.0) @16:1-16:58 =
+function fade(amount: float64 where in 0.0..=1.0) @18:1-18:58 =
   amount
 
-function twice(x: float64) @18:1-18:42 =
+function twice(x: float64) @20:1-20:42 =
   fade((check amount: (x mul 2.0) as float64 where in 0.0..=1.0))
 
-function unit(u: float64 where > 0.0 && < 1.0) @20:1-20:26 =
+function unit(u: float64 where > 0.0 && < 1.0) @22:1-22:26 =
   u
 
-function toUnit(x: float64) @22:1-22:37 =
+function toUnit(x: float64) @24:1-24:37 =
   unit((check u: x as float64 where > 0.0 && < 1.0))
 
-function tenth(x: float32 where <= 0.10000000149011612) @24:1-24:43 =
+function tenth(x: float32 where <= 0.10000000149011612) @26:1-26:43 =
   x
 
-function scores(xs: int+): (int where >= 0)+ @26:1-26:57 =
+function scores(xs: int+): (int where >= 0)+ @28:1-28:57 =
   (
     check result:
     for x in xs yield
@@ -36,36 +40,73 @@ function scores(xs: int+): (int where >= 0)+ @26:1-26:57 =
     as int where >= 0
   )
 
-function paint(p: Paint) @28:1-28:47 =
+function paint(p: Paint) @30:1-30:47 =
   (p.opacity mul p.layers)
 
-function flag(n: int) @30:1-30:68 =
+function inset(s: Stroke) @32:1-32:35 =
+  s.inset
+
+function stroke(width: int) @34:1-34:61 =
+  inset(<Stroke width=width />)
+
+function flag(n: int) @36:1-36:68 =
   if n is
     <= -1 | >= 101 =>
       "out"
     else =>
       "in"
 
-function band(x: float64) (optional result) @32:1-37:2 =
+function band(x: float64) (optional result) @38:1-43:2 =
   if x is
     in 0.0..0.5 =>
       "low"
     in 0.5..=1.0 =>
       "high"
 
-value samples: int+ @39:1-39:42 =
+value samples: int+ @45:1-45:42 =
   [101, 100, 0, (0 sub 1)]
 
-function flags() @41:1-41:47 =
+function flags() @47:1-47:47 =
   for n in samples yield
     flag(n)
 
-value points: float64+ @43:1-43:44 =
+value points: float64+ @49:1-49:44 =
   [0.25, 0.5, 1.0, 2.0]
 
-function bands() @45:1-45:46 =
+function bands() @51:1-51:46 =
   for x in points yield
     band(x)
 
-function faded() @47:1-47:28 =
+function faded() @53:1-53:28 =
   fade(0.5)
+
+component Button external @57:1-57:66
+  props
+    label: string?
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped @57:51-57:61
+
+record Bump @59:1-59:41
+  by: int where in 1..=5 required
+
+component Meter state Meter.State @61:1-64:2
+  props
+    step: int where in 1..=10 = 1
+  state
+    count: int where in 0..=3 = 0
+  emits
+    Bump = Bump
+  body =
+    <Button
+      onTapped=handler Button.Tapped action@2:Button.Tapped owner Meter =>
+        <Meter.State.Update count=(check count: (count add step) as int where in 0..=3) />
+    >
+    </Button>
+
+record Meter.State @61:1-64:2
+  count: int where in 0..=3 required
+
+record Meter.State.Update update of Meter.State @61:1-64:2
+  count: int where in 0..=3

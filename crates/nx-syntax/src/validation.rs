@@ -1779,23 +1779,30 @@ fn walk_and_collect_errors(
         let raw_end = u32::try_from(node.end_byte())
             .expect("NX source size should be validated before collecting syntax diagnostics");
 
-        // Get the text of the error node for context
-        let error_text = &source[raw_start as usize..raw_end.min(source.len() as u32) as usize];
-
-        // Generate context-aware error message
-        let (message, suggestion) = analyze_error_context(&node, error_text, source);
-        let (start, end) = refine_error_range(raw_start, raw_end, error_text, &message);
-        let range = TextRange::new(start.into(), end.into());
-
-        let mut diagnostic_builder = Diagnostic::error("syntax-error")
-            .with_message(message)
-            .with_label(Label::primary(file_name, range).with_message("unexpected syntax here"));
-
-        if let Some(note) = suggestion {
-            diagnostic_builder = diagnostic_builder.with_note(note);
+        // A comma after a `where` clause is a constraint's mistake, not a stray token: the author
+        // listed alternatives as a match arm does. One report per comma, however many error nodes
+        // the parser's recovery leaves around it.
+        if let Some(comma) = constraint_comma(source, raw_start as usize, raw_end as usize) {
+            let range = TextRange::new((comma as u32).into(), (comma as u32 + 1).into());
+            let reported = errors.iter().any(|diagnostic| {
+                diagnostic.code() == Some("invalid-constraint")
+                    && diagnostic.labels().iter().any(|label| label.range == range)
+            });
+            if !reported {
+                errors.push(
+                    Diagnostic::error("invalid-constraint")
+                        .with_message("A constraint has one interval and cannot list alternatives")
+                        .with_label(
+                            Label::primary(file_name, range)
+                                .with_message("a comma lists alternatives only in a match arm"),
+                        )
+                        .with_note("Join bounds with `&&`, as in `int where >= 0 && <= 9`.")
+                        .build(),
+                );
+            }
+        } else {
+            push_syntax_error(node, source, file_name, raw_start, raw_end, errors);
         }
-
-        errors.push(diagnostic_builder.build());
     }
 
     // Recursively check children
@@ -1803,6 +1810,72 @@ fn walk_and_collect_errors(
     for child in node.children(&mut cursor) {
         walk_and_collect_errors(child, source, file_name, errors);
     }
+}
+
+/// The offset of a comma that follows a `where` clause's pattern on the same line, when the error
+/// node from `start` to `end` is the parser's failure at it: the node covers the comma, or starts at
+/// the term after it.
+fn constraint_comma(source: &str, start: usize, end: usize) -> Option<usize> {
+    let end = end.min(source.len());
+    let line_start = source
+        .get(..start)?
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+    let region = source.get(line_start..end)?;
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut from = 0;
+    while let Some(found) = region[from..].find("where") {
+        let at = from + found;
+        from = at + "where".len();
+        let before = region[..at].chars().next_back();
+        let after = region[from..].chars().next();
+        if before.is_some_and(is_word) || !after.is_some_and(|c| c == ' ' || c == '\t') {
+            continue;
+        }
+        // The pattern between `where` and the comma uses only what a numeric pattern spells.
+        let pattern_end = region[from..]
+            .find(|c: char| !(is_word(c) || " \t.<>=&-+".contains(c)))
+            .map(|offset| from + offset)?;
+        if !region[pattern_end..].starts_with(',') {
+            continue;
+        }
+        let comma = line_start + pattern_end;
+        let next_term = source[comma + 1..]
+            .find(|c: char| c != ' ' && c != '\t')
+            .map_or(source.len(), |offset| comma + 1 + offset);
+        if start <= next_term && comma < end {
+            return Some(comma);
+        }
+    }
+    None
+}
+
+/// Reports an error or missing node as a syntax error, with a message from its context.
+fn push_syntax_error(
+    node: tree_sitter::Node,
+    source: &str,
+    file_name: &str,
+    raw_start: u32,
+    raw_end: u32,
+    errors: &mut Vec<Diagnostic>,
+) {
+    // Get the text of the error node for context
+    let error_text = &source[raw_start as usize..raw_end.min(source.len() as u32) as usize];
+
+    // Generate context-aware error message
+    let (message, suggestion) = analyze_error_context(&node, error_text, source);
+    let (start, end) = refine_error_range(raw_start, raw_end, error_text, &message);
+    let range = TextRange::new(start.into(), end.into());
+
+    let mut diagnostic_builder = Diagnostic::error("syntax-error")
+        .with_message(message)
+        .with_label(Label::primary(file_name, range).with_message("unexpected syntax here"));
+
+    if let Some(note) = suggestion {
+        diagnostic_builder = diagnostic_builder.with_note(note);
+    }
+
+    errors.push(diagnostic_builder.build());
 }
 
 fn refine_error_range(start: u32, end: u32, error_text: &str, message: &str) -> (u32, u32) {

@@ -2014,6 +2014,24 @@ describe("value constraints", () => {
     assert.deepEqual(edits, [{ key: "paint.value.layer.value", edit: { kind: "setValue", value: { kind: "number", text: "0.75" } } }]);
   });
 
+  it("compares a float32 with its bounds as a float32, and shows them as written", async () => {
+    const { tree, text } = await fixture("constraints");
+    assert.deepEqual(editTargets(indexTree(tree, text)).get("paint.value.fine.value")?.hints, {
+      max: 0.1,
+      maxExclusive: true,
+      float32: true
+    });
+    const element = show(await fixture("constraints"));
+    const { edits } = events(element);
+    rendered(element, "paint.value.fine.value").click();
+    // `0.1` rounds to the bound itself as a float32, so it is not below it.
+    enter(element, "0.1");
+    assert.deepEqual(edits, []);
+    assert.equal(note(element), "Below 0.1");
+    enter(element, "0.09");
+    assert.deepEqual(edits, [{ key: "paint.value.fine.value", edit: { kind: "setValue", value: { kind: "number", text: "0.09" } } }]);
+  });
+
   it("lets a hint narrow the constraint but not widen it", async () => {
     const element = show(await fixture("constraints"));
     rendered(element, "paint.value.columns.value").click();

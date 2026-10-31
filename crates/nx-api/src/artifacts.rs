@@ -4329,7 +4329,12 @@ fn interval_pattern(
         } else {
             Literal::Float(OrderedFloat(value))
         }),
-        text: nx_hir::ast::spell_bound(value, base.is_float()).into(),
+        text: if base == nx_types::Primitive::Float32 {
+            nx_hir::ast::spell_float32_bound(value)
+        } else {
+            nx_hir::ast::spell_bound(value, base.is_float())
+        }
+        .into(),
         span: nx_diagnostics::TextSpan::default(),
     };
     let mut terms = Vec::new();

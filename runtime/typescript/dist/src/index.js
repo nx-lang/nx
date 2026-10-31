@@ -609,12 +609,16 @@ function intervalAdmits(interval, value) {
     return above && below;
 }
 /** The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`. */
+/** A number at the interval's base: a `float32` in its shortest digits, `0.1`, not `0.10000000149011612`. */
+function intervalNumberText(interval, value) {
+    return interval.float32 ? float32Text(value) : String(value);
+}
 function intervalText(interval) {
     const bound = (value) => {
         if (interval.integer) {
             return String(value);
         }
-        const text = String(value);
+        const text = intervalNumberText(interval, value);
         return /[.eNI]/.test(text) ? text : `${text}.0`;
     };
     const { low, high } = interval;
@@ -659,6 +663,7 @@ function constrainedInterval(image, typeIndex) {
         lowExclusive: (entry[4] & constrainedFlags.lowExclusive) !== 0,
         highExclusive: (entry[4] & constrainedFlags.highExclusive) !== 0,
         integer: base === "int" || base === "int32" || base === "int64",
+        float32: base === "float32",
     };
 }
 /** Whether a site of this type admits the empty value: a `?` or `*` occurrence. */
@@ -2742,7 +2747,7 @@ function evalCheck(context, index, entry) {
     for (const item of items) {
         charge(context, index, 1);
         if (typeof item !== "number" || !intervalAdmits(interval, item)) {
-            fail("nx-ir-constraint", `The value ${typeof item === "number" ? String(item) : "that is not a number"} for '${image.string(entry[3])}' is outside its constraint ${intervalText(interval)}.`, context, index);
+            fail("nx-ir-constraint", `The value ${typeof item === "number" ? intervalNumberText(interval, item) : "that is not a number"} for '${image.string(entry[3])}' is outside its constraint ${intervalText(interval)}.`, context, index);
         }
     }
     return value;
@@ -4054,7 +4059,7 @@ function normalizeValue(context, ty, value, path) {
         case "constrained": {
             const normalized = normalizePrimitiveValue(ty.base, value, path);
             if (typeof normalized !== "number" || !intervalAdmits(ty.interval, normalized)) {
-                fail("nx-ir-boundary-constraint", `Expected ${path} to be in ${intervalText(ty.interval)}, got ${String(normalized)}.`);
+                fail("nx-ir-boundary-constraint", `Expected ${path} to be in ${intervalText(ty.interval)}, got ${typeof normalized === "number" ? intervalNumberText(ty.interval, normalized) : String(normalized)}.`);
             }
             return normalized;
         }

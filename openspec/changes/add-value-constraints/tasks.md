@@ -31,7 +31,7 @@
 ## 5. Schemas and language service
 
 - [x] 5.1 Schema export: bound keywords, integer exclusive ends as inclusive, `float32` ends as inclusive `float32` values, `int32` bound replacement, spelling with the constraint; extend the boundary-agreement corpus.
-- [x] 5.2 Hover and signature help show constraints, including through aliases.
+- [x] 5.2 Hover shows constraints (the language service has no signature help yet), including through aliases.
 - [x] 5.3 Source tree: `bounds` on properties, state fields, union-case fields, aliases and annotated value declarations, and for sequence and optional item types (Rust, wasm transport, `packages/language-protocol`).
 
 ## 6. Viewer

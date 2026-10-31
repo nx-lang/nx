@@ -860,7 +860,10 @@ impl<'p> Machine<'p> {
                     "nx-ir-constraint",
                     format!(
                         "The value {} for '{site}' is outside its constraint {interval}.",
-                        number_text(item)
+                        match item {
+                            Value::Float(number) => interval.number_text(*number),
+                            other => number_text(other),
+                        }
                     ),
                 );
             }

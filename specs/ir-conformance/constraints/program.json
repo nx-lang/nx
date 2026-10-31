@@ -19,6 +19,9 @@
     { "module": "main.nx", "function": "scores", "case": "items", "arguments": [[1, 2, 3]] },
     { "module": "main.nx", "function": "scores", "case": "secondItem", "arguments": [[1, 0]], "fails": true },
     { "module": "main.nx", "function": "paint", "case": "inside", "arguments": [{"$type": "Paint", "opacity": 0.5, "layers": 2}] },
-    { "module": "main.nx", "function": "paint", "case": "nestedField", "arguments": [{"$type": "Paint", "opacity": 1.5}], "fails": true }
+    { "module": "main.nx", "function": "paint", "case": "nestedField", "arguments": [{"$type": "Paint", "opacity": 1.5}], "fails": true },
+    { "module": "main.nx", "function": "stroke", "case": "computedDefault", "arguments": [2] },
+    { "module": "main.nx", "function": "stroke", "case": "computedDefaultFails", "arguments": [0], "fails": true },
+    { "module": "main.nx", "function": "inset", "case": "hostRecordDefaultFails", "arguments": [{"$type": "Stroke", "width": 0}], "fails": true }
   ]
 }

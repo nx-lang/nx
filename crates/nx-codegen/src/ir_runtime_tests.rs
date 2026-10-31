@@ -4144,6 +4144,95 @@ fn a_nested_host_field_outside_its_constraint_is_refused_with_its_path() {
 }
 
 #[test]
+fn a_float32_constraint_is_spelled_in_float32_digits() {
+    let program = program(
+        "let tenth(x: float32 where <= 0.1) = { x }
+         let scaled(x: float32) = { tenth(x * 2.0) }",
+    );
+    let boundary = failure(program.evaluate_function("tenth", &[NxValue::Float(0.2)], &options()));
+    assert_eq!(boundary.code(), "nx-ir-boundary-constraint", "{boundary}");
+    assert!(
+        boundary
+            .to_string()
+            .contains("Expected x to be in <= 0.1, got 0.2."),
+        "{boundary}"
+    );
+    let check = failure(program.evaluate_function("scaled", &[NxValue::Float(0.1)], &options()));
+    assert_eq!(check.code(), "nx-ir-constraint", "{check}");
+    assert!(
+        check
+            .to_string()
+            .contains("The value 0.2 for 'x' is outside its constraint <= 0.1."),
+        "{check}"
+    );
+}
+
+const METER_SOURCE: &str = "
+external component <Button label?:string emits { Tapped { } } />
+action Bump = { by: int where in 1..=5 }
+component <Meter step: int where in 1..=10 = 1 emits { Bump } /> = {
+  state { count: int where in 0..=3 = 0 }
+  <Button onTapped=<State.Update count={count + step} /> />
+}";
+
+#[test]
+fn a_component_boundary_outside_its_constraint_is_refused() {
+    let program = program(METER_SOURCE);
+    let init = ComponentInit::default();
+    let boundary = |result: Result<_, NxIrRuntimeError>, message: &str| {
+        let error = failure(result);
+        assert_eq!(error.code(), "nx-ir-boundary-constraint", "{error}");
+        assert_eq!(argument_of(&error), None);
+        assert!(error.to_string().contains(message), "{error}");
+    };
+    boundary(
+        program
+            .initialize_component("Meter", &fields(r#"{ "step": 11 }"#), &init, &options())
+            .map(|_| ()),
+        "Expected Meter props.step to be in 1..=10, got 11.",
+    );
+    let state = fields(r#"{ "count": 9 }"#);
+    boundary(
+        program
+            .initialize_component(
+                "Meter",
+                &fields(r#"{ "step": 2 }"#),
+                &ComponentInit {
+                    state: Some(&state),
+                    ..ComponentInit::default()
+                },
+                &options(),
+            )
+            .map(|_| ()),
+        "Expected Meter state.count to be in 0..=3, got 9.",
+    );
+    let meter = program
+        .initialize_component("Meter", &fields(r#"{ "step": 2 }"#), &init, &options())
+        .unwrap();
+    let bump = json(r#"{ "$type": "Bump", "by": 9 }"#);
+    boundary(
+        program
+            .dispatch_component_actions(&meter.instance, &[bump], &options())
+            .map(|_| ()),
+        "Expected Bump action.by to be in 1..=5, got 9.",
+    );
+    // A state update the handler computes is checked inside the program.
+    let once = program
+        .dispatch_component_actions(&meter.instance, &[tap("h1-1")], &options())
+        .unwrap();
+    let error =
+        failure(program.dispatch_component_actions(&once.instance, &[tap("h2-1")], &options()));
+    assert_eq!(error.code(), "nx-ir-constraint", "{error}");
+    assert_eq!(argument_of(&error), None);
+    assert!(
+        error
+            .to_string()
+            .contains("The value 4 for 'count' is outside its constraint 0..=3."),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_check_inside_the_program_fails_naming_no_argument() {
     let program = program(
         "let fade(amount: float64 where in 0.0..=1.0) = { amount }

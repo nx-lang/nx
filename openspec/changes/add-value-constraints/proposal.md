@@ -38,7 +38,7 @@ its arguments without checking them.
 - The source tree carries each property's bounds, and the Visual number editor keeps within them
   with no visualizer; `@nx/visualizer` `min`/`max` hints may narrow the range offered but not widen
   it.
-- Hover and signature help show constraints. The types reference, grammar documents and style
+- Hover shows constraints. The types reference, grammar documents and style
   guide document the feature.
 
 ## Capabilities

@@ -2545,6 +2545,68 @@ type Show = { value: Unit }
 }
 
 #[test]
+fn a_constraint_on_an_alias_of_a_plain_number_carries_its_bounds() {
+    let tree = tree_for(
+        "type Weight = int
+type Heavy = Weight where >= 10
+type Load = { w: Weight where in 1..=1000 h: Heavy plain: Weight }
+let load = <Load w=5 h=20 plain=3 />
+",
+    );
+    let at_least_ten = SourceBounds {
+        min: Some(SourceNumber(10.0)),
+        ..SourceBounds::default()
+    };
+    assert_eq!(entry(&tree, "Weight").bounds, None);
+    assert_eq!(entry(&tree, "Heavy").bounds, Some(at_least_ten.clone()));
+    let load = entry(&tree, "Load");
+    let property = |name: &str| {
+        load.properties
+            .iter()
+            .find(|property| property.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    assert_eq!(
+        property("w").bounds,
+        Some(SourceBounds {
+            min: Some(SourceNumber(1.0)),
+            max: Some(SourceNumber(1000.0)),
+            ..SourceBounds::default()
+        })
+    );
+    assert_eq!(property("h").bounds, Some(at_least_ten));
+    assert_eq!(property("plain").bounds, None);
+}
+
+#[test]
+fn a_union_case_property_carries_its_bounds() {
+    let tree = tree_for(
+        "type Shape =
+  | dot { radius: float64 where > 0.0 }
+  | plain { size: float64 }
+let shape = Shape.dot { radius: 1.0 }
+",
+    );
+    let shape = entry(&tree, "Shape");
+    let case = |name: &str| {
+        shape
+            .cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    assert_eq!(
+        case("dot").properties[0].bounds,
+        Some(SourceBounds {
+            min: Some(SourceNumber(0.0)),
+            min_exclusive: Some(true),
+            ..SourceBounds::default()
+        })
+    );
+    assert_eq!(case("plain").properties[0].bounds, None);
+}
+
+#[test]
 fn a_numeric_pattern_is_one_literal_spelled_as_written() {
     let tree = tree_for(
         "let band(x: float64) = { if x is { in 0.0..0.5 => \"low\" > 0.5 && <= 1.0 => \"high\" else => \"off\" } }\n",

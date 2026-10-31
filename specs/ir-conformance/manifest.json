@@ -4,6 +4,7 @@
       "add": [
         "argument-diagnostics",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -158,6 +159,7 @@
     "declarations": {
       "component": [
         "components",
+        "constraints",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -348,6 +350,7 @@
     },
     "nodes": {
       "actionHandler": [
+        "constraints",
         "evaluation-cost",
         "handlers",
         "held-records",
@@ -441,6 +444,7 @@
       ],
       "component": [
         "components",
+        "constraints",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -558,6 +562,7 @@
         "agent-library",
         "agent-tool-context",
         "color-library",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "function-references",

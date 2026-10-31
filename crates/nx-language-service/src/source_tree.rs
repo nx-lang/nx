@@ -2950,34 +2950,43 @@ pub(crate) fn type_interval(
     ty: &nx_hir::ast::TypeRef,
     depth: usize,
 ) -> Option<(nx_types::Primitive, nx_hir::ast::Interval)> {
+    let (primitive, interval) = numeric_interval(workspace, module, ty, depth)?;
+    match nx_types::Type::constrained(primitive, interval) {
+        nx_types::Type::Constrained { base, interval } => Some((base, interval)),
+        _ => None,
+    }
+}
+
+/// The numeric primitive `ty` resolves to through its aliases, with the interval its constraints
+/// leave, which is the whole type's when nothing constrains it; `None` when `ty` is no number.
+fn numeric_interval(
+    workspace: &WorkspaceDeclarations,
+    module: &str,
+    ty: &nx_hir::ast::TypeRef,
+    depth: usize,
+) -> Option<(nx_types::Primitive, nx_hir::ast::Interval)> {
     use nx_hir::ast::TypeRef;
     if depth >= 16 {
         return None;
     }
     match ty {
-        TypeRef::Seq { inner, .. } => type_interval(workspace, module, inner, depth + 1),
+        TypeRef::Seq { inner, .. } => numeric_interval(workspace, module, inner, depth + 1),
         TypeRef::Constrained { base, pattern } => {
-            let (primitive, outer) = match base.as_ref() {
-                TypeRef::Name(name) => match nx_types::Primitive::from_name(name.as_str()) {
-                    Some(primitive) => (primitive, nx_hir::ast::Interval::ALL),
-                    None => type_interval(workspace, module, base, depth + 1)?,
-                },
-                _ => return None,
-            };
+            let (primitive, outer) = numeric_interval(workspace, module, base, depth + 1)?;
             let interval = nx_types::pattern_interval_at(primitive, pattern)?.intersect(&outer);
-            match nx_types::Type::constrained(primitive, interval) {
-                nx_types::Type::Constrained { base, interval } => Some((base, interval)),
-                _ => None,
-            }
+            Some((primitive, interval))
         }
         TypeRef::Name(name) => {
+            if let Some(primitive) = nx_types::Primitive::from_name(name.as_str()) {
+                return Some((primitive, nx_hir::ast::Interval::ALL));
+            }
             let origin = workspace
                 .type_namespaces
                 .get(module)
                 .and_then(|namespace| namespace.get(name.as_str()))?;
             match item_at(workspace, origin) {
                 Some(Item::TypeAlias(alias)) => {
-                    type_interval(workspace, &origin.0, &alias.ty, depth + 1)
+                    numeric_interval(workspace, &origin.0, &alias.ty, depth + 1)
                 }
                 _ => None,
             }

@@ -1025,6 +1025,9 @@ It left these for later:
   program (`nxCheckConstraint`), but their host types and schemas keep the base type, so a value a
   host passes in is not checked at the boundary, and a numeric match pattern is refused there as
   every match is.
+- **Signature help.** The language service offers no signature help yet (it is a reserved query).
+  When it does, a constrained parameter is to read as hover spells it, `amount: float32 where in
+  0.0..=1.0`.
 
 ## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
 

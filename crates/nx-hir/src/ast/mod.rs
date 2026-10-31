@@ -13,7 +13,8 @@ pub use expr::{
 };
 pub use stmt::Stmt;
 pub use types::{
-    spell_applied_type, spell_bound, spell_function_reference_type, spell_function_type,
-    spell_type_ref, spell_type_ref_under_suffix, CompareOp, FunctionParam, Interval, IntervalEnd,
-    NumericPattern, Occurrence, PatternBound, PatternTerm, SpelledParam, TypeRef, UnsupportedTerm,
+    spell_applied_type, spell_bound, spell_float32_bound, spell_function_reference_type,
+    spell_function_type, spell_type_ref, spell_type_ref_under_suffix, CompareOp, FunctionParam,
+    Interval, IntervalEnd, NumericPattern, Occurrence, PatternBound, PatternTerm, SpelledParam,
+    TypeRef, UnsupportedTerm,
 };

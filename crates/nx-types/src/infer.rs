@@ -6970,6 +6970,21 @@ impl<'a> InferenceContext<'a> {
         }
 
         if self.type_satisfies_expected(actual, expected) {
+            // A value whose type is not known here satisfies any site vacuously, so it cannot prove
+            // a constraint either: a record or union-case default read from a sibling field is
+            // inferred before that field is in scope. It is checked when it runs.
+            if actual.is_error() && !proven {
+                if let (Some((base, interval)), Some(expr)) = (constrained, expr) {
+                    self.constraint_checks.insert(
+                        expr,
+                        ConstraintCheckSite {
+                            base,
+                            interval,
+                            site: Name::new(site),
+                        },
+                    );
+                }
+            }
             return true;
         }
 
@@ -7381,10 +7396,18 @@ impl<'a> InferenceContext<'a> {
         if ty.admits_zero() {
             // `T*` becomes `name?:T+`, spelled through the type's own display so that a function
             // type under the suffix keeps its parentheses.
-            let fix = if ty.admits_many() {
-                format!("{name}?:{}", Type::one_or_more(ty.item().clone()))
-            } else {
-                format!("{name}?:{}", ty.item())
+            // A constrained item is named as written, `r?:Ratio`, not spelled out as its interval.
+            let written_item = match written {
+                ast::TypeRef::Seq { inner, .. } if ty.item().constraint().is_some() => {
+                    Some(ast::spell_type_ref(inner))
+                }
+                _ => None,
+            };
+            let fix = match (written_item, ty.admits_many()) {
+                (Some(item), true) => format!("{name}?:{item}+"),
+                (Some(item), false) => format!("{name}?:{item}"),
+                (None, true) => format!("{name}?:{}", Type::one_or_more(ty.item().clone())),
+                (None, false) => format!("{name}?:{}", ty.item()),
             };
             // A bare name whose resolved type carries the occurrence is an alias: name it, since
             // the suffix the rule is about is written at the alias, not here.

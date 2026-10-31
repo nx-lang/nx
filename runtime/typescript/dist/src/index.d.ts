@@ -289,6 +289,8 @@ export interface Interval {
     readonly highExclusive: boolean;
     /** Whether the base is an integer type, which is how the bounds are spelled. */
     readonly integer: boolean;
+    /** Whether the base is `float32`, whose bounds are spelled with the shortest `float32` digits. */
+    readonly float32: boolean;
 }
 export interface NxIrReference {
     readonly slot: number;

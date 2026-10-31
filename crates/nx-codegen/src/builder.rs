@@ -3150,8 +3150,9 @@ fn build_type_ref_resolving_aliases(
             if kind == PreparedItemKind::TypeAlias {
                 let alias = (target_module_identity.clone(), definition_id);
                 if !aliases.contains(&alias) {
-                    // An alias declared by a module compiled to an interface alone has no target to
-                    // read here, and stays the nominal reference it was before.
+                    // An alias is resolved to its target, read from the declaring module's lowered
+                    // form even when the build reads that module as an interface alone. One with no
+                    // target to read stays a nominal reference.
                     if let Some(target) = type_alias_target(artifact, target_module, definition_id)
                     {
                         aliases.push(alias);

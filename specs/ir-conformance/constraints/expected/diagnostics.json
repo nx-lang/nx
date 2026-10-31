@@ -1,4 +1,7 @@
 {
+  "main.nx::inset#hostRecordDefaultFails": {
+    "code": "nx-ir-constraint"
+  },
   "main.nx::paint#nestedField": {
     "argument": "p",
     "code": "nx-ir-boundary-constraint"
@@ -8,6 +11,9 @@
     "code": "nx-ir-boundary-constraint"
   },
   "main.nx::scores#secondItem": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::stroke#computedDefaultFails": {
     "code": "nx-ir-constraint"
   },
   "main.nx::toUnit#exclusiveEnd": {

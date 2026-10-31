@@ -3203,3 +3203,33 @@ fn a_constrained_alias_from_another_module_is_written_as_its_entry() {
     );
     assert_contains(&explain(&entry), "check amount:");
 }
+
+#[test]
+fn a_constrained_alias_from_a_library_read_as_an_interface_is_written_as_its_entry() {
+    let temp = TempDir::new().expect("temp dir");
+    let units = temp.path().join("units");
+    fs::create_dir_all(&units).expect("dir");
+    fs::write(
+        units.join("Ratio.nx"),
+        "export type Ratio = float64 where in 0.0..=1.0",
+    )
+    .expect("write");
+    let registry = LibraryRegistry::new();
+    registry
+        .load_library_from_directory(&units)
+        .expect("units library");
+    let artifact = artifact_from_workspace_with(
+        &[(
+            "app/main.nx",
+            "import { Ratio } from \"../units\"\nlet fade(amount: Ratio) = { amount }\nlet twice(x: float64) = { fade(x * 2.0) }",
+        )],
+        "app/main.nx",
+        &registry.build_context(),
+    );
+    let entry = entry_artifact(&artifact);
+    assert_eq!(
+        constrained_entries(&entry),
+        [("float64".to_string(), Some(0.0), Some(1.0), 0)]
+    );
+    assert_contains(&explain(&entry), "check amount:");
+}

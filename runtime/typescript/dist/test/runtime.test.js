@@ -2304,8 +2304,27 @@ test("a constraint refuses NaN at a check and at the host boundary, and a float3
     assertEqual(code(boundary), ["nx-ir-boundary-constraint"]);
     assertEqual(boundary.diagnostics[0].argument, "u");
     assertEqual(evaluateFunction(program, "tenth", [0.1]), Math.fround(0.1));
+    // A float32 bound and value are spelled in their shortest float32 digits.
+    const tenth = assertThrows(() => evaluateFunction(program, "tenth", [0.2]), "Expected x to be in <= 0.1, got 0.2.");
+    assertEqual(code(tenth), ["nx-ir-boundary-constraint"]);
     assertThrows(() => evaluateFunction(program, "pick", [11]), "1..=10");
     assertEqual(evaluateFunction(program, "band", [Number.NaN]), null);
+});
+test("a component's props, state and actions outside their constraints are refused at the boundary", () => {
+    const program = corpusProgram("constraints", "main.nx");
+    const boundary = (run, message) => {
+        const error = assertThrows(run, message);
+        assertEqual(error.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.argument]), [["nx-ir-boundary-constraint", undefined]]);
+    };
+    boundary(() => initializeComponent(program, "Meter", { step: 11 }), "Expected Meter props.step to be in 1..=10, got 11.");
+    boundary(() => initializeComponent(program, "Meter", { step: 2 }, { state: { count: 9 } }), "Expected Meter state.count to be in 0..=3, got 9.");
+    const meter = initializeComponent(program, "Meter", { step: 2 });
+    boundary(() => dispatchComponentActions(program, meter.instance, [{ $type: "Bump", by: 9 }]), "Expected Bump action.by to be in 1..=5, got 9.");
+    // A state update the handler computes is checked inside the program.
+    const once = dispatchComponentActions(program, meter.instance, [tapped("h1-1")]);
+    assertEqual(once.state, { count: 2 });
+    const update = assertThrows(() => dispatchComponentActions(program, once.instance, [tapped("h2-1")]), "The value 4 for 'count' is outside its constraint 0..=3.");
+    assertEqual(update.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.argument]), [["nx-ir-constraint", undefined]]);
 });
 let failures = 0;
 for (const [name, run] of tests) {

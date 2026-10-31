@@ -572,7 +572,16 @@ impl Interval {
     /// is inclusive, comparison terms joined by `&&` otherwise. `float` decides whether a whole
     /// bound is written with a fraction, `1.0` rather than `1`.
     pub fn spelling(&self, float: bool) -> String {
-        let bound = |value: f64| spell_bound(value, float);
+        self.spelled_with(|value| spell_bound(value, float))
+    }
+
+    /// The interval spelled on a `float32` base: each bound in the shortest digits that round to
+    /// the same `float32`, `0.1` rather than the widening's `0.10000000149011612`.
+    pub fn spelling_float32(&self) -> String {
+        self.spelled_with(spell_float32_bound)
+    }
+
+    fn spelled_with(&self, bound: impl Fn(f64) -> String) -> String {
         match (self.low, self.high) {
             (Some(low), Some(high)) if !low.exclusive => format!(
                 "in {}{}{}",
@@ -593,6 +602,17 @@ impl Interval {
                 terms.join(" && ")
             }
         }
+    }
+}
+
+/// Spells a `float32` bound as a literal: the shortest digits that round to the same `float32`, with
+/// at least one digit after the point.
+pub fn spell_float32_bound(value: f64) -> String {
+    let text = format!("{}", value as f32);
+    if text.contains(['.', 'e', 'E']) || !value.is_finite() {
+        text
+    } else {
+        format!("{text}.0")
     }
 }
 

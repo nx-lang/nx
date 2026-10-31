@@ -250,8 +250,8 @@ fail.
 - A node `[28, operand, type, site]`: evaluates `operand`, fails with `nx-ir-constraint` unless the
   value lies in `type`'s interval, and yields it. Over a sequence it checks each item, and the empty
   value passes, so one node covers optional and `+`/`*` sites. `site` is a string-table index naming what was
-  being bound, for the message. It costs one operation per value checked, so an item-wise check of
-  n items costs n.
+  being bound, for the message. It costs one operation as a node and one more per value checked, so an
+  item-wise check of n items costs n + 1.
 - A node `[29, type]`, allowed only in an `ifIs` arm's pattern list: matches when the scrutinee lies
   in `type`'s interval. It reuses the interval of a kind-7 entry, so constraints and patterns share
   one check in each runtime.
@@ -272,8 +272,8 @@ occurrences did the same).
   `invalid-constraint` (a term this change does not support, a non-numeric base, a bound of the
   wrong type, a constraint on a type with an occurrence, as a type argument or in a function
   type), and `empty-constraint` (a pattern that matches no value, such as `> 5 && < 2`).
-- **Hover and signature help** spell the type with its constraint, as written, and through an
-  alias show the alias's constraint.
+- **Hover** spells the type with its constraint, as written, and through an alias shows the
+  alias's constraint.
 - **Source tree**: a `SourceProperty` (and an alias's declaration) carries `bounds`: `min`, `max`
   and whether each is exclusive. This is there whether or not the request asks for visualizers.
 - **Visual editor**: a number's editor keeps within the intersection of its constraint and its

@@ -38,8 +38,8 @@ interval admits it, and otherwise SHALL fail with the code `nx-ir-constraint` an
 the site, the value and the interval. When the operand is a sequence the interval SHALL be checked
 for each item, and the empty value SHALL pass, so one node serves an optional site and a `+` or `*`
 site whose item type is constrained. A `NaN` operand SHALL fail. The comparison SHALL be made at the
-base type. Each value checked, one for a single value and one per item for a sequence, SHALL count
-as one operation in the cost model. The emitter SHALL write the node
+base type. In the cost model the node SHALL count as one operation, as every node does, and each
+value checked, one for a single value and one per item for a sequence, SHALL count as one more. The emitter SHALL write the node
 exactly where `value-constraints` requires a runtime check and nowhere else.
 
 #### Scenario: A check node at a call

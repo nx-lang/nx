@@ -151,6 +151,82 @@ fn an_unsupported_pattern_is_named_not_a_parse_error() {
 }
 
 #[test]
+fn a_comma_in_a_constraint_is_named_not_a_parse_error() {
+    for source in [
+        "type Edge = int where < 0, > 9",
+        "type Box = { a: int where < 0, > 9 }",
+        "let edge: int where < 0, > 9 = 5",
+        "let f(x: int where < 0, > 9) = { x }",
+    ] {
+        let message = reported(source, "invalid-constraint", ",");
+        assert!(message.contains("one interval"), "{message}");
+        assert!(
+            diagnostics(source)
+                .iter()
+                .all(|(code, ..)| code != "syntax-error"),
+            "`{source}` gave a bare parse error: {:#?}",
+            diagnostics(source)
+        );
+    }
+}
+
+#[test]
+fn a_constraint_empty_only_at_its_bases_limits_is_reported() {
+    for (source, at) in [
+        ("type Under = int32 where < -2147483648", "< -2147483648"),
+        ("type Over = int32 where > 2147483647", "> 2147483647"),
+        (
+            "type Huge = int where > 9007199254740991",
+            "> 9007199254740991",
+        ),
+        (
+            "type Gap = float32 where > 0.99999994 && < 1.0",
+            "> 0.99999994 && < 1.0",
+        ),
+    ] {
+        reported(source, "empty-constraint", at);
+    }
+    // The base's own limits narrow only the emptiness test, not the interval.
+    assert_clean("type Small = int32 where >= 0\nlet s: Small = 2147483647");
+    assert_clean("type Edge = int32 where > 2147483646\nlet e: Edge = 2147483647");
+    assert_clean("type Below = float32 where > 0.99999994 && <= 1.0\nlet b: Below = 1.0");
+}
+
+#[test]
+fn an_integer_bound_a_float32_cannot_hold_is_rejected() {
+    let message = reported(
+        "type Big = float32 where <= 16777217",
+        "invalid-constraint",
+        "16777217",
+    );
+    assert!(message.contains("`16777216`"), "{message}");
+    assert_clean("type Fits = float32 where <= 16777216");
+}
+
+#[test]
+fn a_float32_constraint_is_spelled_as_written() {
+    let message = reported(
+        "type Tenth = float32 where in 0.0..=0.1\nlet t: Tenth = 0.2",
+        "constraint-violation",
+        "0.2",
+    );
+    assert_eq!(
+        message,
+        "`0.2` is outside the constraint for `t`: `float32 where in 0.0..=0.1`"
+    );
+}
+
+#[test]
+fn an_optional_constrained_property_fix_names_the_alias() {
+    let message = reported(
+        &format!("{RATIO}type Paint = {{ r: Ratio? }}"),
+        "optional-in-type-slot",
+        "r: Ratio?",
+    );
+    assert!(message.contains("`r?:Ratio`"), "{message}");
+}
+
+#[test]
 fn a_leading_operand_gets_a_fix() {
     let message = reported(
         "type Count = int where value >= 1",

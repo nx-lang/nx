@@ -18,6 +18,7 @@
     1,
     2
   ],
+  "main.nx::stroke#computedDefault": 1,
   "main.nx::tenth#float32Bound": 0.10000000149011612,
   "main.nx::toUnit#inside": 0.5,
   "main.nx::twice#passes": 1.0

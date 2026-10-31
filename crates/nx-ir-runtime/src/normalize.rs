@@ -233,7 +233,7 @@ impl<'p> Machine<'p> {
                 }
                 let shown = match &value {
                     Value::Int(number) => number.to_string(),
-                    Value::Float(number) => crate::text::float64_text(*number),
+                    Value::Float(number) => interval.number_text(*number),
                     _ => String::new(),
                 };
                 fail(

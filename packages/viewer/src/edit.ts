@@ -74,6 +74,8 @@ const FLOAT_TYPES = new Set(["float32", "float64"]);
 export interface EditorHints extends SourceEditorHints {
   readonly minExclusive?: boolean;
   readonly maxExclusive?: boolean;
+  /** Whether the number is a `float32`, which a value and the bounds are compared as. */
+  readonly float32?: boolean;
 }
 
 /**
@@ -91,8 +93,13 @@ export function boundedHints(
     return hints;
   }
   const { min: _min, max: _max, ...rest } = hints ?? {};
-  let low = bounds.min;
-  let high = bounds.max;
+  // A `float32` bound arrives as the `float64` it widens to, `0.10000000149011612`, and reads as
+  // the shortest number that rounds to it, `0.1`.
+  const float32 = base === "float32";
+  const end = (value: number | undefined): number | undefined =>
+    value === undefined || !float32 ? value : shortestFloat32(value);
+  let low = end(bounds.min);
+  let high = end(bounds.max);
   let lowExclusive = bounds.minExclusive === true;
   let highExclusive = bounds.maxExclusive === true;
   const hintLow = hints?.min;
@@ -121,8 +128,24 @@ export function boundedHints(
     ...(high === undefined ? {} : { max: high }),
     ...(step === undefined ? {} : { step }),
     ...(lowExclusive ? { minExclusive: true } : {}),
-    ...(highExclusive ? { maxExclusive: true } : {})
+    ...(highExclusive ? { maxExclusive: true } : {}),
+    ...(float32 ? { float32: true } : {})
   };
+}
+
+/** The shortest number that rounds to the same `float32` as `value`: `0.1` for `0.10000000149011612`. */
+function shortestFloat32(value: number): number {
+  const target = Math.fround(value);
+  if (!Number.isFinite(target) || target === 0) {
+    return target;
+  }
+  for (let precision = 1; precision <= 9; precision += 1) {
+    const candidate = Number(target.toPrecision(precision));
+    if (Math.fround(candidate) === target) {
+      return candidate;
+    }
+  }
+  return target;
 }
 
 /** Whether `text` is an NX numeric literal: an integer, a real or a hex literal, with a leading minus. */

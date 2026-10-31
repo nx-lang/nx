@@ -121,7 +121,7 @@
     "visualizers": []
   },
   "constraints": {
-    "source": "import \"@nx/visualizer\"\n\ntype Unit = float64 where >= 0.0 && < 1.0\n\ntype Paint = {\n  opacity: float64 where in 0.0..=1.0\n  layer: Unit\n  weight: float64 where > 0.0\n  columns: int where in 1..=1000\n  wide: int where in 1..=1000\n  apart: int where in 1..=1000\n  size: int where in 1..=10\n  extra?: int where in 1..=10\n}\n\nvisualizer Paint = <ElementVisualizer>\n  <PropertyVisualizer property=columns max=12 />\n  <PropertyVisualizer property=wide max=2000 />\n  <PropertyVisualizer property=apart min=2000 max=3000 />\n  <PropertyVisualizer property=size>\n    <ValueChoice value=5 />\n    <ValueChoice value=50 />\n  </PropertyVisualizer>\n</ElementVisualizer>\n\nlet paint = <Paint opacity=0.9 layer=0.5 weight=1.0 columns=4 wide=4 apart=4 size=3 />\n\nlet half: Unit = 0.5\n",
+    "source": "import \"@nx/visualizer\"\n\ntype Unit = float64 where >= 0.0 && < 1.0\n\ntype Paint = {\n  opacity: float64 where in 0.0..=1.0\n  layer: Unit\n  weight: float64 where > 0.0\n  columns: int where in 1..=1000\n  wide: int where in 1..=1000\n  apart: int where in 1..=1000\n  size: int where in 1..=10\n  extra?: int where in 1..=10\n  fine: float32 where < 0.1\n}\n\nvisualizer Paint = <ElementVisualizer>\n  <PropertyVisualizer property=columns max=12 />\n  <PropertyVisualizer property=wide max=2000 />\n  <PropertyVisualizer property=apart min=2000 max=3000 />\n  <PropertyVisualizer property=size>\n    <ValueChoice value=5 />\n    <ValueChoice value=50 />\n  </PropertyVisualizer>\n</ElementVisualizer>\n\nlet paint = <Paint opacity=0.9 layer=0.5 weight=1.0 columns=4 wide=4 apart=4 size=3 fine=0.05 />\n\nlet half: Unit = 0.5\n",
     "visualizers": []
   }
 }

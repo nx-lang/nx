@@ -116,7 +116,7 @@ impl InferenceContext<'_> {
         } else {
             interval
         };
-        if interval.is_empty() {
+        if admits_none(base, &interval) {
             if report {
                 self.error(
                     "empty-constraint",
@@ -204,7 +204,7 @@ impl InferenceContext<'_> {
         } else {
             combined
         };
-        if combined.is_empty() {
+        if admits_none(primitive, &combined) {
             if report {
                 self.error(
                     "empty-constraint",
@@ -264,8 +264,17 @@ pub fn bound_value(base: Primitive, bound: &PatternBound) -> Result<f64, String>
             bound.text, base
         )),
         (Some(Literal::Int(value)), Primitive::Float32 | Primitive::Float64) => {
-            (value.unsigned_abs() > MAX_EXACT_INTEGER as u64)
-                .then(|| out_of_range(&bound.text, base))
+            if value.unsigned_abs() > MAX_EXACT_INTEGER as u64 {
+                Some(out_of_range(&bound.text, base))
+            } else if base == Primitive::Float32 && (*value as f32) as i64 != *value {
+                Some(format!(
+                    "The bound `{}` is not exactly representable as `float32`; write a bound `float32` holds, such as `{}`",
+                    bound.text,
+                    (*value as f32) as i64
+                ))
+            } else {
+                None
+            }
         }
         (Some(Literal::Float(value)), Primitive::Float32) => {
             (!value.0.is_finite() || !(value.0 as f32).is_finite())
@@ -340,7 +349,46 @@ pub fn pattern_interval_at(base: Primitive, pattern: &NumericPattern) -> Option<
     } else {
         interval
     };
-    (!interval.is_empty()).then_some(interval)
+    (!admits_none(base, &interval)).then_some(interval)
+}
+
+/// Whether no value of `base` lies in `interval`: its ends are read within the base's own range, and
+/// a `float32` base's exclusive ends as the nearest `float32` inside them. The interval itself is
+/// kept as written, so `int32 where >= 0` gains no upper bound.
+pub(crate) fn admits_none(base: Primitive, interval: &Interval) -> bool {
+    let (low, high) = match base {
+        Primitive::Int32 => (f64::from(i32::MIN), f64::from(i32::MAX)),
+        Primitive::Int | Primitive::Int64 => {
+            (-(MAX_EXACT_INTEGER as f64), MAX_EXACT_INTEGER as f64)
+        }
+        Primitive::Float32 => (-f64::from(f32::MAX), f64::from(f32::MAX)),
+        _ => (f64::NEG_INFINITY, f64::INFINITY),
+    };
+    let range = Interval {
+        low: Some(IntervalEnd::inclusive(low)),
+        high: Some(IntervalEnd::inclusive(high)),
+    };
+    let interval = if base == Primitive::Float32 {
+        // The next `float32` past an exclusive end. A bound is already a `float32`.
+        let inside = |end: IntervalEnd, up: bool| {
+            if !end.exclusive {
+                return end;
+            }
+            let value = end.value.0 as f32;
+            IntervalEnd::inclusive(f64::from(if up {
+                value.next_up()
+            } else {
+                value.next_down()
+            }))
+        };
+        Interval {
+            low: interval.low.map(|end| inside(end, true)),
+            high: interval.high.map(|end| inside(end, false)),
+        }
+    } else {
+        *interval
+    };
+    interval.intersect(&range).is_empty()
 }
 
 fn out_of_range(text: &str, base: Primitive) -> String {
@@ -388,7 +436,9 @@ impl InferenceContext<'_> {
         let values = self.constant_numbers(expr)?;
         for (value, value_span) in values {
             if !constant_satisfies(value, base, interval) {
-                let written = if base.is_float() {
+                let written = if base == Primitive::Float32 {
+                    ast::spell_float32_bound(value)
+                } else if base.is_float() {
                     ast::spell_bound(value, true)
                 } else if value.fract() == 0.0 {
                     format!("{}", value as i64)
@@ -403,9 +453,8 @@ impl InferenceContext<'_> {
                 self.error(
                     "constraint-violation",
                     format!(
-                        "`{written}` is outside the constraint{what}: `{}` admits values {}",
-                        expected.item(),
-                        interval.spelling(base.is_float())
+                        "`{written}` is outside the constraint{what}: `{}`",
+                        expected.item()
                     ),
                     value_span.unwrap_or(span),
                 );

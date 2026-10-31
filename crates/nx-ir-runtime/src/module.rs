@@ -62,6 +62,8 @@ pub(crate) struct Interval {
     pub high: Option<Bound>,
     /// Whether the base is an integer type, which is how the bounds are spelled.
     pub integer: bool,
+    /// Whether the base is `float32`, whose bounds are spelled with the shortest `float32` digits.
+    pub float32: bool,
 }
 
 impl Interval {
@@ -95,11 +97,21 @@ impl Interval {
         above && below
     }
 
+    /// A number at the base: a `float32` in its shortest digits, `0.1` rather than the widening's
+    /// `0.10000000149011612`.
+    pub(crate) fn number_text(&self, value: f64) -> String {
+        if self.float32 {
+            crate::text::float32_text(value)
+        } else {
+            crate::text::float64_text(value)
+        }
+    }
+
     fn bound_text(&self, value: f64) -> String {
         if self.integer {
             format!("{}", value as i64)
         } else {
-            let text = crate::text::float64_text(value);
+            let text = self.number_text(value);
             if text.contains(['.', 'e', 'N', 'I']) {
                 text
             } else {
@@ -1017,6 +1029,7 @@ impl<'a> Decoder<'a> {
                             base,
                             Primitive::Int | Primitive::Int32 | Primitive::Int64
                         ),
+                        float32: base == Primitive::Float32,
                     };
                     (Type::Constrained { base, interval }, 0)
                 }

@@ -5618,18 +5618,19 @@ fn integer_range(value: &Value) -> Option<IntegerRange> {
     })
 }
 
-/// Whether `value` is a number in the interval `pattern` spells. The empty value and `NaN` match
-/// none.
+/// Whether `value` is a number in the interval `pattern` spells. The bounds are read at the value's
+/// own type, as the checker and the IR runtimes read them, so a `float32` value is compared with
+/// bounds rounded to `float32`. The empty value and `NaN` match none.
 fn numeric_pattern_matches(pattern: &ast::NumericPattern, value: &Value) -> bool {
-    let number = match value {
-        Value::Int(value) => *value as f64,
-        Value::Int32(value) => *value as f64,
-        Value::Float32(value) => *value as f64,
-        Value::Float(value) => *value,
+    let (number, base) = match value {
+        Value::Int(value) => (*value as f64, Primitive::Int),
+        Value::Int32(value) => (*value as f64, Primitive::Int32),
+        Value::Float32(value) => (*value as f64, Primitive::Float32),
+        Value::Float(value) => (*value, Primitive::Float64),
         _ => return false,
     };
-    pattern
-        .interval_as_written()
+    nx_types::pattern_interval_at(base, pattern)
+        .or_else(|| pattern.interval_as_written())
         .is_some_and(|interval| interval.contains(number))
 }
 
