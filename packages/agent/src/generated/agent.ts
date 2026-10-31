@@ -58,7 +58,8 @@ export interface Agent extends NxRecord<"Agent"> {
    */
   description?: string;
   /**
-   * The model to run. NX does not interpret it; the host resolves it and may restrict it.
+   * The model to run. NX does not interpret it; the host resolves it and may restrict
+   * it.
    */
   model?: string;
   /**
@@ -86,8 +87,8 @@ export interface Agent extends NxRecord<"Agent"> {
 export interface FunctionTool extends Tool {
   $type: "FunctionTool";
   /**
-   * The function the tool calls. Its name and doc comment are the tool's default name and
-   * description.
+   * The function the tool calls. Its name and doc comment are the tool's default
+   * name and description.
    */
   function: NxFunctionRef;
 }
@@ -110,8 +111,8 @@ export interface WebSearchTool extends Tool {
  */
 export interface ToolContext extends NxRecord {
   /**
-   * Identifies this tool call and stays the same when the call is retried, so it can serve as
-   * an idempotency key.
+   * Identifies this tool call and stays the same when the call is retried, so it can serve as an
+   * idempotency key.
    */
   callId: string;
 }
@@ -201,7 +202,7 @@ export interface HttpTool extends Tool {
    */
   arguments: NxFunctionRef;
   /**
-   * The most calls to this tool one conversation may make. A host applies its own cap as well.
+   * Maximum calls to this tool per conversation. A host may impose a lower cap.
    */
   maxCallsPerConversation?: number;
 }
@@ -253,7 +254,8 @@ export interface Agent_update {
    */
   description?: string | null;
   /**
-   * The model to run. NX does not interpret it; the host resolves it and may restrict it.
+   * The model to run. NX does not interpret it; the host resolves it and may restrict
+   * it.
    */
   model?: string | null;
   /**
@@ -285,8 +287,8 @@ export interface FunctionTool_update {
    */
   description?: string | null;
   /**
-   * The function the tool calls. Its name and doc comment are the tool's default name and
-   * description.
+   * The function the tool calls. Its name and doc comment are the tool's default
+   * name and description.
    */
   function?: NxFunctionRef;
 }
@@ -310,8 +312,8 @@ export interface WebSearchTool_update {
 export interface ToolContext_update {
   $type: "ToolContext.Update";
   /**
-   * Identifies this tool call and stays the same when the call is retried, so it can serve as
-   * an idempotency key.
+   * Identifies this tool call and stays the same when the call is retried, so it can serve as an
+   * idempotency key.
    */
   callId?: string;
 }
@@ -400,7 +402,7 @@ export interface HttpTool_update {
    */
   arguments?: NxFunctionRef;
   /**
-   * The most calls to this tool one conversation may make. A host applies its own cap as well.
+   * Maximum calls to this tool per conversation. A host may impose a lower cap.
    */
   maxCallsPerConversation?: number | null;
 }
