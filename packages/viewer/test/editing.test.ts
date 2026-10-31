@@ -1968,6 +1968,11 @@ describe("value constraints", () => {
     assert.deepEqual(targets.get("paint.value.weight.value")?.hints, { min: 0, minExclusive: true });
     assert.deepEqual(targets.get("paint.value.columns.value")?.hints, { min: 1, max: 12 }, "an integer steps by one");
     assert.deepEqual(targets.get("half.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
+    assert.deepEqual(
+      targets.get("paint.value.dim.value")?.hints,
+      { min: 0, max: 1, step: 0.1 },
+      "the step comes from the range the hint narrows to, not the constraint's"
+    );
     const extra = unwrittenProperties(index, index.byKey.get("paint.value")!).find((entry) => entry.property.name === "extra");
     assert.equal(extra?.editor?.kind, "number");
     assert.deepEqual(extra?.hints, { min: 1, max: 10 });

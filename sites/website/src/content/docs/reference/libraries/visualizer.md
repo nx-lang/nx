@@ -185,8 +185,9 @@ A constrained number, written inline or through an alias, takes number hints as 
 The viewer keeps its editor within both: a `min` or `max` hint may narrow the range the constraint
 allows but never widen it, a hint range that misses the constraint is ignored, and an exclusive end
 reads `Above` or `Below` and is never stepped onto. A bounded floating-point number with no `step`
-hint steps by the largest power of ten not above a tenth of its span, so `0.0..=1.0` steps by `0.1`.
-A hint outside the constraint is not reported.
+hint steps by the largest power of ten not above a tenth of the range the editor offers, so
+`0.0..=1.0` steps by `0.1`, and so does `0.0..=1000.0` with `max=1`. A `min` or `max` the
+constraint does not admit warns as `editor-hint-range`, since the viewer will not offer it.
 
 ```nx
 import "@nx/visualizer"

@@ -1722,6 +1722,19 @@ parameter's default is typed with the earlier parameters in scope, and report th
 diagnostic. It belongs with "A record default that reads a later field passes the checker and
 fails at run time" above, which is the same walk over a record's fields.
 
+## Generated JavaScript does not give a record default its sibling fields
+
+Code from `nxlang codegen --target javascript` fills a record or union-case field's
+default without binding the record's other fields, so the default reads whatever the name
+means at module level. `type Box = { a: int  c: int = {a} }` with a top-level `let a = 5` gives
+`c = 5` for `<Box a=1 />`, where the interpreter and both IR runtimes give `1`; with no top-level
+`a`, building a `Box` throws "a is not defined". It happens with or without constraints. The IR
+runtimes bind each field as they build the record, and the checker types such a default with the
+record's fields as unknown (see "Typing a default against its sibling fields" above), so only the
+generated source code disagrees. The fix is to emit a record's defaults with the fields before
+each one in scope, in the flattened order the runtimes use, and to add a corpus case where a
+top-level value shares a field's name.
+
 ## HIR type references carry no span and no error form
 
 HIR's `ast::TypeRef` has no source span and no way to say "this reference is malformed". Both

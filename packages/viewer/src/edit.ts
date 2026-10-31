@@ -82,7 +82,7 @@ export interface EditorHints extends SourceEditorHints {
  * The hints a number of the type `base` edits with, given its constraint's `bounds`: the range of
  * the hints narrowed to the bounds, or the bounds alone where the hints give no range or one that
  * does not overlap them. A floating-point number with no `step` hint and two ends steps by the
- * largest power of ten not above a tenth of the span. The hints as they are without bounds.
+ * largest power of ten not above a tenth of that range's span. The hints as they are without bounds.
  */
 export function boundedHints(
   hints: SourceEditorHints | undefined,
@@ -119,8 +119,9 @@ export function boundedHints(
     }
   }
   let step = hints?.step;
-  if (step === undefined && base !== undefined && FLOAT_TYPES.has(base) && bounds.min !== undefined && bounds.max !== undefined && bounds.max > bounds.min) {
-    step = 10 ** Math.floor(Math.log10((bounds.max - bounds.min) / 10));
+  // The step comes from the range the editor offers, the hints' where they narrow the bounds.
+  if (step === undefined && base !== undefined && FLOAT_TYPES.has(base) && low !== undefined && high !== undefined && high > low) {
+    step = 10 ** Math.floor(Math.log10((high - low) / 10));
   }
   return {
     ...rest,

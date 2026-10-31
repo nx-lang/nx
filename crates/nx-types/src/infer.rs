@@ -1731,7 +1731,7 @@ impl<'a> InferenceContext<'a> {
             nx_hir::VisualizerRecord::Function => {}
             nx_hir::VisualizerRecord::Value => {
                 let kind = self.hint_value_kind(target_ty);
-                self.check_hint_attributes(&properties, kind, None);
+                self.check_hint_attributes(&properties, kind, None, target_ty);
                 let integral = Self::is_integral(target_ty);
                 self.check_choices(&content, kind, integral, None);
             }
@@ -1769,7 +1769,12 @@ impl<'a> InferenceContext<'a> {
                     let field_ty =
                         self.type_from_type_ref_in_quietly(Some(&field.module_identity), &field.ty);
                     let kind = self.hint_value_kind(&field_ty);
-                    self.check_hint_attributes(&child_properties, kind, Some(&field.name));
+                    self.check_hint_attributes(
+                        &child_properties,
+                        kind,
+                        Some(&field.name),
+                        &field_ty,
+                    );
                     let integral = Self::is_integral(&field_ty);
                     self.check_choices(&choices, kind, integral, Some(&field.name));
                 }
@@ -1823,13 +1828,14 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    /// Checks the hints among `attributes` against a value of `kind`, the value of the property
-    /// `property` when there is one.
+    /// Checks the hints among `attributes` against a value of `kind` and type `ty`, the value of
+    /// the property `property` when there is one.
     fn check_hint_attributes(
         &mut self,
         attributes: &[nx_hir::Property],
         kind: HintValueKind,
         property: Option<&Name>,
+        ty: &Type,
     ) {
         if kind == HintValueKind::Unknown {
             return;
@@ -1862,7 +1868,9 @@ impl<'a> InferenceContext<'a> {
                     .hint_number(attribute.value)
                     .map(|value| (value, attribute.span));
             } else if name == "max" {
-                max = self.hint_number(attribute.value);
+                max = self
+                    .hint_number(attribute.value)
+                    .map(|value| (value, attribute.span));
             }
             if needs != kind {
                 let what = match needs {
@@ -1879,7 +1887,31 @@ impl<'a> InferenceContext<'a> {
                 );
             }
         }
-        if let (Some((min, span)), Some(max)) = (min, max) {
+        // A min or max the value's constraint does not admit widens the range past it. The viewer
+        // keeps within the constraint whatever the hint says, so the hint is only misleading.
+        if let Some((base, interval)) = ty.constraint() {
+            for (end, hint) in [("min", min), ("max", max)] {
+                let Some((value, span)) = hint else {
+                    continue;
+                };
+                let at_base = if base == Primitive::Float32 {
+                    f64::from(value as f32)
+                } else {
+                    value
+                };
+                if !interval.contains(at_base) {
+                    self.warn(
+                        "editor-hint-range",
+                        format!(
+                            "The editor hint '{end}' ({value}) is outside the constraint of {subject}, `{}`; a viewer keeps within the constraint",
+                            ty.item()
+                        ),
+                        span,
+                    );
+                }
+            }
+        }
+        if let (Some((min, span)), Some((max, _))) = (min, max) {
             if min > max {
                 self.warn(
                     "editor-hint-range",

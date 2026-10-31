@@ -13,9 +13,10 @@ bounds, so a hint can narrow the range the editor offers but not widen it; a hin
 overlap the bounds SHALL be ignored and the bounds used alone. Steppers and arrows SHALL
 NOT step onto or past an exclusive end: a step that would SHALL leave the value where it is. Bounds
 arrive with an integer's ends already inclusive. A choice outside the bounds SHALL be refused as a choice outside the hints is. When a
-floating-point property has no `step` hint and its bounds have both ends, its step SHALL be the
-largest power of ten not above a tenth of the span, so a `0.0..=1.0` number steps by `0.1`; an
-integer's step SHALL stay `1`.
+floating-point property has no `step` hint and the range the editor offers (the intersection, or
+the bounds alone) has both ends, its step SHALL be the largest power of ten not above a tenth of
+that range's span, so a `0.0..=1.0` number steps by `0.1`, as does a `0.0..=1000.0` number hinted
+`max=1`; an integer's step SHALL stay `1`.
 
 #### Scenario: A constraint alone bounds the steppers
 - **WHEN** the reader steps up `opacity=0.9` twice, where `opacity` is `float64 where in 0.0..=1.0` with no visualizer
@@ -33,3 +34,7 @@ integer's step SHALL stay `1`.
 - **WHEN** `columns` is `int where in 1..=1000`, hinted `max=12`, and the reader types `20`
 - **THEN** the note SHALL read `At most 12`
 - **AND** with the hint `max=2000` instead, typing `1500` SHALL show `At most 1000`
+
+#### Scenario: The step follows the narrowed range
+- **WHEN** `dim` is `float64 where in 0.0..=1000.0`, hinted `max=1` with no `step`
+- **THEN** the editor SHALL offer `0..=1` and step by `0.1`

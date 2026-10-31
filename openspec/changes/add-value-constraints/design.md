@@ -285,10 +285,15 @@ occurrences did the same).
 - **Visual editor**: a number's editor keeps within the intersection of its constraint and its
   `min`/`max` hints, so a constraint alone gives steppers that stop at the ends and the note
   `At most 1`. A hint can narrow the range offered (a constraint of `0..=1000`, steppers of
-  `0..=100`) but not widen it: the editor keeps within the intersection. An exclusive end reads
+  `0..=100`) but not widen it: the editor keeps within the intersection, and analysis warns
+  `editor-hint-range` at a `min` or `max` the constraint does not admit, as it does for a hint
+  range that is empty (a warning, as every hint check is, since a hint never changes what a program
+  means, and a visualizer kept apart from a library should not break its build when the library
+  narrows a constraint). An exclusive end reads
   `Above 0` / `Below 1`, and an integer with an exclusive end steps as its inclusive neighbour. A
   float with both ends and no `step` hint steps by the largest power of ten not above a tenth of
-  its span (`0.1` for `0..=1`), since the default step of 1 would cross the whole range. (The
+  the span the editor offers, hints included (`0.1` for `0..=1`, and for `0..=1000` hinted
+  `max=1`), since the default step of 1 would cross the whole range. (The
   slider was dropped from the Visual editor in favour of steppers on 2026-10-22; a constraint with
   two ends is what a slider would need, so this change keeps that door open.)
 - **Schemas**: decision 2's table, with two adjustments so a schema is never wider than the

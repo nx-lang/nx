@@ -37,8 +37,8 @@
 ## 6. Viewer
 
 - [x] 6.0 `packages/viewer/src/edit.ts`: recognise a constrained numeric type (spelled with `where`) as a number, through aliases too, wherever `NUMBER_TYPES` decides today.
-- [x] 6.0a `visualizer-declarations` hint fit: treat a constrained numeric type (inline or alias) as its base, so numeric hints raise no `editor-hint-mismatch`; tests for both scenarios.
-- [x] 6.1 `packages/viewer`: intersect `bounds` with hints for clamping, stepping and range notes (`Above`/`Below` for exclusive ends), the derived float step, ignored non-overlapping hints, no step onto an exclusive end, and refused choices; tests for every scenario.
+- [x] 6.0a `visualizer-declarations` hint fit: treat a constrained numeric type (inline or alias) as its base, so numeric hints raise no `editor-hint-mismatch`, and warn `editor-hint-range` at a `min`/`max` hint the constraint does not admit; tests for each scenario.
+- [x] 6.1 `packages/viewer`: intersect `bounds` with hints for clamping, stepping and range notes (`Above`/`Below` for exclusive ends), the derived float step (from the range the editor offers, hints included), ignored non-overlapping hints, no step onto an exclusive end, and refused choices; tests for every scenario.
 - [x] 6.2 Add constrained properties to the playground's "Visual test cases" example and check them in a browser.
 
 ## 7. Documentation
