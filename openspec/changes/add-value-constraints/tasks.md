@@ -2,45 +2,47 @@
 
 - [ ] 1.1 Add range (`in a..b`, `in a..=b`) and comparison (`< <= > >=` literal) patterns, joined by `&&`, to `pattern` in `crates/nx-syntax/grammar.js`, and a `where_clause` (`where` contextual) holding one such pattern to the `type` rule; parse a leading operand or other expression in the clause for the checker to report. Regenerate the parser; corpus tests for fields with and without defaults, parameters, results, `let` annotations, aliases, negative bounds, a field after a constrained field, and match arms.
 - [ ] 1.1a End an unbraced match-arm body before a following arm's pattern (declared conflict resolved by `=>`), fixing the existing `5 -1 =>` misparse; tests for `-`, `<`, `>`, `<=`, `>=` after a body in value, element and property-list matches.
+- [ ] 1.1b Let a field, prop or parameter named `where` directly follow another field's type (the keyword, aliased as a name when `:` or `?:` follows); tests for records, component props and function parameters.
 - [ ] 1.2 Update the highlighting queries (`crates/nx-syntax/queries`, editor grammars) for `where` and the new patterns.
 - [ ] 1.3 Lower the clause into the HIR type reference (`nx-hir` `TypeRef`) as a list of terms with spans; keep unsupported conditions as an opaque term for the checker to report.
 
 ## 2. Type checker
 
-- [ ] 2.1 Add a constrained form to `nx_types::Type` (base plus an interval with inclusive, exclusive or open ends) and resolve aliases into it, intersecting terms; report `invalid-constraint` and `empty-constraint` per the spec, with the `Score+` fix-it for occurrences.
-- [ ] 2.2 Extend satisfaction and widening: constrained satisfies its base and wider types; interval containment between constrained types; arithmetic yields the base type; joins drop the constraint.
+- [ ] 2.1 Add a constrained form to `nx_types::Type` (base plus an interval with inclusive, exclusive or open ends) and resolve aliases into it, intersecting terms; report `invalid-constraint` and `empty-constraint` per the spec, with the `Score+` fix-it for occurrences; reject `int64` bounds outside ±(2^53−1); normalize integer exclusive ends to inclusive.
+- [ ] 2.2 Extend satisfaction and widening: constrained satisfies its base and wider types; interval containment between constrained types; arithmetic yields the base type; joins keep a constraint only when every item type is the same constrained type; optional properties and `?`/`*` items of a constrained type.
 - [ ] 2.3 Check literals, signed literals, constant expressions and defaults against constrained sites and report `constraint-violation`; record every binding site where a runtime check is needed for the emitter.
 - [ ] 2.4 Reject constrained types as type arguments and inside function types.
-- [ ] 2.4a Type numeric match patterns: numeric scrutinee, bounds at its base type, `empty-constraint`, literal-match rules for `else`, and narrowing of an identifier scrutinee to the arm's interval.
+- [ ] 2.4a Type numeric match patterns: numeric scrutinee, bounds at its base type, `empty-constraint`, literal-match rules for `else`, and narrowing of an identifier scrutinee to the arm's interval, `int?` scrutinees, and the `unreachable-pattern` warning.
 - [ ] 2.5 Tests in `nx-types` and `nx-api` for every scenario in `value-constraints`.
 
 ## 3. IR and emitter
 
 - [ ] 3.1 Add type kind 7, node kinds 28 and 29 and `constraints-v1` to `nx-ir` (model, image writer, reader validation, `explain`) and to `docs/nx-ir-format.md`.
-- [ ] 3.2 Emit constrained types, check nodes and interval patterns in `nx-codegen` at exactly the sites the checker recorded; add IR tests including "no second check" for a parameter passed on.
+- [ ] 3.2 Emit constrained types, check nodes (item-wise over sequences and optional values) and interval patterns in `nx-codegen` at exactly the sites the checker recorded, resolving constrained aliases from other modules, including interface-only ones (`builder.rs` keeps them as plain references today); bounds as integer or float constants, `float32` pre-rounded; add IR tests including "no second check" for a parameter passed on.
 - [ ] 3.3 Add conformance corpus programs: passing checks, inclusive and exclusive failures, `NaN`, host-boundary failures, nested record fields, defaults, operation counts.
 
 ## 4. Runtimes
 
-- [ ] 4.1 Rust runtime: read kind 7, evaluate kind 28, match kind 29 (`nx-ir-constraint`), check host values against constrained types at the boundary (`nx-ir-boundary-constraint`, argument named), and count the check as one operation.
+- [ ] 4.1 Rust runtime: read kind 7, evaluate kind 28, match kind 29 (`nx-ir-constraint`), check host values against constrained types at the boundary (arguments, props, state, patches, action records; `nx-ir-boundary-constraint`, argument named), and count the check as one operation.
 - [ ] 4.2 TypeScript runtime: the same, with `float32` rounding before comparison; run the corpus on both and compare.
 - [ ] 4.3 `@nx-lang/agent`: add a test that a constraint failure maps to `invalid-input`.
 - [ ] 4.4 Interpreter: accept constrained types (treat as base) and evaluate numeric match patterns.
 
 ## 5. Schemas and language service
 
-- [ ] 5.1 Schema export: bound keywords, `int32` bound replacement, spelling with the constraint; extend the boundary-agreement corpus.
+- [ ] 5.1 Schema export: bound keywords, integer exclusive ends as inclusive, `float32` ends as inclusive `float32` values, `int32` bound replacement, spelling with the constraint; extend the boundary-agreement corpus.
 - [ ] 5.2 Hover and signature help show constraints, including through aliases.
-- [ ] 5.3 Source tree: `bounds` on properties, state fields and aliases (Rust, wasm transport, `packages/language-protocol`).
+- [ ] 5.3 Source tree: `bounds` on properties, state fields, union-case fields, aliases and annotated value declarations, and for sequence and optional item types (Rust, wasm transport, `packages/language-protocol`).
 
 ## 6. Viewer
 
-- [ ] 6.1 `packages/viewer`: intersect `bounds` with hints for clamping, stepping and range notes (`Above`/`Below` for exclusive ends), the derived float step, and refused choices; tests for every scenario.
+- [ ] 6.0 `packages/viewer/src/edit.ts`: recognise a constrained numeric type (spelled with `where`) as a number, through aliases too, wherever `NUMBER_TYPES` decides today.
+- [ ] 6.1 `packages/viewer`: intersect `bounds` with hints for clamping, stepping and range notes (`Above`/`Below` for exclusive ends), the derived float step, ignored non-overlapping hints, no step onto an exclusive end, and refused choices; tests for every scenario.
 - [ ] 6.2 Add constrained properties to the playground's "Visual test cases" example and check them in a browser.
 
 ## 7. Documentation
 
-- [ ] 7.1 Website: a "Constrained types" section in `reference/syntax/types.md`, `where` in the style guide (name a constrained type used more than once), and update `reference/libraries/visualizer.md` to say how hints and constraints combine.
+- [ ] 7.1 Website: a "Constrained types" section in `reference/syntax/types.md`; range and comparison patterns in `reference/syntax/if.md`; `where` in the style guide (name a constrained type used more than once, write float bounds as `0.0..=1.0`); constraint keywords in `reference/concepts/declaration-schemas.md`; and in `reference/libraries/visualizer.md` and the `@nx/visualizer` `min`/`max` doc comments, how hints and constraints combine ("Not a constraint" stays true of hints).
 - [ ] 7.2 `nx-grammar.md` and `nx-grammar-spec.md`; `specs/future.md`: record the follow-ups (strings, sequence counts, named bounds, general predicates, integer overflow on the same check) and the interpreter gap.
 
 ## 8. Review

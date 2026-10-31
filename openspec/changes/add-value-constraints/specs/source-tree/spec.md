@@ -2,11 +2,13 @@
 
 ### Requirement: Properties and aliases carry their constraint's bounds
 Each property entry and each alias declaration SHALL carry a `bounds` value when its type, directly
-or through aliases, is constrained: the entries of a declaration's `properties` and `state` lists,
-and a declaration that is an alias. It SHALL be present whether or not the request asks for
+or through aliases, is constrained, or is a sequence or optional type whose item type is: the entries
+of a declaration's `properties` and `state` lists, of each union case's `properties`, a declaration
+that is an alias, and a value declaration whose annotation is constrained. It SHALL be present whether or not the request asks for
 `visualizers`. `bounds` SHALL hold `min` and `max` as numbers for the ends
 the interval has, and `minExclusive` and `maxExclusive`, each present and `true` only when that end
-is exclusive. The property's `type` SHALL spell the constraint as written. An unconstrained property
+is exclusive. An integer's exclusive ends SHALL be given as the inclusive ends next to them. The property's `type`
+SHALL spell the constraint as written. An unconstrained property
 SHALL carry no `bounds`. The value SHALL round-trip through JSON without loss.
 
 #### Scenario: A closed range

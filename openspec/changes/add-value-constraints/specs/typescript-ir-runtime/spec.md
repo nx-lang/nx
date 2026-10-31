@@ -2,8 +2,9 @@
 
 ### Requirement: TypeScript runtime enforces constraints in programs and at the host boundary
 The TypeScript IR runtime SHALL support the `constraints-v1` feature. It SHALL evaluate check nodes
-and match interval patterns as `nx-ir-format` defines them. When a host passes a value, as an argument, a component prop, or a
-field nested anywhere inside either, whose declared type is a constrained type and whose value the
+and match interval patterns as `nx-ir-format` defines them. When a host passes a value, as an argument, a component prop, component
+state, a state or record patch, a dispatched action record, or a field nested anywhere inside any of
+them, whose declared type is a constrained type and whose value the
 interval does not admit, the runtime SHALL refuse the call with the code
 `nx-ir-boundary-constraint` and a message naming the path to the value and the interval, and SHALL
 name the argument the value was passed for as it does for every boundary failure. A default the

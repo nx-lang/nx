@@ -81,7 +81,7 @@ type Count = int where >= 1
 type Unit = float64 where > 0.0 && <= 1.0
 
 type Paint = {
-  opacity: float64 where in 0..=1 = 1
+  opacity: float64 where in 0.0..=1.0 = 1.0
   layer: Ratio
 }
 
@@ -139,7 +139,7 @@ block in NX); attributes `@range(0, 1)` (metadata the checker does not own, the 
 parameter list `float32(min=0 max=1)` (a second vocabulary, close to element syntax); `value` as a
 named operand (the first draft).
 
-**Defaults.** A default follows the whole type: `opacity: float64 where in 0..=1 = 1`. The style
+**Defaults.** A default follows the whole type: `opacity: float64 where in 0.0..=1.0 = 1.0`. The style
 guide recommends naming a constrained type used more than once (`opacity: Ratio = 1`). A constraint
 after the default (`opacity: float64 = 1 where …`) would put part of the type outside the type, and
 would not work for a `let` annotation or a return type.
@@ -178,7 +178,7 @@ Anywhere a type is written: record, action and union-case fields, component prop
 function parameters and results, `let` annotations, and aliases. It binds to the base type it
 follows and so comes after any occurrence suffix; a constraint on a type that has one is rejected
 in this change (`string+ where count >= 2` is a candidate item-count form), with a fix-it
-naming the item type: `type Positive = int where > 0` then `Positive+`. Constrained types
+naming the item type: `type Score = int where >= 0` then `Score+`. Constrained types
 are rejected as type arguments (`<Range T=Ratio/>`) and inside function types, since the IR erases
 both and neither runtime could check them.
 
@@ -198,6 +198,14 @@ host exactly as one. In the checker:
 - `A` satisfies `B where …` with no check when `A`'s base widens to `B`'s and `A`'s interval lies
   inside `B`'s. So a `Ratio` passes to a parameter declared `float64 where >= 0` freely.
 - An alias of a constrained type may add terms (`type Low = Ratio where <= 0.5`), which
+- On an integer base an exclusive end is the inclusive end next to it, so `int where > 0` and
+  `int where >= 1` are one type, and the schema, the IR and the editor only ever see inclusive integer
+  ends.
+- A join (`if` branches, match arms, `??`, sequence items) keeps a constraint only when every item has
+  the same constrained type; otherwise it is the join of the bases, unconstrained. Interval hulls
+  were considered and left out: they would make a branch's type depend on its siblings' bounds.
+- `name?: Ratio` and `Ratio*` are allowed: the constraint applies to each value present and the empty
+  value passes.
   intersect.
 - Arithmetic, as in Ada, yields the base type: `ratio * 2` is a `float32`, so a result is checked
   again when it enters a constrained site.
@@ -233,11 +241,13 @@ fail.
 ### 6. IR: one type kind, two node kinds, one feature
 
 - A type entry `[7, base, low, high, flags]`: `low` and `high` are constant-table indexes or `-1`
-  for an open end, and `flags` bit 0 makes the low end exclusive and bit 1 the high end. Constants
-  are written at the base type. The prelude and the IR reader treat every other type rule as they
+  for an open end, and `flags` bit 0 makes the low end exclusive and bit 1 the high end. Bounds are
+  integer constants for an integer base and float constants otherwise; a `float32` bound is stored
+  already rounded to `float32`, and an `int64` bound must lie within ±(2^53−1) in this change. The prelude and the IR reader treat every other type rule as they
   would for `base`.
 - A node `[28, operand, type, site]`: evaluates `operand`, fails with `nx-ir-constraint` unless the
-  value lies in `type`'s interval, and yields it. `site` is a string-table index naming what was
+  value lies in `type`'s interval, and yields it. Over a sequence it checks each item, and the empty
+  value passes, so one node covers optional and `+`/`*` sites. `site` is a string-table index naming what was
   being bound, for the message. It costs one operation, as a comparison does.
 - A node `[29, type]`, allowed only in an `ifIs` arm's pattern list: matches when the scrutinee lies
   in `type`'s interval. It reuses the interval of a kind-7 entry, so constraints and patterns share
@@ -245,14 +255,17 @@ fail.
 - A module that carries any of them lists the required feature `constraints-v1`, so a runtime that
   predates constraints refuses it by name.
 - Parameters, record fields, component props and state fields carry their declared types already;
-  with the constrained type in the table, the boundary check needs no new metadata.
+  with the constrained type in the table, the boundary check needs no new metadata. A constrained
+  alias from another module, including an interface-only one, is resolved into a kind-7 entry when
+  emitted, never left as a reference to the alias.
 
 The schema version does not change: the feature gate is how this IR adds kinds (ranges and
 occurrences did the same).
 
 ### 7. Tooling
 
-- **Diagnostics**: `constraint-violation` (a constant outside its site's interval),
+- **Diagnostics**: `unreachable-pattern` (warning: a match arm's pattern matches nothing its
+  constrained scrutinee admits), `constraint-violation` (a constant outside its site's interval),
   `invalid-constraint` (a term this change does not support, a non-numeric base, a bound of the
   wrong type, a constraint on a type with an occurrence, as a type argument or in a function
   type), and `empty-constraint` (a pattern that matches no value, such as `> 5 && < 2`).
@@ -269,7 +282,10 @@ occurrences did the same).
   its span (`0.1` for `0..=1`), since the default step of 1 would cross the whole range. (The
   slider was dropped from the Visual editor in favour of steppers on 2026-10-22; a constraint with
   two ends is what a slider would need, so this change keeps that door open.)
-- **Schemas**: decision 2's table. Because the runtimes refuse what the schema now excludes, the
+- **Schemas**: decision 2's table, with two adjustments so a schema is never wider than the
+  runtimes: integer exclusive ends are written as inclusive ones, and a `float32` bound is written as
+  an inclusive `float32` value (an exclusive end as the nearest `float32` inside), since a runtime
+  rounds a `float32` it is given before checking it. Because the runtimes refuse what the schema now excludes, the
   existing requirement that a schema is never wider than the runtime holds.
 - **Style guide**: name a constrained type used in more than one place, write bounds with the
   base type's literal form (`0.0..=1.0` for a float), and keep a doc comment for what the range
@@ -309,7 +325,7 @@ so.
 
 ## Open questions
 
-1. Is `opacity: float64 where in 0..=1 = 1` acceptable as the inline-with-default form, given the
+1. Is `opacity: float64 where in 0.0..=1.0 = 1.0` acceptable as the inline-with-default form, given the
    style guide's advice to name the type?
 2. Should integer overflow checking (`specs/future.md`, "Bounds checks are specified but not
    enforced") ride on the same `[28 …]` node in a follow-up? The node is shaped so it can.

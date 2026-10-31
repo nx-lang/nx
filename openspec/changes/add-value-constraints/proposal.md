@@ -12,7 +12,8 @@ its arguments without checking them.
 - Add constrained types: a type followed by `where` and a value pattern with no operand, such as
   `ratio: float32 where in 0.0..=1.0`, `count: int where >= 1`, or a named
   `type Ratio = float32 where in 0.0..=1.0`. Allowed anywhere a type is written except type
-  arguments and function types.
+  arguments and function types; on a sequence, the item type is named (`type Score = int where >= 0`,
+  then `Score+`).
 - Numeric value patterns: `in a..b`, `in a..=b`, and `<`, `<=`, `>`, `>=` against a literal,
   joined by `&&`. Other patterns are rejected by name. String length and
   pattern, sequence counts, named-constant bounds and general predicates are planned follow-ups

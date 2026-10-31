@@ -6,7 +6,8 @@ type and any occurrence suffix, wherever a type is written: a record, action or 
 component prop or state field, a function parameter or result, a `let` annotation and an alias. The
 pattern SHALL have no operand: it is matched against the value being constrained, as a match arm's
 pattern is matched against the scrutinee. `where` SHALL be a keyword only after a type, so a
-declaration, field or parameter named `where` elsewhere SHALL be unaffected. A default SHALL follow
+declaration, field or parameter named `where` SHALL be unaffected, including a field or prop named
+`where` that directly follows another field's type, which `:` or `?:` after the name decides. A default SHALL follow
 the whole type, constraint included. The clause SHALL end at the first token that cannot continue the
 pattern, so a whitespace-separated field list needs no braces or separators around it.
 
@@ -26,8 +27,11 @@ pattern, so a whitespace-separated field list needs no braces or separators arou
 - **THEN** analysis SHALL accept both declarations
 
 #### Scenario: A field may be named `where` or `value`
-- **WHEN** a file contains `type Slider = { value: float64 where in 0.0..=1.0  where: string }`
-- **THEN** analysis SHALL accept the record with the fields `value` and `where`
+- **WHEN** a file contains `type Slider = { value: float64 where in 0.0..=1.0  where: string }`,
+  `type Query = { limit: int  where: string  order?: string }` and
+  `let <Filter count: int where?: string /> = <p />`
+- **THEN** analysis SHALL accept all three, with the fields and the parameter named `where` unconstrained
+  and `limit` and `count` unconstrained
 
 ### Requirement: Numeric value patterns are ranges and comparisons joined by `&&`
 A value pattern SHALL be one or more terms joined by `&&`, each term `in a..b`, `in a..=b`, `>= a`,
@@ -53,14 +57,16 @@ operand, shows the pattern without it; it SHALL NOT be a bare parse error.
   `>=` and `&&` as what a constraint may use
 
 #### Scenario: A leading operand gets a fix
-- **WHEN** a file contains `type Count = int where >= 1`
+- **WHEN** a file contains `type Count = int where value >= 1`
 - **THEN** analysis SHALL report `invalid-constraint` and the message SHALL suggest `int where >= 1`
 
 ### Requirement: Only numeric types without an occurrence take a constraint
 The base of a constrained type SHALL be `int`, `int32`, `int64`, `float32` or `float64`, or an alias
 of one, constrained or not. Each bound SHALL be checked as a literal written at the base type, so a
-real bound on an integer base and a bound outside the base's range SHALL be rejected with
-`invalid-constraint`. A constraint on a type with an occurrence suffix, on a type reached through an
+real bound on an integer base, a bound outside the base's range, and an `int64` bound outside
+±(2^53−1), which a JSON number and the TypeScript runtime's `number` cannot hold exactly, SHALL be
+rejected with `invalid-constraint`. On an integer base an exclusive end SHALL be the same as the
+inclusive end next to it, so `int where > 0` and `int where >= 1` SHALL be the same type. A constraint on a type with an occurrence suffix, on a type reached through an
 alias that carries one, on a non-numeric type, on a type argument and inside a function type SHALL
 be rejected with `invalid-constraint`; for an occurrence the diagnostic SHALL show naming the item
 type as the fix. A pattern that matches no value of the base type SHALL be rejected with
@@ -78,6 +84,10 @@ type as the fix. A pattern that matches no value of the base type SHALL be rejec
 - **WHEN** a file contains `type Scores = int+ where >= 0`
 - **THEN** analysis SHALL report `invalid-constraint`, and the message SHALL suggest
   `type Score = int where >= 0` with `Score+`
+
+#### Scenario: Integer exclusive ends are inclusive ends
+- **WHEN** a file contains `type A = int where > 0` and `type B = int where >= 1` and `let f(a: A) = { a }` and `let g(b: B) = { f(b) }`
+- **THEN** analysis SHALL accept `f(b)` and the emitted IR SHALL contain no check for it
 
 #### Scenario: A constraint on a string
 - **WHEN** a file contains `type Name = string where >= 1`
@@ -99,6 +109,11 @@ which intersect with its own. A constrained type SHALL satisfy its base type, an
 widens to, with no check. A type `A` SHALL satisfy a constrained type `B` with no check when `A`'s
 base widens to `B`'s base and every value `A` admits lies in `B`'s interval. The result of an
 arithmetic operator on constrained operands SHALL have the base type's result type, unconstrained.
+A join (the branches of an `if` or a match, the operands of `??`, the items of a sequence) SHALL keep
+a constraint only when every joined item type is the same constrained type, and SHALL otherwise take
+the join of the base types under the existing rules, unconstrained. A constrained type MAY be the
+type of an optional property, `name?: Ratio`, and of a `?` or `*` item type through an alias, such as
+`Ratio*`: the constraint SHALL apply to each value present, and the empty value SHALL satisfy it.
 
 #### Scenario: A constrained value passes where its base is expected
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0`, `let wide(x: float64) = { x }` and `let f(r: Ratio) = { wide(r) }`
@@ -112,14 +127,22 @@ arithmetic operator on constrained operands SHALL have the base type's result ty
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0` and `let f(r: Ratio) = { r * 2 }`
 - **THEN** the result type of `f` SHALL be `float32`
 
+#### Scenario: Joins keep a shared constraint only
+- **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0`, `let a(c: boolean, x: Ratio, y: Ratio) = { if c { x } else { y } }` and `let b(c: boolean, x: Ratio, n: float32) = { if c { x } else { n } }`
+- **THEN** the result type of `a` SHALL be `Ratio` and that of `b` SHALL be `float32`
+
+#### Scenario: An optional constrained property
+- **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0`, `type Fade = { amount?: Ratio }`, `let a = <Fade />` and `let b = <Fade amount=2.0 />`
+- **THEN** analysis SHALL accept `a` and SHALL report `constraint-violation` at `2.0` in `b`
+
 #### Scenario: An alias adds a term
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0` and `type Low = Ratio where <= 0.5`
 - **THEN** `Low` SHALL admit `0.25` and SHALL NOT admit `0.75`
 
 ### Requirement: The checker rejects a constant outside its site's range
-A literal, signed literal or constant expression bound to a constrained site SHALL be checked by
-the type checker after it takes the site's numeric type, and one the interval does not admit SHALL
-be reported as `constraint-violation` at the value, with a message naming the value, the interval as
+The type checker SHALL check a literal, signed literal or constant expression (as the types
+reference defines one: arithmetic whose operands are all numeric literals) bound to a constrained
+site, after it takes the site's numeric type, and one the interval does not admit SHALL be reported as `constraint-violation` at the value, with a message naming the value, the interval as
 written and the site. This SHALL apply to property values, record and union-case field values,
 arguments, `let` initializers, returned values, sequence items whose item type is constrained, and
 defaults where they are declared.
@@ -145,8 +168,10 @@ The compiled program SHALL check a value when the program runs, at the binding, 
 is bound to a constrained site its type does not satisfy with no check, as defined above, and it
 SHALL fail with `nx-ir-constraint` when the interval does not admit it. The author SHALL write
 nothing for the check. The sites SHALL be the ones the constant check covers, plus each item of a
-`for` result or sequence bound to a constrained item type, and a field of an update record derived
-from a record with a constrained field. `NaN` SHALL fail every constraint.
+`for` result or sequence bound to a constrained item type, a value bound to an optional constrained
+property, and a field of an update record derived from a record or component state with a
+constrained field. For a sequence or a value that may be empty, the check SHALL apply to each item,
+and the empty value SHALL pass. `NaN` SHALL fail every constraint.
 
 #### Scenario: A computed argument
 - **WHEN** a file contains `let fade(amount: float64 where in 0.0..=1.0) = { amount }` and `let twice(x: float64) = { fade(x * 2.0) }`, and `twice(0.75)` runs
@@ -156,6 +181,10 @@ from a record with a constrained field. `NaN` SHALL fail every constraint.
 #### Scenario: A returned value
 - **WHEN** a file contains `let clampLow(x: int): int where >= 0 = { x }` and `clampLow(-1)` runs
 - **THEN** evaluation SHALL fail with `nx-ir-constraint`
+
+#### Scenario: Each item of a computed sequence
+- **WHEN** a file contains `type Score = int where >= 0` and `let scores(xs: int+): Score+ = { for x in xs { x - 1 } }`, and `scores({ 1 0 })` runs
+- **THEN** evaluation SHALL fail with `nx-ir-constraint`, since the second item is `-1`
 
 #### Scenario: The body relies on its parameter
 - **WHEN** a file contains `let fade(amount: float64 where in 0.0..=1.0) = { inner(amount) }` and `let inner(a: float64 where in 0.0..=1.0) = { a }`
@@ -170,7 +199,11 @@ SHALL require a scrutinee of a numeric type, possibly constrained, and SHALL be 
 each bound SHALL be checked as a literal written at the scrutinee's base type. An arm SHALL match when
 the scrutinee lies in its interval; `NaN` SHALL match none. Numeric patterns SHALL follow the rules
 for literal matches: an `else` MAY be omitted, and a match with no arm taken is the empty value. A
-pattern that matches no value of the scrutinee's type SHALL be reported as `empty-constraint`. Within
+pattern whose own terms match no value SHALL be reported as `empty-constraint`; a pattern that
+matches values but none the scrutinee's constrained type admits SHALL be reported as the warning
+`unreachable-pattern`, as a `{}` arm on a scrutinee that cannot be empty is reported. A scrutinee
+that may be empty (`int?`) SHALL be accepted: the empty value SHALL match no numeric pattern, only
+`{}` or `else`. Within
 an arm whose scrutinee is a local identifier and whose patterns are one numeric pattern, the type
 checker SHALL narrow that identifier to the scrutinee's type constrained by the pattern, so passing it
 to a site whose interval contains the pattern's needs no runtime check. An unbraced arm body SHALL
