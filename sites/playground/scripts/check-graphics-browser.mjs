@@ -11,7 +11,8 @@ import { build } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 // A production preview serves built assets, not /src/*.ts. Bundle the probes from the actual
-// graphics modules independently of the application, including Vite's handling of the font URL.
+// graphics modules independently of the application. Library mode inlines the fixture font;
+// the application-level checks exercise the served app and its own asset URLs.
 // Nothing from this harness is written into the site's production output.
 const harnessBuild = await build({
   configFile: false,
@@ -89,6 +90,21 @@ try {
   });
   await page.goto(base + "graphics");
   const canvas = page.locator("canvas.drawing-canvas[data-revision]");
+  // Check the app-owned font before any harness probe can load its separate copy.
+  await canvas.waitFor({ timeout: 60_000 });
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Preview", exact: true })
+      .getAttribute("aria-pressed"),
+    "true",
+  );
+  assert.ok(
+    await page.evaluate(() =>
+      [...document.fonts].some(
+        (f) => f.family === "NXGraphicsFixtureV1" && f.status === "loaded",
+      ),
+    ),
+  );
   const gradientCorpus = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/sampling.json", import.meta.url), "utf8"));
   const gradientFailures = await page.evaluate(async (cases) => {
     const { canvasPaint } = globalThis.NXGraphicsBrowserTest;
@@ -161,20 +177,6 @@ try {
 
   console.log("Canvas gradient interpolation matches the shared native analytic corpus.");
 
-  await canvas.waitFor({ timeout: 60_000 });
-  assert.equal(
-    await page
-      .getByRole("button", { name: "Preview", exact: true })
-      .getAttribute("aria-pressed"),
-    "true",
-  );
-  assert.ok(
-    await page.evaluate(() =>
-      [...document.fonts].some(
-        (f) => f.family === "NXGraphicsFixtureV1" && f.status === "loaded",
-      ),
-    ),
-  );
   const pixels = await canvas.evaluate((canvas) => {
     const ctx = canvas.getContext("2d");
     return [

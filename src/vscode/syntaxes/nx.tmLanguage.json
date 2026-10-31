@@ -379,18 +379,6 @@
           "comment": "`where` starts a type's constraint (`float32 where in 0.0..=1.0`); a field or parameter named `where` is followed by `:` or `?:`.",
           "name": "keyword.other.where.nx",
           "match": "\\bwhere\\b(?!\\s*\\??\\s*:)"
-        },
-        {
-          "comment": "The contextual finite term in a where constraint, a conjunction, or a numeric match arm. Fields and functions named finite retain identifier scopes.",
-          "match": "(?:(?<=\\bwhere)|(?<=&&))\\s*\\b(finite)\\b|(?:^|(?<=\\{))\\s*\\b(finite)\\b(?=\\s*=>)",
-          "captures": {
-            "1": {
-              "name": "keyword.other.finite.nx"
-            },
-            "2": {
-              "name": "keyword.other.finite.nx"
-            }
-          }
         }
       ]
     },
@@ -835,6 +823,9 @@
           "patterns": [
             {
               "include": "#comments"
+            },
+            {
+              "include": "#numeric-constraint"
             },
             {
               "include": "#keywords-control"
@@ -1710,6 +1701,9 @@
           "include": "#values-braced-expression"
         },
         {
+          "include": "#numeric-match-elements"
+        },
+        {
           "include": "#keywords-control"
         },
         {
@@ -1814,6 +1808,9 @@
         },
         {
           "include": "#values-braced-expression"
+        },
+        {
+          "include": "#numeric-match-block"
         },
         {
           "include": "#keywords-control"
@@ -2237,6 +2234,9 @@
           "include": "#values-braced-expression"
         },
         {
+          "include": "#numeric-match-properties"
+        },
+        {
           "include": "#keywords-control"
         },
         {
@@ -2611,6 +2611,9 @@
               "name": "keyword.operator.type-modifier.nx"
             }
           }
+        },
+        {
+          "include": "#numeric-constraint"
         }
       ]
     },
@@ -2847,6 +2850,265 @@
         },
         {
           "include": "#rhs-expression"
+        }
+      ]
+    },
+    "numeric-constraint": {
+      "comment": "A where clause reached from a type annotation. Preserve the region across newlines and comments; end before defaults, the next field, delimiters, or any other non-pattern token.",
+      "name": "meta.type.constraint.nx",
+      "begin": "\\b(where)\\b(?!\\s*\\??\\s*:)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.where.nx"
+        }
+      },
+      "end": "(?=\\S)(?!(?:finite|in)\\b(?!\\s*\\??\\s*:)|[0-9]|[-+](?=\\s*[0-9])|&&|[<>]=?(?=\\s*-?\\s*[0-9])|\\.\\.=?|//|/\\*)",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "keyword.other.finite.nx",
+          "match": "\\bfinite\\b"
+        },
+        {
+          "name": "keyword.control.loop.nx",
+          "match": "\\bin\\b"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "numeric-match-block": {
+      "comment": "The arm list after is, distinct from a boolean condition list. Nested expressions keep their own contexts. Finite is a term only where a numeric-pattern suffix leads to an arm arrow.",
+      "name": "meta.control.match.nx",
+      "begin": "\\b(is)\\b(?=\\s*(?:\\{|//|/\\*|$))",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.match.nx"
+        }
+      },
+      "end": "(?<=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|external(?=\\s+(?:<|[A-Za-z_][A-Za-z0-9_]*\\s*\\())|visualizer)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|external(?=\\s+(?:<|[A-Za-z_][A-Za-z0-9_]*\\s*\\())|visualizer)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numeric-arm-finite"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
+          ]
+        }
+      ]
+    },
+    "numeric-match-properties": {
+      "comment": "The arm list after is, distinct from a boolean condition list. Nested expressions keep their own contexts. Finite is a term only where a numeric-pattern suffix leads to an arm arrow.",
+      "name": "meta.control.match.nx",
+      "begin": "\\b(is)\\b(?=\\s*(?:\\{|//|/\\*|$))",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.match.nx"
+        }
+      },
+      "end": "(?<=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|external(?=\\s+(?:<|[A-Za-z_][A-Za-z0-9_]*\\s*\\())|visualizer)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|external(?=\\s+(?:<|[A-Za-z_][A-Za-z0-9_]*\\s*\\())|visualizer)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numeric-arm-finite"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#attributes-condition"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#qualifiers"
+            },
+            {
+              "include": "#operators"
+            }
+          ]
+        }
+      ]
+    },
+    "numeric-arm-finite": {
+      "name": "keyword.other.finite.nx",
+      "match": "(?<![\\w.])finite\\b(?=\\s*(?:(?:&&|,)\\s*(?:finite\\b|in\\s+-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\s*\\.\\.=?\\s*-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|[<>]=?\\s*-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\\s*)*=>)"
+    },
+    "numeric-match-elements": {
+      "comment": "The arm list after is, distinct from a boolean condition list. Nested expressions keep their own contexts. Finite is a term only where a numeric-pattern suffix leads to an arm arrow.",
+      "name": "meta.control.match.nx",
+      "begin": "\\b(is)\\b(?=\\s*(?:\\{|//|/\\*|$))",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.match.nx"
+        }
+      },
+      "end": "(?<=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|external(?=\\s+(?:<|[A-Za-z_][A-Za-z0-9_]*\\s*\\())|visualizer)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|external(?=\\s+(?:<|[A-Za-z_][A-Za-z0-9_]*\\s*\\())|visualizer)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numeric-arm-finite"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
+          ]
         }
       ]
     }
