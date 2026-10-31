@@ -7,8 +7,33 @@ import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { build } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+// A production preview serves built assets, not /src/*.ts. Bundle the probes from the actual
+// graphics modules independently of the application, including Vite's handling of the font URL.
+// Nothing from this harness is written into the site's production output.
+const harnessBuild = await build({
+  configFile: false,
+  root,
+  base: "./",
+  logLevel: "error",
+  build: {
+    target: "es2022",
+    write: false,
+    minify: false,
+    lib: {
+      entry: fileURLToPath(new URL("./graphics-browser-harness.ts", import.meta.url)),
+      name: "NXGraphicsBrowserTest",
+      formats: ["iife"],
+    },
+  },
+});
+const harness = [harnessBuild].flat()
+  .flatMap((result) => result.output)
+  .find((output) => output.type === "chunk" && output.isEntry);
+assert.ok(harness, "The graphics test harness must produce a browser entry.");
+
 const server = createServer();
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = server.address().port;
@@ -58,11 +83,15 @@ try {
     dialogs++;
     await dialog.dismiss();
   });
+  // Reinstall the test bundle after every navigation in the recovery and example checks.
+  await page.addInitScript({
+    content: `${harness.code}\nglobalThis.NXGraphicsBrowserTest = NXGraphicsBrowserTest;`,
+  });
   await page.goto(base + "graphics");
   const canvas = page.locator("canvas.drawing-canvas[data-revision]");
   const gradientCorpus = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/sampling.json", import.meta.url), "utf8"));
   const gradientFailures = await page.evaluate(async (cases) => {
-    const { canvasPaint } = await import("/play/src/graphics/paint.ts");
+    const { canvasPaint } = globalThis.NXGraphicsBrowserTest;
     const failures = [];
     for (const test of cases) {
       const surface = new OffscreenCanvas(101,101);
@@ -75,8 +104,8 @@ try {
         if (actual.some((x,i) => Math.abs(x-sample.expected[i]) > 2/255)) failures.push({name:test.name,actual,sample});
       }
     }
-    const { hitTest } = await import("/play/src/graphics/hit-test.ts");
-    const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
+    const { hitTest } = globalThis.NXGraphicsBrowserTest;
+    const { renderCanvas } = globalThis.NXGraphicsBrowserTest;
     const bounds = {rect:{x0:0,y0:0,x1:100,y1:100},conservative:true};
     const node = {id:"shape",parent:null,order:0,identity:{module:"test",version:"test",declaration:"Rectangle"},
       provenance:null,accessibility:null,transform:[1,0,0,1,0,0],opacity:1,clip:null,clip_evenodd:false,
@@ -90,7 +119,7 @@ try {
     if(Math.abs(inside[3]/255-.375)>2/255 || outside[3]!==0) failures.push({compositing:[...inside],outside:[...outside]});
     node.fill={...node.fill,stops:node.fill.stops.map(s=>({...s,color:[s.color[0],s.color[1],s.color[2],0]}))};
     if(hitTest(scene,50,50)!==undefined) failures.push("all-transparent paint hit");
-    const { measureBrowserText } = await import("/play/src/graphics/browser-font.ts");
+    const { measureBrowserText } = globalThis.NXGraphicsBrowserTest;
     for(const size of [16,32]) for(const anchor of [0,.5,1]) {
       const measurement=await measureBrowserText({text:"Gradient",family:"Fixture",size,weight:400,italic:false});
       const textNode={...node,id:"text",path:null,transform:[1.25,0,0,.8,10,5],fill:cases[0].paint,
@@ -116,7 +145,7 @@ try {
   assert.deepEqual(gradientFailures, []);
   const gradientScenes = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/scenes.json", import.meta.url), "utf8"));
   const sceneFailures = await page.evaluate(async cases => {
-    const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
+    const { renderCanvas } = globalThis.NXGraphicsBrowserTest;
     const failures = [];
     for (const fixture of cases) {
       const ctx = renderCanvas(fixture.prepared).getContext("2d");
@@ -871,34 +900,30 @@ try {
     "DPR 1/2/4 text stays inside physical painted bounds; high-DPR surfaces and nested opacity fit resource limits.",
   );
 
-  if (process.env.NX_PLAYGROUND_PREVIEW !== "1") {
-    const metrics = await page.evaluate(async () => {
-      const { measureBrowserText } = await import(
-        "/play/src/graphics/browser-font.ts"
-      );
-      const request = {
-        text: "Hello world",
-        family: "Fixture",
-        weight: 400,
-        italic: false,
-      };
-      return await Promise.all(
-        [0.01, 0.04, 4, 16, 20000].map(async (size) => ({
-          size,
-          run: (await measureBrowserText({ ...request, size })).run,
-        })),
-      );
-    });
-    const em = metrics[0].run.advance / metrics[0].size;
-    for (const { size, run } of metrics) {
-      assert.ok(Math.abs(run.advance / size - em) < 1e-8);
-      assert.ok(run.ink.rect.y0 / size < -0.76);
-      assert.ok(run.ink.rect.y1 > 0);
-    }
-    console.log(
-      "Browser text scales consistently from tiny through very large local sizes.",
+  const metrics = await page.evaluate(async () => {
+    const { measureBrowserText } = globalThis.NXGraphicsBrowserTest;
+    const request = {
+      text: "Hello world",
+      family: "Fixture",
+      weight: 400,
+      italic: false,
+    };
+    return await Promise.all(
+      [0.01, 0.04, 4, 16, 20000].map(async (size) => ({
+        size,
+        run: (await measureBrowserText({ ...request, size })).run,
+      })),
     );
+  });
+  const em = metrics[0].run.advance / metrics[0].size;
+  for (const { size, run } of metrics) {
+    assert.ok(Math.abs(run.advance / size - em) < 1e-8);
+    assert.ok(run.ink.rect.y0 / size < -0.76);
+    assert.ok(run.ink.rect.y1 > 0);
   }
+  console.log(
+    "Browser text scales consistently from tiny through very large local sizes.",
+  );
   await page.goto(base + "gradients");
   await page.locator("canvas.drawing-canvas[data-revision]").waitFor({ state: "visible" });
   const gradientElements = await page.getByRole("combobox", { name: "Drawing element", exact: true })
