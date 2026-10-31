@@ -109,9 +109,12 @@ which intersect with its own. A constrained type SHALL satisfy its base type, an
 widens to, with no check. A type `A` SHALL satisfy a constrained type `B` with no check when `A`'s
 base widens to `B`'s base and every value `A` admits lies in `B`'s interval. The result of an
 arithmetic operator on constrained operands SHALL have the base type's result type, unconstrained.
-A join (the branches of an `if` or a match, the operands of `??`, the items of a sequence) SHALL keep
-a constraint only when every joined item type is the same constrained type, and SHALL otherwise take
-the join of the base types under the existing rules, unconstrained. A constrained type MAY be the
+A join (the branches of an `if` or a match, the operands of `??`, the items of a sequence) SHALL take
+the narrowest type every branch's item type satisfies, as `implicit-primitive-conversions` requires
+of a join, reading satisfaction as above: when one joined item type is constrained and every other
+satisfies it with no check, the join SHALL be that type, and otherwise the join SHALL be the join of
+the base types under the existing rules, unconstrained. A join SHALL never form an interval no item
+type declares. A constrained type MAY be the
 type of an optional property, `name?: Ratio`, and of a `?` or `*` item type through an alias, such as
 `Ratio*`: the constraint SHALL apply to each value present, and the empty value SHALL satisfy it.
 
@@ -130,6 +133,8 @@ type of an optional property, `name?: Ratio`, and of a `?` or `*` item type thro
 #### Scenario: Joins keep a shared constraint only
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0`, `let a(c: boolean, x: Ratio, y: Ratio) = { if c { x } else { y } }` and `let b(c: boolean, x: Ratio, n: float32) = { if c { x } else { n } }`
 - **THEN** the result type of `a` SHALL be `Ratio` and that of `b` SHALL be `float32`
+- **AND** with `type Low = Ratio where <= 0.5`, `if c { x } else { l }` for `x: Ratio` and `l: Low`
+  SHALL be `Ratio`, and `if c { l } else { h }` for `h: float32 where >= 0.75` SHALL be `float32`
 
 #### Scenario: An optional constrained property
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0`, `type Fade = { amount?: Ratio }`, `let a = <Fade />` and `let b = <Fade amount=2.0 />`
@@ -224,6 +229,12 @@ subtraction; this SHALL hold for the signed literal patterns arms already accept
 #### Scenario: A body is not continued by the next arm's pattern
 - **WHEN** a file contains `let g(n: int) = { if n is { 1 => 5 -1 => 6 > 9 => 7 else => 8 } }`
 - **THEN** parsing SHALL produce three arms and an `else`, and `g(-1)` SHALL be `6` and `g(10)` `7`
+
+#### Scenario: An unreachable pattern and an empty one
+- **WHEN** a file contains `type Ratio = float64 where in 0.0..=1.0` and `let f(r: Ratio) = { if r is { > 2.0 => "big" > 1.0 && < 0.0 => "never" else => "ok" } }`
+- **THEN** analysis SHALL report the warning `unreachable-pattern` at `> 2.0`, which matches values
+  but none a `Ratio` admits, and the error `empty-constraint` at `> 1.0 && < 0.0`, which matches no
+  value, and SHALL NOT report both at one pattern
 
 #### Scenario: A numeric pattern on a string
 - **WHEN** a file contains `let bad(s: string) = { if s is { > 3 => 1 else => 0 } }`

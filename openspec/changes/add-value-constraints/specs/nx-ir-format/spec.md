@@ -11,7 +11,7 @@ table holds such an entry or whose nodes hold a check node or an interval patter
 feature. A bound SHALL be an integer constant for an integer base and a float constant for a floating-point
 base; for `float32` it SHALL hold the bound already rounded to `float32`, so comparing a rounded value
 against it is exact. An integer base's exclusive ends SHALL be written as the inclusive ends next to
-them. Everywhere a rule reads a type, a constrained entry SHALL behave as its base, except where a
+them, in every kind-7 entry, including those an interval pattern refers to. Everywhere a rule reads a type, a constrained entry SHALL behave as its base, except where a
 requirement on checks says otherwise. A constrained type reached through an alias declared in another
 module, including one the build reads only as an interface, SHALL be written as a kind-7 entry, never
 as a reference to the alias, so the constraint reaches the runtime.
@@ -34,11 +34,12 @@ as a reference to the alias, so the constraint reaches the runtime.
 NX IR SHALL encode a runtime constraint check as a node `[28, operand, type, site]`, where `type` is a
 kind-7 type entry and `site` is a string-table index naming what is being bound, such as a parameter
 or field name. Evaluating it SHALL evaluate `operand` and SHALL yield its value when the type's
-interval admits it; when the operand is a sequence the interval SHALL be checked for each item, and
-the empty value SHALL pass, so one node serves an optional site and a `+` or `*` site whose item type
-is constrained, and otherwise SHALL fail with the code `nx-ir-constraint` and a message naming
-the site, the value and the interval. A `NaN` operand SHALL fail. The comparison SHALL be made at the
-base type. The node SHALL count as one operation in the cost model. The emitter SHALL write the node
+interval admits it, and otherwise SHALL fail with the code `nx-ir-constraint` and a message naming
+the site, the value and the interval. When the operand is a sequence the interval SHALL be checked
+for each item, and the empty value SHALL pass, so one node serves an optional site and a `+` or `*`
+site whose item type is constrained. A `NaN` operand SHALL fail. The comparison SHALL be made at the
+base type. Each value checked, one for a single value and one per item for a sequence, SHALL count
+as one operation in the cost model. The emitter SHALL write the node
 exactly where `value-constraints` requires a runtime check and nowhere else.
 
 #### Scenario: A check node at a call
@@ -54,7 +55,7 @@ exactly where `value-constraints` requires a runtime check and nowhere else.
 #### Scenario: The corpus covers checks
 - **WHEN** the conformance corpus runs
 - **THEN** it SHALL include programs whose checks pass, fail at an inclusive and an exclusive end,
-  fail on `NaN`, and record each check as one operation
+  fail on `NaN`, and record one operation per value checked, item by item for a sequence
 
 ### Requirement: NX IR encodes a numeric match pattern as an interval node
 NX IR SHALL encode a numeric value pattern in an `ifIs` arm's pattern list as a node `[29, type]`,
@@ -67,4 +68,4 @@ SHALL cost what a literal pattern costs.
 #### Scenario: Two alternatives in one arm
 - **WHEN** a module declares `let flag(n: int) = { if n is { < 0, > 100 => "out" else => "in" } }`
 - **THEN** the arm's pattern list SHALL hold two kind-29 nodes, one whose type has only a high end
-  `0`, exclusive, and one whose type has only a low end `100`, exclusive
+  `-1`, inclusive, and one whose type has only a low end `101`, inclusive

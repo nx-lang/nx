@@ -9,7 +9,7 @@
 ## 2. Type checker
 
 - [ ] 2.1 Add a constrained form to `nx_types::Type` (base plus an interval with inclusive, exclusive or open ends) and resolve aliases into it, intersecting terms; report `invalid-constraint` and `empty-constraint` per the spec, with the `Score+` fix-it for occurrences; reject `int64` bounds outside ±(2^53−1); normalize integer exclusive ends to inclusive.
-- [ ] 2.2 Extend satisfaction and widening: constrained satisfies its base and wider types; interval containment between constrained types; arithmetic yields the base type; joins keep a constraint only when every item type is the same constrained type; optional properties and `?`/`*` items of a constrained type.
+- [ ] 2.2 Extend satisfaction and widening: constrained satisfies its base and wider types; interval containment between constrained types; arithmetic yields the base type; joins take the narrowest type every item satisfies, else the unconstrained join of the bases; optional properties and `?`/`*` items of a constrained type.
 - [ ] 2.3 Check literals, signed literals, constant expressions and defaults against constrained sites and report `constraint-violation`; record every binding site where a runtime check is needed for the emitter.
 - [ ] 2.4 Reject constrained types as type arguments and inside function types.
 - [ ] 2.4a Type numeric match patterns: numeric scrutinee, bounds at its base type, `empty-constraint`, literal-match rules for `else`, and narrowing of an identifier scrutinee to the arm's interval, `int?` scrutinees, and the `unreachable-pattern` warning.
@@ -23,7 +23,7 @@
 
 ## 4. Runtimes
 
-- [ ] 4.1 Rust runtime: read kind 7, evaluate kind 28, match kind 29 (`nx-ir-constraint`), check host values against constrained types at the boundary (arguments, props, state, patches, action records; `nx-ir-boundary-constraint`, argument named), and count the check as one operation.
+- [ ] 4.1 Rust runtime: read kind 7, evaluate kind 28, match kind 29 (`nx-ir-constraint`), check host values against constrained types at the boundary (arguments, props, state, patches, action records; `nx-ir-boundary-constraint`, argument named), and count one operation per value checked.
 - [ ] 4.2 TypeScript runtime: the same, with `float32` rounding before comparison; run the corpus on both and compare.
 - [ ] 4.3 `@nx-lang/agent`: add a test that a constraint failure maps to `invalid-input`.
 - [ ] 4.4 Interpreter: accept constrained types (treat as base) and evaluate numeric match patterns.
@@ -37,6 +37,7 @@
 ## 6. Viewer
 
 - [ ] 6.0 `packages/viewer/src/edit.ts`: recognise a constrained numeric type (spelled with `where`) as a number, through aliases too, wherever `NUMBER_TYPES` decides today.
+- [ ] 6.0a `visualizer-declarations` hint fit: treat a constrained numeric type (inline or alias) as its base, so numeric hints raise no `editor-hint-mismatch`; tests for both scenarios.
 - [ ] 6.1 `packages/viewer`: intersect `bounds` with hints for clamping, stepping and range notes (`Above`/`Below` for exclusive ends), the derived float step, ignored non-overlapping hints, no step onto an exclusive end, and refused choices; tests for every scenario.
 - [ ] 6.2 Add constrained properties to the playground's "Visual test cases" example and check them in a browser.
 

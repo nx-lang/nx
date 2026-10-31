@@ -201,9 +201,11 @@ host exactly as one. In the checker:
 - On an integer base an exclusive end is the inclusive end next to it, so `int where > 0` and
   `int where >= 1` are one type, and the schema, the IR and the editor only ever see inclusive integer
   ends.
-- A join (`if` branches, match arms, `??`, sequence items) keeps a constraint only when every item has
-  the same constrained type; otherwise it is the join of the bases, unconstrained. Interval hulls
-  were considered and left out: they would make a branch's type depend on its siblings' bounds.
+- A join (`if` branches, match arms, `??`, sequence items) is the narrowest type every item satisfies,
+  as the existing join rule says: when one item's constrained type is satisfied by every other item
+  with no check (`Ratio` with `Low`), the join is that type; otherwise it is the join of the bases,
+  unconstrained. Interval hulls were considered and left out: they would make a branch's type depend
+  on its siblings' bounds.
 - `name?: Ratio` and `Ratio*` are allowed: the constraint applies to each value present and the empty
   value passes.
   intersect.
@@ -248,7 +250,8 @@ fail.
 - A node `[28, operand, type, site]`: evaluates `operand`, fails with `nx-ir-constraint` unless the
   value lies in `type`'s interval, and yields it. Over a sequence it checks each item, and the empty
   value passes, so one node covers optional and `+`/`*` sites. `site` is a string-table index naming what was
-  being bound, for the message. It costs one operation, as a comparison does.
+  being bound, for the message. It costs one operation per value checked, so an item-wise check of
+  n items costs n.
 - A node `[29, type]`, allowed only in an `ifIs` arm's pattern list: matches when the scrutinee lies
   in `type`'s interval. It reuses the interval of a kind-7 entry, so constraints and patterns share
   one check in each runtime.
@@ -330,7 +333,6 @@ so.
 2. Should integer overflow checking (`specs/future.md`, "Bounds checks are specified but not
    enforced") ride on the same `[28 …]` node in a follow-up? The node is shaped so it can.
 
-3. `&&` to join terms (decision 1) or C#'s `and`/`or`? The design assumes `&&`.
-
 Settled with Bret on 2026-10-31: no named operand (`value`/`it`); constraints are value patterns,
-shared with match arms.
+shared with match arms; terms join with `&&` (not C#'s `and`/`or`), and commas give alternatives in
+match arms.
