@@ -78,11 +78,11 @@ try {
     const { hitTest } = await import("/play/src/graphics/hit-test.ts");
     const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
     const bounds = {rect:{x0:0,y0:0,x1:100,y1:100},conservative:true};
-    const node = {id:"shape",parent:null,order:0,identity:{module:"test",version:"test",declaration:"Rect"},
+    const node = {id:"shape",parent:null,order:0,identity:{module:"test",version:"test",declaration:"Rectangle"},
       provenance:null,accessibility:null,transform:[1,0,0,1,0,0],opacity:1,clip:null,clip_evenodd:false,
       path:[{MoveTo:{x:0,y:0}},{LineTo:{x:100,y:0}},{LineTo:{x:100,y:100}},{LineTo:{x:0,y:100}},"ClosePath"],
       evenodd:false,fill:cases[0].paint,stroke:null,text:null,geometry:bounds,painted:bounds,visible:bounds,children:[]};
-    const scene={profile:"graphics-core-v3",revision:"test",config:{width:100,height:100,scale:1},root:node};
+    const scene={profile:"graphics-core-v4",revision:"test",config:{width:100,height:100,scale:1},root:node};
     if(hitTest(scene,99,50)?.id!=="shape") failures.push("transparent interval selection");
     const group={...node,id:"group",path:null,fill:null,opacity:.5,children:[node],clip:[{MoveTo:{x:0,y:0}},{LineTo:{x:60,y:0}},{LineTo:{x:60,y:100}},{LineTo:{x:0,y:100}},"ClosePath"]};
     const frame=renderCanvas({...scene,root:group}); const ctx=frame.getContext("2d");
@@ -180,7 +180,7 @@ try {
   for (const [name, icon] of Object.entries({
     Drawing: "frame",
     Group: "group",
-    Rect: "rectangle-horizontal",
+    Rectangle: "rectangle-horizontal",
     Circle: "circle",
     Text: "type",
     RegularPolygon: "hexagon",
@@ -378,7 +378,7 @@ try {
     ).includes("element/children/2"),
   );
   const prefix =
-    'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>';
+    'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>';
   async function draw(body) {
     const old = (await canvas.count())
       ? await canvas.getAttribute("data-revision")
@@ -394,13 +394,13 @@ try {
   const gradientStops = '<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff00/>';
   const linear = `<g.Paint.linearGradient x1=0 y1=0 x2=100 y2=0 stops={${gradientStops}}/>`;
   const radial = `<g.Paint.radialGradient cx=50 cy=50 radius=45 stops={${gradientStops}}/>`;
-  await draw(`<g.Rect width=100 height=100 fill=${linear}/><g.Circle cx=50 cy=50 r=30 fill=${radial}/><g.Line x1=10 y1=90 x2=90 y2=90 stroke=<g.Stroke paint=${linear} width=3/>/><g.Text x=10 y=20 fontFamily="Fixture" fill=${linear}>Gradient</g.Text>`);
+  await draw(`<g.Rectangle width=100 height=100 fill=${linear}/><g.Circle cx=50 cy=50 r=30 fill=${radial}/><g.Line x1=10 y1=90 x2=90 y2=90 stroke=<g.Stroke paint=${linear} width=3/>/><g.Text x=10 y=20 fontFamily="Fixture" fill=${linear}>Gradient</g.Text>`);
   const gradientPixels = await canvas.evaluate(c => {
     const ctx=c.getContext("2d"); const y=Math.round(c.height*.8);
     return [.2,.8].map(f => [...ctx.getImageData(Math.round(c.width*f),y,1,1).data]);
   });
   assert.ok(gradientPixels[0][0] > 245 && gradientPixels[0][3] > gradientPixels[1][3]);
-  await edit(prefix + `<g.Rect width=100 height=100 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0 y2=0 stops={${gradientStops}}/>/></g.Drawing>`);
+  await edit(prefix + `<g.Rectangle width=100 height=100 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0 y2=0 stops={${gradientStops}}/>/></g.Drawing>`);
   await page.getByRole("alert").filter({hasText:"Drawing could not be rendered"}).waitFor();
   assert.equal(await canvas.count(),0);
   await edit(prefix + '<g.Path data="M0 0 L"/></g.Drawing>');
@@ -418,7 +418,7 @@ try {
   assert.equal(dialogs, 0);
   // Clip holes use their own rule, independently of the shape's fill rule and transforms.
   await draw(
-    '<g.Rect width=100 height=100 fill=<g.Paint.color color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
+    '<g.Rectangle width=100 height=100 fill=<g.Paint.color color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
   );
   const clip = await canvas.evaluate((canvas) => {
     const ctx = canvas.getContext("2d");
@@ -762,7 +762,7 @@ try {
   await canvas.waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: "Source", exact: true }).click();
   await draw(
-    '<g.Rect x=70 y=5 width=20 height=20 fill=<g.Paint.color color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.color color=#000000/> width=2/>/>',
+    '<g.Rectangle x=70 y=5 width=20 height=20 fill=<g.Paint.color color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.color color=#000000/> width=2/>/>',
   );
   await canvas.evaluate((canvas) => {
     const box = canvas.getBoundingClientRect();
@@ -779,7 +779,7 @@ try {
     "element/children/0",
   );
   console.log(
-    "Canvas hit-testing selects the painted Rect beneath a Line's bounding box.",
+    "Canvas hit-testing selects the painted Rectangle beneath a Line's bounding box.",
   );
 
   const textSource =
@@ -857,7 +857,7 @@ try {
         await setSource(
           prefix +
             "<g.Group opacity=0.9>".repeat(14) +
-            "<g.Rect width=10 height=10/>" +
+            "<g.Rectangle width=10 height=10/>" +
             "</g.Group>".repeat(14) +
             "</g.Drawing>",
         );
@@ -899,6 +899,14 @@ try {
       "Browser text scales consistently from tiny through very large local sizes.",
     );
   }
+  await page.goto(base + "gradients");
+  await page.locator("canvas.drawing-canvas[data-revision]").waitFor({ state: "visible" });
+  const gradientElements = await page.getByRole("combobox", { name: "Drawing element", exact: true })
+    .locator("option").allTextContents();
+  const gradientDeclarations = gradientElements.map((label) => label.split(" · ")[0].trim());
+  assert.ok(gradientDeclarations.includes("Rectangle"));
+  assert.ok(!gradientDeclarations.includes("Rect"));
+  console.log("The gradients playground example renders with shared Rect data and Rectangle elements.");
   assert.deepEqual(errors, []);
   console.log(
     "Canvas Drawing renders, revises, measures supplied fonts, isolates opacity, respects clip holes, inspects, rejects invalid scenes and preserves component Preview.",

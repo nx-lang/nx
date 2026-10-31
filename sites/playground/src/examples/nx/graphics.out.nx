@@ -8,39 +8,39 @@
       color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=nonzero
-    opacity=1.0
-    points={<Point x=90.0 y=55.0 /> <Point x=72.5 y=85.31088913245534 /> <Point x=37.50000000000001 y=85.31088913245536 /> <Point x=20.0 y=55.00000000000001 /> <Point x=37.499999999999986 y=24.689110867544652 /> <Point x=72.5 y=24.68911086754465 />}
+    opacity=1
+    points={<Point x=90 y=55 /> <Point x=72.5 y=85.31088913245534 /> <Point x=37.50000000000001 y=85.31088913245536 /> <Point x=20 y=55.00000000000001 /> <Point x=37.499999999999986 y=24.689110867544652 /> <Point x=72.5 y=24.68911086754465 />}
   /> <Polygon
     clipRule=nonzero
     fill=<Paint.color
       color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=nonzero
-    opacity=1.0
-    points={<Point x=150.0 y=19.0 /> <Point x=159.99234928897204 y=41.2467110956259 /> <Point x=184.23803458662553 y=43.875388202501895 /> <Point x=166.1679607770176 y=60.2532889043741 /> <Point x=171.16026908252903 y=84.1246117974981 /> <Point x=150.0 y=72.0 /> <Point x=128.83973091747097 y=84.1246117974981 /> <Point x=133.8320392229824 y=60.25328890437411 /> <Point x=115.76196541337447 y=43.875388202501895 /> <Point x=140.00765071102796 y=41.2467110956259 />}
+    opacity=1
+    points={<Point x=150 y=19 /> <Point x=159.99234928897204 y=41.2467110956259 /> <Point x=184.23803458662553 y=43.875388202501895 /> <Point x=166.1679607770176 y=60.2532889043741 /> <Point x=171.16026908252903 y=84.1246117974981 /> <Point x=150 y=72 /> <Point x=128.83973091747097 y=84.1246117974981 /> <Point x=133.8320392229824 y=60.25328890437411 /> <Point x=115.76196541337447 y=43.875388202501895 /> <Point x=140.00765071102796 y=41.2467110956259 />}
   /> <Polygon
     clipRule=nonzero
     fill=<Paint.color
       color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=nonzero
-    opacity=1.0
-    points={<Point x=210.0 y=59.0 /> <Point x=265.0 y=59.0 /> <Point x=265.0 y=67.0 /> <Point x=285.0 y=55.0 /> <Point x=265.0 y=43.0 /> <Point x=265.0 y=51.0 /> <Point x=210.0 y=51.0 />}
+    opacity=1
+    points={<Point x=210 y=59 /> <Point x=265 y=59 /> <Point x=265 y=67 /> <Point x=285 y=55 /> <Point x=265 y=43 /> <Point x=265 y=51 /> <Point x=210 y=51 />}
   /> <Path
     clipRule=nonzero
     data="M 372 55 A 32 32 0 0 1 317.37258300203047 77.62741699796952 A 32 32 0 0 1 340 23"
     fill=none
     fillRule=nonzero
-    opacity=1.0
+    opacity=1
     stroke=<Stroke
-      dashOffset=0.0
+      dashOffset=0
       lineCap=butt
       lineJoin=miter
-      miterLimit=4.0
+      miterLimit=4
       paint=<Paint.color
         color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
       />
-      width=2.0
+      width=2
     />
   /> <Path
     clipRule=nonzero
@@ -49,35 +49,35 @@
       color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=evenodd
-    opacity=1.0
+    opacity=1
   /> <Group
-    children={<Rect
+    children={<Rectangle
       clipRule=nonzero
       fill=<Paint.color
         color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
       />
       fillRule=nonzero
-      height=60.0
-      opacity=1.0
-      rx=0.0
-      width=60.0
-      x=140.0
-      y=130.0
+      height=60
+      opacity=1
+      rx=0
+      width=60
+      x=140
+      y=130
     /> <Circle
       clipRule=nonzero
-      cx=200.0
-      cy=160.0
+      cx=200
+      cy=160
       fill=<Paint.color
         color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
       />
       fillRule=nonzero
-      opacity=1.0
-      r=30.0
+      opacity=1
+      r=30
     />}
     clipRule=nonzero
     opacity=0.5
-  /> <Text clipRule=nonzero fontFamily="Fixture" fontSize=18.0 fontStyle=normal fontWeight=400.0 opacity=1.0 text="NX graphics" textAnchor=start x=250.0 y=165.0 />}
+  /> <Text clipRule=nonzero fontFamily="Fixture" fontSize=18 fontStyle=normal fontWeight=400 opacity=1 text="NX graphics" textAnchor=start x=250 y=165 />}
   fit=contain
-  opacity=1.0
-  viewBox=<ViewBox height=240.0 width=400.0 x=0.0 y=0.0 />
+  opacity=1
+  viewBox=<Rect height=240 width=400 x=0 y=0 />
 />

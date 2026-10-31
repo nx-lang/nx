@@ -1210,6 +1210,85 @@ mod tests {
         panic!("`tsc` is not available: run `pnpm install` at the repository root");
     }
 
+    #[test]
+    fn standard_library_typescript_bindings_type_check_without_private_aliases() {
+        let temp = TempDir::new().expect("temp dir");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+        let mut entrypoints = Vec::new();
+        for library in nx_api::standard_libraries() {
+            let root = temp
+                .path()
+                .join("node_modules")
+                .join(library.typescript_package);
+            for file in generate_library_types(library.artifact(), &opts).expect("generate library")
+            {
+                let path = root.join(file.relative_path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(&path, &file.content).unwrap();
+                assert!(!file.content.contains("DashLength"), "{}", path.display());
+                entrypoints.push(path);
+            }
+        }
+        let output = tsc_command()
+            .args([
+                "--strict",
+                "--noEmit",
+                "--target",
+                "es2022",
+                "--module",
+                "es2022",
+                "--moduleResolution",
+                "bundler",
+            ])
+            .args(entrypoints)
+            .output()
+            .expect("run tsc");
+        assert!(
+            output.status.success(),
+            "tsc failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let graphics = nx_api::standard_library("@nx/graphics").unwrap();
+        let csharp = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+            ..opts
+        };
+        let files = generate_library_types(graphics, &csharp).unwrap();
+        let content = files
+            .iter()
+            .map(|file| file.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!content.contains("DashLength"));
+        assert!(content.contains("double[]? DashArray"), "{content}");
+    }
+
+    #[test]
+    fn private_alias_chains_expand_in_public_fields_and_companions() {
+        let source = "type Length = float64 where finite && >= 0.0\n\
+            type Lengths = Length+\n\
+            export type Values = { lengths: Lengths }\n\
+            export type Choice = | values { lengths: Lengths }\n\
+            export external component <Widget lengths: Lengths/>\n";
+        let ts = generate_for(source, TargetLanguage::TypeScript);
+        let cs = generate_for(source, TargetLanguage::CSharp);
+        for output in [&ts, &cs] {
+            assert!(!output.contains(": Lengths"), "{output}");
+            assert!(!output.contains("public Lengths"), "{output}");
+            assert!(!output.contains("Length[]"), "{output}");
+        }
+        assert!(ts.contains("lengths: number[]"), "{ts}");
+        assert!(cs.contains("double[] Lengths"), "{cs}");
+    }
+
     /// Host code can pass any record extending an abstract base where the base is expected,
     /// literal or not, and narrows a union extending the base by `$type`.
     #[test]

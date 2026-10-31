@@ -8,9 +8,16 @@ import { programFromImages } from "@nx-lang/previewer";
 import { prepareDrawingValue, checkGraphicsValue } from "./prepare.ts";
 import { glyphCoverage } from "./cmap.ts";
 import { pathData, color } from "./paths.ts";
+import { renderCanvas } from "./canvas.ts";
+
+test("Canvas rejects earlier and unknown graphics profiles before creating a frame", () => {
+  for (const profile of ["graphics-core-v3", "graphics-core-v999"]) {
+    assert.throws(() => renderCanvas({ profile }), /Unsupported graphics profile/);
+  }
+});
 const host = createNxHost(await loadNxModule());
 const prefix =
-  'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>';
+  'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>';
 const complete = (body) => prefix + body + "</g.Drawing>";
 const measure = async (request) => ({
   request,
@@ -76,7 +83,7 @@ test("drawing evaluates IR, supports aliases/helpers, and never calls HIR", asyn
 });
 test("spoofed nodes, malformed paths, invalid helpers and math failures clear the scene", async () => {
   for (const source of [
-    'import "@nx/graphics" as g\nexternal component <Rect width:float64 height:float64/>\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><Rect width=1 height=1/></g.Drawing>',
+    'import "@nx/graphics" as g\nexternal component <Rectangle width:float64 height:float64/>\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><Rectangle width=1 height=1/></g.Drawing>',
     complete('<g.Path data="M0 0 L"/>'),
     complete("<g.Arc cx=0 cy=0 radius=-1/>"),
     'import "@nx/math" as m\nlet root() = {m.sqrt(-1.0)}',
@@ -243,7 +250,6 @@ test("call-site origins are opt-in and preserve values, costs and construction o
 test("helper diagnostics use authored call sites", async () => {
   for (const body of [
     "<g.Star cx=50 cy=50 outerRadius=10 innerRadius=50 pointCount=5/>",
-    "<g.RegularPolygon cx=50 cy=50 radius=10 pointCount=2/>",
     "<g.Arrow x1=5 y1=5 x2=5 y2=5 shaftWidth=2 headWidth=4 headLength=3/>",
   ]) {
     const source = complete(body);
@@ -263,7 +269,7 @@ test("helper diagnostics use authored call sites", async () => {
 
 test("legacy color strings are rejected before painting", async () => {
   const result = await prepareDrawing(host, complete(
-    '<g.Rect width=10 height=10 fill=<g.Paint.color color="red"/>/>',
+    '<g.Rectangle width=10 height=10 fill=<g.Paint.color color="red"/>/>',
   ), measure);
   assert.equal(result.scene, null);
   assert.ok(result.diagnostics.length > 0);
@@ -276,7 +282,7 @@ test("identity and scene limits are checked before any browser text measurement"
     return measure(request);
   };
   const spoof =
-    'import "@nx/graphics" as g\nexternal component <Text fontFamily:string text:string/>\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><Text fontFamily="Other" text="x"/></g.Drawing>';
+    'import "@nx/graphics" as g\nexternal component <Text fontFamily:string text:string/>\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><Text fontFamily="Other" text="x"/></g.Drawing>';
   const invalid = await prepareDrawing(host, spoof, spy);
   assert.equal(invalid.scene, null);
   assert.match(invalid.diagnostics[0].message, /identity/);
@@ -306,7 +312,7 @@ test("many sibling translucent elements fit the concurrent layer budget", async 
 
 test("browser font-measurement failures identify the first requesting Text source", async () => {
   const body =
-    '<g.Rect width=5 height=5/><g.Text fontFamily="Fixture" text="hello"/><g.Text fontFamily="Fixture" text="hello"/>';
+    '<g.Rectangle width=5 height=5/><g.Text fontFamily="Fixture" text="hello"/><g.Text fontFamily="Fixture" text="hello"/>';
   const source = complete(body);
   let measured = 0;
   const result = await prepareDrawing(host, source, async () => {
@@ -406,7 +412,7 @@ test("gradient example prepares shared illustration and chart fills through Type
   const source = readFileSync(new URL("../examples/nx/gradients.nx", import.meta.url), "utf8");
   const result = await prepareDrawing(host, source, measure);
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.scene.profile, "graphics-core-v3");
+  assert.equal(result.scene.profile, "graphics-core-v4");
   assert.equal(result.scene.root.children[0].fill.kind, "linearGradient");
   assert.equal(result.scene.root.children[1].fill.kind, "radialGradient");
   assert.deepEqual(result.scene.root.children[0].fill, result.scene.root.children[2].fill);

@@ -18,7 +18,7 @@ fn read_svg(node: roxmltree::Node<'_, '_>, path: &str, ids: &mut Identities) -> 
     let kind = match name {
         "svg" => "Drawing",
         "g" => "Group",
-        "rect" => "Rect",
+        "rect" => "Rectangle",
         "path" => "Path",
         _ => panic!("unexpected corpus SVG tag {name}"),
     };

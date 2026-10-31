@@ -12,7 +12,7 @@ try {
  const run=spawnSync("cargo",["run","-q","-p","nx-cli","--","codegen",join(root,"examples/graphics/runtime.nx"),"--target","nx-ir","--output",out],{cwd:root,encoding:"utf8"});
  assert.equal(run.status,0,run.stderr);
  const modules=new Map(readdirSync(out,{recursive:true}).filter(p=>p.endsWith(".nxir")).map(p=>{const module=prepareNxIrModule(readFileSync(join(out,p)));return [module.identity,module]}));
- assert.ok(modules.has("@nx/math/math.nx"));assert.ok(modules.has("@nx/graphics/graphics.nx"));
+ assert.ok(modules.has("@nx/geometry/geometry.nx"));assert.ok(modules.has("@nx/math/math.nx"));assert.ok(modules.has("@nx/graphics/graphics.nx"));
  const entry=[...modules.values()].find(m=>m.identity.endsWith("runtime.nx"));
  const program=linkNxIrProgram(entry,{resolve:id=>modules.get(id)});
  const value=name=>evaluateFunction(program,name,[]);
@@ -27,7 +27,7 @@ try {
  const polygon=value("polygon");assert.equal(polygon.$type,"Polygon");assert.equal(polygon.points.length,3);near(polygon.points[1].x,-5);near(polygon.points[1].y,Math.sqrt(75));
  for(const [name,count] of [["star",5],["revisedStar",7]]) {const s=value(name);assert.equal(s.points.length,count*2);s.points.forEach((p,i)=>near(Math.hypot(p.x,p.y),i%2?5:10));near(s.points[0].x,0);near(s.points[0].y,-10);}
  const large=value("largeRotation").points[0];near(large.x,10*Math.cos((1e100%360)*Math.PI/180));near(large.y,10*Math.sin((1e100%360)*Math.PI/180));near(value("periodicRotation").points[0].y,10);assert.equal((value("periodicArc").data.match(/ A /g)||[]).length,2);
- assert.equal(value("nonfiniteArc").data,"nx-graphics-invalid: Arc radius must be finite");assert.equal(value("nonfiniteRing").data,"nx-graphics-invalid: RingSector outerRadius must be finite");
+ for (const name of ["nonfiniteArc", "nonfiniteRing"]) assert.throws(() => value(name), (error) => error.diagnostics[0].code === "nx-ir-constraint");
  const arrow=value("arrow");assert.equal(arrow.points.length,7);assert.deepEqual(arrow.points[3],{$type:"Point",x:30,y:40});
  assert.equal(value("invalidArrow").$type,"Path");assert.match(value("invalidArrow").data,/nx-graphics-invalid: Arrow/);
  assert.equal(value("ring").fillRule,"evenodd");assert.equal((value("ring").data.match(/ A /g)||[]).length,4);

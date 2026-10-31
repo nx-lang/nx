@@ -24,3 +24,13 @@ let describe(x: float64) = {
 }
 
 let flag(n: int) = { if n is { < 0, > 100 => "out" > 0 && <= 10 => "low" } }
+
+type Finite = float64 where finite
+
+type Extent = Finite where >= 0.0
+
+let finite(x: float32 where finite): float64 where finite = { x }
+
+let classify(x: float64) = {
+  if x is { finite && >= 0.0 => "nonnegative finite" else => "other" }
+}

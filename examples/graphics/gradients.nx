@@ -28,10 +28,10 @@ let chartFade(): Paint =
 
 export let root() =
   <Drawing
-    viewBox=<ViewBox x=0 y=0 width=320 height=260 />
+    viewBox=<Rect x=0 y=0 width=320 height=260 />
     background=<Paint.color color=#0f172a />
   >
-    <Rect width=320 height=150 fill={sunset()} />
+    <Rectangle width=320 height=150 fill={sunset()} />
     <Circle
       cx=245
       cy=50

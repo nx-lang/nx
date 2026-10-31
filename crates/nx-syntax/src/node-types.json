@@ -946,6 +946,25 @@
     }
   },
   {
+    "type": "finite_pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "value_expression",
+          "named": true
+        },
+        {
+          "type": "values_braced_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "function_definition",
     "named": true,
     "fields": {
@@ -1303,6 +1322,10 @@
         "types": [
           {
             "type": "comparison_pattern",
+            "named": true
+          },
+          {
+            "type": "finite_pattern",
             "named": true
           },
           {
@@ -2951,6 +2974,10 @@
   },
   {
     "type": "false",
+    "named": false
+  },
+  {
+    "type": "finite",
     "named": false
   },
   {

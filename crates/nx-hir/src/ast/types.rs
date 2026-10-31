@@ -262,6 +262,10 @@ impl NumericPattern {
         let mut interval = Interval::ALL;
         for term in &self.terms {
             let term = match term {
+                PatternTerm::Finite => Interval {
+                    low: Some(IntervalEnd::inclusive(-f64::MAX)),
+                    high: Some(IntervalEnd::inclusive(f64::MAX)),
+                },
                 PatternTerm::Range {
                     start,
                     end,
@@ -320,6 +324,8 @@ impl std::hash::Hash for NumericPattern {
 /// One term of a [`NumericPattern`].
 #[derive(Debug, Clone)]
 pub enum PatternTerm {
+    /// The finite values of a floating-point base.
+    Finite,
     /// `in a..b` or `in a..=b`.
     Range {
         start: PatternBound,
@@ -354,6 +360,7 @@ impl PatternTerm {
                 if *inclusive { "..=" } else { ".." },
                 end.spelling()
             ),
+            PatternTerm::Finite => "finite".to_owned(),
             PatternTerm::Compare { op, bound } => format!("{} {}", op.as_str(), bound.spelling()),
             PatternTerm::Unsupported { text, .. } => text.to_string(),
         }

@@ -1849,6 +1849,29 @@ fn alias_constraint_note(
         return None;
     };
     let (base, interval) = source_tree::type_interval(workspace, module, named, 0)?;
+    let mut current_module = module.to_owned();
+    let mut current = named;
+    for _ in 0..16 {
+        let TypeRef::Name(target) = current else {
+            break;
+        };
+        let origin = workspace
+            .type_namespaces
+            .get(&current_module)?
+            .get(target.as_str())?;
+        let Some(Item::TypeAlias(alias)) = source_tree::item_at(workspace, origin) else {
+            break;
+        };
+        if matches!(alias.ty, TypeRef::Constrained { .. }) {
+            return Some(format!(
+                "`{}` is `{}`",
+                name.as_str(),
+                nx_hir::ast::spell_type_ref(&alias.ty)
+            ));
+        }
+        current_module = origin.0.clone();
+        current = &alias.ty;
+    }
     Some(format!(
         "`{}` is `{}`",
         name.as_str(),
@@ -6530,6 +6553,18 @@ component <SearchBox placeholder:string /> = {
         assert!(reported[0].message.contains("@nx/automation"));
         assert!(reported[0].message.contains("@nx/agent"));
         assert_eq!(reported[0].range.start.line, 0);
+    }
+
+    #[test]
+    fn hover_preserves_finite_pattern_spelling_through_an_alias() {
+        let hover =
+            hover_at("type F = float64 where finite && >= 0.0\ntype R = { va⟨cursor⟩lue: F }")
+                .expect("hover");
+        assert!(
+            hover.contents.contains("float64 where finite && >= 0.0"),
+            "{}",
+            hover.contents
+        );
     }
 
     #[test]

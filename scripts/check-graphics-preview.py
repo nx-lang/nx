@@ -96,9 +96,9 @@ with tempfile.TemporaryDirectory(prefix='nx-preview-') as d:
         'import "@nx/math" as m\nlet root() = { m.sqrt(-1.0) }',
         'import "@nx/math" as m\nlet root() = { m.sqrt(1.0e309) }',
         'import "@nx/math" as m\nlet root() = { m.hypot(1.7e308,1.7e308) }',
-        'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><g.Rect width=10 height=10/><g.Path data="M 0 0 L"/></g.Drawing>',
-        'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><g.Text fontFamily="Fixture" text={"a\nb"}/></g.Drawing>',
-        'import "@nx/graphics" as g\nexternal component <Rect width:float64 height:float64/>\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><Rect width=10 height=10/></g.Drawing>',
+        'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><g.Rectangle width=10 height=10/><g.Path data="M 0 0 L"/></g.Drawing>',
+        'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><g.Text fontFamily="Fixture" text={"a\nb"}/></g.Drawing>',
+        'import "@nx/graphics" as g\nexternal component <Rectangle width:float64 height:float64/>\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><Rectangle width=10 height=10/></g.Drawing>',
     ]:
         entry.write_text(source)
         try: error=run('--entry',entry,'--output',output,success=False)
@@ -110,34 +110,34 @@ with tempfile.TemporaryDirectory(prefix='nx-preview-') as d:
         if 'm.hypot' in source: assert error['diagnostics'][0]['code']=='nx-math-overflow'
         assert (output/'current.json').read_bytes()==previous
 
-    prefix='import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>'
+    prefix='import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>'
     gradient='<g.Paint.linearGradient x1=0 y1=0 x2=100 y2=0 stops={<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff00/>}/>'
-    entry.write_text(prefix+'<g.Rect width=100 height=100 fill='+gradient+'/></g.Drawing>')
+    entry.write_text(prefix+'<g.Rectangle width=100 height=100 fill='+gradient+'/></g.Drawing>')
     limits=d/'gradient-limits.json';limits.write_text(json.dumps({'gradient_stops':1}))
     error=run('--entry',entry,'--output',output,'--limits',limits,success=False)
     assert 'gradient_stops' in error['diagnostics'][0]['message'],error
     assert (output/'current.json').read_bytes()==previous
     for bad in [gradient.replace('x2=100','x2=0'),gradient.replace('offset=1','offset=-1')]:
-        entry.write_text(prefix+'<g.Rect width=100 height=100 fill='+bad+'/></g.Drawing>')
+        entry.write_text(prefix+'<g.Rectangle width=100 height=100 fill='+bad+'/></g.Drawing>')
         assert run('--entry',entry,'--output',output,success=False)['diagnostics']
         assert (output/'current.json').read_bytes()==previous
     for helper,reason in [
         ('<g.Arrow x1=0 y1=0 x2=0 y2=0/>','endpoints coincide'),
         ('<g.Arrow x1=0 y1=0 x2=10 y2=0 headLength=11/>','exceeds endpoint distance'),
-        ('<g.RegularPolygon cx=0 cy=0 radius=1 pointCount=2/>','pointCount must'),
+        ('<g.RegularPolygon cx=0 cy=0 radius=1 pointCount=2/>','pointCount'),
         ('<g.Star cx=0 cy=0 outerRadius=1 innerRadius=2 pointCount=5/>','innerRadius exceeds'),
-        ('<g.Arc cx=0 cy=0 radius=1 sweepAngle=361/>','sweepAngle must'),
+        ('<g.Arc cx=0 cy=0 radius=1 sweepAngle=361/>','sweepAngle'),
         ('<g.RingSector cx=0 cy=0 outerRadius=1 innerRadius=2/>','innerRadius exceeds'),
     ]:
         entry.write_text(prefix+helper+'</g.Drawing>')
         failure=run('--entry',entry,'--output',output,success=False)
-        assert failure['diagnostics'][0]['code']=='graphics-helper-invalid',failure
+        assert failure['diagnostics'][0]['code']==('constraint-violation' if reason in ['pointCount','sweepAngle'] else 'graphics-helper-invalid'),failure
         assert reason in failure['diagnostics'][0]['message'],failure
         assert (output/'current.json').read_bytes()==previous
     entry.write_text(prefix+'<g.RegularPolygon cx=0 cy=0 radius=1.0e309 pointCount=3/></g.Drawing>')
     failure=run('--entry',entry,'--output',output,success=False)
-    assert failure['diagnostics'][0]['code']=='graphics-helper-invalid',failure
-    assert 'radius must be finite' in failure['diagnostics'][0]['message'],failure
+    assert failure['diagnostics'][0]['code']=='constraint-violation',failure
+    assert 'radius' in failure['diagnostics'][0]['message'],failure
     for helper,parameter in [
         ('<g.Arc cx=0 cy=0 radius={1.0e309 - 1.0e309}/>','radius'),
         ('<g.Arc cx=1.0e309 cy=0 radius=1/>','cx'),
@@ -147,13 +147,13 @@ with tempfile.TemporaryDirectory(prefix='nx-preview-') as d:
         ('<g.Arrow x1=1.0e309 y1=0 x2=10 y2=0/>','x1'),
     ]:
         entry.write_text(prefix+helper+'</g.Drawing>');failure=run('--entry',entry,'--output',output,success=False)
-        assert failure['diagnostics'][0]['code']=='graphics-helper-invalid',failure
-        assert parameter+' must be finite' in failure['diagnostics'][0]['message'],failure
-    entry.write_text(prefix+'<g.Rect width={1.0e309 - 1.0e309} height=10/></g.Drawing>')
+        assert failure['diagnostics'][0]['code']=='constraint-violation',failure
+        assert parameter in failure['diagnostics'][0]['message'],failure
+    entry.write_text(prefix+'<g.Rectangle width={1.0e309 - 1.0e309} height=10/></g.Drawing>')
     failure=run('--entry',entry,'--output',output,success=False)
-    assert failure['diagnostics'][0]['code']=='graphics-non-finite',failure
+    assert failure['diagnostics'][0]['code']=='constraint-violation',failure
     limits=d/'limits.json';limits.write_text('{"nodes":5}')
-    entry.write_text(prefix+'<g.Rect width=10 height=10/></g.Drawing>')
+    entry.write_text(prefix+'<g.Rectangle width=10 height=10/></g.Drawing>')
     run('--entry',entry,'--output',d/'partial-limits','--limits',limits)
     imported=d/'lib.nx';entry.write_text('import "./lib" as lib\nlet root() = { lib.bad() }')
     failures=[]
@@ -168,7 +168,7 @@ with tempfile.TemporaryDirectory(prefix='nx-preview-') as d:
         for spelling in [str(folder),str(folder)+'/.' ]:
             hashes.append(run('--entry',source,'--source-root',spelling,'--output',d/'hash-out',success=False)['requestRevision'])
     assert len(set(hashes))==1,hashes
-    entry.write_text(prefix+'<g.Rect width=10 height=10/></g.Drawing>')
+    entry.write_text(prefix+'<g.Rectangle width=10 height=10/></g.Drawing>')
     for array in ['[]','[1]']:
         limits.write_text(array)
         failure=run('--entry',entry,'--output',output,'--limits',limits,success=False)
