@@ -1,0 +1,47 @@
+// Value constraints: constrained types at parameters, results, fields and sequence items, the
+// checks the emitter places where a value's own type does not prove the constraint, and numeric
+// patterns in match arms.
+
+type Score = int where >= 0
+
+type Unit = float64 where > 0.0 && < 1.0
+
+type Paint = {
+  opacity: float64 where in 0.0..=1.0
+  layers: int where in 1..=8 = 1
+}
+
+let pick(count: int where in 1..=10): int = { count }
+
+let fade(amount: float64 where in 0.0..=1.0) = { amount }
+
+let twice(x: float64) = { fade(x * 2.0) }
+
+let unit(u: Unit) = { u }
+
+let toUnit(x: float64) = { unit(x) }
+
+let tenth(x: float32 where <= 0.1) = { x }
+
+let scores(xs: int+): Score+ = { for x in xs { x - 1 } }
+
+let paint(p: Paint) = { p.opacity * p.layers }
+
+let flag(n: int) = { if n is { < 0, > 100 => "out" else => "in" } }
+
+let band(x: float64) = {
+  if x is {
+    in 0.0..0.5 => "low"
+    in 0.5..=1.0 => "high"
+  }
+}
+
+let samples: int+ = { 101 100 0 (0 - 1) }
+
+let flags() = { for n in samples { flag(n) } }
+
+let points: float64+ = { 0.25 0.5 1.0 2.0 }
+
+let bands() = { for x in points { band(x) } }
+
+let faded() = { fade(0.5) }

@@ -1,0 +1,71 @@
+module main.nx fingerprint 15032654582476594623
+requires constraints-v1
+entrypoints functions [pick fade twice unit toUnit tenth scores paint flag band flags bands faded] components []
+
+alias Score
+
+alias Unit
+
+record Paint
+  opacity: float64 where in 0.0..=1.0 required
+  layers: int where in 1..=8 = 1
+
+function pick(count: int where in 1..=10): int =
+  count
+
+function fade(amount: float64 where in 0.0..=1.0) =
+  amount
+
+function twice(x: float64) =
+  fade((check amount: (x mul 2.0) as float64 where in 0.0..=1.0))
+
+function unit(u: float64 where > 0.0 && < 1.0) =
+  u
+
+function toUnit(x: float64) =
+  unit((check u: x as float64 where > 0.0 && < 1.0))
+
+function tenth(x: float32 where <= 0.10000000149011612) =
+  x
+
+function scores(xs: int+): (int where >= 0)+ =
+  (
+    check result:
+    for x in xs yield
+      (x sub 1)
+    as int where >= 0
+  )
+
+function paint(p: Paint) =
+  (p.opacity mul p.layers)
+
+function flag(n: int) =
+  if n is
+    <= -1 | >= 101 =>
+      "out"
+    else =>
+      "in"
+
+function band(x: float64) (optional result) =
+  if x is
+    in 0.0..0.5 =>
+      "low"
+    in 0.5..=1.0 =>
+      "high"
+
+value samples: int+ =
+  [101, 100, 0, (0 sub 1)]
+
+function flags() =
+  for n in samples yield
+    flag(n)
+
+value points: float64+ =
+  [0.25, 0.5, 1.0, 2.0]
+
+function bands() =
+  for x in points yield
+    band(x)
+
+function faded() =
+  fade(0.5)

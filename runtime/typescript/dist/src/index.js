@@ -29,6 +29,10 @@ export const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
  * pattern. A `seq` type alone needs no feature: it is a type kind, not a node.
  */
 export const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
+/**
+ * Value constraints: the `constrained` type kind, the `check` node and the `interval` pattern.
+ */
+export const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
 const knownFeatures = new Set([
     "standard-color-v1",
     NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
@@ -40,6 +44,7 @@ const knownFeatures = new Set([
     NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
     NX_IR_REQUIRED_FEATURE_RANGES_V1,
     NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
 ]);
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
@@ -474,6 +479,10 @@ export const nodeKinds = {
     optionalMember: 24,
     /** `x ?? y`: `[25, left, right]`, the left operand when it holds an item and the right one otherwise. */
     coalesce: 25,
+    /** `[28, operand, type, site]`: the operand's value once every item of it lies in the type's interval. */
+    check: 28,
+    /** `[29, type]`: a pattern-list entry that matches a scrutinee in the type's interval. */
+    interval: 29,
 };
 /**
  * The start and the number of integers of a `Range` record, or `undefined` when the value is not one.
@@ -529,7 +538,11 @@ const textTypes = ["int", "int32", "int64", "float32", "float64", "boolean"];
  * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
  * `seq`, and stay assigned so no later kind reuses them; a reader reports either as malformed.
  */
-export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5, anyFunction: 6 };
+export const typeKinds = { primitive: 0, nominal: 1, function: 4, seq: 5, anyFunction: 6, constrained: 7 };
+/** The bits of a `constrained` type's flags cell: the low end is excluded; the high end is. */
+const constrainedFlags = { lowExclusive: 1, highExclusive: 2 };
+/** The primitive types a `constrained` type may narrow. */
+const numericTypes = ["int", "int32", "int64", "float32", "float64"];
 /**
  * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
  * admits more than one. `?` is `1`, `+` is `2` and `*` is `3`; exactly one is never a `seq`.
@@ -584,6 +597,69 @@ export class NxIrRuntimeError extends Error {
         this.name = "NxIrRuntimeError";
         this.diagnostics = diagnostics;
     }
+}
+/** Whether `value` lies in the interval. `NaN` lies in none. */
+function intervalAdmits(interval, value) {
+    if (Number.isNaN(value)) {
+        return false;
+    }
+    const { low, high } = interval;
+    const above = low === undefined || (interval.lowExclusive ? value > low : value >= low);
+    const below = high === undefined || (interval.highExclusive ? value < high : value <= high);
+    return above && below;
+}
+/** The interval as a constraint spells it: `1..=10`, `0.0..1.0`, `>= 0`, `> 0.0 && <= 1.0`. */
+function intervalText(interval) {
+    const bound = (value) => {
+        if (interval.integer) {
+            return String(value);
+        }
+        const text = String(value);
+        return /[.eNI]/.test(text) ? text : `${text}.0`;
+    };
+    const { low, high } = interval;
+    if (low !== undefined && high !== undefined) {
+        if (!interval.lowExclusive) {
+            return `${bound(low)}${interval.highExclusive ? ".." : "..="}${bound(high)}`;
+        }
+        return `> ${bound(low)} && ${interval.highExclusive ? "<" : "<="} ${bound(high)}`;
+    }
+    if (low !== undefined) {
+        return `${interval.lowExclusive ? ">" : ">="} ${bound(low)}`;
+    }
+    if (high !== undefined) {
+        return `${interval.highExclusive ? "<" : "<="} ${bound(high)}`;
+    }
+    return "any value";
+}
+/** A number constant of the image, or `undefined` for any other constant. */
+function numberConstant(image, index) {
+    const constant = image.entry("constants", index);
+    switch (constant[0]) {
+        case constantKinds.int:
+            return (constant[2] | 0) * 4294967296 + constant[1];
+        case constantKinds.float:
+            float64Cells[littleEndian ? 0 : 1] = constant[1];
+            float64Cells[littleEndian ? 1 : 0] = constant[2];
+            return float64View[0];
+        default:
+            return undefined;
+    }
+}
+/** The interval of a `constrained` type entry, read from a validated image. */
+function constrainedInterval(image, typeIndex) {
+    const entry = image.entry("types", typeIndex);
+    const base = image.string(image.entry("types", entry[1])[1]);
+    const end = (cell) => (cell === NX_IR_NONE ? undefined : numberConstant(image, cell));
+    const low = end(entry[2]);
+    const high = end(entry[3]);
+    return {
+        ...(low === undefined ? {} : { low }),
+        ...(high === undefined ? {} : { high }),
+        lowExclusive: (entry[4] & constrainedFlags.lowExclusive) !== 0,
+        highExclusive: (entry[4] & constrainedFlags.highExclusive) !== 0,
+        integer: base === "int" || base === "int32" || base === "int64",
+    };
 }
 /** Whether a site of this type admits the empty value: a `?` or `*` occurrence. */
 function admitsEmpty(ty) {
@@ -784,7 +860,16 @@ const EMIT = ["str", "ref"];
  * entry of that kind is reported as malformed rather than laid out.
  */
 const layouts = {
-    types: [["str"], ["ref"], undefined, undefined, ["type", { list: PARAM }], ["itemType", "occurrence"], ["type"]],
+    types: [
+        ["str"],
+        ["ref"],
+        undefined,
+        undefined,
+        ["type", { list: PARAM }],
+        ["itemType", "occurrence"],
+        ["type"],
+        ["type", "optConst", "optConst", "int"],
+    ],
     constants: [["i64"], ["str"], ["f64"]],
     nodes: [
         undefined,
@@ -816,6 +901,8 @@ const layouts = {
         ["node", "node"],
         ["standardMath", { list: NODES }],
         ["standardColor", { list: NODES }],
+        ["node", "type", "str"],
+        ["type"],
     ],
     declarations: [
         ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
@@ -866,6 +953,9 @@ class TableReader {
                 this.#validateEntry(table, index);
             }
         }
+        if (this.#diagnostics.length === 0) {
+            this.#validateIntervalPlacement();
+        }
     }
     #validateEntry(table, index) {
         const what = `${table.replace(/s$/, "")} ${index}`;
@@ -897,6 +987,15 @@ class TableReader {
             this.#fail(`${what} has ${cursor.cells.length - cursor.position} cell(s) more than its layout.`);
             return;
         }
+        if (table === "types" && kind === typeKinds.constrained) {
+            this.#validateConstrained(entry, what);
+        }
+        if (table === "nodes" && (kind === nodeKinds.check || kind === nodeKinds.interval)) {
+            const ty = entry[kind === nodeKinds.check ? 2 : 1];
+            if (this.#image.entry("types", ty)[0] !== typeKinds.constrained) {
+                this.#fail(`${what} names a type that is not a constrained type.`);
+            }
+        }
         if (table === "nodes") {
             this.#validateOccurrenceFeature(entry, kind, what);
             if (kind === nodeKinds.standardColor) {
@@ -911,6 +1010,47 @@ class TableReader {
                 }
                 if (entry[2] !== nxStandardMathArities[entry[1]])
                     this.#fail(`${what} has wrong standard math arity.`);
+            }
+        }
+    }
+    /** A `constrained` type narrows a numeric primitive, and its bounds are number constants. */
+    #validateConstrained(entry, what) {
+        const base = this.#image.entry("types", entry[1]);
+        if (base[0] !== typeKinds.primitive || !numericTypes.includes(this.#image.string(base[1]))) {
+            this.#fail(`${what} constrains a type that is not a numeric primitive.`);
+            return;
+        }
+        for (const cell of [entry[2], entry[3]]) {
+            if (cell !== NX_IR_NONE && numberConstant(this.#image, cell) === undefined) {
+                this.#fail(`${what} has a bound that is not a number.`);
+                return;
+            }
+        }
+    }
+    /** An `interval` node appears only in an `ifIs` arm's pattern list. */
+    #validateIntervalPlacement() {
+        const patterns = new Set();
+        const intervals = [];
+        for (let index = 0; index < this.#image.entryCount("nodes"); index += 1) {
+            const entry = this.#image.entry("nodes", index);
+            if (entry[0] === nodeKinds.interval) {
+                intervals.push(index);
+            }
+            else if (entry[0] === nodeKinds.ifIs) {
+                const arms = entry[2];
+                let position = 3;
+                for (let arm = 0; arm < arms; arm += 1) {
+                    const count = entry[position];
+                    for (let pattern = position + 1; pattern < position + 1 + count; pattern += 1) {
+                        patterns.add(entry[pattern]);
+                    }
+                    position += count + 2;
+                }
+            }
+        }
+        for (const index of intervals) {
+            if (!patterns.has(index)) {
+                this.#fail(`node ${index} is an 'interval' node outside an 'ifIs' pattern list.`);
             }
         }
     }
@@ -1010,6 +1150,8 @@ class TableReader {
                     this.#fail(`${what} carries the occurrence cell ${cell}, which spells no suffix.`));
             case "const":
                 return inRange("constant", cell, this.#image.entryCount("constants"));
+            case "optConst":
+                return cell === NX_IR_NONE || inRange("constant", cell, this.#image.entryCount("constants"));
             case "node":
                 return inRange("node", cell, bounds.nodes);
             case "optNode":
@@ -1115,6 +1257,13 @@ class TableReader {
             }
             case typeKinds.anyFunction:
                 prepared = { kind: "anyFunction", result: this.type(entry[1]) };
+                break;
+            case typeKinds.constrained:
+                prepared = {
+                    kind: "constrained",
+                    base: this.#image.string(this.#image.entry("types", entry[1])[1]),
+                    interval: constrainedInterval(this.#image, index),
+                };
                 break;
             default:
                 // Every kind the validator admits is handled above.
@@ -2553,9 +2702,14 @@ function takenBranch(context, entry, index) {
         const patterns = entry[position];
         let matched = false;
         for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
-            if (!matched && patternMatches(scrutinee, evalPattern(context, entry[pattern]), context, entry[pattern])) {
-                matched = true;
+            if (matched) {
+                continue;
             }
+            const node = entry[pattern];
+            matched =
+                entryAt(context, node)[0] === nodeKinds.interval
+                    ? intervalPatternMatches(context, scrutinee, node)
+                    : patternMatches(scrutinee, evalPattern(context, node), context, node);
         }
         const body = entry[position + 1 + patterns];
         if (matched) {
@@ -2565,6 +2719,33 @@ function takenBranch(context, entry, index) {
     }
     const otherwise = entry[position];
     return otherwise === NX_IR_NONE ? undefined : otherwise;
+}
+/**
+ * Whether `scrutinee` lies in the interval pattern `index`. It costs what a literal pattern
+ * does: the pattern, then the one comparison. It never matches the empty value or `NaN`.
+ */
+function intervalPatternMatches(context, scrutinee, index) {
+    const entry = entryAt(context, index);
+    charge(context, index, 2);
+    const item = Array.isArray(scrutinee) && scrutinee.length === 1 ? scrutinee[0] : scrutinee;
+    return typeof item === "number" && intervalAdmits(constrainedInterval(context.linked.module.artifact, entry[1]), item);
+}
+/**
+ * `[28, operand, type, site]`: the operand's value, once every item of it lies in the type's
+ * interval. The empty value passes; each value checked costs one operation.
+ */
+function evalCheck(context, index, entry) {
+    const value = evalNode(entry[1], context);
+    const image = context.linked.module.artifact;
+    const interval = constrainedInterval(image, entry[2]);
+    const items = Array.isArray(value) ? value : [value];
+    for (const item of items) {
+        charge(context, index, 1);
+        if (typeof item !== "number" || !intervalAdmits(interval, item)) {
+            fail("nx-ir-constraint", `The value ${typeof item === "number" ? String(item) : "that is not a number"} for '${image.string(entry[3])}' is outside its constraint ${intervalText(interval)}.`, context, index);
+        }
+    }
+    return value;
 }
 /**
  * A match arm's pattern as a value. A pattern naming a union case with fields stands for every
@@ -2788,6 +2969,12 @@ function evalNodeKind(index, context) {
         }
         case nodeKinds.exists:
             return !isEmptyValue(evalNode(entry[1], context));
+        case nodeKinds.check:
+            return evalCheck(context, index, entry);
+        // The reader refuses an image whose interval node is outside a pattern list, and a pattern
+        // list tests one without evaluating it.
+        case nodeKinds.interval:
+            fail("nx-ir-malformed", "NX IR image is malformed: an 'interval' node was evaluated outside a pattern list.", context, index);
         case nodeKinds.coalesce: {
             // `x ?? y`: the right operand runs only when the left is empty.
             const left = evalNode(entry[1], context);
@@ -3863,6 +4050,14 @@ function normalizeValue(context, ty, value, path) {
     switch (ty.kind) {
         case "primitive":
             return normalizePrimitiveValue(ty.name, value, path);
+        // The value is read at the base first, so a `float32` is compared once rounded.
+        case "constrained": {
+            const normalized = normalizePrimitiveValue(ty.base, value, path);
+            if (typeof normalized !== "number" || !intervalAdmits(ty.interval, normalized)) {
+                fail("nx-ir-boundary-constraint", `Expected ${path} to be in ${intervalText(ty.interval)}, got ${String(normalized)}.`);
+            }
+            return normalized;
+        }
         case "nominal":
             return normalizeNominalValue(context, ty, value, path);
         case "function":

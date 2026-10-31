@@ -622,6 +622,17 @@ impl<'p> Machine<'p> {
                 name,
             } => self.eval_member(cx, frame, index, *optional, *base, name),
             Node::Exists(operand) => self.eval_exists(cx, frame, *operand),
+            Node::Check { operand, ty, site } => {
+                self.eval_check(cx, frame, index, *operand, *ty, site)
+            }
+            // The reader refuses an image whose interval node is outside a pattern list, and a
+            // pattern list tests one without evaluating it.
+            Node::Interval(_) => self.fail(
+                cx,
+                index,
+                "nx-ir-malformed",
+                "NX IR image is malformed: an 'interval' node was evaluated outside a pattern list.",
+            ),
             Node::Coalesce(left, right) => self.eval_coalesce(cx, frame, *left, *right),
             Node::Record(construct) => self.eval_record(cx, frame, index, construct),
             Node::UnionCase(construct) => self.eval_union_case(cx, frame, index, construct),
@@ -718,6 +729,25 @@ impl<'p> Machine<'p> {
         for arm in arms {
             for pattern in arm.patterns.iter() {
                 let node = *pattern;
+                // An interval pattern costs what a literal does: the pattern, then the one
+                // comparison. It never matches the empty value or `NaN`.
+                if let Node::Interval(ty) = self.node(cx, node)? {
+                    self.charge(cx, Some(node), 2)?;
+                    let interval = self.interval(cx, node, *ty)?;
+                    let item = match &scrutinee {
+                        Value::Seq(items) if items.len() == 1 => &items[0],
+                        other => other,
+                    };
+                    let matched = match item {
+                        Value::Int(number) => interval.admits(*number as f64),
+                        Value::Float(number) => interval.admits(*number),
+                        _ => false,
+                    };
+                    if matched {
+                        return Ok(Some(arm.body));
+                    }
+                    continue;
+                }
                 let pattern = self.eval_pattern(cx, frame, node)?;
                 if pattern_matches(
                     &scrutinee,
@@ -771,6 +801,68 @@ impl<'p> Machine<'p> {
             None => Ok(Value::empty()),
             Some(receiver) => self.read_member(cx, index, receiver, name),
         }
+    }
+
+    /// The interval of the constrained type at index `ty` of the module `cx` is in.
+    fn interval(&self, cx: Cx, node: u32, ty: u32) -> Result<crate::module::Interval> {
+        match self
+            .program
+            .linked(cx.module)
+            .and_then(|linked| linked.module.types.get(ty as usize))
+            .map(|ty| &**ty)
+        {
+            Some(crate::module::Type::Constrained { interval, .. }) => Ok(*interval),
+            _ => self.fail(
+                cx,
+                node,
+                "nx-ir-malformed",
+                "NX IR image is malformed: a constraint node names a type that is not constrained.",
+            ),
+        }
+    }
+
+    /// `[28, operand, type, site]`: the operand's value, once every item of it lies in the type's
+    /// interval. The empty value passes; each value checked costs one operation.
+    #[inline(never)]
+    fn eval_check(
+        &self,
+        cx: Cx,
+        frame: &mut Frame,
+        node: u32,
+        operand: u32,
+        ty: u32,
+        site: &str,
+    ) -> Result<Value> {
+        let value = self.eval(cx, frame, operand)?;
+        let interval = self.interval(cx, node, ty)?;
+        let single;
+        let items: &[Value] = match &value {
+            Value::Seq(items) => items,
+            other => {
+                single = [other.clone()];
+                &single
+            }
+        };
+        for item in items {
+            self.charge(cx, Some(node), 1)?;
+            let admitted = match item {
+                Value::Int(number) => interval.admits(*number as f64),
+                Value::Float(number) => interval.admits(*number),
+                _ => false,
+            };
+            if !admitted {
+                return self.fail(
+                    cx,
+                    node,
+                    "nx-ir-constraint",
+                    format!(
+                        "The value {} for '{site}' is outside its constraint {interval}.",
+                        number_text(item)
+                    ),
+                );
+            }
+        }
+        Ok(value)
     }
 
     #[inline(never)]
@@ -1732,6 +1824,15 @@ fn optional_item(value: &Value) -> Option<&Value> {
 /// Whether a match arm's pattern matches the scrutinee. The `{}` pattern matches exactly the
 /// empty value; a record pattern matches by `$type`; anything else by the language's equality,
 /// which is the one of the three that walks the values and so the one `meter` pays for.
+/// A number as a diagnostic shows it: an integer as itself, a float in its canonical text form.
+fn number_text(value: &Value) -> String {
+    match value {
+        Value::Int(number) => number.to_string(),
+        Value::Float(number) => crate::text::float64_text(*number),
+        _ => "that is not a number".to_string(),
+    }
+}
+
 fn pattern_matches(
     value: &Value,
     pattern: &Value,

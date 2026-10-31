@@ -27,6 +27,10 @@ export declare const NX_IR_REQUIRED_FEATURE_RANGES_V1 = "ranges-v1";
  * pattern. A `seq` type alone needs no feature: it is a type kind, not a node.
  */
 export declare const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
+/**
+ * Value constraints: the `constrained` type kind, the `check` node and the `interval` pattern.
+ */
+export declare const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export declare const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
 /**
@@ -124,6 +128,10 @@ export declare const nodeKinds: {
     readonly optionalMember: 24;
     /** `x ?? y`: `[25, left, right]`, the left operand when it holds an item and the right one otherwise. */
     readonly coalesce: 25;
+    /** `[28, operand, type, site]`: the operand's value once every item of it lies in the type's interval. */
+    readonly check: 28;
+    /** `[29, type]`: a pattern-list entry that matches a scrutinee in the type's interval. */
+    readonly interval: 29;
 };
 /**
  * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
@@ -135,6 +143,7 @@ export declare const typeKinds: {
     readonly function: 4;
     readonly seq: 5;
     readonly anyFunction: 6;
+    readonly constrained: 7;
 };
 /**
  * The bits of a `seq` type's occurrence cell: whether the type admits no value and whether it
@@ -265,7 +274,22 @@ export type PreparedType = {
  | {
     readonly kind: "anyFunction";
     readonly result: PreparedType;
+}
+/** A numeric primitive narrowed to an interval. Everywhere but a check it behaves as its base. */
+ | {
+    readonly kind: "constrained";
+    readonly base: string;
+    readonly interval: Interval;
 };
+/** The values a constrained type admits, compared at its base. An `undefined` end is open. */
+export interface Interval {
+    readonly low?: number;
+    readonly high?: number;
+    readonly lowExclusive: boolean;
+    readonly highExclusive: boolean;
+    /** Whether the base is an integer type, which is how the bounds are spelled. */
+    readonly integer: boolean;
+}
 export interface NxIrReference {
     readonly slot: number;
     readonly name: string;

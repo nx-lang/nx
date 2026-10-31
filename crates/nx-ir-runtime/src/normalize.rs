@@ -220,6 +220,27 @@ impl<'p> Machine<'p> {
         self.charge(cx, None, 1)?;
         match ty {
             Type::Primitive(primitive) => normalize_primitive(*primitive, value, path),
+            // The value is read at the base first, so a `float32` is compared once rounded.
+            Type::Constrained { base, interval } => {
+                let value = normalize_primitive(*base, value, path)?;
+                let admitted = match &value {
+                    Value::Int(number) => interval.admits(*number as f64),
+                    Value::Float(number) => interval.admits(*number),
+                    _ => false,
+                };
+                if admitted {
+                    return Ok(value);
+                }
+                let shown = match &value {
+                    Value::Int(number) => number.to_string(),
+                    Value::Float(number) => crate::text::float64_text(*number),
+                    _ => String::new(),
+                };
+                fail(
+                    "nx-ir-boundary-constraint",
+                    format!("Expected {path} to be in {interval}, got {shown}."),
+                )
+            }
             Type::UnknownPrimitive(name) => {
                 fail("nx-ir-schema", format!("Unknown primitive type '{name}'."))
             }

@@ -1,0 +1,11 @@
+{
+  "main.nx::bands": [],
+  "main.nx::faded": [],
+  "main.nx::flags": [],
+  "main.nx::paint#inside": [],
+  "main.nx::pick#inside": [],
+  "main.nx::scores#items": [],
+  "main.nx::tenth#float32Bound": [],
+  "main.nx::toUnit#inside": [],
+  "main.nx::twice#passes": []
+}

@@ -2294,6 +2294,19 @@ test("standard math validates its feature, operation, arity and references", () 
     }
     assertEqual(evaluateFunction(prepareNxIrProgram(make(0, [0], ["standard-math-v1"])), "root"), 0);
 });
+// Value constraints, over the corpus's `constraints` program: what JSON cannot spell, `NaN`, and the
+// interval's spelling in a boundary message.
+test("a constraint refuses NaN at a check and at the host boundary, and a float32 bound admits its float32", () => {
+    const program = corpusProgram("constraints", "main.nx", [], true);
+    const code = (error) => error.diagnostics.map((diagnostic) => diagnostic.code);
+    assertEqual(code(assertThrows(() => evaluateFunction(program, "toUnit", [Number.NaN]), "'u'")), ["nx-ir-constraint"]);
+    const boundary = assertThrows(() => evaluateFunction(program, "unit", [Number.NaN]), "> 0.0 && < 1.0");
+    assertEqual(code(boundary), ["nx-ir-boundary-constraint"]);
+    assertEqual(boundary.diagnostics[0].argument, "u");
+    assertEqual(evaluateFunction(program, "tenth", [0.1]), Math.fround(0.1));
+    assertThrows(() => evaluateFunction(program, "pick", [11]), "1..=10");
+    assertEqual(evaluateFunction(program, "band", [Number.NaN]), null);
+});
 let failures = 0;
 for (const [name, run] of tests) {
     try {

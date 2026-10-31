@@ -1,0 +1,23 @@
+{
+  "main.nx::paint#nestedField": {
+    "argument": "p",
+    "code": "nx-ir-boundary-constraint"
+  },
+  "main.nx::pick#above": {
+    "argument": "count",
+    "code": "nx-ir-boundary-constraint"
+  },
+  "main.nx::scores#secondItem": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::toUnit#exclusiveEnd": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::twice#fails": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::unit#exclusiveEnd": {
+    "argument": "u",
+    "code": "nx-ir-boundary-constraint"
+  }
+}

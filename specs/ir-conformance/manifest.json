@@ -91,6 +91,7 @@
         "expressions"
       ],
       "mul": [
+        "constraints",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -108,6 +109,7 @@
         "expressions"
       ],
       "sub": [
+        "constraints",
         "expressions",
         "generic-records"
       ]
@@ -118,6 +120,7 @@
       ],
       "float": [
         "color-library",
+        "constraints",
         "conversions",
         "expressions",
         "large-catalog",
@@ -130,6 +133,7 @@
         "agent-library",
         "argument-diagnostics",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -172,6 +176,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -199,6 +204,7 @@
         "agent-tool-context",
         "argument-diagnostics",
         "color-library",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "function-references",
@@ -216,6 +222,7 @@
         "two-module"
       ],
       "typeAlias": [
+        "constraints",
         "function-references",
         "function-values",
         "held-records",
@@ -238,6 +245,7 @@
         "agent-library",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -352,6 +360,7 @@
         "agent-tool-context",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -369,6 +378,7 @@
         "agent-library",
         "argument-diagnostics",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -401,6 +411,7 @@
       "call": [
         "argument-diagnostics",
         "color-library",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -418,6 +429,9 @@
         "ranges",
         "records",
         "two-module"
+      ],
+      "check": [
+        "constraints"
       ],
       "coalesce": [
         "handlers",
@@ -450,6 +464,7 @@
       ],
       "for": [
         "components",
+        "constraints",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -468,10 +483,14 @@
         "question-flow"
       ],
       "ifIs": [
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
         "occurrence-patterns"
+      ],
+      "interval": [
+        "constraints"
       ],
       "intrinsic": [
         "evaluation-cost",
@@ -483,6 +502,7 @@
       "member": [
         "agent-tool-context",
         "argument-diagnostics",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -509,6 +529,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -559,6 +580,7 @@
         "agent-tool-context",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -586,6 +608,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -618,6 +641,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -666,6 +690,9 @@
         "agent-tool-context",
         "function-references"
       ],
+      "constrained": [
+        "constraints"
+      ],
       "function": [
         "argument-diagnostics",
         "evaluation-cost",
@@ -679,6 +706,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "constraints",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -703,6 +731,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -730,6 +759,7 @@
         "agent-tool-context",
         "argument-diagnostics",
         "components",
+        "constraints",
         "conversions",
         "evaluation-cost",
         "function-references",
@@ -764,6 +794,7 @@
     "argument-diagnostics",
     "color-library",
     "components",
+    "constraints",
     "conversions",
     "evaluation-cost",
     "expressions",

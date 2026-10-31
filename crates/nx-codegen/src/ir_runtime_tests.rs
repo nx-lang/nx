@@ -4104,3 +4104,143 @@ fn standard_math_smoke() {
         EvalResult::Err(e) => panic!("legacy: {e:?}"),
     }
 }
+
+// ------------------------------------------------------------------------------------------------
+// Value constraints
+// ------------------------------------------------------------------------------------------------
+
+/// The argument a failure names, if any.
+fn argument_of(error: &NxIrRuntimeError) -> Option<&str> {
+    error.diagnostics.first()?.argument.as_deref()
+}
+
+#[test]
+fn a_host_argument_outside_its_constraint_is_refused_naming_the_argument() {
+    let program = program("let pick(count: int where in 1..=10): int = { count }");
+    assert_eq!(
+        program.evaluate_function("pick", &[NxValue::Int(10)], &options()),
+        Ok(NxValue::Int(10))
+    );
+    let error = failure(program.evaluate_function("pick", &[NxValue::Int(11)], &options()));
+    assert_eq!(error.code(), "nx-ir-boundary-constraint", "{error}");
+    assert_eq!(argument_of(&error), Some("count"));
+    assert!(error.to_string().contains("1..=10"), "{error}");
+}
+
+#[test]
+fn a_nested_host_field_outside_its_constraint_is_refused_with_its_path() {
+    let program = program(
+        "type Paint = { opacity: float64 where in 0.0..=1.0 }
+         let paint(p: Paint) = { p.opacity }",
+    );
+    let error = failure(program.evaluate_function(
+        "paint",
+        &[json(r#"{ "$type": "Paint", "opacity": 1.5 }"#)],
+        &options(),
+    ));
+    assert_eq!(error.code(), "nx-ir-boundary-constraint", "{error}");
+    assert_eq!(argument_of(&error), Some("p"));
+    assert!(error.to_string().contains("opacity"), "{error}");
+}
+
+#[test]
+fn a_check_inside_the_program_fails_naming_no_argument() {
+    let program = program(
+        "let fade(amount: float64 where in 0.0..=1.0) = { amount }
+         let twice(x: float64) = { fade(x * 2.0) }",
+    );
+    assert_eq!(
+        program.evaluate_function("twice", &[NxValue::Float(0.5)], &options()),
+        Ok(NxValue::Float(1.0))
+    );
+    let error = failure(program.evaluate_function("twice", &[NxValue::Float(0.75)], &options()));
+    assert_eq!(error.code(), "nx-ir-constraint", "{error}");
+    assert_eq!(argument_of(&error), None);
+    assert!(error.to_string().contains("amount"), "{error}");
+}
+
+#[test]
+fn checks_fail_at_an_exclusive_end_and_on_nan() {
+    let program = program(
+        "type Unit = float64 where > 0.0 && < 1.0
+         let take(u: Unit) = { u }
+         let pass(x: float64) = { take(x) }",
+    );
+    assert!(program
+        .evaluate_function("pass", &[NxValue::Float(0.5)], &options())
+        .is_ok());
+    for value in [0.0, 1.0, f64::NAN] {
+        assert_code(
+            program.evaluate_function("pass", &[NxValue::Float(value)], &options()),
+            "nx-ir-constraint",
+            &["u"],
+        );
+    }
+}
+
+#[test]
+fn a_float32_bound_admits_the_float32_it_names() {
+    let program = program("let f(x: float32 where <= 0.1) = { x }");
+    assert!(program
+        .evaluate_function("f", &[NxValue::Float(0.1)], &options())
+        .is_ok());
+}
+
+#[test]
+fn a_sequence_is_checked_item_by_item_and_costs_one_per_item() {
+    let program = program(
+        "type Score = int where >= 0
+         let scores(xs: int+): Score+ = { for x in xs { x - 1 } }",
+    );
+    assert_same(
+        &program
+            .evaluate_function("scores", &[json("[1, 2]")], &options())
+            .unwrap(),
+        "[0, 1]",
+    );
+    assert_code(
+        program.evaluate_function("scores", &[json("[1, 0]")], &options()),
+        "nx-ir-constraint",
+        &["result", "-1"],
+    );
+    let plain = program_cost("let scores(xs: int+): int+ = { for x in xs { x - 1 } }");
+    let checked = program_cost(
+        "type Score = int where >= 0
+         let scores(xs: int+): Score+ = { for x in xs { x - 1 } }",
+    );
+    // The check node, then one for each of the three items.
+    assert_eq!(checked, plain + 4);
+}
+
+fn program_cost(source: &str) -> u64 {
+    let program = program(source);
+    cost(|options| program.evaluate_function("scores", &[json("[1, 2, 3]")], options))
+}
+
+#[test]
+fn interval_patterns_match_their_ranges_and_cost_what_a_literal_does() {
+    let program = program(
+        r#"let flag(n: int) = { if n is { < 0, > 100 => "out" else => "in" } }
+           let half(x: float64) = { if x is { in 0.0..0.5 => "low" in 0.5..=1.0 => "high" } }
+           let literal(n: int) = { if n is { 0 => "zero" else => "other" } }
+           let ranged(n: int) = { if n is { in 0..=0 => "zero" else => "other" } }"#,
+    );
+    for (value, expected) in [(-1, "out"), (0, "in"), (100, "in"), (101, "out")] {
+        assert_eq!(
+            program.evaluate_function("flag", &[NxValue::Int(value)], &options()),
+            Ok(NxValue::String(expected.into())),
+            "{value}"
+        );
+    }
+    assert_eq!(
+        program.evaluate_function("half", &[NxValue::Float(0.5)], &options()),
+        Ok(NxValue::String("high".into()))
+    );
+    assert_eq!(
+        program.evaluate_function("half", &[NxValue::Float(f64::NAN)], &options()),
+        Ok(NxValue::Null)
+    );
+    let literal = cost(|options| program.evaluate_function("literal", &[NxValue::Int(1)], options));
+    let ranged = cost(|options| program.evaluate_function("ranged", &[NxValue::Int(1)], options));
+    assert_eq!(literal, ranged);
+}
