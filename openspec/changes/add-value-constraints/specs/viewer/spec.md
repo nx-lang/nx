@@ -14,7 +14,7 @@ largest power of ten not above a tenth of the span, so a `0.0..=1.0` number step
 integer's step SHALL stay `1`.
 
 #### Scenario: A constraint alone bounds the steppers
-- **WHEN** the reader steps up `opacity=0.9` twice, where `opacity` is `float64 where value in 0.0..=1.0` with no visualizer
+- **WHEN** the reader steps up `opacity=0.9` twice, where `opacity` is `float64 where in 0.0..=1.0` with no visualizer
 - **THEN** the first step SHALL commit `1.0` and the second SHALL leave the value at `1.0`
 
 #### Scenario: Out of range
@@ -26,6 +26,6 @@ integer's step SHALL stay `1`.
 - **THEN** no `nx-edit` SHALL fire and the note SHALL read `Above 0`
 
 #### Scenario: A hint narrows the constraint
-- **WHEN** `columns` is `int where value in 1..=1000`, hinted `max=12`, and the reader types `20`
+- **WHEN** `columns` is `int where in 1..=1000`, hinted `max=12`, and the reader types `20`
 - **THEN** the note SHALL read `At most 12`
 - **AND** with the hint `max=2000` instead, typing `1500` SHALL show `At most 1000`

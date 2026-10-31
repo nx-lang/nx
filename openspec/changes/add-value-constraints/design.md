@@ -34,8 +34,8 @@ Three pieces already exist to build on:
 
 - Constraints on strings (length, pattern) and sequences (item count). The syntax is designed for
   them (decision 3); they are the next change.
-- Arbitrary predicates (`where isEmail(value)`, `where value % 2 == 0`), cross-field record
-  invariants, and bounds that name constants (`where value <= MaxColumns`).
+- Arbitrary predicates (an email check, `x % 2 == 0`), alternatives in a `where` clause,
+  cross-field record invariants, and bounds that name constants (`where <= MaxColumns`).
 - Proving constraints through arithmetic (Liquid Haskell, SPARK). The checker reasons about literals
   and about constrained types flowing into each other, nothing more.
 - The tree-walking interpreter. It is being retired; it gets the checker's errors but no runtime
@@ -58,7 +58,7 @@ Three pieces already exist to build on:
 | Pkl | `ratio: Float(isBetween(0, 1))`, `name: String(length <= 10)` | evaluation time | Constraints as a parenthesized list of boolean expressions about `this`. |
 | CUE | `ratio: float & >=0 & <=1` | evaluation time | Constraints are types; unification intersects them. |
 | JSON Schema, XSD, OpenAPI | `minimum`, `exclusiveMaximum`, `pattern`, `minItems`; XSD facets | validator | The vocabulary every host already speaks, and what this design maps to. |
-| Liquid Haskell, F\*, Dafny | `{v:Float | 0 <= v && v <= 1}`, `x:int{x >= 0}`, `type R = r: real | 0.0 <= r <= 1.0` | proved statically | Full refinement types; needs an SMT solver and proof effort. |
+| Liquid Haskell, F\*, Dafny | `{v:Float \| 0 <= v && v <= 1}`, `x:int{x >= 0}`, `type R = r: real \| 0.0 <= r <= 1.0` | proved statically | Full refinement types; needs an SMT solver and proof effort. |
 
 Three families fall out:
 
@@ -72,99 +72,132 @@ Three families fall out:
 
 ## Decisions
 
-### 1. Syntax: `Type where value <condition>`
+### 1. Syntax: `Type where <pattern>`, a value pattern with no operand
 
 ```nx
-type Ratio = float32 where value in 0.0..=1.0
-type Weight = int where value in 1..=1000
-type Count = int where value >= 1
-type Unit = float64 where value >= 0.0 && value < 1.0
+type Ratio = float32 where in 0.0..=1.0
+type Weight = int where in 1..=1000
+type Count = int where >= 1
+type Unit = float64 where > 0.0 && <= 1.0
 
 type Paint = {
-  opacity: float64 where value in 0..=1 = 1
+  opacity: float64 where in 0..=1 = 1
   layer: Ratio
 }
 
-let fade(amount: Ratio, steps: int where value >= 1) = { … }
+let fade(amount: Ratio, steps: int where >= 1) = { … }
+
+let describe(x: float64) = {
+  if x is {
+    in 0.0..1.0 => "valid"
+    > 1.0 => "too big"
+    < 0.0 => "too small"
+  }
+}
 ```
 
-A type may be followed by `where` and a condition about `value`, the value being constrained. This
-is Bret's candidate, kept nearly as written, because:
+A type may be followed by `where` and a *value pattern*: the same pattern a match arm uses, matched
+against the value being constrained. Bret chose this over the first draft's
+`where value in 0.0..=1.0` (2026-10-31), after comparing how languages name, or leave out, the
+operand:
 
-- **It reads as a sentence.** "opacity: a float64 where the value is in 0 through 1." A reader who
-  has never seen the feature can say what it means; an AI agent will write it correctly from one
-  example. `float32(0..1)` (Pkl) and `float & >=0 & <=1` (CUE) both need the feature explained.
-- **The condition is NX's own expression syntax.** `in`, `..=`, `>=` and `&&` mean what they mean
-  everywhere else (`in` as in `for`, the range operators as in `range-expressions`), so there is
-  nothing new to learn, and the Visual view renders them with the operator symbols and words it
-  already uses (`≥`, "through", "and").
-- **`where` grows.** Strings, sequences and, later, general predicates are more conditions in the
-  same clause (decision 3). A dedicated range form (`float32 in 0..=1`, `type Rating = 1..=5`) has
-  nowhere to grow, and the bare range type leaves its base implicit: is `0..=1` an `int`, a
-  `float32` or a `float64`?
-- **`value` over `it`, `this` or `_`.** `value` says what it is to a non-programmer, matches the
-  word the docs already use, and does not suggest an object (`this`). It is contextual: it means
-  the constrained value only inside a `where` clause, and stays an ordinary name elsewhere.
+| Approach | Languages |
+| --- | --- |
+| Operand left out: the pattern is tested against an implied subject | C# relational patterns (`x is > 0 and < 10`, switch arms `< 0 => …`); Kotlin `when (x) { in 0..9 -> … }`; Rust and Swift match arms (`0..=9 =>`, `case 0..<10:`) and Rust's pattern types (`u32 is 1..`); Ada and Pascal case arms and subtypes (`when 1 .. 5 =>`, `range 0.0 .. 1.0`); CUE (`>=0 & <=1`); Pkl, where the value's members are in scope (`String(length <= 10)`) |
+| Operand named by a keyword | SQL domains (`CHECK (VALUE BETWEEN 0 AND 1)`); Kotlin and Groovy `it`; Raku `*`; Swift `$0`; Scala `_` |
+| Operand named by the author | Dafny, Liquid Haskell, F\* (`{v:Float \| 0 <= v}`); Python and Java guards (`case x if x > 0`) |
 
-Alternatives considered: Ada's `float32 range 0.0..1.0` (a second keyword that does only ranges);
-Rust's `float32 is 0.0..=1.0` (`is` already reads as a pattern test in NX's `if … is`); attributes
-`@range(0, 1)` (metadata the checker does not own, the C# failure mode); a parameter list
-`float32(min=0 max=1)` (a second vocabulary beside the expression syntax, and close to element
-syntax).
+Why a pattern with no operand:
 
-**Defaults.** A default follows the whole type: `opacity: float64 where value in 0..=1 = 1`. The
-`=` after the constraint reads less well than elsewhere, which is one reason the style guide
-recommends naming a constrained type that is used more than once (`opacity: Ratio = 1`). The
-alternative, a constraint after the default (`opacity: float64 = 1 where …`), would put part of
-the type outside the type, and would not work for a `let` annotation or a return type.
+- **One grammar, two features.** NX match arms already take literal patterns and comma alternatives.
+  Range and comparison patterns make `if x is { in 0.0..1.0 => … }` work with the same terms a
+  constraint uses, and a constraint reads as "the value matches this pattern".
+- **It still reads as a sentence.** "opacity: a float64 where in 0 through 1"; "count: an int where
+  at least 1" in the Visual view's words.
+- **`where` stays.** `float32 in 0.0..=1.0` reads well, but only for ranges: `int >= 1` and
+  `int > 0 && < 10` do not. `where` covers every form with one rule, and later string and sequence
+  forms (decision 3).
+- **No name to explain.** A `value` (or `it`) keyword is one more thing to learn and conflicts in
+  the reader's mind with the many props named `value`.
 
-### 2. What a condition can say (this change)
+The cost: a general predicate (`value % 2 == 0`) is not a pattern. If one is ever wanted, a named
+form can be added for that case alone.
 
-A condition is one or more terms joined by `&&`, each term one of:
+**`&&`, and commas for alternatives.** Languages split on how patterns combine. C# uses `and`/`or`/
+`not` in patterns and `&&`/`||` in expressions, because C# allows a pattern test inside an
+expression and `x is > 0 && y` would otherwise be ambiguous. Rust, Python, Scala, OCaml, F# and Ada
+use `|` for alternatives (F# also `&`); Swift and Kotlin use commas; CUE uses `&` and `|`. NX
+already separates alternatives in an arm with commas, and has no inline `x is pattern` expression, so
+the C# ambiguity does not arise. This design uses `&&` for "and", the operator NX expressions use and
+the Visual view already reads as "and", and keeps commas for alternatives in arms. A `where` clause
+takes no alternatives in this change, so a constraint is always one interval. If NX later adds an
+inline `x is > 0` expression, `x is > 0 && y` would need parentheses there.
 
-| Term | Meaning | JSON Schema |
+Alternatives considered for the clause: Ada's `float32 range 0.0..1.0` (a keyword that does only
+ranges); Rust's `float32 is 0.0..=1.0` (reads oddly with comparisons, and `is` already opens a match
+block in NX); attributes `@range(0, 1)` (metadata the checker does not own, the C# failure mode); a
+parameter list `float32(min=0 max=1)` (a second vocabulary, close to element syntax); `value` as a
+named operand (the first draft).
+
+**Defaults.** A default follows the whole type: `opacity: float64 where in 0..=1 = 1`. The style
+guide recommends naming a constrained type used more than once (`opacity: Ratio = 1`). A constraint
+after the default (`opacity: float64 = 1 where …`) would put part of the type outside the type, and
+would not work for a `let` annotation or a return type.
+
+### 2. What a value pattern can say (this change)
+
+A numeric value pattern is one or more terms joined by `&&`, each term one of:
+
+| Term | Matches | JSON Schema |
 | --- | --- | --- |
-| `value in a..b` | `a ≤ value < b` | `minimum`, `exclusiveMaximum` |
-| `value in a..=b` | `a ≤ value ≤ b` | `minimum`, `maximum` |
-| `value >= a`, `value > a` | lower bound | `minimum`, `exclusiveMinimum` |
-| `value <= b`, `value < b` | upper bound | `maximum`, `exclusiveMaximum` |
+| `in a..b` | `a ≤ x < b` | `minimum`, `exclusiveMaximum` |
+| `in a..=b` | `a ≤ x ≤ b` | `minimum`, `maximum` |
+| `>= a`, `> a` | lower bound | `minimum`, `exclusiveMinimum` |
+| `<= b`, `< b` | upper bound | `maximum`, `exclusiveMaximum` |
 
-The bounds are numeric literals, optionally signed. The base must be a numeric primitive (`int`,
-`int32`, `int64`, `float32`, `float64`) or an alias of one, constrained or not. A bound is checked
-as a literal written at the base type (so `0.5` is rejected for an `int` base and `3000000000` for
-an `int32` one), and the terms together must admit at least one value. Anything else, `||`, `!=`,
-a call, a name other than `value`, is rejected with a diagnostic naming what is supported, not a
-parse error, so the grammar can stay the same when more is supported.
+The bounds are numeric literals, optionally signed. The base (or scrutinee) must be a numeric
+primitive (`int`, `int32`, `int64`, `float32`, `float64`) or an alias of one, constrained or not. A
+bound is checked as a literal written at the base type (so `0.5` is rejected for an `int` base and
+`3000000000` for an `int32` one), and the terms together must match at least one value. In a
+`where` clause anything else (`||`, a comma, `!=`, a call, a leading operand like `value > 0`) is
+rejected with a diagnostic naming what is supported and, for a leading operand, the fix.
 
-The terms intersect, so every constrained numeric type is exactly one interval with inclusive or
-exclusive ends. That makes everything below simple: containment is two comparisons, the editor
-gets a `min` and a `max`, and the schema gets at most two keywords.
+The terms intersect, so every constrained numeric type is exactly one interval with inclusive,
+exclusive or open ends. That keeps everything below simple: containment is two comparisons, the
+editor gets a `min` and a `max`, and the schema gets at most two keywords.
+
+**In match arms** the same patterns apply to a numeric scrutinee, with commas for alternatives
+(`< 0, > 100 => "out"`). They follow the rules literal patterns follow today: `else` is optional and
+a match that takes no arm is the empty value. An arm with one numeric pattern narrows an identifier
+scrutinee to that interval, so `if x is { in 0.0..=1.0 => fade(x) }` passes `x` to a `Ratio`
+parameter with no runtime check.
 
 ### 3. Where a constraint can appear
 
 Anywhere a type is written: record, action and union-case fields, component props and state,
 function parameters and results, `let` annotations, and aliases. It binds to the base type it
 follows and so comes after any occurrence suffix; a constraint on a type that has one is rejected
-in this change (`string+ where value.count >= 2` is the planned item-count form), with a fix-it
-naming the item type: `type Positive = int where value > 0` then `Positive+`. Constrained types
+in this change (`string+ where count >= 2` is a candidate item-count form), with a fix-it
+naming the item type: `type Positive = int where > 0` then `Positive+`. Constrained types
 are rejected as type arguments (`<Range T=Ratio/>`) and inside function types, since the IR erases
 both and neither runtime could check them.
 
-Planned next, with no new syntax: `value.length` and `value matches "…"` for strings (the pattern
-dialect needs choosing across Rust, JavaScript and .NET), `value.count` for sequences, constant
-names as bounds, and general pure predicates checked only at run time.
+Planned next: member patterns with the value's members in scope, as Pkl does, such as
+`string where length in 1..=64`, a string pattern form (the regular-expression dialect needs choosing
+across Rust, JavaScript and .NET), `count` for sequences, alternatives in a `where` clause, constant
+names as bounds, and perhaps a named form for general predicates checked only at run time.
 
 ### 4. A constrained type is its base type plus a check
 
 There is no new kind of value: a `Ratio` is a `float32`, encoded, compared, hashed and sent to a
 host exactly as one. In the checker:
 
-- A constrained type is structural. `type Ratio = float32 where value in 0.0..=1.0` is an alias,
-  and an inline `float32 where value in 0.0..=1.0` is the same type.
+- A constrained type is structural. `type Ratio = float32 where in 0.0..=1.0` is an alias,
+  and an inline `float32 where in 0.0..=1.0` is the same type.
 - A constrained type satisfies its base, and every type its base widens to, with no check.
 - `A` satisfies `B where …` with no check when `A`'s base widens to `B`'s and `A`'s interval lies
-  inside `B`'s. So a `Ratio` passes to a parameter declared `float64 where value >= 0` freely.
-- An alias of a constrained type may add terms (`type Low = Ratio where value <= 0.5`), which
+  inside `B`'s. So a `Ratio` passes to a parameter declared `float64 where >= 0` freely.
+- An alias of a constrained type may add terms (`type Low = Ratio where <= 0.5`), which
   intersect.
 - Arithmetic, as in Ada, yields the base type: `ratio * 2` is a `float32`, so a result is checked
   again when it enters a constrained site.
@@ -197,7 +230,7 @@ checks are what Ada, Pascal, Nim and Pkl do, and the checker's literal errors ca
 author or agent most often makes. A later change can add a warning for a check that will always
 fail.
 
-### 6. IR: one type kind, one node kind, one feature
+### 6. IR: one type kind, two node kinds, one feature
 
 - A type entry `[7, base, low, high, flags]`: `low` and `high` are constant-table indexes or `-1`
   for an open end, and `flags` bit 0 makes the low end exclusive and bit 1 the high end. Constants
@@ -206,7 +239,10 @@ fail.
 - A node `[28, operand, type, site]`: evaluates `operand`, fails with `nx-ir-constraint` unless the
   value lies in `type`'s interval, and yields it. `site` is a string-table index naming what was
   being bound, for the message. It costs one operation, as a comparison does.
-- A module that carries either lists the required feature `constraints-v1`, so a runtime that
+- A node `[29, type]`, allowed only in an `ifIs` arm's pattern list: matches when the scrutinee lies
+  in `type`'s interval. It reuses the interval of a kind-7 entry, so constraints and patterns share
+  one check in each runtime.
+- A module that carries any of them lists the required feature `constraints-v1`, so a runtime that
   predates constraints refuses it by name.
 - Parameters, record fields, component props and state fields carry their declared types already;
   with the constrained type in the table, the boundary check needs no new metadata.
@@ -219,7 +255,7 @@ occurrences did the same).
 - **Diagnostics**: `constraint-violation` (a constant outside its site's interval),
   `invalid-constraint` (a term this change does not support, a non-numeric base, a bound of the
   wrong type, a constraint on a type with an occurrence, as a type argument or in a function
-  type), and `empty-constraint` (terms that admit no value, such as `value > 5 && value < 2`).
+  type), and `empty-constraint` (a pattern that matches no value, such as `> 5 && < 2`).
 - **Hover and signature help** spell the type with its constraint, as written, and through an
   alias show the alias's constraint.
 - **Source tree**: a `SourceProperty` (and an alias's declaration) carries `bounds`: `min`, `max`
@@ -241,21 +277,27 @@ occurrences did the same).
 
 ### 8. Grammar
 
-`type` gains an optional `where_clause` after its suffixes: `'where' condition`. `where` and `value`
-are keywords only there. The condition is parsed as a restricted expression, `value` followed by
-`in` and a range of two signed literals or by a comparison operator and one signed literal, joined
-by `&&`, which keeps a field list unambiguous without braces: a field list is whitespace-separated,
-and the condition ends at the first token that cannot continue it. A broader condition (a call, `||`)
-parses as a general `value_expression` inside the clause so that the checker can reject it by name.
+`pattern` gains range (`in a..b`, `in a..=b`) and comparison (`<`, `<=`, `>`, `>=` and a signed
+numeric literal) terms, joined by `&&`. `type` gains an optional `where_clause` after its suffixes,
+`'where'` and one pattern; `where` is a keyword only there. The pattern ends at the first token that
+cannot continue it, which keeps a whitespace-separated field list unambiguous without braces. A
+leading operand or other expression after `where` parses so the checker can reject it with a fix.
+
+Match arms need one grammar fix that exists today: an unbraced body followed by an arm whose pattern
+starts with `-` is read as a subtraction, so `{ 1 => 5 -1 => 6 }` fails to parse (checked on main
+2026-10-31). Comparison patterns would hit the same problem with `<` and `>`. The arm body ends where
+the next arm's pattern begins, decided by the `=>` after it, using a declared conflict so the parser
+keeps both readings until `=>` settles which one holds. If that proves impractical in tree-sitter,
+the fallback is to require braces around a body followed by such an arm, with a diagnostic that says
+so.
 
 ## Risks / Trade-offs
 
 - **Implicit runtime checks can surprise.** A computed value that is usually in range fails in
   production rather than at compile time. Mitigation: the error names the site and the interval,
   the checker catches every constant, and this is the trade every language in family 2 makes.
-- **`value` is contextual.** A declaration named `value` cannot be read inside a `where` clause.
-  No bound in this change can name a declaration, so nothing is lost now; when bounds can name
-  constants, `value` stays reserved there.
+- **Arm bodies and operator patterns.** The grammar fix in decision 8 is the riskiest piece of
+  parsing; the fallback keeps the feature with braces.
 - **Float bounds at `float32`.** `0.1` is not exact in a `float32`; the bound is converted as a
   literal at the base type is, and values are compared at the base type, so `0.1` written as a
   value and `0.1` written as a bound agree.
@@ -267,8 +309,10 @@ parses as a general `value_expression` inside the clause so that the checker can
 
 ## Open questions
 
-1. Is `value` the subject word Bret wants (vs. `it`)? The design assumes `value`.
-2. Is `opacity: float64 where value in 0..=1 = 1` acceptable as the inline-with-default form, given
-   the style guide's advice to name the type?
-3. Should integer overflow checking (`specs/future.md`, "Bounds checks are specified but not
+1. Is `opacity: float64 where in 0..=1 = 1` acceptable as the inline-with-default form, given the
+   style guide's advice to name the type?
+2. Should integer overflow checking (`specs/future.md`, "Bounds checks are specified but not
    enforced") ride on the same `[28 …]` node in a follow-up? The node is shaped so it can.
+
+Settled with Bret on 2026-10-31: no named operand (`value`/`it`); constraints are value patterns,
+shared with match arms; `&&` joins terms and commas separate alternatives in arms.

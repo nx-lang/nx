@@ -6,19 +6,19 @@ the type-table index of the unconstrained base type, `low` and `high` are consta
 the bounds written at the base type or `-1` for an open end, and `flags` bit 0 marks the low end
 exclusive and bit 1 the high end. An entry SHALL describe the intersection of every term and alias
 that contributed to the type, so no entry's base is itself a constrained entry. A module whose type
-table holds such an entry or whose nodes hold a check node SHALL list the required feature
+table holds such an entry or whose nodes hold a check node or an interval pattern SHALL list the required feature
 `constraints-v1`, and a reader that does not support it SHALL refuse the module by naming the
 feature. Everywhere a rule reads a type, a constrained entry SHALL behave as its base, except where
 a requirement on checks says otherwise.
 
 #### Scenario: A constrained parameter's type
-- **WHEN** a module declares `let fade(amount: float32 where value in 0.0..=1.0) = { amount }`
+- **WHEN** a module declares `let fade(amount: float32 where in 0.0..=1.0) = { amount }`
 - **THEN** the emitted artifact SHALL list `constraints-v1`, and `amount`'s type SHALL be a kind-7
   entry whose base is `float32`, whose bounds are the `float32` constants `0.0` and `1.0`, and whose
   flags are `0`
 
 #### Scenario: An open end and an exclusive end
-- **WHEN** a module declares `type Unit = float64 where value > 0.0` and uses it as a parameter type
+- **WHEN** a module declares `type Unit = float64 where > 0.0` and uses it as a parameter type
 - **THEN** the entry SHALL have `high` equal to `-1` and `flags` equal to `1`
 
 #### Scenario: A runtime without the feature
@@ -35,7 +35,7 @@ base type. The node SHALL count as one operation in the cost model. The emitter 
 exactly where `value-constraints` requires a runtime check and nowhere else.
 
 #### Scenario: A check node at a call
-- **WHEN** a module declares `let fade(amount: float64 where value in 0.0..=1.0) = { amount }` and `let twice(x: float64) = { fade(x * 2.0) }`
+- **WHEN** a module declares `let fade(amount: float64 where in 0.0..=1.0) = { amount }` and `let twice(x: float64) = { fade(x * 2.0) }`
 - **THEN** the argument of the call in `twice` SHALL be a kind-28 node whose operand is the
   multiplication and whose site names `amount`
 
@@ -43,3 +43,16 @@ exactly where `value-constraints` requires a runtime check and nowhere else.
 - **WHEN** the conformance corpus runs
 - **THEN** it SHALL include programs whose checks pass, fail at an inclusive and an exclusive end,
   fail on `NaN`, and record each check as one operation
+
+### Requirement: NX IR encodes a numeric match pattern as an interval node
+NX IR SHALL encode a numeric value pattern in an `ifIs` arm's pattern list as a node `[29, type]`,
+where `type` is a kind-7 type entry whose base is the scrutinee's base type and whose interval is the
+pattern's. An arm SHALL match when one of its patterns matches; an interval node SHALL match when the
+scrutinee lies in the interval, compared at the base type, and SHALL NOT match `NaN`. An interval node
+SHALL appear only in a pattern list, and a reader SHALL refuse one anywhere else as malformed. It
+SHALL cost what a literal pattern costs.
+
+#### Scenario: Two alternatives in one arm
+- **WHEN** a module declares `let flag(n: int) = { if n is { < 0, > 100 => "out" else => "in" } }`
+- **THEN** the arm's pattern list SHALL hold two kind-29 nodes, one whose type has only a high end
+  `0`, exclusive, and one whose type has only a low end `100`, exclusive
