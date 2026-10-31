@@ -130,7 +130,7 @@ type of an optional property, `name?: Ratio`, and of a `?` or `*` item type thro
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0` and `let f(r: Ratio) = { r * 2 }`
 - **THEN** the result type of `f` SHALL be `float32`
 
-#### Scenario: Joins keep a shared constraint only
+#### Scenario: A join is the narrowest type every branch satisfies
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0`, `let a(c: boolean, x: Ratio, y: Ratio) = { if c { x } else { y } }` and `let b(c: boolean, x: Ratio, n: float32) = { if c { x } else { n } }`
 - **THEN** the result type of `a` SHALL be `Ratio` and that of `b` SHALL be `float32`
 - **AND** with `type Low = Ratio where <= 0.5`, `if c { x } else { l }` for `x: Ratio` and `l: Low`

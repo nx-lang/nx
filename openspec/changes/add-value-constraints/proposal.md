@@ -56,6 +56,7 @@ its arguments without checking them.
 - `declaration-schema-export`: map constraints to JSON Schema bound keywords.
 - `source-tree`: properties and aliases carry their bounds.
 - `viewer`: a number's editor keeps within its constraint.
+- `visualizer-declarations`: a constrained numeric type takes numeric editor hints as its base does.
 
 ## Impact
 

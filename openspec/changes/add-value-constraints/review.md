@@ -130,7 +130,7 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
   `minimum`/`maximum`, or accept a narrower schema in some other way. Add a scenario at a float32 exclusive end.
 - **Verification:** The schema delta writes `float32` ends as inclusive `float32` values, and an exclusive end as the nearest `float32` inside. With monotone rounding, every schema-valid value then rounds inside the interval. The scenario value `0.9999999403953552` is the largest `float32` below `1.0`. The IR delta stores `float32` bounds pre-rounded, as float constants. Integer exclusive ends are normalized, so the schema writes `int where > 0` as `minimum: 1`.
 
-### 🟡 Fixed - RF9 The viewer delta silently changes existing stepping rules and leaves edge cases open.
+### ✅ Verified - RF9 The viewer delta silently changes existing stepping rules and leaves edge cases open.
 - **Severity:** Medium (confidence: medium)
 - **Evidence:** The existing viewer requirement says number arrows "step by 1" and steppers step "by `step`, or by
   one" (`openspec/specs/viewer/spec.md:416-418,638`). The ADDED requirement (`specs/viewer/spec.md:11-14`) derives
@@ -148,6 +148,7 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
   constrained types in the hint-fit rule.
 - **Verification:** Mostly fixed. The delta is now explicitly additive for properties with `bounds`, a hint range that does not overlap the bounds is ignored, and a step that would reach or pass an exclusive end leaves the value unchanged. One item from the finding is still open: `visualizer-declarations` (`openspec/specs/visualizer-declarations/spec.md:229-230`) still accepts `min`/`max`/`step`/`editor=field` only on "`int` … `float64` or an alias of one". The change never says that an inline `int where …` type fits those hints, so an implementation that matches primitive types could warn `editor-hint-mismatch` on `columns: int where in 1..=1000` with `max=12`, which is the viewer delta's own scenario. Add one sentence, to the viewer or source-tree delta or as a `visualizer-declarations` delta, saying that a constrained numeric type fits numeric hints as its base does.
 - **Fix (remaining item):** New `visualizer-declarations` delta: a constrained numeric type, inline or through an alias, takes numeric hints as its base does, and a hint outside the interval is not a mismatch (the viewer intersects). Two scenarios; task 6.0a.
+- **Verification:** The new `specs/visualizer-declarations/spec.md` delta treats an inline or alias-constrained numeric type as its base when checking whether a hint fits. It says a fitting hint is not reported for lying outside the interval, and both scenarios (inline `int where …` with `max`, and the `Ratio` alias with `step`) cover the gap. Task 6.0a matches. The proposal's capability list does not name the new delta; that is tracked as RF20.
 
 ### ✅ Verified - RF10 Source-tree `bounds` miss several places the viewer edits.
 - **Severity:** Low (confidence: medium-high)
@@ -223,7 +224,7 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
 
 ## New Findings Discovered During 2026-10-31 Verification
 
-### 🟡 Fixed - RF16 An IR scenario still encodes integer exclusive ends, which the fixed requirement forbids.
+### ✅ Verified - RF16 An IR scenario still encodes integer exclusive ends, which the fixed requirement forbids.
 - **Severity:** Medium (confidence: high)
 - **Evidence:** `specs/nx-ir-format/spec.md:13-14` now says "An integer base's exclusive ends SHALL be written
   as the inclusive ends next to them". The "Two alternatives in one arm" scenario (`spec.md:67-70`) scrutinizes
@@ -235,8 +236,9 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
   kind-7 entry, including those referenced by interval patterns. Alternatively, switch the scenario to a
   `float64` scrutinee if the scenario is meant to show exclusive flags.
 - **Fix:** The scenario now expects `-1` and `101`, inclusive, and the kind-7 rule says integer ends are normalized in every kind-7 entry, including those interval patterns refer to.
+- **Verification:** The scenario now expects `-1` and `101`, both inclusive. The requirement extends integer normalization to every kind-7 entry, including those an interval pattern refers to.
 
-### 🟡 Fixed - RF17 An item-wise check costs "one operation" regardless of how many items it checks, and its sentence no longer parses.
+### ✅ Verified - RF17 An item-wise check costs "one operation" regardless of how many items it checks, and its sentence no longer parses.
 - **Severity:** Low (confidence: high)
 - **Evidence:** `specs/nx-ir-format/spec.md:41` says the node SHALL count as one operation, and design decision
   6 says the same. Since the RF2 fix, one node can check a sequence of any length. The cost model exists to
@@ -248,8 +250,9 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
   corpus wording ("record each check as one operation"). Split the sentence: first the single-value rule
   with its failure, then a second sentence on sequences and the empty value.
 - **Fix:** Split the sentence (single value and failure first, then sequences); each value checked costs one operation, item by item; corpus scenario, design decision 6 and task 4.1 agree.
+- **Verification:** The sentence is split: the failure clause comes first, then sequences and the empty value. The cost is one operation per value checked, item by item, and the corpus scenario, design decision 6 and task 4.1 agree.
 
-### 🟡 Fixed - RF18 The new join rule contradicts the existing "narrowest type" join requirement for nested constrained types.
+### ✅ Verified - RF18 The new join rule contradicts the existing "narrowest type" join requirement for nested constrained types.
 - **Severity:** Low (confidence: medium)
 - **Evidence:** `implicit-primitive-conversions` (`openspec/specs/implicit-primitive-conversions/spec.md:446-449`)
   says a join is "the narrowest type every branch's item type widens to". For `Ratio` and
@@ -260,8 +263,9 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
   constrained types to `value-constraints`, or word the new rule as an explicit exception ("notwithstanding
   the narrowest-type rule"). Add `Ratio` with `Low` to the join scenario so the choice is tested.
 - **Fix:** The join rule now follows the existing narrowest-type rule, read through satisfaction: `Ratio` with `Low` joins to `Ratio`; a constrained type with an unrelated one joins to the bases, unconstrained; no hull is formed. Scenario extended with both pairs; design decision 4 and task 2.2 agree.
+- **Verification:** The join now follows the narrowest-type rule through satisfaction, citing `implicit-primitive-conversions`, so no MODIFIED delta is needed. The scenario adds `Ratio` with `Low`, which joins to `Ratio`, and `Low` with `float32 where >= 0.75`, which joins to `float32`. Both are correct, and the design and task 2.2 agree. Nit, not reopened: the scenario title "Joins keep a shared constraint only" no longer describes the `Ratio`/`Low` case.
 
-### 🟡 Fixed - RF19 The new `unreachable-pattern` warning has no scenario.
+### ✅ Verified - RF19 The new `unreachable-pattern` warning has no scenario.
 - **Severity:** Low (confidence: high)
 - **Evidence:** `specs/value-constraints/spec.md:203-205` and design decision 7 introduce `unreachable-pattern`,
   and task 2.4a lists it. No scenario covers it, and nothing contrasts it with `empty-constraint`.
@@ -269,6 +273,18 @@ stepping `0.9 → 1.0 → 1.0`) checks out.
   reports the warning `unreachable-pattern` at `> 2.0` and no error. Pair it with `> 5.0 && < 2.0`, which
   reports `empty-constraint`.
 - **Fix:** Added the scenario "An unreachable pattern and an empty one" (`> 2.0` on `Ratio` warns `unreachable-pattern`; `> 1.0 && < 0.0` is `empty-constraint`; never both at one pattern).
+- **Verification:** The new scenario reports `unreachable-pattern` (a warning) at `> 2.0` on a `Ratio` (`float64` in `[0, 1]`) and `empty-constraint` at `> 1.0 && < 0.0`, never both at one pattern. Both expectations are correct.
+
+## New Findings Discovered During 2026-10-31 Second Verification
+
+### ✅ Verified - RF20 The proposal does not list the new `visualizer-declarations` delta.
+- **Severity:** Low (confidence: high)
+- **Evidence:** Commit 3b41c10 added `specs/visualizer-declarations/spec.md`, but `proposal.md:50-58`
+  (Modified Capabilities) lists only `nx-ir-format`, `rust-ir-runtime`, `typescript-ir-runtime`,
+  `declaration-schema-export`, `source-tree` and `viewer`.
+- **Recommendation:** Add `visualizer-declarations`: a constrained numeric type takes numeric editor hints
+  as its base does.
+- **Fix:** Added the `visualizer-declarations` bullet to the proposal's Modified Capabilities; also renamed the join scenario to "A join is the narrowest type every branch satisfies". Checked by inspection.
 
 ## Questions
 Answered in the spec (2026-10-31): an arm outside a constrained scrutinee's interval is the warning
@@ -291,3 +307,5 @@ ends are normalized to inclusive ones, so `int where > 0` and `int where >= 1` a
 - Verification (2026-10-31): 14 of 15 findings verified. RF9 is reopened for one remaining item: numeric editor
   hints on inline constrained types. New: RF16 (Medium, a leftover IR scenario with exclusive integer ends) and
   RF17–RF19 (Low). `openspec validate add-value-constraints --strict` passes.
+- Second verification (2026-10-31): RF9 and RF16–RF19 verified. One new Low finding, RF20, for the
+  proposal's capability list. `openspec validate --strict` passes.
