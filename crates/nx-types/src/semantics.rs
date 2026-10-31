@@ -52,6 +52,14 @@ pub(crate) fn common_item_supertype(lhs: &Type, rhs: &Type) -> Type {
         return lhs.clone();
     }
 
+    // Constrained numbers neither of which satisfies the other join at their bases, unconstrained:
+    // a join never forms an interval no branch declares.
+    if let (Some(a), Some(b)) = (lhs.numeric_item(), rhs.numeric_item()) {
+        if let Some(promoted) = Primitive::numeric_promotion(a, b) {
+            return Type::Primitive(promoted);
+        }
+    }
+
     // Two function types neither of which satisfies the other are still both functions: they
     // join to the type every function satisfies rather than to `object`. Their results are not
     // joined.
@@ -76,10 +84,8 @@ pub fn is_object_type(ty: &Type) -> bool {
 /// <para>A suffixed site answers with its item type because a scalar binds there by the one-level
 /// lift, so the item type is the expectation a literal written at that site actually meets.</para>
 pub fn numeric_literal_target(expected: &Type) -> Option<Primitive> {
-    match expected.item() {
-        Type::Primitive(primitive) if primitive.is_numeric() => Some(*primitive),
-        _ => None,
-    }
+    // A constrained site takes a literal at its base; the binding site then checks the value.
+    expected.numeric_item()
 }
 
 /// Whether a value of type `actual` satisfies a site of type `expected`.
@@ -118,6 +124,11 @@ where
         }
         ast::TypeRef::Seq { inner, occ } => {
             Type::seq(resolve_type_ref_with_seen(inner, seen, resolve_named), *occ)
+        }
+        // Below the type checker a constrained value is a value of its base: the checker has
+        // already proven what it could and placed the checks it could not.
+        ast::TypeRef::Constrained { base, .. } => {
+            resolve_type_ref_with_seen(base, seen, resolve_named)
         }
         ast::TypeRef::Function {
             params,

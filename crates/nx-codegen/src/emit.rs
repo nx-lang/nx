@@ -37,6 +37,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxArraySchema",
     "nxBooleanSchema",
     "nxChangedFields",
+    "nxCheckConstraint",
     "nxCleared",
     "nxCoalesce",
     "nxComponentSchema",
@@ -263,7 +264,9 @@ fn collect_expression_source_codegen_diagnostics(
             collect_expression_source_codegen_diagnostics(module, lhs, diagnostics);
             collect_expression_source_codegen_diagnostics(module, rhs, diagnostics);
         }
-        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
+        CodegenExpressionKind::Unary { expr, .. }
+        | CodegenExpressionKind::ToText { expr, .. }
+        | CodegenExpressionKind::ConstraintCheck { operand: expr, .. } => {
             collect_expression_source_codegen_diagnostics(module, expr, diagnostics);
         }
         CodegenExpressionKind::Call { callee, args } => {
@@ -380,8 +383,10 @@ fn collect_expression_source_codegen_diagnostics(
                 collect_expression_source_codegen_diagnostics(module, item, diagnostics);
             }
         }
+        // Only a match holds one, and a match is refused above.
         CodegenExpressionKind::Literal(_)
         | CodegenExpressionKind::Identifier { .. }
+        | CodegenExpressionKind::IntervalPattern { .. }
         | CodegenExpressionKind::Unsupported(_) => {}
     }
 }
@@ -1780,7 +1785,7 @@ fn emit_generic_prop_type(
                 emit_generic_prop_type(module, inner, component, context)
             })
         }
-        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } | TypeRef::Constrained { .. } => {
             emit_type_ref(module.id, ty, module, context)
         }
     }
@@ -1815,7 +1820,7 @@ fn emit_erased_field_type(
                 emit_erased_field_type(module, inner, component, context)
             })
         }
-        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } | TypeRef::Constrained { .. } => {
             emit_type_ref(module.id, ty, module, context)
         }
     }
@@ -2791,6 +2796,13 @@ fn emit_type_schema_inner(
         CodegenTypeRef::Function { .. } | CodegenTypeRef::AnyFunction { .. } => {
             "nxAnySchema".to_string()
         }
+        // Host types keep the base; the constraint is checked where a value enters the site.
+        CodegenTypeRef::Constrained { base, .. } => emit_type_schema_inner(
+            current_module_id,
+            &CodegenTypeRef::Primitive { name: base.clone() },
+            context,
+            seen,
+        ),
     }
 }
 
@@ -3221,6 +3233,10 @@ fn emit_type_ref(
             emit_type_ref(current_module_id, return_type, module, context),
         ),
         TypeRef::AnyFunction { .. } => emit_any_function_type(),
+        // A generated host type keeps the base type.
+        TypeRef::Constrained { base, .. } => {
+            emit_type_ref(current_module_id, base, module, context)
+        }
     }
 }
 
@@ -3245,6 +3261,7 @@ fn emit_type(
             emit_type(current_module_id, ret, module, context),
         ),
         Type::AnyFunction { .. } => emit_any_function_type(),
+        Type::Constrained { base, .. } => emit_primitive_type(*base),
         Type::Named(named) => {
             emit_named_type(current_module_id, named.name.as_str(), module, context)
         }
@@ -3517,6 +3534,31 @@ fn emit_expression(
         CodegenExpressionKind::NamedCall { .. } => {
             "nxRuntimeError(\"calls of function-typed values are not supported by executable source codegen yet\")"
                 .to_string()
+        }
+        // Only a match holds one, and a match is refused before emission.
+        CodegenExpressionKind::IntervalPattern { .. } => {
+            "nxRuntimeError(\"numeric patterns are not supported by executable source codegen yet\")"
+                .to_string()
+        }
+        CodegenExpressionKind::ConstraintCheck { operand, ty, site } => {
+            let CodegenTypeRef::Constrained { base, interval } = ty else {
+                return emit_expression(current_module_id, operand, context);
+            };
+            let float = base.starts_with("float");
+            let end = |end: Option<nx_hir::ast::IntervalEnd>| match end {
+                Some(end) => nx_hir::ast::spell_bound(end.value.0, float),
+                None => "null".to_string(),
+            };
+            let flags = i64::from(interval.low.is_some_and(|end| end.exclusive))
+                + 2 * i64::from(interval.high.is_some_and(|end| end.exclusive));
+            format!(
+                "nxCheckConstraint({}, {}, {}, {}, {})",
+                emit_expression(current_module_id, operand, context),
+                end(interval.low),
+                end(interval.high),
+                flags,
+                js_string(site)
+            )
         }
         CodegenExpressionKind::Let { name, value, body } => format!(
             "(() => {{ const {} = {}; return {}; }})()",
@@ -4485,6 +4527,9 @@ fn collect_type_ref_schema_value_references(
         TypeRef::AnyFunction { return_type } => {
             collect_type_ref_schema_value_references(module, return_type, output);
         }
+        TypeRef::Constrained { base, .. } => {
+            collect_type_ref_schema_value_references(module, base, output);
+        }
     }
 }
 
@@ -4515,6 +4560,9 @@ fn collect_type_ref_references(
         }
         TypeRef::AnyFunction { return_type } => {
             collect_type_ref_references(module, return_type, output);
+        }
+        TypeRef::Constrained { base, .. } => {
+            collect_type_ref_references(module, base, output);
         }
     }
 }
@@ -4567,6 +4615,7 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
             collect_named_type_reference(module, case_ty.union.as_str(), output);
         }
         Type::Primitive(_)
+        | Type::Constrained { .. }
         | Type::Parameter(_)
         | Type::ContextualName(_)
         | Type::Variable(_)
@@ -4667,9 +4716,12 @@ fn collect_expression_value_references(
             collect_expression_value_references(current_module_id, lhs, output);
             collect_expression_value_references(current_module_id, rhs, output);
         }
-        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
+        CodegenExpressionKind::Unary { expr, .. }
+        | CodegenExpressionKind::ToText { expr, .. }
+        | CodegenExpressionKind::ConstraintCheck { operand: expr, .. } => {
             collect_expression_value_references(current_module_id, expr, output);
         }
+        CodegenExpressionKind::IntervalPattern { .. } => {}
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_value_references(current_module_id, callee, output);
             for arg in args.iter().flatten() {
@@ -4982,6 +5034,7 @@ fn type_ref_has_optional(ty: &TypeRef) -> bool {
                 || type_ref_has_optional(return_type)
         }
         TypeRef::AnyFunction { return_type } => type_ref_has_optional(return_type),
+        TypeRef::Constrained { base, .. } => type_ref_has_optional(base),
     }
 }
 
@@ -5049,6 +5102,7 @@ fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<
         TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
             output.insert("nxAnySchema");
         }
+        TypeRef::Constrained { base, .. } => collect_type_ref_schema_runtime_helpers(base, output),
     }
 }
 
@@ -5087,8 +5141,13 @@ fn collect_expression_runtime_helpers(
                 collect_expression_runtime_helpers(content, output);
             }
         }
-        CodegenExpressionKind::Unsupported(_) => {
+        CodegenExpressionKind::Unsupported(_) | CodegenExpressionKind::IntervalPattern { .. } => {
             output.insert("nxRuntimeError");
+        }
+        CodegenExpressionKind::ConstraintCheck { operand, .. } => {
+            output.insert("nxCheckConstraint");
+            output.insert("nxRuntimeError");
+            collect_expression_runtime_helpers(operand, output);
         }
         CodegenExpressionKind::ActionHandler(_) => {
             unreachable!("validate_source_codegen_program refuses handlers before emission")

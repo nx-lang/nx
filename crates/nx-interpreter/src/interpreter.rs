@@ -2329,6 +2329,16 @@ impl Interpreter {
                 self.eval_optional_member(module, ctx, *base, member)
             }
             ast::Expr::Exists { operand, .. } => self.eval_exists(module, ctx, *operand),
+            // The interpreter checks constraints at compile time only: a runtime check yields its
+            // value unchecked. New runtime work targets the IR runtimes.
+            ast::Expr::ConstraintCheck { expr, .. } => self.eval_expr(module, ctx, *expr),
+            ast::Expr::NumericPattern { span, .. } => Err(RuntimeError::new(
+                crate::error::RuntimeErrorKind::TypeMismatch {
+                    expected: "a value".to_string(),
+                    actual: "a numeric pattern".to_string(),
+                    operation: format!("evaluating the expression at {:?}", span),
+                },
+            )),
             ast::Expr::Coalesce { left, right, .. } => {
                 self.eval_coalesce(module, ctx, *left, *right)
             }
@@ -2896,6 +2906,25 @@ impl Interpreter {
 
         for arm in arms {
             for pattern in &arm.patterns {
+                // A numeric pattern matches a number in its interval; the empty value and `NaN`
+                // match none.
+                if let ast::Expr::NumericPattern { pattern, .. } = module.expr(*pattern) {
+                    let number = match &scrutinee_value {
+                        Value::Int(value) => Some(*value as f64),
+                        Value::Int32(value) => Some(*value as f64),
+                        Value::Float32(value) => Some(*value as f64),
+                        Value::Float(value) => Some(*value),
+                        _ => None,
+                    };
+                    let matched = match (number, pattern.interval_as_written()) {
+                        (Some(number), Some(interval)) => interval.contains(number),
+                        _ => false,
+                    };
+                    if matched {
+                        return Ok(Some(arm.body));
+                    }
+                    continue;
+                }
                 let pattern_value = self.eval_match_pattern(module, ctx, *pattern)?;
                 if self.values_match(&scrutinee_value, &pattern_value)? {
                     return Ok(Some(arm.body));

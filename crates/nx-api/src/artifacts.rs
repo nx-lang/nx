@@ -4317,9 +4317,57 @@ fn type_from_function_binding(ty: &Type) -> Option<TypeRef> {
     }
 }
 
+/// The pattern that spells `interval` on `base`: comparison terms for each end.
+fn interval_pattern(
+    base: nx_types::Primitive,
+    interval: &nx_types::Interval,
+) -> nx_hir::ast::NumericPattern {
+    use nx_hir::ast::{CompareOp, Literal, OrderedFloat, PatternBound, PatternTerm};
+    let bound = |value: f64| PatternBound {
+        value: Some(if base.is_integer() {
+            Literal::Int(value as i64)
+        } else {
+            Literal::Float(OrderedFloat(value))
+        }),
+        text: nx_hir::ast::spell_bound(value, base.is_float()).into(),
+        span: nx_diagnostics::TextSpan::default(),
+    };
+    let mut terms = Vec::new();
+    if let Some(low) = interval.low {
+        terms.push(PatternTerm::Compare {
+            op: if low.exclusive {
+                CompareOp::Gt
+            } else {
+                CompareOp::Ge
+            },
+            bound: bound(low.value.0),
+        });
+    }
+    if let Some(high) = interval.high {
+        terms.push(PatternTerm::Compare {
+            op: if high.exclusive {
+                CompareOp::Lt
+            } else {
+                CompareOp::Le
+            },
+            bound: bound(high.value.0),
+        });
+    }
+    nx_hir::ast::NumericPattern {
+        terms,
+        span: nx_diagnostics::TextSpan::default(),
+    }
+}
+
 fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
     match ty {
         Type::Primitive(primitive) => Some(TypeRef::name(primitive.as_str())),
+        // A constrained type publishes as its base and the pattern its interval spells, so an
+        // importing module resolves the same constraint.
+        Type::Constrained { base, interval } => Some(TypeRef::Constrained {
+            base: Box::new(TypeRef::name(base.as_str())),
+            pattern: interval_pattern(*base, interval),
+        }),
         Type::Seq { item, occ } => Some(TypeRef::seq(type_to_type_ref(item)?, *occ)),
         Type::Function { params, ret } => Some(TypeRef::function(
             params

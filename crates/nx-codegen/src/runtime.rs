@@ -143,6 +143,32 @@ export function nxIsEmpty(value: unknown): boolean {
   return value == null || (Array.isArray(value) && value.length === 0);
 }
 
+/**
+ * A constraint check: yields `value` when every item lies in the interval, compared as numbers,
+ * and fails otherwise. A `null` end is open; `flags` bit 0 excludes the low end and bit 1 the
+ * high end. The empty value passes and `NaN` fails.
+ */
+export function nxCheckConstraint<T>(
+  value: T,
+  low: number | null,
+  high: number | null,
+  flags: number,
+  site: string,
+): T {
+  const items: readonly unknown[] = Array.isArray(value) ? value : nxIsEmpty(value) ? [] : [value];
+  for (const item of items) {
+    const n = item as number;
+    const admitted =
+      !Number.isNaN(n) &&
+      (low === null || ((flags & 1) !== 0 ? n > low : n >= low)) &&
+      (high === null || ((flags & 2) !== 0 ? n < high : n <= high));
+    if (!admitted) {
+      nxRuntimeError(`The value ${n} for '${site}' is outside its constraint`);
+    }
+  }
+  return value;
+}
+
 /** `x?`: true when the value holds at least one item. */
 export function nxExists(value: unknown): boolean {
   return !nxIsEmpty(value);
@@ -786,6 +812,25 @@ export function nxOptionalSchema(item) {
  */
 export function nxIsEmpty(value) {
   return value == null || (Array.isArray(value) && value.length === 0);
+}
+
+/**
+ * A constraint check: yields `value` when every item lies in the interval, compared as numbers,
+ * and fails otherwise. A `null` end is open; `flags` bit 0 excludes the low end and bit 1 the
+ * high end. The empty value passes and `NaN` fails.
+ */
+export function nxCheckConstraint(value, low, high, flags, site) {
+  const items = Array.isArray(value) ? value : nxIsEmpty(value) ? [] : [value];
+  for (const n of items) {
+    const admitted =
+      !Number.isNaN(n) &&
+      (low === null || ((flags & 1) !== 0 ? n > low : n >= low)) &&
+      (high === null || ((flags & 2) !== 0 ? n < high : n <= high));
+    if (!admitted) {
+      nxRuntimeError(`The value ${n} for '${site}' is outside its constraint`);
+    }
+  }
+  return value;
 }
 
 /** The empty value as generated code writes it. */

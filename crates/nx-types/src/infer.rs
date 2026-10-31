@@ -19,6 +19,9 @@ use nx_hir::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+mod constraints;
+pub use constraints::{pattern_interval_at, ConstraintCheckSite};
+
 /// What kind of value an editor hint edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HintValueKind {
@@ -362,6 +365,12 @@ pub struct InferenceContext<'a> {
     /// terms as `converted_literals`. Whether a `+` adds or concatenates is decided here, where
     /// every operand's type is known, and nowhere else.
     string_conversions: StringConversions,
+    /// The values bound to a constrained site whose own types do not prove the constraint, and
+    /// the check each needs.
+    ///
+    /// <para>Consumed after analysis to wrap each in an `Expr::ConstraintCheck`, on the same terms
+    /// as `widened_joins`. A constant is never here: it is checked at compile time.</para>
+    constraint_checks: FxHashMap<ExprId, ConstraintCheckSite>,
     /// The branches of a join that widen, and the numeric type each widens to.
     ///
     /// Joining an `int` branch with a `float64` one types the join as `float64`, but the `int`
@@ -516,6 +525,7 @@ impl<'a> InferenceContext<'a> {
             folded_constants: FxHashMap::default(),
             string_conversions: StringConversions::default(),
             widened_joins: FxHashMap::default(),
+            constraint_checks: FxHashMap::default(),
             lifted_joins: FxHashSet::default(),
             resolved_type_aliases: FxHashMap::default(),
             local_type_alias_spans: FxHashMap::default(),
@@ -714,6 +724,20 @@ impl<'a> InferenceContext<'a> {
         let ty = match expr {
             // Literals have known types
             ast::Expr::Literal(lit) => self.infer_literal(lit),
+            // A numeric pattern is typed by the match that holds it, against the scrutinee.
+            ast::Expr::NumericPattern { .. } => Type::Error,
+            // A check is inserted after analysis; a re-inference reads it as its interval.
+            ast::Expr::ConstraintCheck {
+                expr,
+                base,
+                interval,
+                ..
+            } => {
+                let (expr, base, interval) = (*expr, *base, *interval);
+                let operand = self.infer_expr(expr);
+                let item = Type::constrained(Primitive::from_hir_type(base), interval);
+                Type::seq(item, operand.occurrence())
+            }
             ast::Expr::StandardColor { args, result, .. } => {
                 for arg in args {
                     self.infer_expr(*arg);
@@ -780,7 +804,7 @@ impl<'a> InferenceContext<'a> {
 
             // Unary operations
             ast::Expr::UnaryOp { op, expr, span } => {
-                let expr_ty = self.infer_expr(*expr);
+                let expr_ty = self.infer_expr(*expr).unconstrained();
                 self.infer_unop(*op, &expr_ty, *span)
             }
 
@@ -1254,6 +1278,7 @@ impl<'a> InferenceContext<'a> {
                     param.span,
                     "parameter-default-type-mismatch",
                     format!("Default value for parameter '{}'", param.name),
+                    param.name.as_str(),
                 );
             }
             // The body reads an optional parameter at a type that admits zero.
@@ -1299,6 +1324,7 @@ impl<'a> InferenceContext<'a> {
                 func.span,
                 "return-type-mismatch",
                 format!("Return value for function '{}'", func.name),
+                "result",
             );
             expected
         } else {
@@ -1767,6 +1793,11 @@ impl<'a> InferenceContext<'a> {
 
     /// What kind of value an editor hint edits, for a value of type `ty`.
     fn hint_value_kind(&self, ty: &Type) -> HintValueKind {
+        // A constrained number takes numeric hints as its base does; the viewer intersects a
+        // hint's range with the constraint.
+        if ty.numeric_item().is_some() {
+            return HintValueKind::Number;
+        }
         match ty.item() {
             Type::Primitive(
                 Primitive::Int
@@ -1863,10 +1894,8 @@ impl<'a> InferenceContext<'a> {
 
     /// Whether a value of `ty` is a whole number: an `int`, `int32` or `int64`.
     fn is_integral(ty: &Type) -> bool {
-        matches!(
-            ty.item(),
-            Type::Primitive(Primitive::Int | Primitive::Int32 | Primitive::Int64)
-        )
+        ty.numeric_item()
+            .is_some_and(|primitive| primitive.is_integer())
     }
 
     /// Checks each `ValueChoice` among `content` against a value of `kind`, a whole number when
@@ -2331,6 +2360,7 @@ impl<'a> InferenceContext<'a> {
             field.span,
             "component-default-type-mismatch",
             format!("Default value for '{}.{}'", component.name, field.name),
+            field.name.as_str(),
         );
     }
 
@@ -2378,6 +2408,20 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
+                    if let ast::Expr::NumericPattern {
+                        pattern: numeric,
+                        span: pattern_span,
+                    } = self.module.raw_module().expr(*pattern)
+                    {
+                        let (numeric, pattern_span) = (numeric.clone(), *pattern_span);
+                        return self.infer_numeric_pattern(
+                            *pattern,
+                            &numeric,
+                            &scrutinee_ty,
+                            union_ty.is_some(),
+                            pattern_span,
+                        );
+                    }
                     let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
                         &scrutinee_ty,
@@ -2395,6 +2439,21 @@ impl<'a> InferenceContext<'a> {
             let mut narrowings = present_narrowings;
             if let (Some(path), Some(case_ty)) = (scrutinee_path.as_ref(), narrowed_case) {
                 narrowings.push((path.clone(), Type::UnionCase(case_ty)));
+            }
+            // An arm whose one pattern is numeric proves the scrutinee lies in its interval, and
+            // that it is present: the empty value matches no numeric pattern.
+            if let (Some(path), [pattern], [pattern_ty]) = (
+                scrutinee_path.as_ref(),
+                arm.patterns.as_slice(),
+                pattern_tys.as_slice(),
+            ) {
+                if matches!(
+                    self.module.raw_module().expr(*pattern),
+                    ast::Expr::NumericPattern { .. }
+                ) && pattern_ty.constraint().is_some()
+                {
+                    narrowings.push((path.clone(), pattern_ty.clone()));
+                }
             }
             let body_ty = self.infer_under_narrowings(narrowings, arm.body);
 
@@ -2476,6 +2535,81 @@ impl<'a> InferenceContext<'a> {
         }
         let narrowed = scrutinee_ty.with_occurrence(scrutinee_ty.occurrence().without_zero());
         vec![(path.to_vec(), narrowed)]
+    }
+
+    /// Types a numeric pattern in a match arm as the scrutinee's base narrowed to the pattern's
+    /// interval, intersected with the scrutinee's own constraint.
+    ///
+    /// <para>The scrutinee must be numeric, possibly constrained and possibly empty. A pattern that
+    /// matches values but none the scrutinee's constraint admits is the warning
+    /// `unreachable-pattern`; one that matches no value at all was reported as
+    /// `empty-constraint` while its interval was built. The type is recorded on the pattern so
+    /// the IR builder reads the interval from it.</para>
+    fn infer_numeric_pattern(
+        &mut self,
+        pattern: ExprId,
+        numeric: &ast::NumericPattern,
+        scrutinee_ty: &Type,
+        is_union: bool,
+        span: TextSpan,
+    ) -> Type {
+        if scrutinee_ty.is_error() {
+            self.env.set_expr_type(pattern, Type::Error);
+            return Type::Error;
+        }
+        let Some(base) = scrutinee_ty.numeric_item().filter(|_| !is_union) else {
+            self.error(
+                "type-mismatch",
+                format!(
+                    "A numeric pattern needs a numeric scrutinee; `{}` is not one, so `{}` cannot match it",
+                    scrutinee_ty,
+                    numeric.spelling()
+                ),
+                span,
+            );
+            self.env.set_expr_type(pattern, Type::Error);
+            return Type::Error;
+        };
+        let context = base.to_string();
+        let Some(interval) = self.pattern_interval(base, numeric, &context, true) else {
+            self.env.set_expr_type(pattern, Type::Error);
+            return Type::Error;
+        };
+        let ty = match scrutinee_ty.constraint() {
+            Some((_, admitted)) => {
+                let reachable = interval.intersect(&admitted);
+                let reachable = if base.is_integer() {
+                    reachable.normalized_for_integers()
+                } else {
+                    reachable
+                };
+                if reachable.is_empty() {
+                    self.warn(
+                        "unreachable-pattern",
+                        format!(
+                            "`{}` never matches: a value of type `{}` lies outside it",
+                            numeric.spelling(),
+                            scrutinee_ty.item()
+                        ),
+                        span,
+                    );
+                }
+                // The narrowed type is what the arm proves; the pattern node itself keeps its own
+                // interval, which is what the runtime tests.
+                self.env
+                    .set_expr_type(pattern, Type::constrained(base, interval));
+                if reachable.is_empty() {
+                    return Type::constrained(base, interval);
+                }
+                Type::constrained(base, reachable)
+            }
+            None => {
+                let ty = Type::constrained(base, interval);
+                self.env.set_expr_type(pattern, ty.clone());
+                ty
+            }
+        };
+        ty
     }
 
     fn infer_match_pattern(&mut self, pattern: ExprId, scrutinee_ty: &Type) -> Type {
@@ -2701,8 +2835,8 @@ impl<'a> InferenceContext<'a> {
             }
         };
 
-        let start_ty = self.infer_expr(start);
-        let end_ty = self.infer_expr(end);
+        let start_ty = self.infer_expr(start).unconstrained();
+        let end_ty = self.infer_expr(end).unconstrained();
         if start_ty.is_error() || end_ty.is_error() {
             return Type::Error;
         }
@@ -2883,8 +3017,10 @@ impl<'a> InferenceContext<'a> {
     ) -> Type {
         use ast::BinOp::*;
 
-        let mut lhs_ty = self.infer_expr(lhs);
-        let mut rhs_ty = self.infer_expr(rhs);
+        // An operator computes at its operands' base types: a constrained value is a value of its
+        // base, and the result carries no constraint.
+        let mut lhs_ty = self.infer_expr(lhs).unconstrained();
+        let mut rhs_ty = self.infer_expr(rhs).unconstrained();
 
         // Skip error checking if either operand is error
         if lhs_ty.is_error() || rhs_ty.is_error() {
@@ -3252,6 +3388,7 @@ impl<'a> InferenceContext<'a> {
                         span,
                         "type-mismatch",
                         format!("Argument {}", i),
+                        param.name.as_str(),
                     );
                 }
 
@@ -3681,6 +3818,7 @@ impl<'a> InferenceContext<'a> {
                             property.span,
                             "record-field-type-mismatch",
                             format!("Record field '{}' on '{}'", property.name, record),
+                            property.name.as_str(),
                         );
                     }
                     None => {
@@ -5358,7 +5496,7 @@ impl<'a> InferenceContext<'a> {
                 params,
                 return_type,
             } => {
-                let params = params
+                let params: Vec<FunctionParam> = params
                     .iter()
                     .map(|param| {
                         let ty =
@@ -5375,11 +5513,26 @@ impl<'a> InferenceContext<'a> {
                     })
                     .collect();
                 let ret = self.type_from_type_ref_walk(declaring_module, return_type, seen, scoped);
+                // A function value carries no checks, so its type cannot promise a constraint.
+                let span = self.type_ref_span;
+                let nested = params
+                    .iter()
+                    .map(|param: &FunctionParam| param.ty.clone())
+                    .chain(std::iter::once(ret.clone()))
+                    .find(|ty| ty.constraint().is_some());
+                if let Some(nested) = nested {
+                    self.reject_nested_constraint(&nested, "part of a function type", span);
+                    return Type::Error;
+                }
                 Type::function(params, ret)
             }
             ast::TypeRef::AnyFunction { return_type } => Type::any_function(
                 self.type_from_type_ref_walk(declaring_module, return_type, seen, scoped),
             ),
+            ast::TypeRef::Constrained { base, pattern } => {
+                let base_ty = self.type_from_type_ref_walk(declaring_module, base, seen, scoped);
+                self.constrained_type(base, base_ty, pattern)
+            }
         }
     }
 
@@ -5827,6 +5980,9 @@ impl<'a> InferenceContext<'a> {
             if self.reject_occurrence_type_argument(&ty, written.as_ref(), span) {
                 failed = true;
             }
+            if self.reject_nested_constraint(&ty, "a type argument", span) {
+                failed = true;
+            }
             // A bare name that reached no declaration is a misspelling, not a type, and is named
             // here as the argument it was written for rather than as a bare `unresolved-type`.
             if let ast::TypeRef::Name(arg_name) = arg {
@@ -6255,6 +6411,7 @@ impl<'a> InferenceContext<'a> {
                         property.span,
                         type_mismatch_code,
                         format!("Property '{}' on '{}'", property.key, element_name),
+                        property.key.as_str(),
                     );
                 } else if spec.handler_properties.contains(&property.key)
                     || spec.type_parameters.contains(&property.key)
@@ -6640,6 +6797,7 @@ impl<'a> InferenceContext<'a> {
                 span,
                 "content-type-mismatch",
                 context,
+                "content",
             );
         }
 
@@ -6735,7 +6893,7 @@ impl<'a> InferenceContext<'a> {
         code: &str,
         context: String,
     ) -> bool {
-        self.check_typed_binding_for(None, actual, expected, span, code, context)
+        self.check_typed_binding_for(None, actual, expected, span, code, context, "")
     }
 
     /// Checks a binding, recording the resolution when `expr` is a contextual name.
@@ -6751,6 +6909,7 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
         code: &str,
         context: String,
+        site: &str,
     ) -> bool {
         // A pending contextual name resolves here, where the expected type is finally known.
         if let Type::ContextualName(name) = actual {
@@ -6781,9 +6940,8 @@ impl<'a> InferenceContext<'a> {
             let resolved = self.resolve_contextual_name(expr, &name, expected, span, &context);
             return match resolved {
                 Some(Type::Error) => false,
-                Some(resolved) => {
-                    self.check_typed_binding_for(None, &resolved, expected, span, code, context)
-                }
+                Some(resolved) => self
+                    .check_typed_binding_for(None, &resolved, expected, span, code, context, site),
                 None => false,
             };
         }
@@ -6792,6 +6950,18 @@ impl<'a> InferenceContext<'a> {
         // satisfaction so that `1` at an `int64` site is recorded at `int64`, not left an `int`
         // that merely widens; `numeric_literal_target` declines `object` and an undecided type
         // variable, so a site that accepts any value keeps the literal's default type.
+        // A constant bound to a constrained site is checked here, against the interval: a value
+        // outside it is `constraint-violation`, and one inside needs no runtime check.
+        let constrained = expected.constraint();
+        let mut proven = false;
+        if let (Some(expr), Some((base, interval))) = (expr, constrained) {
+            match self.check_constant_constraint(expr, base, &interval, expected, span, site) {
+                Some(false) => return false,
+                Some(true) => proven = true,
+                None => {}
+            }
+        }
+
         if let Some(expr) = expr {
             if let Some(converted) = self.convert_literals(expr, expected, span, &context) {
                 return converted;
@@ -6800,6 +6970,26 @@ impl<'a> InferenceContext<'a> {
 
         if self.type_satisfies_expected(actual, expected) {
             return true;
+        }
+
+        // A value whose own type does not prove the constraint binds with a runtime check when it
+        // would bind to the base: the check yields the value, or fails naming the site.
+        if let Some((base, interval)) = constrained {
+            if self.type_satisfies_expected(&actual.unconstrained(), &expected.unconstrained()) {
+                if !proven {
+                    if let Some(expr) = expr {
+                        self.constraint_checks.insert(
+                            expr,
+                            ConstraintCheckSite {
+                                base,
+                                interval,
+                                site: Name::new(site),
+                            },
+                        );
+                    }
+                }
+                return true;
+            }
         }
 
         // Two same-named types are told apart by their declaring modules; one nominal type in
@@ -7362,6 +7552,12 @@ impl<'a> InferenceContext<'a> {
         &self.lifted_joins
     }
 
+    /// The values that bind to a constrained site with a runtime check. See
+    /// [`Self::constraint_checks`]'s field.
+    pub fn constraint_checks(&self) -> &FxHashMap<ExprId, ConstraintCheckSite> {
+        &self.constraint_checks
+    }
+
     pub fn widened_joins(&self) -> &FxHashMap<ExprId, Primitive> {
         &self.widened_joins
     }
@@ -7556,6 +7752,7 @@ impl<'a> InferenceContext<'a> {
                             prop.span,
                             "record-default-type-mismatch",
                             format!("Default value for record property '{}'", prop.name),
+                            prop.name.as_str(),
                         );
                     }
                 }
@@ -7672,6 +7869,7 @@ impl<'a> InferenceContext<'a> {
                                     "Default value for union case field '{}.{}.{}'",
                                     union_def.name, case.name, field.name
                                 ),
+                                field.name.as_str(),
                             );
                         }
                     }
@@ -7813,6 +8011,7 @@ impl<'a> InferenceContext<'a> {
                                 value.span,
                                 "value-type-mismatch",
                                 format!("Initializer for value '{}'", value.name),
+                                value.name.as_str(),
                             );
                             expected
                         } else if let Type::ContextualName(name) = &actual {
@@ -8651,8 +8850,13 @@ fn mentions_word(text: &str, word: &str) -> bool {
 /// when it does not widen.
 fn join_widening(member: &Type, joined: &Type) -> Option<Primitive> {
     match (member, joined) {
-        (Type::Primitive(from), Type::Primitive(to)) => {
-            (from != to && from.is_numeric() && from.widens_to(*to)).then_some(*to)
+        // A constrained branch widens as its base does: its value is a value of its base.
+        (
+            Type::Primitive(_) | Type::Constrained { .. },
+            Type::Primitive(_) | Type::Constrained { .. },
+        ) => {
+            let (from, to) = (member.numeric_item()?, joined.numeric_item()?);
+            (from != to && from.widens_to(to)).then_some(to)
         }
         // A branch widens to the join's item type whatever the occurrences: in
         // `if c { 1 } else { floats }` the `1` becomes the one-item `float64+` `[1.0]`.
@@ -8669,6 +8873,8 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
     fn widen(ty: &Type, target: Primitive) -> Type {
         match ty {
             Type::Primitive(primitive) if primitive.is_numeric() => Type::Primitive(target),
+            // A widened value keeps its interval: widening is exact.
+            Type::Constrained { interval, .. } => Type::constrained(target, *interval),
             Type::Seq { item, occ } => Type::seq(widen(item, target), *occ),
             other => other.clone(),
         }
@@ -8715,6 +8921,7 @@ fn type_ref_mentions(ty: &ast::TypeRef, name: &Name) -> bool {
                 || type_ref_mentions(return_type, name)
         }
         ast::TypeRef::AnyFunction { return_type } => type_ref_mentions(return_type, name),
+        ast::TypeRef::Constrained { base, .. } => type_ref_mentions(base, name),
     }
 }
 

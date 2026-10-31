@@ -412,6 +412,27 @@ pub enum Expr {
     /// Example: `book.author?`
     Exists { operand: ExprId, span: TextSpan },
 
+    /// A numeric value pattern in a match arm's pattern list: `in 0.0..1.0`, `> 1.0`,
+    /// `> 0 && <= 10`. Appears nowhere else.
+    NumericPattern {
+        pattern: super::NumericPattern,
+        span: TextSpan,
+    },
+
+    /// A runtime constraint check, inserted by the type checker where a value enters a
+    /// constrained site and the value's own type does not already guarantee the constraint.
+    ///
+    /// <para>Evaluates `expr` and yields its value when it lies in `interval`, compared at
+    /// `base`; fails otherwise. Over a sequence it checks each item, and the empty value passes.
+    /// `site` names what is being bound, for the failure message.</para>
+    ConstraintCheck {
+        expr: ExprId,
+        base: PrimitiveType,
+        interval: super::Interval,
+        site: Name,
+        span: TextSpan,
+    },
+
     /// The fallback: `left` when it holds an item, `right` otherwise. `right` is evaluated only
     /// then.
     ///
@@ -521,6 +542,8 @@ impl Expr {
             Expr::Member { span, .. } => *span,
             Expr::OptionalMember { span, .. } => *span,
             Expr::Exists { span, .. } => *span,
+            Expr::NumericPattern { span, .. } => *span,
+            Expr::ConstraintCheck { span, .. } => *span,
             Expr::Coalesce { span, .. } => *span,
             Expr::RecordLiteral { span, .. } => *span,
             Expr::Element { span, .. } => *span,

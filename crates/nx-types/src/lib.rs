@@ -149,12 +149,15 @@ pub use doc_links::{
     ResolvedDocLink,
 };
 pub use env::{TypeBinding, TypeEnvironment};
-pub use infer::{ContextualResolution, InferenceContext, TypeInference};
+pub use infer::{
+    pattern_interval_at, ConstraintCheckSite, ContextualResolution, InferenceContext, TypeInference,
+};
 pub use semantics::{
     common_supertype, is_object_type, numeric_literal_target, resolve_type_ref_with,
     resolve_type_ref_with_seen, type_satisfies_expected,
 };
 pub use ty::{
     check_function_satisfies, check_function_types, display_type_pair, read_type, DeclaringOrigin,
-    FunctionMismatch, FunctionParam, Occurrence, Primitive, Type, TypeId, UnionCaseType, UnionType,
+    FunctionMismatch, FunctionParam, Interval, IntervalEnd, Occurrence, Primitive, Type, TypeId,
+    UnionCaseType, UnionType,
 };

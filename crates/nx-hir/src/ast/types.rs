@@ -3,7 +3,10 @@
 //! These represent type annotations in the source code before type checking.
 //! They are resolved to concrete types during type checking.
 
+use super::expr::Literal;
 use crate::Name;
+use nx_diagnostics::TextSpan;
+use smol_str::SmolStr;
 
 /// How many values a type admits: the occurrence an `?`, `+` or `*` suffix spells.
 ///
@@ -188,6 +191,423 @@ pub enum TypeRef {
         /// Return type
         return_type: Box<TypeRef>,
     },
+
+    /// A type with a `where` clause: the base type's values that match a numeric value pattern.
+    ///
+    /// <para>The clause follows the whole base, suffix included, so `int+ where >= 0` lowers to a
+    /// constraint over `int+`, which the checker rejects with the `Score+` fix-it. A constraint
+    /// over a constraint arises only through an alias, which the checker intersects.</para>
+    ///
+    /// Example: `float32 where in 0.0..=1.0`, `int where >= 1`
+    Constrained {
+        /// The constrained type.
+        base: Box<TypeRef>,
+        /// The pattern its values must match.
+        pattern: NumericPattern,
+    },
+}
+
+/// A numeric value pattern with no operand: range and comparison terms joined by `&&`.
+///
+/// <para>One structure serves a `where` clause and a match arm, since they are the same
+/// patterns. Terms the language does not support (`||`, `!=`, an expression with an operand) are
+/// kept as [`PatternTerm::Unsupported`] so that the checker can name them; lowering reports
+/// nothing about them.</para>
+///
+/// <para>Equality and hashing read only the pattern's spelling, so the same constraint written
+/// in two places is the same, as a type is.</para>
+#[derive(Debug, Clone)]
+pub struct NumericPattern {
+    /// The terms, in source order.
+    pub terms: Vec<PatternTerm>,
+    /// The pattern's span, from its first term to its last.
+    pub span: TextSpan,
+}
+
+impl NumericPattern {
+    /// The pattern as source spells it, normalized: terms joined by ` && `.
+    pub fn spelling(&self) -> String {
+        let mut out = String::new();
+        let mut previous_or = true;
+        for term in &self.terms {
+            let is_or = matches!(
+                term,
+                PatternTerm::Unsupported {
+                    kind: UnsupportedTerm::Or,
+                    ..
+                }
+            );
+            if !out.is_empty() {
+                out.push_str(if is_or || previous_or { " " } else { " && " });
+            }
+            out.push_str(&term.spelling());
+            previous_or = is_or;
+        }
+        out
+    }
+}
+
+impl NumericPattern {
+    /// The interval the terms admit, read without a base type: bounds as written, no rounding
+    /// and no integer normalization. `None` when a term is unsupported or unreadable.
+    ///
+    /// <para>What an engine with no type information tests a value against; for an integer value
+    /// it admits the same set as the normalized interval.</para>
+    pub fn interval_as_written(&self) -> Option<Interval> {
+        let value = |bound: &PatternBound| match bound.value.as_ref()? {
+            Literal::Int(value) => Some(*value as f64),
+            Literal::Float(value) => Some(value.0),
+            _ => None,
+        };
+        let mut interval = Interval::ALL;
+        for term in &self.terms {
+            let term = match term {
+                PatternTerm::Range {
+                    start,
+                    end,
+                    inclusive,
+                } => Interval {
+                    low: Some(IntervalEnd::inclusive(value(start)?)),
+                    high: Some(if *inclusive {
+                        IntervalEnd::inclusive(value(end)?)
+                    } else {
+                        IntervalEnd::exclusive(value(end)?)
+                    }),
+                },
+                PatternTerm::Compare { op, bound } => {
+                    let bound = value(bound)?;
+                    match op {
+                        CompareOp::Lt => Interval {
+                            low: None,
+                            high: Some(IntervalEnd::exclusive(bound)),
+                        },
+                        CompareOp::Le => Interval {
+                            low: None,
+                            high: Some(IntervalEnd::inclusive(bound)),
+                        },
+                        CompareOp::Gt => Interval {
+                            low: Some(IntervalEnd::exclusive(bound)),
+                            high: None,
+                        },
+                        CompareOp::Ge => Interval {
+                            low: Some(IntervalEnd::inclusive(bound)),
+                            high: None,
+                        },
+                    }
+                }
+                PatternTerm::Unsupported { .. } => return None,
+            };
+            interval = interval.intersect(&term);
+        }
+        Some(interval)
+    }
+}
+
+impl PartialEq for NumericPattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.spelling() == other.spelling()
+    }
+}
+
+impl Eq for NumericPattern {}
+
+impl std::hash::Hash for NumericPattern {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.spelling().hash(state);
+    }
+}
+
+/// One term of a [`NumericPattern`].
+#[derive(Debug, Clone)]
+pub enum PatternTerm {
+    /// `in a..b` or `in a..=b`.
+    Range {
+        start: PatternBound,
+        end: PatternBound,
+        /// Whether the end is included: `..=`.
+        inclusive: bool,
+    },
+    /// `< a`, `<= a`, `> a` or `>= a`.
+    Compare { op: CompareOp, bound: PatternBound },
+    /// Something a numeric pattern does not support, kept for the checker to name.
+    Unsupported {
+        /// What was written.
+        kind: UnsupportedTerm,
+        /// Where it was written.
+        span: TextSpan,
+        /// Its source text.
+        text: SmolStr,
+    },
+}
+
+impl PatternTerm {
+    /// The term as source spells it.
+    pub fn spelling(&self) -> String {
+        match self {
+            PatternTerm::Range {
+                start,
+                end,
+                inclusive,
+            } => format!(
+                "in {}{}{}",
+                start.spelling(),
+                if *inclusive { "..=" } else { ".." },
+                end.spelling()
+            ),
+            PatternTerm::Compare { op, bound } => format!("{} {}", op.as_str(), bound.spelling()),
+            PatternTerm::Unsupported { text, .. } => text.to_string(),
+        }
+    }
+}
+
+/// The comparison a [`PatternTerm::Compare`] makes against its bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompareOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl CompareOp {
+    /// The operator's spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompareOp::Lt => "<",
+            CompareOp::Le => "<=",
+            CompareOp::Gt => ">",
+            CompareOp::Ge => ">=",
+        }
+    }
+}
+
+/// What a [`PatternTerm::Unsupported`] holds.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum UnsupportedTerm {
+    /// `||` between terms. Alternatives are commas, and only in a match arm.
+    Or,
+    /// `!= a`.
+    NotEqual,
+    /// An expression. When it is a comparison with a leading operand (`value >= 1`), the
+    /// suggestion is the pattern without the operand (`>= 1`).
+    Expression { suggestion: Option<SmolStr> },
+}
+
+/// One bound of a pattern term: a numeric literal, possibly negated.
+#[derive(Debug, Clone)]
+pub struct PatternBound {
+    /// The literal's value: [`Literal::Int`] for an integer or hex literal, [`Literal::Float`] for
+    /// a real one. `None` when the literal could not be read.
+    pub value: Option<Literal>,
+    /// The literal as written, sign included.
+    pub text: SmolStr,
+    /// Where it was written.
+    pub span: TextSpan,
+}
+
+impl PatternBound {
+    /// The bound as written.
+    pub fn spelling(&self) -> &str {
+        &self.text
+    }
+}
+
+/// One end of an [`Interval`]: a bound and whether the bound itself is excluded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IntervalEnd {
+    /// The bound. Every bound a constraint can state is exact in an `f64`: integer bounds lie
+    /// within ±(2^53−1), and a `float32` bound is already rounded to `float32`.
+    pub value: super::OrderedFloat,
+    /// Whether the bound is excluded.
+    pub exclusive: bool,
+}
+
+impl IntervalEnd {
+    /// An included bound.
+    pub fn inclusive(value: f64) -> Self {
+        Self {
+            value: super::OrderedFloat(value),
+            exclusive: false,
+        }
+    }
+
+    /// An excluded bound.
+    pub fn exclusive(value: f64) -> Self {
+        Self {
+            value: super::OrderedFloat(value),
+            exclusive: true,
+        }
+    }
+}
+
+/// The values a numeric constraint or pattern admits: one interval whose ends are each
+/// inclusive, exclusive or open (`None`).
+///
+/// <para>The type checker builds one from a pattern's terms, intersecting them, and from an
+/// alias chain, intersecting its constraints. On an integer base the checker normalizes an
+/// exclusive end to the inclusive one next to it, so equal sets of integers are equal
+/// intervals.</para>
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Interval {
+    /// The low end, or `None` when unbounded below.
+    pub low: Option<IntervalEnd>,
+    /// The high end, or `None` when unbounded above.
+    pub high: Option<IntervalEnd>,
+}
+
+impl Interval {
+    /// The interval with no ends: every value.
+    pub const ALL: Self = Self {
+        low: None,
+        high: None,
+    };
+
+    /// Whether `value` lies in the interval. `NaN` lies in none.
+    pub fn contains(&self, value: f64) -> bool {
+        if value.is_nan() {
+            return false;
+        }
+        let above_low = match self.low {
+            None => true,
+            Some(end) if end.exclusive => value > end.value.0,
+            Some(end) => value >= end.value.0,
+        };
+        let below_high = match self.high {
+            None => true,
+            Some(end) if end.exclusive => value < end.value.0,
+            Some(end) => value <= end.value.0,
+        };
+        above_low && below_high
+    }
+
+    /// The values both intervals admit.
+    pub fn intersect(&self, other: &Self) -> Self {
+        let low = match (self.low, other.low) {
+            (None, end) | (end, None) => end,
+            (Some(a), Some(b)) => Some(if a.value.0 > b.value.0 {
+                a
+            } else if b.value.0 > a.value.0 {
+                b
+            } else {
+                IntervalEnd {
+                    value: a.value,
+                    exclusive: a.exclusive || b.exclusive,
+                }
+            }),
+        };
+        let high = match (self.high, other.high) {
+            (None, end) | (end, None) => end,
+            (Some(a), Some(b)) => Some(if a.value.0 < b.value.0 {
+                a
+            } else if b.value.0 < a.value.0 {
+                b
+            } else {
+                IntervalEnd {
+                    value: a.value,
+                    exclusive: a.exclusive || b.exclusive,
+                }
+            }),
+        };
+        Self { low, high }
+    }
+
+    /// The interval with each exclusive end replaced by the inclusive integer next to it, as an
+    /// integer base reads it: `> 0` is `>= 1`, `< 0.5` is `<= 0`.
+    pub fn normalized_for_integers(&self) -> Self {
+        let low = self.low.map(|end| {
+            let floor = end.value.0.floor();
+            if end.exclusive || floor != end.value.0 {
+                IntervalEnd::inclusive(floor + 1.0)
+            } else {
+                IntervalEnd::inclusive(floor)
+            }
+        });
+        let high = self.high.map(|end| {
+            let ceil = end.value.0.ceil();
+            if end.exclusive || ceil != end.value.0 {
+                IntervalEnd::inclusive(ceil - 1.0)
+            } else {
+                IntervalEnd::inclusive(ceil)
+            }
+        });
+        Self { low, high }
+    }
+
+    /// Whether no value lies in the interval. On an integer base, normalize first.
+    pub fn is_empty(&self) -> bool {
+        match (self.low, self.high) {
+            (Some(low), Some(high)) => {
+                low.value.0 > high.value.0
+                    || (low.value.0 == high.value.0 && (low.exclusive || high.exclusive))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether every value `self` admits, `other` admits too.
+    pub fn is_within(&self, other: &Self) -> bool {
+        let low_ok = match (self.low, other.low) {
+            (_, None) => true,
+            (None, Some(_)) => false,
+            (Some(a), Some(b)) => {
+                a.value.0 > b.value.0 || (a.value.0 == b.value.0 && (a.exclusive || !b.exclusive))
+            }
+        };
+        let high_ok = match (self.high, other.high) {
+            (_, None) => true,
+            (None, Some(_)) => false,
+            (Some(a), Some(b)) => {
+                a.value.0 < b.value.0 || (a.value.0 == b.value.0 && (a.exclusive || !b.exclusive))
+            }
+        };
+        low_ok && high_ok
+    }
+
+    /// Whether the interval has no ends.
+    pub fn is_all(&self) -> bool {
+        self.low.is_none() && self.high.is_none()
+    }
+
+    /// Spells the interval as a pattern: `in 0.0..=1.0` when both ends are present and the low one
+    /// is inclusive, comparison terms joined by `&&` otherwise. `float` decides whether a whole
+    /// bound is written with a fraction, `1.0` rather than `1`.
+    pub fn spelling(&self, float: bool) -> String {
+        let bound = |value: f64| spell_bound(value, float);
+        match (self.low, self.high) {
+            (Some(low), Some(high)) if !low.exclusive => format!(
+                "in {}{}{}",
+                bound(low.value.0),
+                if high.exclusive { ".." } else { "..=" },
+                bound(high.value.0)
+            ),
+            (low, high) => {
+                let mut terms = Vec::new();
+                if let Some(low) = low {
+                    let op = if low.exclusive { ">" } else { ">=" };
+                    terms.push(format!("{op} {}", bound(low.value.0)));
+                }
+                if let Some(high) = high {
+                    let op = if high.exclusive { "<" } else { "<=" };
+                    terms.push(format!("{op} {}", bound(high.value.0)));
+                }
+                terms.join(" && ")
+            }
+        }
+    }
+}
+
+/// Spells a bound as a literal: an integer without a fraction, a float with at least one digit
+/// after the point.
+pub fn spell_bound(value: f64, float: bool) -> String {
+    if !float {
+        return format!("{}", value as i64);
+    }
+    let text = format!("{value}");
+    if text.contains(['.', 'e', 'E']) || !value.is_finite() {
+        text
+    } else {
+        format!("{text}.0")
+    }
 }
 
 /// One parameter of a function type.
@@ -408,6 +828,9 @@ pub fn spell_type_ref(ty: &TypeRef) -> String {
         TypeRef::AnyFunction { return_type } => {
             spell_function_reference_type(&spell_type_ref(return_type))
         }
+        TypeRef::Constrained { base, pattern } => {
+            format!("{} where {}", spell_type_ref(base), pattern.spelling())
+        }
     }
 }
 
@@ -435,7 +858,7 @@ pub fn spell_applied_type<'a>(
 /// is spelled as it stands.
 pub fn spell_type_ref_under_suffix(ty: &TypeRef) -> String {
     match ty {
-        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => {
+        TypeRef::Function { .. } | TypeRef::AnyFunction { .. } | TypeRef::Constrained { .. } => {
             format!("({})", spell_type_ref(ty))
         }
         _ => spell_type_ref(ty),

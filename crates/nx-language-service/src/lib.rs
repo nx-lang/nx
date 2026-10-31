@@ -2432,6 +2432,7 @@ fn is_unresolved_type(ty: &nx_types::Type) -> bool {
         }
         nx_types::Type::AnyFunction { ret } => is_unresolved_type(ret),
         nx_types::Type::Primitive(_)
+        | nx_types::Type::Constrained { .. }
         | nx_types::Type::Named(_)
         | nx_types::Type::Union(_)
         | nx_types::Type::UnionCase(_)
@@ -2874,7 +2875,9 @@ fn base_type_name(ty: &TypeRef) -> String {
         // An applied type reaches its record: a bare name resolves against the record's members,
         // which the type arguments do not change.
         TypeRef::Name(name) | TypeRef::Applied { name, .. } => name.as_str().to_string(),
-        TypeRef::Seq { inner, .. } => base_type_name(inner),
+        TypeRef::Seq { inner, .. } | TypeRef::Constrained { base: inner, .. } => {
+            base_type_name(inner)
+        }
         TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => String::new(),
     }
 }

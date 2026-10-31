@@ -506,7 +506,11 @@ impl BoundaryReach {
             Shape::Seq(item, _) => self.visit(program, item),
             Shape::Declared(declared) => self.visit_declared(program, declared),
             Shape::Case { union, case } => self.visit_case(program, *union, case),
-            Shape::Primitive(_) | Shape::Object | Shape::Parameter | Shape::NoJsonForm(_) => {}
+            Shape::Primitive(_)
+            | Shape::Constrained(..)
+            | Shape::Object
+            | Shape::Parameter
+            | Shape::NoJsonForm(_) => {}
         }
     }
 
@@ -852,7 +856,42 @@ impl<'a> Program<'a> {
             TypeRef::AnyFunction { .. } => {
                 Shape::NoJsonForm(NoJsonForm::FunctionReference(ast::spell_type_ref(ty)))
             }
+            // A constraint narrows a numeric base, written or reached through aliases; on any
+            // other base the checker has already rejected it, and the base stands alone.
+            TypeRef::Constrained { base, pattern } => {
+                match self.denote(self.resolve(module, base, args)) {
+                    Shape::Primitive(primitive) if primitive.is_numeric() => {
+                        match nx_types::pattern_interval_at(primitive, pattern) {
+                            Some(interval) => constrained_shape(primitive, interval),
+                            None => Shape::Primitive(primitive),
+                        }
+                    }
+                    Shape::Constrained(primitive, existing) => {
+                        match nx_types::pattern_interval_at(primitive, pattern) {
+                            Some(interval) => {
+                                constrained_shape(primitive, existing.intersect(&interval))
+                            }
+                            None => Shape::Constrained(primitive, existing),
+                        }
+                    }
+                    other => other,
+                }
+            }
         }
+    }
+
+    /// `shape` with the aliases it names followed to what they denote.
+    fn denote(&self, mut shape: Shape) -> Shape {
+        for _ in 0..MAX_ALIAS_DEPTH {
+            let Shape::Declared(declared) = &shape else {
+                return shape;
+            };
+            let Some(Item::TypeAlias(alias)) = self.item(declared.addr) else {
+                return shape;
+            };
+            shape = self.resolve(declared.addr.module, &alias.ty, &TypeArgs::NONE);
+        }
+        shape
     }
 
     /// The type a checked type denotes, for a result the checker inferred.
@@ -860,6 +899,7 @@ impl<'a> Program<'a> {
         match ty {
             Type::Primitive(Primitive::Never) => Shape::NoJsonForm(NoJsonForm::UnresolvedResult),
             Type::Primitive(primitive) => Shape::Primitive(*primitive),
+            Type::Constrained { base, interval } => Shape::Constrained(*base, *interval),
             Type::Seq { item, occ } => Shape::Seq(Box::new(self.shape_of_checked(item)), *occ),
             Type::Function { .. } => Shape::NoJsonForm(NoJsonForm::FunctionType(ty.to_string())),
             Type::AnyFunction { .. } => {
@@ -1250,7 +1290,9 @@ impl<'a> Program<'a> {
 
     fn argument_key(&self, shape: &Shape) -> String {
         match shape {
-            Shape::Primitive(primitive) => primitive.as_str().to_string(),
+            Shape::Primitive(primitive) | Shape::Constrained(primitive, _) => {
+                primitive.as_str().to_string()
+            }
             Shape::Object | Shape::Parameter => "object".to_string(),
             Shape::Seq(item, _) => self.argument_key(item),
             Shape::Declared(declared) => self.natural_key(declared),
@@ -1271,6 +1313,8 @@ const MAX_ALIAS_DEPTH: usize = 64;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Shape {
     Primitive(Primitive),
+    /// A numeric primitive narrowed to an interval: `float32 where in 0.0..=1.0`.
+    Constrained(Primitive, nx_types::Interval),
     /// `object`, the top type.
     Object,
     Seq(Box<Shape>, Occurrence),
@@ -1327,7 +1371,11 @@ impl HeldWalk<'_, '_, '_> {
             // These hold no declared type: a primitive, the open `object`, an unbound type
             // parameter, which a runtime reads as `object`, and a type with no JSON form, which
             // no caller can supply.
-            Shape::Primitive(_) | Shape::Object | Shape::Parameter | Shape::NoJsonForm(_) => {}
+            Shape::Primitive(_)
+            | Shape::Constrained(..)
+            | Shape::Object
+            | Shape::Parameter
+            | Shape::NoJsonForm(_) => {}
             Shape::Seq(item, _) => self.shape(item),
             Shape::Case { union, case } => self.case(*union, case),
             Shape::Declared(declared) => {
@@ -1596,6 +1644,7 @@ impl<'p, 'a> Document<'p, 'a> {
     fn mention(&mut self, shape: &Shape, site: &Site, path: &mut Vec<String>) -> SchemaValue {
         match shape {
             Shape::Primitive(primitive) => primitive_schema(*primitive),
+            Shape::Constrained(primitive, interval) => constrained_schema(*primitive, interval),
             Shape::Object | Shape::Parameter => any_value(),
             Shape::Seq(item, occ) => {
                 let item = self.mention(item, site, path);
@@ -2227,6 +2276,75 @@ fn primitive_schema(primitive: Primitive) -> SchemaValue {
         // No value has the bottom type; it never reaches here from a declared type.
         Primitive::Never => SchemaValue::object(vec![("not", SchemaValue::Object(Vec::new()))]),
     }
+}
+
+/// A constrained shape, with an integer base's ends made inclusive, as the checker reads it.
+fn constrained_shape(primitive: Primitive, interval: nx_types::Interval) -> Shape {
+    let interval = if primitive.is_integer() {
+        interval.normalized_for_integers()
+    } else {
+        interval
+    };
+    if interval.is_all() {
+        Shape::Primitive(primitive)
+    } else {
+        Shape::Constrained(primitive, interval)
+    }
+}
+
+/// The schema of a constrained number: its base's schema with the interval's ends as bound
+/// keywords.
+///
+/// <para>An integer's ends are already inclusive. A `float32` end is written as an inclusive
+/// `float32` value, an exclusive one as the nearest `float32` inside the interval, because a
+/// runtime rounds a `float32` it is given: a number just inside an exclusive `float64` bound
+/// could round onto the bound and be refused, which would make the schema wider than the
+/// boundary. Each bound replaces the base's own bound on its side, as `int32` has.</para>
+fn constrained_schema(primitive: Primitive, interval: &nx_types::Interval) -> SchemaValue {
+    let number = |value: f64| {
+        if primitive.is_integer() {
+            SchemaValue::Int(value as i64)
+        } else {
+            SchemaValue::Float(value)
+        }
+    };
+    let mut entries: Vec<(String, SchemaValue)> = match primitive_schema(primitive) {
+        SchemaValue::Object(entries) => entries,
+        _ => Vec::new(),
+    };
+    let mut set = |key: &str, value: SchemaValue, replaces: &str| {
+        entries.retain(|(existing, _)| existing != replaces && existing != key);
+        entries.push((key.to_string(), value));
+    };
+    if let Some(low) = interval.low {
+        let value = low.value.0;
+        if primitive == Primitive::Float32 && low.exclusive {
+            set(
+                "minimum",
+                number((value as f32).next_up() as f64),
+                "minimum",
+            );
+        } else if low.exclusive {
+            set("exclusiveMinimum", number(value), "minimum");
+        } else {
+            set("minimum", number(value), "minimum");
+        }
+    }
+    if let Some(high) = interval.high {
+        let value = high.value.0;
+        if primitive == Primitive::Float32 && high.exclusive {
+            set(
+                "maximum",
+                number((value as f32).next_down() as f64),
+                "maximum",
+            );
+        } else if high.exclusive {
+            set("exclusiveMaximum", number(value), "maximum");
+        } else {
+            set("maximum", number(value), "maximum");
+        }
+    }
+    SchemaValue::Object(entries)
 }
 
 fn literal_value(literal: &Literal, negate: bool) -> SchemaValue {

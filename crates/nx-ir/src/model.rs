@@ -43,6 +43,11 @@ pub const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1: &str = "occurrence-v1";
 /// kind.
 pub const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1: &str = "function-reference-type-v1";
 
+/// Required by a module whose type table holds a constrained type, or whose nodes hold a
+/// constraint check or an interval pattern, so a runtime that predates value constraints refuses
+/// the module by name rather than skipping its checks.
+pub const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1: &str = "constraints-v1";
+
 /// The kind numbers of schema 5. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
@@ -80,6 +85,13 @@ pub mod kinds {
         pub const COALESCE: i64 = 25;
         pub const STANDARD_COLOR: i64 = 27;
         pub const STANDARD_MATH: i64 = 26;
+        /// A runtime constraint check, `[28, operand, type, site]`: yields the operand when the
+        /// constrained type's interval admits it, item by item over a sequence, and fails
+        /// `nx-ir-constraint` otherwise.
+        pub const CHECK: i64 = 28;
+        /// A numeric pattern in an `ifIs` arm's pattern list, `[29, type]`: matches a scrutinee
+        /// in the constrained type's interval. Appears nowhere else.
+        pub const INTERVAL: i64 = 29;
 
         pub const NAMES: &[(i64, &str)] = &[
             (BOOL, "bool"),
@@ -109,6 +121,8 @@ pub mod kinds {
             (COALESCE, "coalesce"),
             (STANDARD_COLOR, "standardColor"),
             (STANDARD_MATH, "standardMath"),
+            (CHECK, "check"),
+            (INTERVAL, "interval"),
         ];
     }
 
@@ -129,6 +143,15 @@ pub mod kinds {
         /// A function type whose parameters are not stated, `<function ... />: R`: `[6, result]`.
         /// A function of any parameters whose result satisfies the result type satisfies it.
         pub const ANY_FUNCTION: i64 = 6;
+        /// A numeric primitive narrowed to an interval: `[7, base, low, high, flags]`. `base` is
+        /// an unconstrained primitive type entry; `low` and `high` index the constant table, or
+        /// are `-1` for an open end; `flags` marks an exclusive end. An integer base's ends are
+        /// always inclusive.
+        pub const CONSTRAINED: i64 = 7;
+        /// Bit 0 of a `CONSTRAINED` type's flags cell: the low end is excluded.
+        pub const CONSTRAINED_LOW_EXCLUSIVE: i64 = 1;
+        /// Bit 1 of a `CONSTRAINED` type's flags cell: the high end is excluded.
+        pub const CONSTRAINED_HIGH_EXCLUSIVE: i64 = 2;
 
         /// Bit 0 of a function type parameter's flags cell: the parameter takes body content.
         pub const FUNCTION_PARAM_CONTENT: i64 = 1;
@@ -146,6 +169,7 @@ pub mod kinds {
             (FUNCTION, "function"),
             (SEQ, "seq"),
             (ANY_FUNCTION, "anyFunction"),
+            (CONSTRAINED, "constrained"),
         ];
 
         /// How many values a `SEQ` type admits: the two bits of its occurrence cell.

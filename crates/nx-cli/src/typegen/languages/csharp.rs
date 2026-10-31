@@ -1770,6 +1770,8 @@ fn csharp_type_inner(
         TypeRef::Seq { inner, occ } if !occ.admits_many() => {
             csharp_nullable(csharp_type_inner(inner, context, seen_aliases))
         }
+        // A host type keeps the base: the runtime checks the constraint at the NX boundary.
+        TypeRef::Constrained { base, .. } => csharp_type_inner(base, context, seen_aliases),
         TypeRef::Seq { inner, .. } => {
             let inner = csharp_type_inner(inner, context, seen_aliases);
             CSharpType {
@@ -2003,6 +2005,12 @@ fn csharp_imported_alias_target_type(
                 context,
             ))
         }
+        TypeRef::Constrained { base, .. } => csharp_imported_alias_target_type(
+            base,
+            dependency_namespace,
+            target_is_reference,
+            context,
+        ),
         TypeRef::Seq { inner, .. } => {
             let inner = csharp_imported_alias_target_type(
                 inner,
@@ -2203,7 +2211,9 @@ fn imported_type_uses_dependency_namespace(imported_type: &ImportedType) -> bool
 
 fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
     match ty {
-        TypeRef::Seq { inner, .. } => imported_alias_target_uses_dependency_namespace(inner),
+        TypeRef::Seq { inner, .. } | TypeRef::Constrained { base: inner, .. } => {
+            imported_alias_target_uses_dependency_namespace(inner)
+        }
         TypeRef::Function { .. } | TypeRef::AnyFunction { .. } => false,
         TypeRef::Applied { name, .. } | TypeRef::Name(name) => !matches!(
             name.as_str(),

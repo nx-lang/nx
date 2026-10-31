@@ -18,16 +18,17 @@ use crate::model::{
 use crate::options::CodegenError;
 use nx_api::ProgramArtifact;
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
-use nx_hir::ast::{BinOp, Literal, UnOp};
+use nx_hir::ast::{BinOp, IntervalEnd, Literal, UnOp};
 use nx_hir::UpdateIntrinsic;
 use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
-    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_types::{Primitive, Type};
 use rustc_hash::FxHashSet;
@@ -528,9 +529,12 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
             visit_expression(lhs, visit);
             visit_expression(rhs, visit);
         }
-        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
+        CodegenExpressionKind::Unary { expr, .. }
+        | CodegenExpressionKind::ToText { expr, .. }
+        | CodegenExpressionKind::ConstraintCheck { operand: expr, .. } => {
             visit_expression(expr, visit)
         }
+        CodegenExpressionKind::IntervalPattern { .. } => {}
         CodegenExpressionKind::Concat { lhs, rhs } => {
             visit_expression(lhs, visit);
             visit_expression(rhs, visit);
@@ -886,6 +890,11 @@ impl<'a> ModuleEmitter<'a> {
         if has_type_kind(kinds::ty::ANY_FUNCTION) {
             required_features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1.to_string());
         }
+        // Every check node and interval pattern names a constrained type, so the type table
+        // answers for them too.
+        if has_type_kind(kinds::ty::CONSTRAINED) {
+            required_features.push(NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1.to_string());
+        }
         self.string(NX_IR_RUNTIME_ABI);
         for feature in &required_features {
             self.string(feature);
@@ -1005,6 +1014,29 @@ impl<'a> ModuleEmitter<'a> {
             CodegenTypeRef::AnyFunction { return_type } => {
                 let result = self.type_ref(return_type);
                 IrItem::ints([kinds::ty::ANY_FUNCTION, result])
+            }
+            // `[7, base, low, high, flags]`: the bounds are constants of the base's kind, `-1` for
+            // an open end.
+            CodegenTypeRef::Constrained { base, interval } => {
+                let integer = !base.starts_with("float");
+                let base_type = self.type_ref(&CodegenTypeRef::Primitive { name: base.clone() });
+                let mut bound = |end: Option<IntervalEnd>| match end {
+                    Some(end) if integer => {
+                        self.constant(IrItem::ints([kinds::constant::INT, end.value.0 as i64]))
+                    }
+                    Some(end) => self.constant(IrItem::list([
+                        IrItem::Int(kinds::constant::FLOAT),
+                        IrItem::Float(end.value.0),
+                    ])),
+                    None => -1,
+                };
+                let low = bound(interval.low);
+                let high = bound(interval.high);
+                let flags = i64::from(interval.low.is_some_and(|end| end.exclusive))
+                    * kinds::ty::CONSTRAINED_LOW_EXCLUSIVE
+                    + i64::from(interval.high.is_some_and(|end| end.exclusive))
+                        * kinds::ty::CONSTRAINED_HIGH_EXCLUSIVE;
+                IrItem::ints([kinds::ty::CONSTRAINED, base_type, low, high, flags])
             }
         };
         self.intern_type(entry)
@@ -1531,6 +1563,19 @@ impl<'a> ModuleEmitter<'a> {
             CodegenExpressionKind::Exists { operand } => {
                 let operand = self.expression(operand);
                 IrItem::ints([kinds::node::EXISTS, operand])
+            }
+            // `[28, operand, type, site]`: the operand's value when every item lies in the
+            // type's interval.
+            CodegenExpressionKind::ConstraintCheck { operand, ty, site } => {
+                let operand = self.expression(operand);
+                let ty = self.type_ref(ty);
+                let site = self.string(site);
+                IrItem::ints([kinds::node::CHECK, operand, ty, site])
+            }
+            // `[29, type]`: a pattern-list entry that matches a scrutinee in the type's interval.
+            CodegenExpressionKind::IntervalPattern { ty } => {
+                let ty = self.type_ref(ty);
+                IrItem::ints([kinds::node::INTERVAL, ty])
             }
             CodegenExpressionKind::Coalesce { lhs, rhs } => {
                 let lhs = self.expression(lhs);
