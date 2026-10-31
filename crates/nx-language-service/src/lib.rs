@@ -12,10 +12,10 @@ mod visualizers;
 
 pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
-    SourceCase, SourceChoice, SourceDeclaration, SourceDeclarationKind, SourceEditorHints,
-    SourceFlag, SourceNode, SourceNumber, SourcePreviewVisualizer, SourceProperty,
-    SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions, SourceTreeVisualizers,
-    SourceVisualizer,
+    SourceBounds, SourceCase, SourceChoice, SourceDeclaration, SourceDeclarationKind,
+    SourceEditorHints, SourceFlag, SourceNode, SourceNumber, SourcePreviewVisualizer,
+    SourceProperty, SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions,
+    SourceTreeVisualizers, SourceVisualizer,
 };
 
 use nx_api::{
@@ -682,18 +682,25 @@ impl WorkspaceSnapshot {
                     .iter()
                     .find(|declared| declared.name == property)?;
                 let origin = &scope.element(tag)?.origin.0;
-                Some(hover::with_doc(
-                    hover::fenced(hover::with_origin_label(
-                        origin,
-                        hover::property(
-                            Some(tag),
-                            &declared.name,
-                            declared.optional,
-                            &declared.display_type,
-                        ),
-                    )),
-                    declared.doc.as_deref(),
-                ))
+                let mut content = hover::fenced(hover::with_origin_label(
+                    origin,
+                    hover::property(
+                        Some(tag),
+                        &declared.name,
+                        declared.optional,
+                        &declared.display_type,
+                    ),
+                ));
+                if !declared.display_type.contains(" where ") {
+                    if let Some(note) = alias_constraint_note(
+                        &scope.workspace,
+                        &declared.declaring_module,
+                        &TypeRef::Name(nx_hir::Name::new(&declared.base_type)),
+                    ) {
+                        content = format!("{content}\n\n{note}");
+                    }
+                }
+                Some(hover::with_doc(content, declared.doc.as_deref()))
             }
             // A written type annotation names a type, and a name has a declaration behind it. An
             // annotation with nothing written in it yet does not.
@@ -728,7 +735,12 @@ impl WorkspaceSnapshot {
             } => {
                 let owner_declaration = scope.visible.get(owner)?;
                 let item = scope.item(owner_declaration)?;
-                let content = local_declaration_hover(kind, name, owner, item)?;
+                let mut content = local_declaration_hover(kind, name, owner, item)?;
+                if let Some(note) = local_declaration_type(kind, name, item).and_then(|ty| {
+                    alias_constraint_note(&scope.workspace, &owner_declaration.origin.0, ty)
+                }) {
+                    content = format!("{content}\n\n{note}");
+                }
                 let doc = scope.render_doc(
                     &owner_declaration.origin.0,
                     local_declaration_doc(kind, name, item),
@@ -1783,6 +1795,65 @@ fn local_declaration_hover(
         _ => return None,
     };
     Some(hover::fenced(rendered))
+}
+
+/// The type written for a parameter, field or payload field inside `item`.
+fn local_declaration_type<'a>(
+    kind: &positions::LocalDeclarationKind,
+    name: &str,
+    item: &'a Item,
+) -> Option<&'a TypeRef> {
+    match (kind, item) {
+        (positions::LocalDeclarationKind::Parameter, Item::Function(function)) => function
+            .params
+            .iter()
+            .find(|param| param.name.as_str() == name)
+            .map(|param| &param.ty),
+        (positions::LocalDeclarationKind::Parameter, Item::Component(component)) => component
+            .props
+            .iter()
+            .find(|property| property.name.as_str() == name)
+            .map(|property| &property.ty),
+        (positions::LocalDeclarationKind::RecordField, Item::Record(record)) => record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == name)
+            .map(|field| &field.ty),
+        (positions::LocalDeclarationKind::UnionPayloadField { case }, Item::Union(union_def)) => {
+            union_def
+                .cases
+                .iter()
+                .find(|declared| declared.name.as_str() == case)?
+                .fields
+                .iter()
+                .find(|field| field.name.as_str() == name)
+                .map(|field| &field.ty)
+        }
+        _ => None,
+    }
+}
+
+/// `` `Ratio` is `float32 where in 0.0..=1.0` ``: the constraint behind a type written as the name
+/// of a constrained alias, read in `module`, so a hover shows what the name admits. A type written
+/// with its own `where` clause already shows its constraint and has no note.
+fn alias_constraint_note(
+    workspace: &WorkspaceDeclarations,
+    module: &str,
+    ty: &TypeRef,
+) -> Option<String> {
+    let mut named = ty;
+    while let TypeRef::Seq { inner, .. } = named {
+        named = inner;
+    }
+    let TypeRef::Name(name) = named else {
+        return None;
+    };
+    let (base, interval) = source_tree::type_interval(workspace, module, named, 0)?;
+    Some(format!(
+        "`{}` is `{}`",
+        name.as_str(),
+        nx_types::Type::constrained(base, interval)
+    ))
 }
 
 /// The documentation of a parameter, field, case, or payload field written inside `item`.
@@ -6459,5 +6530,40 @@ component <SearchBox placeholder:string /> = {
         assert!(reported[0].message.contains("@nx/automation"));
         assert!(reported[0].message.contains("@nx/agent"));
         assert_eq!(reported[0].range.start.line, 0);
+    }
+
+    #[test]
+    fn hover_spells_a_constraint_and_follows_an_alias_to_it() {
+        let source =
+            "type Ratio = float32 where in 0.0..=1.0\ntype Fade = { am⟨cursor⟩ount: Ratio }\n";
+        let hover = hover_at(source).expect("hover on amount");
+        assert!(
+            hover.contents.contains("amount: Ratio"),
+            "{}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("float32 where in 0.0..=1.0"),
+            "{}",
+            hover.contents
+        );
+
+        let source = "let pick(co⟨cursor⟩unt: int where in 1..=10): int = { count }\n";
+        let hover = hover_at(source).expect("hover on count");
+        assert!(
+            hover.contents.contains("count: int where in 1..=10"),
+            "{}",
+            hover.contents
+        );
+
+        let source = "type Rat⟨cursor⟩io = float32 where in 0.0..=1.0\n";
+        let hover = hover_at(source).expect("hover on the alias");
+        assert!(
+            hover
+                .contents
+                .contains("type Ratio = float32 where in 0.0..=1.0"),
+            "{}",
+            hover.contents
+        );
     }
 }

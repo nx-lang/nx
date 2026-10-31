@@ -265,6 +265,28 @@ pub struct SourceDeclaration {
     /// applies to it; present only when the request asked for visualizers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visualizer: Option<SourceVisualizer>,
+    /// The interval an alias's or a value's constrained type admits, through aliases too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<SourceBounds>,
+}
+
+/// The interval a constrained numeric type admits. An integer's exclusive ends are given as the
+/// inclusive ends next to them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceBounds {
+    /// The low end, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<SourceNumber>,
+    /// The high end, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<SourceNumber>,
+    /// Present and `true` only when the low end is excluded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_exclusive: Option<bool>,
+    /// Present and `true` only when the high end is excluded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_exclusive: Option<bool>,
 }
 
 /// A declaration's resolved visualizer.
@@ -413,6 +435,10 @@ pub struct SourceProperty {
     /// `optional`, `content` and `inherited`, where they apply.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flags: Vec<SourceFlag>,
+    /// The interval the property's constrained type admits, or its item type's for a sequence or
+    /// an optional; absent when the type is not constrained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<SourceBounds>,
 }
 
 /// One case of a union.
@@ -1468,7 +1494,7 @@ impl<'a> TreeBuilder<'a> {
         arm
     }
 
-    /// A pattern: a literal, a case, or `{}`, which holds whatever comments are inside it. A
+    /// A pattern: a literal, a numeric pattern, a case, or `{}`, which holds whatever comments are inside it. A
     /// pattern that is only a region that did not parse is that region.
     fn pattern(&mut self, node: SyntaxNode<'_>, parent: usize, segment: String) {
         let mut item = false;
@@ -1492,6 +1518,18 @@ impl<'a> TreeBuilder<'a> {
             }
             match child.kind() {
                 SyntaxKind::QUALIFIED_NAME => self.qualified_case(child, parent, segment.clone()),
+                // A numeric pattern, `in 0.0..1.0` or `> 0 && <= 10`, reads as one value, spelled
+                // as written.
+                SyntaxKind::NUMERIC_PATTERN => {
+                    let index = self.push_expression(
+                        SourceRole::Literal,
+                        child,
+                        Some(parent),
+                        segment.clone(),
+                        &[],
+                    );
+                    self.nodes[index].value = Some(spell(child));
+                }
                 _ => self.expression(child, Some(parent), segment.clone(), &[]),
             }
         }
@@ -1975,6 +2013,7 @@ impl<'a> TreeBuilder<'a> {
             ty: None,
             value_range: None,
             visualizer: None,
+            bounds: None,
         });
 
         let chain = base_chain(&workspace, origin);
@@ -2049,8 +2088,15 @@ impl<'a> TreeBuilder<'a> {
                     })
                     .collect();
             }
-            Item::TypeAlias(alias) => entry.ty = Some(type_ref_display(&alias.ty)),
+            Item::TypeAlias(alias) => {
+                entry.ty = Some(type_ref_display(&alias.ty));
+                entry.bounds = type_bounds(&workspace, module, &alias.ty, 0);
+            }
             Item::Value(value) => {
+                entry.bounds = value
+                    .ty
+                    .as_ref()
+                    .and_then(|ty| type_bounds(&workspace, module, ty, 0));
                 entry.ty = match &value.ty {
                     Some(ty) => Some(type_ref_display(ty)),
                     None => workspace
@@ -2428,6 +2474,8 @@ fn written_type_name(ty: &nx_hir::ast::TypeRef) -> Option<&nx_hir::Name> {
     match ty {
         nx_hir::ast::TypeRef::Name(name) => Some(name),
         nx_hir::ast::TypeRef::Seq { inner, .. } => written_type_name(inner),
+        // A constrained number reads as its base, which is what its hints must fit.
+        nx_hir::ast::TypeRef::Constrained { base, .. } => written_type_name(base),
         _ => None,
     }
 }
@@ -2870,6 +2918,71 @@ fn property(
             .and_then(|default| default_text(workspace, module, default)),
         doc: scope.render_doc(module, parts.doc),
         flags,
+        bounds: type_bounds(workspace, module, parts.ty, 0),
+    }
+}
+
+/// The bounds of the interval `ty` admits, read in `module` through aliases, for a constrained
+/// type or a sequence or optional of one.
+fn type_bounds(
+    workspace: &WorkspaceDeclarations,
+    module: &str,
+    ty: &nx_hir::ast::TypeRef,
+    depth: usize,
+) -> Option<SourceBounds> {
+    let (_, interval) = type_interval(workspace, module, ty, depth)?;
+    let end = |end: Option<nx_hir::ast::IntervalEnd>| end.map(|end| SourceNumber(end.value.0));
+    let exclusive =
+        |end: Option<nx_hir::ast::IntervalEnd>| end.filter(|end| end.exclusive).map(|_| true);
+    Some(SourceBounds {
+        min: end(interval.low),
+        max: end(interval.high),
+        min_exclusive: exclusive(interval.low),
+        max_exclusive: exclusive(interval.high),
+    })
+}
+
+/// The base and the interval of a constrained `ty`, the item type's for a sequence or an
+/// optional, intersected through every alias it names; `None` when nothing constrains it.
+pub(crate) fn type_interval(
+    workspace: &WorkspaceDeclarations,
+    module: &str,
+    ty: &nx_hir::ast::TypeRef,
+    depth: usize,
+) -> Option<(nx_types::Primitive, nx_hir::ast::Interval)> {
+    use nx_hir::ast::TypeRef;
+    if depth >= 16 {
+        return None;
+    }
+    match ty {
+        TypeRef::Seq { inner, .. } => type_interval(workspace, module, inner, depth + 1),
+        TypeRef::Constrained { base, pattern } => {
+            let (primitive, outer) = match base.as_ref() {
+                TypeRef::Name(name) => match nx_types::Primitive::from_name(name.as_str()) {
+                    Some(primitive) => (primitive, nx_hir::ast::Interval::ALL),
+                    None => type_interval(workspace, module, base, depth + 1)?,
+                },
+                _ => return None,
+            };
+            let interval = nx_types::pattern_interval_at(primitive, pattern)?.intersect(&outer);
+            match nx_types::Type::constrained(primitive, interval) {
+                nx_types::Type::Constrained { base, interval } => Some((base, interval)),
+                _ => None,
+            }
+        }
+        TypeRef::Name(name) => {
+            let origin = workspace
+                .type_namespaces
+                .get(module)
+                .and_then(|namespace| namespace.get(name.as_str()))?;
+            match item_at(workspace, origin) {
+                Some(Item::TypeAlias(alias)) => {
+                    type_interval(workspace, &origin.0, &alias.ty, depth + 1)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 

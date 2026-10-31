@@ -2117,3 +2117,60 @@ fn only_functions_the_entry_reaches_through_imports_count() {
         vec!["base.nx"]
     );
 }
+
+// ---- Value constraints --------------------------------------------------------------------------
+
+#[test]
+fn a_constrained_parameter_carries_its_bounds_and_its_spelling() {
+    let artifact = source("let pick(count: int where in 1..=10): int = { count }");
+    let schema = function(&artifact, "pick");
+    assert_eq!(
+        input(&schema)["properties"]["count"],
+        json!({ "type": "integer", "minimum": 1, "maximum": 10 })
+    );
+    let parameters = serde_json::to_value(&schema.parameters).unwrap();
+    assert_eq!(parameters[0]["type"], "int where in 1..=10");
+    assert!(schema.diagnostics.is_empty(), "{:#?}", schema.diagnostics);
+}
+
+#[test]
+fn constrained_aliases_map_exclusive_and_open_ends() {
+    let artifact = source(
+        "type Unit = float64 where > 0.0 && < 1.0
+         type Count = int where >= 1
+         type Pos = int where > 0
+         type Below = float32 where < 1.0
+         type Small = Count where <= 5",
+    );
+    let unit = document(&output_type(&artifact, "Unit"));
+    assert_eq!(unit["type"], "number");
+    assert_eq!(unit["exclusiveMinimum"], json!(0.0));
+    assert_eq!(unit["exclusiveMaximum"], json!(1.0));
+    assert!(unit.get("minimum").is_none() && unit.get("maximum").is_none());
+
+    let count = document(&output_type(&artifact, "Count"));
+    assert_eq!(count["minimum"], json!(1));
+    assert!(count.get("maximum").is_none());
+
+    let positive = document(&output_type(&artifact, "Pos"));
+    assert_eq!(positive["type"], "integer");
+    assert_eq!(positive["minimum"], json!(1));
+    assert!(positive.get("exclusiveMinimum").is_none());
+
+    let below = document(&output_type(&artifact, "Below"));
+    assert_eq!(below["maximum"], json!(0.9999999403953552));
+    assert!(below.get("exclusiveMaximum").is_none());
+
+    // An alias of an alias intersects both.
+    let small = document(&output_type(&artifact, "Small"));
+    assert_eq!(small["minimum"], json!(1));
+    assert_eq!(small["maximum"], json!(5));
+}
+
+#[test]
+fn an_int32_bound_replaces_the_base_bound_on_its_side() {
+    let artifact = source("let f(x: int32 where >= 0) = { x }");
+    let x = &input(&function(&artifact, "f"))["properties"]["x"];
+    assert_eq!(x["minimum"], json!(0));
+    assert_eq!(x["maximum"], json!(2147483647));
+}
