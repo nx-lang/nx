@@ -314,5 +314,7 @@ so.
 2. Should integer overflow checking (`specs/future.md`, "Bounds checks are specified but not
    enforced") ride on the same `[28 …]` node in a follow-up? The node is shaped so it can.
 
+3. `&&` to join terms (decision 1) or C#'s `and`/`or`? The design assumes `&&`.
+
 Settled with Bret on 2026-10-31: no named operand (`value`/`it`); constraints are value patterns,
-shared with match arms; `&&` joins terms and commas separate alternatives in arms.
+shared with match arms.
