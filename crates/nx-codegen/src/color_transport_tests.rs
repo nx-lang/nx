@@ -341,7 +341,11 @@ fn color_transport_json_and_messagepack_restore_float32_against_schema() {
         NxValue::from_msgpack_slice(&messagepack).unwrap(),
     ] {
         let echoed = program
-            .evaluate_function("echo", &[restored.clone()], &RuntimeOptions::default())
+            .evaluate_function(
+                "echo",
+                std::slice::from_ref(&restored),
+                &RuntimeOptions::default(),
+            )
             .unwrap();
         assert_eq!(echoed, original);
         let color = program

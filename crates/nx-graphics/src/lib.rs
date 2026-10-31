@@ -1351,7 +1351,7 @@ mod tests {
         assert_eq!(
             scene.root.children[0].fill,
             Some(Paint::Color {
-                color: [0.123456789_f32, 0.4, 0.8, 0.5]
+                color: [0.123_456_79_f32, 0.4, 0.8, 0.5]
             })
         );
         let valid = value["children"][0].clone();

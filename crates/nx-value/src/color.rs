@@ -734,7 +734,7 @@ mod tests {
             "hsl(180 100% 50%)",
         ] {
             let v = parse(text).unwrap();
-            let NxValue::String(css) = call("toCss", &[v.clone()]) else {
+            let NxValue::String(css) = call("toCss", std::slice::from_ref(&v)) else {
                 panic!()
             };
             assert_eq!(v, parse(&css).unwrap(), "{text}");

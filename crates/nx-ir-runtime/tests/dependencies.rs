@@ -1,5 +1,5 @@
-//! The runtime builds without the compiler: it and the two crates it depends on name no other
-//! crate of this workspace as a dependency.
+//! The runtime builds without the compiler: it depends on `nx-ir` and `nx-value`, `nx-ir` only on
+//! `nx-value`, and `nx-value` on no other crate of this workspace.
 
 use std::path::Path;
 
@@ -27,7 +27,7 @@ fn the_runtime_depends_on_no_compiler_crate() {
         dependencies("nx-ir-runtime"),
         ["nx-ir", "nx-value", "serde"]
     );
-    assert_eq!(dependencies("nx-ir"), [] as [&str; 0]);
+    assert_eq!(dependencies("nx-ir"), ["nx-value"]);
     let workspace: Vec<String> = dependencies("nx-value")
         .into_iter()
         .filter(|name| name.starts_with("nx-"))
