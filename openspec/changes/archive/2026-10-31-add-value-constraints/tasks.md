@@ -48,4 +48,4 @@
 
 ## 8. Review
 
-- [ ] 8.1 Run the review loop (`/openspecex-review`, `/openspecex-review-fix`, `/openspecex-review-verify`) until high-confidence findings are fixed and verified.
+- [x] 8.1 Run the review loop (`/openspecex-review`, `/openspecex-review-fix`, `/openspecex-review-verify`) until high-confidence findings are fixed and verified.
