@@ -459,6 +459,26 @@ export interface SourceProperty {
   doc?: string;
   /** `optional`, `content` and `inherited`, where they apply. */
   flags?: SourceFlag[];
+  /**
+   * The bounds of the property's constraint, or of its items' for a sequence or an optional value,
+   * when its type is constrained directly or through aliases.
+   */
+  bounds?: SourceBounds;
+}
+
+/**
+ * The bounds a value constraint puts on a number. An end is absent when it is open, and an
+ * integer's exclusive end arrives as the inclusive one next to it.
+ */
+export interface SourceBounds {
+  /** The low end. */
+  min?: number;
+  /** The high end. */
+  max?: number;
+  /** Present, and `true`, when the value must be greater than `min`. */
+  minExclusive?: boolean;
+  /** Present, and `true`, when the value must be less than `max`. */
+  maxExclusive?: boolean;
 }
 
 /** One case of a union. */
@@ -490,6 +510,8 @@ export interface SourceDeclaration {
   type?: string;
   /** The range of a value declaration's value, when the queried document declares it. */
   valueRange?: EditorRange;
+  /** The bounds of an alias's or a value's constraint, when its type is constrained. */
+  bounds?: SourceBounds;
   /**
    * How a viewer presents the declaration, resolved from every visualizer declaration that applies
    * to it; present only when the request asked for `visualizers`.
