@@ -7,7 +7,7 @@ export function renderCanvas(
   scene: GraphicsScene,
   selected: readonly string[] = [],
 ): HTMLCanvasElement {
-  if (scene.profile !== "graphics-core-v3") {
+  if (scene.profile !== "graphics-core-v4") {
     throw new Error("Unsupported graphics profile.");
   }
   const frame = document.createElement("canvas");

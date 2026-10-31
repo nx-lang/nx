@@ -1,0 +1,25 @@
+// NX geometry standard library.
+// Unstable: declarations may change incompatibly in any NX release.
+// Values use the consumer's coordinate system and units; no axis direction is imposed.
+
+/// A finite position in a consumer-defined coordinate system.
+export type Point = {
+  x: float64 where finite  /// Coordinate along the first axis.
+  y: float64 where finite  /// Coordinate along the second axis.
+}
+
+/// Nonnegative extents; positive infinity may describe unbounded available layout space.
+/// NaN is rejected. Both signs of zero are accepted.
+export type Size = {
+  width: float64 where >= 0.0   /// Extent along the first axis, possibly positive infinity.
+  height: float64 where >= 0.0  /// Extent along the second axis, possibly positive infinity.
+}
+
+/// An axis-aligned rectangle with a finite origin and finite, nonnegative extents.
+/// Zero dimensions are valid and do not denote absence. Edge computations may overflow.
+export type Rect = {
+  x: float64 where finite                 /// Origin along the first axis.
+  y: float64 where finite                 /// Origin along the second axis.
+  width: float64 where finite && >= 0.0   /// Extent along the first axis.
+  height: float64 where finite && >= 0.0  /// Extent along the second axis.
+}

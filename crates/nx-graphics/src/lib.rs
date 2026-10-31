@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub const PROFILE: &str = "graphics-core-v3";
+pub const PROFILE: &str = "graphics-core-v4";
 pub const MODULE: &str = "@nx/graphics/graphics.nx";
 pub type Result<T> = std::result::Result<T, Diagnostic>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -635,7 +635,7 @@ impl Prepare<'_> {
         }
         let kind = identity.declaration.as_str();
         let required: &[&str] = match kind {
-            "Rect" => &["width", "height"],
+            "Rectangle" => &["width", "height"],
             "Circle" => &["cx", "cy", "r"],
             "Ellipse" => &["cx", "cy", "rx", "ry"],
             "Line" => &["x1", "y1", "x2", "y2"],
@@ -696,7 +696,15 @@ impl Prepare<'_> {
             return Err(error(path, "expected graphics record"));
         }
         if ![
-            "Drawing", "Group", "Rect", "Circle", "Ellipse", "Line", "Polyline", "Polygon", "Path",
+            "Drawing",
+            "Group",
+            "Rectangle",
+            "Circle",
+            "Ellipse",
+            "Line",
+            "Polyline",
+            "Polygon",
+            "Path",
             "Text",
         ]
         .contains(&kind)
@@ -828,7 +836,7 @@ impl Prepare<'_> {
                 }
             }
             "Group" => {}
-            "Rect" => {
+            "Rectangle" => {
                 let x = n("x", 0.0)?;
                 let y = n("y", 0.0)?;
                 let w = nonnegative("width", 0.0)?;
@@ -1407,6 +1415,80 @@ mod tests {
         }
     }
     #[test]
+    fn raw_viewports_and_geometry_children_retain_defensive_validation() {
+        for dimension in ["width", "height"] {
+            let mut value = drawing("");
+            value["viewBox"][dimension] = json!(-1);
+            let diagnostic =
+                prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap_err();
+            assert!(diagnostic
+                .message
+                .contains("viewBox dimensions must be positive"));
+        }
+        struct GeometryChild;
+        impl DeclarationResolver for GeometryChild {
+            fn resolve(&self, path: &str) -> Option<Identity> {
+                Some(Identity {
+                    module: if path.is_empty() {
+                        MODULE
+                    } else {
+                        "@nx/geometry/geometry.nx"
+                    }
+                    .into(),
+                    version: "test".into(),
+                    declaration: if path.is_empty() { "Drawing" } else { "Rect" }.into(),
+                })
+            }
+        }
+        let value = json!({"viewBox":{"width":100,"height":100},
+            "children":[{"$type":"Rect","x":0,"y":0,"width":10,"height":10}]});
+        let diagnostic = prepare(&value, &GeometryChild, &mut NoText, config()).unwrap_err();
+        assert!(diagnostic
+            .message
+            .contains("unrecognized graphics declaration identity"));
+    }
+
+    #[test]
+    fn raw_non_finite_fields_fail_before_json_conversion() {
+        use nx_value::NxValue;
+        for bad in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            for field in ["width", "height"] {
+                let mut value: NxValue = serde_json::from_value(drawing("")).unwrap();
+                let NxValue::Record { properties, .. } = &mut value else {
+                    panic!("drawing")
+                };
+                let NxValue::Record { properties, .. } = properties.get_mut("viewBox").unwrap()
+                else {
+                    panic!("viewBox")
+                };
+                properties.insert(field.into(), NxValue::Float(bad));
+                let diagnostic =
+                    prepare_value(&value, &Resolver { spoof: false }, &mut NoText, config())
+                        .unwrap_err();
+                assert_eq!(diagnostic.code, "graphics-non-finite");
+                assert_eq!(diagnostic.element, format!("element/viewBox/{field}"));
+            }
+        }
+    }
+
+    #[test]
+    fn fractional_font_weight_is_rejected_before_text_shaping() {
+        struct TextResolver;
+        impl DeclarationResolver for TextResolver {
+            fn resolve(&self, path: &str) -> Option<Identity> {
+                Some(Identity {
+                    module: MODULE.into(),
+                    version: "test".into(),
+                    declaration: if path.is_empty() { "Drawing" } else { "Text" }.into(),
+                })
+            }
+        }
+        let value = json!({"viewBox":{"width":100,"height":100},
+            "children":[{"fontFamily":"test","text":"hello","fontWeight":400.5}]});
+        let diagnostic = prepare(&value, &TextResolver, &mut NoText, config()).unwrap_err();
+        assert_eq!(diagnostic.message, "invalid font weight");
+    }
+    #[test]
     fn arcs_and_closed_subpaths() {
         let scene = prepare(
             &drawing("M10 50 A40 40 0 1 1 90 50 A40 40 0 1 1 10 50 Z M40 50L60 50"),
@@ -1532,6 +1614,25 @@ mod tests {
             assert_eq!(mock.paths, 1);
         }
     }
+
+    #[test]
+    fn earlier_and_unknown_profiles_fail_before_destination_calls() {
+        let mut scene = prepare(
+            &drawing("M0 0L10 10"),
+            &Resolver { spoof: false },
+            &mut NoText,
+            config(),
+        )
+        .unwrap();
+        for profile in ["graphics-core-v3", "graphics-core-v999"] {
+            scene.profile = profile.into();
+            let mut destination = Mock::default();
+            let diagnostic = scene.draw(&mut destination).unwrap_err();
+            assert_eq!(diagnostic.message, "unsupported graphics profile");
+            assert_eq!(destination.paths, 0);
+            assert!(!destination.ended);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1544,7 +1645,7 @@ mod boundary_tests {
             Some(Identity {
                 module: MODULE.into(),
                 version: "v".into(),
-                declaration: if p.is_empty() { "Drawing" } else { "Rect" }.into(),
+                declaration: if p.is_empty() { "Drawing" } else { "Rectangle" }.into(),
             })
         }
     }
@@ -1804,7 +1905,7 @@ mod review_bounds_tests {
             Some(Identity {
                 module: MODULE.into(),
                 version: "v".into(),
-                declaration: if p.is_empty() { "Drawing" } else { "Rect" }.into(),
+                declaration: if p.is_empty() { "Drawing" } else { "Rectangle" }.into(),
             })
         }
     }
@@ -1912,7 +2013,7 @@ mod folded_clip_tests {
             Some(Identity {
                 module: MODULE.into(),
                 version: "v".into(),
-                declaration: if p.is_empty() { "Drawing" } else { "Rect" }.into(),
+                declaration: if p.is_empty() { "Drawing" } else { "Rectangle" }.into(),
             })
         }
     }
@@ -2096,8 +2197,8 @@ mod full_review_tests {
     #[test]
     fn group_bounds_include_only_visible_child_contributions() {
         let s = scene(json!([{"$type":"Group","children":[
-            {"$type":"Rect","width":50,"height":50,"clipPath":"M0 0H10V10H0Z"},
-            {"$type":"Rect","x":50,"width":10,"height":10,"opacity":0}
+            {"$type":"Rectangle","width":50,"height":50,"clipPath":"M0 0H10V10H0Z"},
+            {"$type":"Rectangle","x":50,"width":10,"height":10,"opacity":0}
         ]}]));
         let group = &s.root.children[0];
         assert_eq!(group.painted.rect, Some(Rect::new(0.0, 0.0, 10.0, 10.0)));

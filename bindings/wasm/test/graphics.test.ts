@@ -53,12 +53,12 @@ function requestFor(source: string) {
   };
 }
 const prefix =
-  'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>';
+  'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>';
 test("shared graphics preparation resolves genuine aliases and rejects same-name spoofs", () => {
   for (const [source, valid] of [
-    [prefix + "<g.Rect width=10 height=20/></g.Drawing>", true],
+    [prefix + "<g.Rectangle width=10 height=20/></g.Drawing>", true],
     [
-      'import "@nx/graphics" as g\nexternal component <Rect width:float64 height:float64/>\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><Rect width=10 height=20/></g.Drawing>',
+      'import "@nx/graphics" as g\nexternal component <Rectangle width:float64 height:float64/>\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><Rectangle width=10 height=20/></g.Drawing>',
       false,
     ],
   ] as const) {

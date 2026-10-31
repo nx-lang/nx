@@ -1,4 +1,4 @@
-module @nx/agent/agent.nx fingerprint 11527925250760699671
+module @nx/agent/agent.nx fingerprint 15097637627327149526
 requires update-records-v1 property-unions-v1 function-reference-type-v1
 entrypoints functions [] components []
 

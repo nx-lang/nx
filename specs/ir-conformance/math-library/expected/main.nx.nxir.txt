@@ -1,5 +1,5 @@
 module main.nx fingerprint 10820066715230863280
-links @nx/math/math.nx version "87473e7ace259133" fingerprint 14154561969793253313
+links @nx/math/math.nx version "7d750052efed5e6f" fingerprint 7963937948937048613
 entrypoints functions [root] components []
 
 function root(): float64 @2:1-2:59 =

@@ -379,6 +379,18 @@
           "comment": "`where` starts a type's constraint (`float32 where in 0.0..=1.0`); a field or parameter named `where` is followed by `:` or `?:`.",
           "name": "keyword.other.where.nx",
           "match": "\\bwhere\\b(?!\\s*\\??\\s*:)"
+        },
+        {
+          "comment": "The contextual finite term in a where constraint, a conjunction, or a numeric match arm. Fields and functions named finite retain identifier scopes.",
+          "match": "(?:(?<=\\bwhere)|(?<=&&))\\s*\\b(finite)\\b|(?:^|(?<=\\{))\\s*\\b(finite)\\b(?=\\s*=>)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.finite.nx"
+            },
+            "2": {
+              "name": "keyword.other.finite.nx"
+            }
+          }
         }
       ]
     },
@@ -823,6 +835,9 @@
           "patterns": [
             {
               "include": "#comments"
+            },
+            {
+              "include": "#keywords-control"
             },
             {
               "include": "#type-annotation"

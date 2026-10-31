@@ -59,9 +59,9 @@ let statusBadge(status:ReviewStatus) = {
 
 ### Numeric patterns
 
-A number may be matched against ranges and comparisons, the same patterns a
+A number may be matched against finiteness, ranges and comparisons, the same patterns a
 [constrained type](/reference/syntax/types/#constrained-types) takes: `in a..b`, `in a..=b`, `>= a`,
-`> a`, `<= a` and `< a`, joined by `&&`. A comma gives alternatives, as for any pattern.
+`> a`, `<= a`, `< a`, and (for floating types) `finite`, joined by `&&`. A comma gives alternatives, as for any pattern.
 
 ```nx
 let describe(x: float64) = {

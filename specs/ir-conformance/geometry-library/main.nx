@@ -1,0 +1,36 @@
+import "@nx/geometry" as geometry
+
+type Document = {
+  anchor: geometry.Point
+  available: geometry.Size
+  bounds: geometry.Rect
+  regions: geometry.Rect+
+}
+
+let identity(value: Document): Document = { value }
+
+let root(): Document = {
+  identity(<Document
+    anchor=<geometry.Point x=1000000000000.125 y=-2000000000000.25/>
+    available=<geometry.Size width=0 height=32.5/>
+    bounds=<geometry.Rect x=-0.0 y=12.75 width=0 height=0/>
+    regions={
+      <geometry.Rect x=1 y=2 width=3 height=4/>
+      <geometry.Rect x=-2.5 y=0 width=0 height=0/>
+    }
+  />)
+}
+
+let isUnbounded(size: geometry.Size): boolean = { size.width == 1.0e309 }
+
+let unbounded(): boolean = { isUnbounded(<geometry.Size width=1.0e309 height=0/>) }
+
+let point(x: float64): geometry.Point = <geometry.Point x={x} y=0/>
+
+let rect(width: float64): geometry.Rect = <geometry.Rect x=0 y=0 width={width} height=0/>
+
+let size(width: float64): geometry.Size = <geometry.Size width={width} height=0/>
+
+let nan(x: float64): geometry.Point = <geometry.Point x={x * x - x * x} y=0/>
+
+let overflow(x: float64): geometry.Rect = <geometry.Rect x=0 y=0 width={x * x} height=0/>

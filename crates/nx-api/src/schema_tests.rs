@@ -2174,3 +2174,18 @@ fn an_int32_bound_replaces_the_base_bound_on_its_side() {
     assert_eq!(x["minimum"], json!(0));
     assert_eq!(x["maximum"], json!(2147483647));
 }
+
+#[test]
+fn finite_schema_endpoints_round_trip_at_both_precisions() {
+    for (base, max) in [("float32", f32::MAX as f64), ("float64", f64::MAX)] {
+        let artifact = source(&format!("let id(x: {base} where finite) = {{ x }}"));
+        let schema = function(&artifact, "id");
+        assert_eq!(input(&schema)["properties"]["x"]["minimum"], json!(-max));
+        assert_eq!(input(&schema)["properties"]["x"]["maximum"], json!(max));
+        let parameters = serde_json::to_value(&schema.parameters).unwrap();
+        assert_eq!(parameters[0]["type"], format!("{base} where finite"));
+        let round_trip: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&input(&schema)).unwrap()).unwrap();
+        assert_eq!(round_trip["properties"]["x"]["maximum"].as_f64(), Some(max));
+    }
+}

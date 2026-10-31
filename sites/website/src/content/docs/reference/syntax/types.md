@@ -360,6 +360,7 @@ A pattern is one or more terms joined by `&&`, each one of:
 
 | Term | Admits |
 | --- | --- |
+| `finite` | Finite values of float32 or float64, including signed zero and subnormals |
 | `in a..b` | `a` up to but not including `b` |
 | `in a..=b` | `a` through `b` |
 | `>= a`, `> a` | values at least, or greater than, `a` |
@@ -395,6 +396,27 @@ type None = int where > 5 && < 6      // matches no int
 ```
 
 A constrained type cannot be a type argument or appear inside a function type.
+
+### Finite floating-point constraints
+
+The contextual `finite` term applies to float32 and float64, including aliases. Combine it with
+range or comparison terms using `&&`:
+
+```nx
+type Coordinate = float64 where finite
+
+type Extent = float64 where finite && >= 0.0
+```
+
+It accepts both signs of zero, subnormal values, and the selected precision's largest finite
+magnitudes. It excludes both infinities and NaN. Integer and nonnumeric bases reject this term.
+All numeric constraints already reject NaN, so `float64 where >= 0.0` accepts positive infinity
+but excludes NaN. This is useful for unbounded available layout space.
+
+Numeric `is` arms also accept `finite` and narrow their scrutinee within that arm. The word
+remains an ordinary identifier outside numeric pattern positions. It is a pattern term, not a
+predicate call: write `where finite`, not `where finite()`. Arithmetic continues to return the
+unconstrained base type, since finite inputs can produce an infinite or NaN result.
 
 ### A constrained type is its base type
 A value of a constrained type is a value of its base type: the same encoding, equality, operations

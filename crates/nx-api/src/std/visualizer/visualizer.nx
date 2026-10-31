@@ -20,28 +20,29 @@ export type ElementVisualizer = {
   /// The property whose value identifies the element: a key that names it and is kept. It reads as
   /// one quiet token, its value alone, where `idPosition` puts it.
   id?: Target.Property
-  /// Where the element's id reads.
-  idPosition: IdPosition = start
+  idPosition: IdPosition = start                              /// Where the element's id reads.
+
   /// The name of the icon that marks the element where it starts, from the Lucide set
   /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
   icon?: string
-  preview?: PreviewVisualizer     /// Host-rendered view, inherited and overridden like other hints.
-                                  /// Unsupported renderer IDs leave structured Output available.
+  /// Host-rendered view, inherited and overridden like other hints. Unsupported renderer IDs leave
+  /// structured Output available.
+  preview?: PreviewVisualizer
 
-  /// How individual properties read.
-  content properties?: <PropertyVisualizer Target=Target/>+
+  content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
 
 /// A rendered presentation requested by a type; the host supplies the implementation.
-/// Unknown renderer IDs leave the ordinary structured output available. This descriptor loads no code.
+/// Unknown renderer IDs leave the ordinary structured output available. This descriptor loads no
+/// code.
 export type PreviewVisualizer = {
-  renderer: string             /// Logical renderer ID registered by the host, such as "nx.graphics".
+  renderer: string  /// Logical renderer ID registered by the host, such as "nx.graphics".
 }
 
 /// How a viewer marks an authored element-style function invocation.
 /// Previews are selected from the function's result type, independently of this invocation icon.
 export type FunctionVisualizer = {
-  icon?: string                /// Lucide icon name for the invocation, such as "star".
+  icon?: string  /// Lucide icon name for the invocation, such as "star".
 }
 
 /// Where an element's id reads.
@@ -55,59 +56,50 @@ export type IdPosition =
 export type PropertyVisualizer = {
   // The declaration whose property this describes. Bound by the `visualizer` declaration.
   Target: type
-  /// The property this describes.
-  property: Target.Property
-  /// How the property's string value is shown.
-  format?: ValueFormat
-  /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
-  editor?: ValueEditor
-  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
-  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
+  property: Target.Property       /// The property this describes.
+  format?: ValueFormat            /// How the property's string value is shown.
+  editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
+                                  /// usual one.
+
+  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one. A
+  /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   min?: float64
-  /// The largest number the editor offers. Not a constraint: a document may write a larger one.
-  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
+  /// The largest number the editor offers. Not a constraint: a document may write a larger one. A
+  /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
-  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
-  step?: float64
-  /// Whether the property's string field takes line breaks: Enter starts a new line, and the
-  /// value is written over several lines.
-  multiline: boolean = false
-  /// Text shown in the property's empty field, quieter than a value, and never written.
-  placeholder?: string
-  /// The values a viewer offers to pick for the property, in order. They suggest and never
-  /// restrict: any value the property's type takes may still be written.
-  content choices?: ValueChoice+
+  step?: float64                  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
+  multiline: boolean = false      /// Whether the property's string field takes line breaks: Enter starts a new line,
+                                  /// and the value is written over several lines.
+  placeholder?: string            /// Text shown in the property's empty field, quieter than a value, and never written.
+  content choices?: ValueChoice+  /// The values a viewer offers to pick for the property, in order. They suggest and
+                                  /// never restrict: any value the property's type takes may still be written.
 }
 
 /// How a viewer presents values of a scalar type.
 export type ValueVisualizer = {
   // The type this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
-  /// How a string value of the type is shown.
-  format?: ValueFormat
-  /// The editor a viewer offers for the value. A viewer that cannot offer it uses its usual one.
-  editor?: ValueEditor
-  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one.
-  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
+  format?: ValueFormat            /// How a string value of the type is shown.
+  editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
+                                  /// usual one.
+
+  /// The smallest number the editor offers. Not a constraint: a document may write a smaller one. A
+  /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   min?: float64
-  /// The largest number the editor offers. Not a constraint: a document may write a larger one.
-  /// A `where` constraint on the type limits the value itself, and the editor keeps within both.
+  /// The largest number the editor offers. Not a constraint: a document may write a larger one. A
+  /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
-  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
-  step?: float64
-  /// The values a viewer offers to pick for a value of the type, in order. They suggest and never
-  /// restrict: any value of the type may still be written.
-  content choices?: ValueChoice+
+  step?: float64                  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
+  content choices?: ValueChoice+  /// The values a viewer offers to pick for a value of the type, in order. They suggest
+                                  /// and never restrict: any value of the type may still be written.
 }
 
 /// A value a viewer offers to pick, such as a size on a type's scale. Picking it writes the value,
 /// never the label.
 export type ValueChoice = {
-  /// The value written when the choice is picked: a number literal for a number, or a string
-  /// literal for a string.
-  value: object
-  /// The name the choice reads by, beside its value, such as `"lg"`.
-  label?: string
+  value: object   /// The value written when the choice is picked: a number literal for a number, or a string literal
+                  /// for a string.
+  label?: string  /// The name the choice reads by, beside its value, such as `"lg"`.
 }
 
 /// How a string value is shown. A format changes how the value looks, never what it is.

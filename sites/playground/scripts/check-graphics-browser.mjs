@@ -7,8 +7,33 @@ import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { build } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+// A production preview serves built assets, not /src/*.ts. Bundle the probes from the actual
+// graphics modules independently of the application, including Vite's handling of the font URL.
+// Nothing from this harness is written into the site's production output.
+const harnessBuild = await build({
+  configFile: false,
+  root,
+  base: "./",
+  logLevel: "error",
+  build: {
+    target: "es2022",
+    write: false,
+    minify: false,
+    lib: {
+      entry: fileURLToPath(new URL("./graphics-browser-harness.ts", import.meta.url)),
+      name: "NXGraphicsBrowserTest",
+      formats: ["iife"],
+    },
+  },
+});
+const harness = [harnessBuild].flat()
+  .flatMap((result) => result.output)
+  .find((output) => output.type === "chunk" && output.isEntry);
+assert.ok(harness, "The graphics test harness must produce a browser entry.");
+
 const server = createServer();
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = server.address().port;
@@ -58,11 +83,15 @@ try {
     dialogs++;
     await dialog.dismiss();
   });
+  // Reinstall the test bundle after every navigation in the recovery and example checks.
+  await page.addInitScript({
+    content: `${harness.code}\nglobalThis.NXGraphicsBrowserTest = NXGraphicsBrowserTest;`,
+  });
   await page.goto(base + "graphics");
   const canvas = page.locator("canvas.drawing-canvas[data-revision]");
   const gradientCorpus = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/sampling.json", import.meta.url), "utf8"));
   const gradientFailures = await page.evaluate(async (cases) => {
-    const { canvasPaint } = await import("/play/src/graphics/paint.ts");
+    const { canvasPaint } = globalThis.NXGraphicsBrowserTest;
     const failures = [];
     for (const test of cases) {
       const surface = new OffscreenCanvas(101,101);
@@ -75,14 +104,14 @@ try {
         if (actual.some((x,i) => Math.abs(x-sample.expected[i]) > 2/255)) failures.push({name:test.name,actual,sample});
       }
     }
-    const { hitTest } = await import("/play/src/graphics/hit-test.ts");
-    const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
+    const { hitTest } = globalThis.NXGraphicsBrowserTest;
+    const { renderCanvas } = globalThis.NXGraphicsBrowserTest;
     const bounds = {rect:{x0:0,y0:0,x1:100,y1:100},conservative:true};
-    const node = {id:"shape",parent:null,order:0,identity:{module:"test",version:"test",declaration:"Rect"},
+    const node = {id:"shape",parent:null,order:0,identity:{module:"test",version:"test",declaration:"Rectangle"},
       provenance:null,accessibility:null,transform:[1,0,0,1,0,0],opacity:1,clip:null,clip_evenodd:false,
       path:[{MoveTo:{x:0,y:0}},{LineTo:{x:100,y:0}},{LineTo:{x:100,y:100}},{LineTo:{x:0,y:100}},"ClosePath"],
       evenodd:false,fill:cases[0].paint,stroke:null,text:null,geometry:bounds,painted:bounds,visible:bounds,children:[]};
-    const scene={profile:"graphics-core-v3",revision:"test",config:{width:100,height:100,scale:1},root:node};
+    const scene={profile:"graphics-core-v4",revision:"test",config:{width:100,height:100,scale:1},root:node};
     if(hitTest(scene,99,50)?.id!=="shape") failures.push("transparent interval selection");
     const group={...node,id:"group",path:null,fill:null,opacity:.5,children:[node],clip:[{MoveTo:{x:0,y:0}},{LineTo:{x:60,y:0}},{LineTo:{x:60,y:100}},{LineTo:{x:0,y:100}},"ClosePath"]};
     const frame=renderCanvas({...scene,root:group}); const ctx=frame.getContext("2d");
@@ -90,7 +119,7 @@ try {
     if(Math.abs(inside[3]/255-.375)>2/255 || outside[3]!==0) failures.push({compositing:[...inside],outside:[...outside]});
     node.fill={...node.fill,stops:node.fill.stops.map(s=>({...s,color:[s.color[0],s.color[1],s.color[2],0]}))};
     if(hitTest(scene,50,50)!==undefined) failures.push("all-transparent paint hit");
-    const { measureBrowserText } = await import("/play/src/graphics/browser-font.ts");
+    const { measureBrowserText } = globalThis.NXGraphicsBrowserTest;
     for(const size of [16,32]) for(const anchor of [0,.5,1]) {
       const measurement=await measureBrowserText({text:"Gradient",family:"Fixture",size,weight:400,italic:false});
       const textNode={...node,id:"text",path:null,transform:[1.25,0,0,.8,10,5],fill:cases[0].paint,
@@ -116,7 +145,7 @@ try {
   assert.deepEqual(gradientFailures, []);
   const gradientScenes = JSON.parse(readFileSync(new URL("../../../crates/nx-graphics-skia/fixtures/gradients/scenes.json", import.meta.url), "utf8"));
   const sceneFailures = await page.evaluate(async cases => {
-    const { renderCanvas } = await import("/play/src/graphics/canvas.ts");
+    const { renderCanvas } = globalThis.NXGraphicsBrowserTest;
     const failures = [];
     for (const fixture of cases) {
       const ctx = renderCanvas(fixture.prepared).getContext("2d");
@@ -180,7 +209,7 @@ try {
   for (const [name, icon] of Object.entries({
     Drawing: "frame",
     Group: "group",
-    Rect: "rectangle-horizontal",
+    Rectangle: "rectangle-horizontal",
     Circle: "circle",
     Text: "type",
     RegularPolygon: "hexagon",
@@ -378,7 +407,7 @@ try {
     ).includes("element/children/2"),
   );
   const prefix =
-    'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>';
+    'import "@nx/graphics" as g\nlet root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>';
   async function draw(body) {
     const old = (await canvas.count())
       ? await canvas.getAttribute("data-revision")
@@ -394,13 +423,13 @@ try {
   const gradientStops = '<g.GradientStop offset=0 color=#ff0000/><g.GradientStop offset=1 color=#0000ff00/>';
   const linear = `<g.Paint.linearGradient x1=0 y1=0 x2=100 y2=0 stops={${gradientStops}}/>`;
   const radial = `<g.Paint.radialGradient cx=50 cy=50 radius=45 stops={${gradientStops}}/>`;
-  await draw(`<g.Rect width=100 height=100 fill=${linear}/><g.Circle cx=50 cy=50 r=30 fill=${radial}/><g.Line x1=10 y1=90 x2=90 y2=90 stroke=<g.Stroke paint=${linear} width=3/>/><g.Text x=10 y=20 fontFamily="Fixture" fill=${linear}>Gradient</g.Text>`);
+  await draw(`<g.Rectangle width=100 height=100 fill=${linear}/><g.Circle cx=50 cy=50 r=30 fill=${radial}/><g.Line x1=10 y1=90 x2=90 y2=90 stroke=<g.Stroke paint=${linear} width=3/>/><g.Text x=10 y=20 fontFamily="Fixture" fill=${linear}>Gradient</g.Text>`);
   const gradientPixels = await canvas.evaluate(c => {
     const ctx=c.getContext("2d"); const y=Math.round(c.height*.8);
     return [.2,.8].map(f => [...ctx.getImageData(Math.round(c.width*f),y,1,1).data]);
   });
   assert.ok(gradientPixels[0][0] > 245 && gradientPixels[0][3] > gradientPixels[1][3]);
-  await edit(prefix + `<g.Rect width=100 height=100 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0 y2=0 stops={${gradientStops}}/>/></g.Drawing>`);
+  await edit(prefix + `<g.Rectangle width=100 height=100 fill=<g.Paint.linearGradient x1=0 y1=0 x2=0 y2=0 stops={${gradientStops}}/>/></g.Drawing>`);
   await page.getByRole("alert").filter({hasText:"Drawing could not be rendered"}).waitFor();
   assert.equal(await canvas.count(),0);
   await edit(prefix + '<g.Path data="M0 0 L"/></g.Drawing>');
@@ -418,7 +447,7 @@ try {
   assert.equal(dialogs, 0);
   // Clip holes use their own rule, independently of the shape's fill rule and transforms.
   await draw(
-    '<g.Rect width=100 height=100 fill=<g.Paint.color color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
+    '<g.Rectangle width=100 height=100 fill=<g.Paint.color color=#ff0000/> clipPath="M0 0H100V100H0Z M25 25H75V75H25Z" clipRule=evenodd/>',
   );
   const clip = await canvas.evaluate((canvas) => {
     const ctx = canvas.getContext("2d");
@@ -762,7 +791,7 @@ try {
   await canvas.waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: "Source", exact: true }).click();
   await draw(
-    '<g.Rect x=70 y=5 width=20 height=20 fill=<g.Paint.color color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.color color=#000000/> width=2/>/>',
+    '<g.Rectangle x=70 y=5 width=20 height=20 fill=<g.Paint.color color=#0000ff/>/><g.Line x1=0 y1=100 x2=100 y2=0 stroke=<g.Stroke paint=<g.Paint.color color=#000000/> width=2/>/>',
   );
   await canvas.evaluate((canvas) => {
     const box = canvas.getBoundingClientRect();
@@ -779,7 +808,7 @@ try {
     "element/children/0",
   );
   console.log(
-    "Canvas hit-testing selects the painted Rect beneath a Line's bounding box.",
+    "Canvas hit-testing selects the painted Rectangle beneath a Line's bounding box.",
   );
 
   const textSource =
@@ -857,7 +886,7 @@ try {
         await setSource(
           prefix +
             "<g.Group opacity=0.9>".repeat(14) +
-            "<g.Rect width=10 height=10/>" +
+            "<g.Rectangle width=10 height=10/>" +
             "</g.Group>".repeat(14) +
             "</g.Drawing>",
         );
@@ -871,34 +900,38 @@ try {
     "DPR 1/2/4 text stays inside physical painted bounds; high-DPR surfaces and nested opacity fit resource limits.",
   );
 
-  if (process.env.NX_PLAYGROUND_PREVIEW !== "1") {
-    const metrics = await page.evaluate(async () => {
-      const { measureBrowserText } = await import(
-        "/play/src/graphics/browser-font.ts"
-      );
-      const request = {
-        text: "Hello world",
-        family: "Fixture",
-        weight: 400,
-        italic: false,
-      };
-      return await Promise.all(
-        [0.01, 0.04, 4, 16, 20000].map(async (size) => ({
-          size,
-          run: (await measureBrowserText({ ...request, size })).run,
-        })),
-      );
-    });
-    const em = metrics[0].run.advance / metrics[0].size;
-    for (const { size, run } of metrics) {
-      assert.ok(Math.abs(run.advance / size - em) < 1e-8);
-      assert.ok(run.ink.rect.y0 / size < -0.76);
-      assert.ok(run.ink.rect.y1 > 0);
-    }
-    console.log(
-      "Browser text scales consistently from tiny through very large local sizes.",
+  const metrics = await page.evaluate(async () => {
+    const { measureBrowserText } = globalThis.NXGraphicsBrowserTest;
+    const request = {
+      text: "Hello world",
+      family: "Fixture",
+      weight: 400,
+      italic: false,
+    };
+    return await Promise.all(
+      [0.01, 0.04, 4, 16, 20000].map(async (size) => ({
+        size,
+        run: (await measureBrowserText({ ...request, size })).run,
+      })),
     );
+  });
+  const em = metrics[0].run.advance / metrics[0].size;
+  for (const { size, run } of metrics) {
+    assert.ok(Math.abs(run.advance / size - em) < 1e-8);
+    assert.ok(run.ink.rect.y0 / size < -0.76);
+    assert.ok(run.ink.rect.y1 > 0);
   }
+  console.log(
+    "Browser text scales consistently from tiny through very large local sizes.",
+  );
+  await page.goto(base + "gradients");
+  await page.locator("canvas.drawing-canvas[data-revision]").waitFor({ state: "visible" });
+  const gradientElements = await page.getByRole("combobox", { name: "Drawing element", exact: true })
+    .locator("option").allTextContents();
+  const gradientDeclarations = gradientElements.map((label) => label.split(" · ")[0].trim());
+  assert.ok(gradientDeclarations.includes("Rectangle"));
+  assert.ok(!gradientDeclarations.includes("Rect"));
+  console.log("The gradients playground example renders with shared Rect data and Rectangle elements.");
   assert.deepEqual(errors, []);
   console.log(
     "Canvas Drawing renders, revises, measures supplied fonts, isolates opacity, respects clip holes, inspects, rejects invalid scenes and preserves component Preview.",

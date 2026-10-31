@@ -1,0 +1,82 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "@nx/geometry/geometry.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "root",
+      "case": "value",
+      "arguments": []
+    },
+    {
+      "module": "main.nx",
+      "function": "unbounded",
+      "case": "value",
+      "arguments": []
+    },
+    {
+      "module": "main.nx",
+      "function": "point",
+      "case": "fractional",
+      "arguments": [
+        1000000000000.125
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "point",
+      "case": "max",
+      "arguments": [
+        1.7976931348623157e+308
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "point",
+      "case": "negativeMax",
+      "arguments": [
+        -1.7976931348623157e+308
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "rect",
+      "case": "negative",
+      "arguments": [
+        -1
+      ],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "size",
+      "case": "negative",
+      "arguments": [
+        -1
+      ],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "overflow",
+      "case": "infinite",
+      "arguments": [
+        1e+308
+      ],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "nan",
+      "case": "computed",
+      "arguments": [
+        1e+308
+      ],
+      "fails": true
+    }
+  ],
+  "recordFailures": true
+}
