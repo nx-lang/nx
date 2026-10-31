@@ -21,7 +21,10 @@ function treeSitterKeywords(source: string): string[] {
   const terminalsOnly = withoutComments
     // `field('name', …)` and the grammar's own `name:` are metadata, not terminals.
     .replace(/field\(\s*'[^']*'\s*,/g, 'field(')
-    .replace(/\bname:\s*'[^']*'/g, 'name:');
+    .replace(/\bname:\s*'[^']*'/g, 'name:')
+    // A named precedence, `prec('match_arm_body', …)` and its entry in `precedences`, is a name.
+    .replace(/\bprec(\.(left|right|dynamic))?\(\s*'[^']*'\s*,/g, 'prec(')
+    .replace(/precedences:\s*\$\s*=>\s*\[[\s\S]*?\n\s*\],/, '');
 
   const keywords = new Set<string>();
   for (const [, literal] of terminalsOnly.matchAll(/'([a-z][a-z0-9_]*)'/g)) {
