@@ -395,7 +395,7 @@ applies to it.
 
 ## New Findings Discovered During 2026-10-31 03:38 Verification
 
-### 🟡 Fixed - RF14 A sibling field that shares its name with a constrained top-level value proves the default that reads it, so the default gets no check
+### ✅ Verified - RF14 A sibling field that shares its name with a constrained top-level value proves the default that reads it, so the default gets no check
 - **Severity:** Low
 - **Evidence:** A record or union-case default is typed without its sibling fields in scope, so a
   sibling name resolves to whatever an outer scope binds under that name. With
@@ -456,6 +456,18 @@ applies to it.
   `a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name` and the `let t: string` case
   to `a_default_is_not_typed_by_a_top_level_value_sharing_a_field_name`.
 - **Fix (2):** `validate_local_union_defaults` now also binds the fields of the union's abstract base (from `effective_record_shape` of `union_def.base`) as unknown, beside each case's own fields. With `let w: int where >= 0 = 5`, `type Shape extends Base = | dot { … k: int where >= 0 = {w} }` checks `k`, and `let t: string` no longer types a case default `{t}`. Both tests gain the inherited-base case. The 168-character line in `specs/future.md` is rewrapped.
+- **Verification (2):** Confirmed. `validate_local_union_defaults` binds the base's effective
+  fields (all levels) beside each case's own. Re-tried with `nxlang ir explain` and the TypeScript
+  runtime: the union-base example above now emits `(check k: w as int where >= 0)` and
+  `<Shape.dot w={0 - 7} … />` fails with `nx-ir-constraint`, not `nx-ir-boundary-constraint`; with
+  `let t: string`, a case default `{t}` reading the base's `t: int` is clean. A field inherited
+  through two abstract bases (`Mid extends Top`, `{w}` from `Top` and `{m}` from `Mid`) is checked,
+  also when both bases are in another module of a workspace. A case whose base lacks the name still
+  reads the top-level value (`{t}` with `Base = { w: int }` is a `string` mismatch, rightly).
+  Non-field names still type normally (`{limit}` and `{helper(1)}` get no check), `{"s"}` and `{5}`
+  are still `union-case-default-type-mismatch`, and `{zzz}` is still refused by the emitter. The new
+  test cases cover the IR and checker halves. The `specs/future.md` paragraph is now wrapped at 100.
+  `cargo test -p nx-types`, `-p nx-codegen --lib` and `openspec validate --strict` pass.
 
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
@@ -521,3 +533,8 @@ applies to it.
   `nx-ir-boundary-constraint` at run time) or falsely mistyped. No new findings. Re-run: `cargo test
   -p nx-types`, `-p nx-codegen --lib`, `-p nx-language-service -p nx-interpreter -p nx-api`, and
   `openspec validate --strict`.
+- Verification (2026-10-31, commit `0c148f0`): RF14 is verified: a union case's default now reads
+  the fields it inherits from the union's abstract base (local, imported or several levels up) as
+  unknown, so a same-named top-level value neither proves nor mistypes it. Every finding is now
+  verified or resolved. No new findings. Re-run: `cargo test -p nx-types`, `-p nx-codegen --lib`,
+  and `openspec validate --strict`.
