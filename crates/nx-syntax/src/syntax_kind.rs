@@ -113,6 +113,10 @@ pub enum SyntaxKind {
     VALUE_MATCH_EXPRESSION,
     ELEMENTS_MATCH_EXPRESSION,
     PATTERN,
+    NUMERIC_PATTERN,
+    RANGE_PATTERN,
+    COMPARISON_PATTERN,
+    WHERE_CLAUSE,
 
     // === If Expression Parts ===
     VALUE_IF_SIMPLE_EXPRESSION,
@@ -479,6 +483,10 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "value_match_expression" => SyntaxKind::VALUE_MATCH_EXPRESSION,
         "elements_match_expression" => SyntaxKind::ELEMENTS_MATCH_EXPRESSION,
         "pattern" => SyntaxKind::PATTERN,
+        "numeric_pattern" => SyntaxKind::NUMERIC_PATTERN,
+        "range_pattern" => SyntaxKind::RANGE_PATTERN,
+        "comparison_pattern" => SyntaxKind::COMPARISON_PATTERN,
+        "where_clause" => SyntaxKind::WHERE_CLAUSE,
         "literal" => SyntaxKind::LITERAL,
         "string_literal" => SyntaxKind::STRING_LITERAL,
         "number_literal" => SyntaxKind::NUMBER_LITERAL,

@@ -1,0 +1,26 @@
+type Ratio = float32 where in 0.0..=1.0
+type Pan = float32 where in -1.0..=1.0
+type Unit = float64 where > 0.0 && < 1.0
+type Low = Ratio where <= 0.5
+
+type Paint = {
+  opacity: float64 where in 0.0..=1.0 = 1.0
+  layer: int
+  depth?: int where >= 0
+  where: string
+}
+
+let fade(amount: float32 where in 0.0..=1.0, steps: int where >= 1): int where >= 0 = { steps }
+
+let half: float64 where <= 1.0 = 0.5
+
+let describe(x: float64) = {
+  if x is {
+    in 0.0..1.0 => "valid"
+    > 1.0 => "too big"
+    < 0.0 => "too small"
+    else => "one"
+  }
+}
+
+let flag(n: int) = { if n is { < 0, > 100 => "out" > 0 && <= 10 => "low" } }

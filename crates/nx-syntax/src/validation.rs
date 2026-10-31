@@ -1274,7 +1274,12 @@ fn validate_external_function_definitions(
                     .build(),
             );
         }
-        if function.has_error() {
+        // A half-typed declaration (`external cos(` before the next line) can end at the `(`,
+        // with the rest in an error node glued to it; the parse error already covers it.
+        let runs_into_error = function
+            .next_sibling()
+            .is_some_and(|next| next.is_error() && next.start_byte() == function.end_byte());
+        if function.has_error() || runs_into_error {
             continue;
         }
         let has_parameters = function

@@ -213,6 +213,60 @@
     }
   },
   {
+    "type": "comparison_pattern",
+    "named": true,
+    "fields": {
+      "bound": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "int_literal",
+            "named": true
+          },
+          {
+            "type": "real_literal",
+            "named": true
+          },
+          {
+            "type": "signed_numeric_literal",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "!=",
+            "named": false
+          },
+          {
+            "type": "<",
+            "named": false
+          },
+          {
+            "type": "<=",
+            "named": false
+          },
+          {
+            "type": ">",
+            "named": false
+          },
+          {
+            "type": ">=",
+            "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "component_body",
     "named": true,
     "fields": {
@@ -1226,6 +1280,40 @@
     }
   },
   {
+    "type": "numeric_pattern",
+    "named": true,
+    "fields": {
+      "operator": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "&&",
+            "named": false
+          },
+          {
+            "type": "||",
+            "named": false
+          }
+        ]
+      },
+      "term": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "comparison_pattern",
+            "named": true
+          },
+          {
+            "type": "range_pattern",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "optional_member_expression",
     "named": true,
     "fields": {
@@ -1292,6 +1380,10 @@
       "types": [
         {
           "type": "literal",
+          "named": true
+        },
+        {
+          "type": "numeric_pattern",
           "named": true
         },
         {
@@ -1646,6 +1738,70 @@
     }
   },
   {
+    "type": "range_pattern",
+    "named": true,
+    "fields": {
+      "end": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "int_literal",
+            "named": true
+          },
+          {
+            "type": "real_literal",
+            "named": true
+          },
+          {
+            "type": "signed_numeric_literal",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "..",
+            "named": false
+          },
+          {
+            "type": "..=",
+            "named": false
+          }
+        ]
+      },
+      "start": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "int_literal",
+            "named": true
+          },
+          {
+            "type": "real_literal",
+            "named": true
+          },
+          {
+            "type": "signed_numeric_literal",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "raw_text_run",
     "named": true,
     "fields": {},
@@ -1926,7 +2082,18 @@
   {
     "type": "type",
     "named": true,
-    "fields": {},
+    "fields": {
+      "constraint": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "where_clause",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": false,
       "required": true,
@@ -2547,6 +2714,26 @@
     }
   },
   {
+    "type": "where_clause",
+    "named": true,
+    "fields": {
+      "pattern": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "numeric_pattern",
+            "named": true
+          },
+          {
+            "type": "value_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "wildcard_import",
     "named": true,
     "fields": {
@@ -2890,6 +3077,10 @@
   },
   {
     "type": "visualizer",
+    "named": false
+  },
+  {
+    "type": "where",
     "named": false
   },
   {

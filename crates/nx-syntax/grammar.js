@@ -61,6 +61,12 @@ module.exports = grammar({
     [$.value_definition, $.function_definition],
     [$.property_definition],
     [$._component_property_definition],
+    [$.type],
+    [$.binary_expression, $.value_if_match_arm],
+  ],
+
+  precedences: $ => [
+    ['match_arm_body'],
   ],
 
   word: $ => $.identifier,
@@ -243,7 +249,12 @@ module.exports = grammar({
     // function type itself is written `(<function />: string)?`. Every suffix is admitted here,
     // and `[]` still parses, so that post-parse validation can report a second suffix and a `[]`
     // by name rather than as a bare parse error.
-    type: $ => prec.right(seq(
+    type: $ => seq(
+      $._type_core,
+      optional(field('constraint', $.where_clause)),
+    ),
+
+    _type_core: $ => prec.right(seq(
       choice(
         $.primitive_type,
         $.user_defined_type,
@@ -258,6 +269,19 @@ module.exports = grammar({
         seq('[', ']'), // removed; validation names `*` and `+`
       )),
     )),
+
+    // `where` and a value pattern with no operand: `float32 where in 0.0..=1.0`. `where` is a
+    // keyword only here, after a type; a field named `where` that directly follows another field's
+    // type is told apart by the `:` or `?:` after it. A leading operand (`where value >= 1`) or any
+    // other expression parses as `value_expression`, so the checker can name it rather than leave
+    // a bare parse error.
+    where_clause: $ => seq(
+      'where',
+      field('pattern', choice(
+        $.numeric_pattern,
+        prec.dynamic(-1, $.value_expression),
+      )),
+    ),
 
     // A function type is an element function's signature with `function` in the name slot and
     // the result type after `/>`: `<function Item:Contact Index:int />: DrawnNode`. `function` is
@@ -470,6 +494,20 @@ module.exports = grammar({
     _component_field_name: $ => choice(
       $.identifier,
       $.markup_identifier,
+      alias('where', $.identifier),
+    ),
+
+    // `where` is a keyword after a type, so a field named `where` that directly follows another
+    // field's type lexes as the keyword; the `:` or `?:` after it makes it a name.
+    _property_modifier: $ => choice(
+      $.markup_identifier,
+      alias($.identifier, $.markup_identifier),
+    ),
+
+    _property_name: $ => choice(
+      $.markup_identifier,
+      alias($.identifier, $.markup_identifier),
+      alias('where', $.markup_identifier),
     ),
 
     // `name?:type` marks a property optional: it may be omitted at construction and reads as a
@@ -477,7 +515,7 @@ module.exports = grammar({
     // there are the type checker's to reject with the `name?:` fix-it.
     property_definition: $ => choice(
       seq(
-        field('name', $.markup_identifier),
+        field('name', $._property_name),
         optional(field('optional', '?')),
         ':',
         field('type', $._property_type),
@@ -487,8 +525,8 @@ module.exports = grammar({
         )),
       ),
       seq(
-        field('modifier', $.markup_identifier),
-        field('name', $.markup_identifier),
+        field('modifier', $._property_modifier),
+        field('name', $._property_name),
         optional(field('optional', '?')),
         ':',
         field('type', $._property_type),
@@ -731,7 +769,7 @@ module.exports = grammar({
       '}',
     ),
 
-    value_if_match_arm: $ => seq(
+    value_if_match_arm: $ => prec('match_arm_body', seq(
       $.pattern,
       repeat(seq(',', $.pattern)),
       '=>',
@@ -739,7 +777,7 @@ module.exports = grammar({
         $.value_expression,
         $.values_braced_expression,
       )),
-    ),
+    )),
 
     value_if_condition_list_expression: $ => seq(
       'if',
@@ -1086,6 +1124,42 @@ module.exports = grammar({
       $.signed_numeric_literal,
       $.qualified_name,
       seq('{', '}'),
+      $.numeric_pattern,
+    ),
+
+    // A numeric value pattern: range and comparison terms joined by `&&`, matched against the
+    // value being constrained or the scrutinee, with no operand written. `||` and `!=` parse so
+    // that the checker can name them as unsupported.
+    numeric_pattern: $ => prec.left(seq(
+      field('term', $._numeric_pattern_term),
+      repeat(seq(
+        field('operator', choice('&&', '||')),
+        field('term', $._numeric_pattern_term),
+      )),
+    )),
+
+    _numeric_pattern_term: $ => choice(
+      $.range_pattern,
+      $.comparison_pattern,
+    ),
+
+    range_pattern: $ => seq(
+      'in',
+      field('start', $._pattern_bound),
+      field('operator', choice('..', '..=')),
+      field('end', $._pattern_bound),
+    ),
+
+    comparison_pattern: $ => seq(
+      field('operator', choice('<', '<=', '>', '>=', '!=')),
+      field('bound', $._pattern_bound),
+    ),
+
+    _pattern_bound: $ => choice(
+      $.int_literal,
+      $.real_literal,
+      $.hex_literal,
+      $.signed_numeric_literal,
     ),
 
     // ===== Names =====
