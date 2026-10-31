@@ -176,6 +176,11 @@ fn a_default_is_not_typed_by_a_top_level_value_sharing_a_field_name() {
     // The default reads the sibling `a`, an `int`, not the top-level `string`.
     assert_clean("let a: string = \"x\"\ntype Box = { a: int  c: int = {a} }");
     assert_clean("let a: string = \"x\"\ntype Shape =\n  | dot { a: int  c: int = {a} }");
+    // A field the case inherits from the union's abstract base.
+    assert_clean(
+        "let a: string = \"x\"\nabstract type Base = { a: int }\n\
+         type Shape extends Base =\n  | dot { c: int = {a} }",
+    );
 }
 
 #[test]

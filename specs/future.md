@@ -1033,9 +1033,11 @@ It left these for later:
   on a sibling's type is checked when it runs, whatever that type is:
   `{ a: int where >= 0  c: int where >= 0 = {a} }` checks `c` though `a` already satisfies it. (A
   default whose type does not depend on a sibling, such as a call with a constrained return type, is
-  treated as anywhere else.) Typing a default with the fields' declared types would drop that check and would also report a default that does not fit its field, such as
+  treated as anywhere else.) Typing a default with the fields' declared types would drop that check
+  and would also report a default that does not fit its field, such as
   `{ n: int  label: string = {n} }`, at compile time rather than when it runs. That second effect
-  changes what programs compile (some runtime tests rely on such a default), so it is its own change.
+  changes what programs compile (some runtime tests rely on such a default), so it is its own
+  change.
 - **Naming the alias in `constraint-violation`.** The message spells the site's resolved type, so
   `type Low = Ratio where <= 0.5` with `let l: Low = 0.75` names `float32 where in 0.0..=0.5`, not
   `Low`. Naming the alias the site was written with, beside the resolved interval, would point the

@@ -3186,6 +3186,12 @@ fn a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name() {
          type Shape =\n\
          \x20 | dot { a: int  c: int where >= 0 = {a} }\n\
          let main(): Shape = <Shape.dot a=1 />",
+        // A field the case inherits from the union's abstract base.
+        "let a: int where >= 0 = 5\n\
+         abstract type Base = { a: int }\n\
+         type Shape extends Base =\n\
+         \x20 | dot { r: int  c: int where >= 0 = {a} }\n\
+         let main(): Shape = <Shape.dot a=1 r=2 />",
     ] {
         let text = explain_source(source);
         assert_contains(&text, "(check c: a as int where >= 0)");

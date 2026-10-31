@@ -7892,11 +7892,24 @@ impl<'a> InferenceContext<'a> {
         let local_items = self.module.raw_module().items().to_vec();
         for item in local_items {
             if let Item::Union(union_def) = item {
+                // As for a record: a default reads the case's own fields and those of the union's
+                // abstract base, each bound as unknown.
+                let base_field_names: Vec<Name> = match union_def.base.as_ref() {
+                    Some(base) => match self.effective_record_shape(base) {
+                        Ok(Some(shape)) => {
+                            shape.fields.into_iter().map(|field| field.name).collect()
+                        }
+                        _ => Vec::new(),
+                    },
+                    None => Vec::new(),
+                };
                 for case in &union_def.cases {
-                    // As for a record: a default reads the case's own fields, bound as unknown.
                     self.env.push_scope();
-                    for field in &case.fields {
-                        self.env.bind(field.name.clone(), Type::Error);
+                    for name in base_field_names
+                        .iter()
+                        .chain(case.fields.iter().map(|field| &field.name))
+                    {
+                        self.env.bind(name.clone(), Type::Error);
                     }
                     for field in &case.fields {
                         // Resolved whether or not it has a default, so a type reference that names

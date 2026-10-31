@@ -206,7 +206,7 @@ applies to it.
 
 ## New Findings Discovered During 2026-10-31 03:15 Verification
 
-### 🟡 Fixed - RF9 A record or union-case default read from a sibling field is checked even when the sibling's type already satisfies the constraint
+### ✅ Verified - RF9 A record or union-case default read from a sibling field is checked even when the sibling's type already satisfies the constraint
 - **Severity:** Low
 - **Evidence:** The RF1 fix records a check whenever the default's type is `Error` at validation
   time (`check_typed_binding_for`, `crates/nx-types/src/infer.rs:6972-6988`), which is every default
@@ -277,6 +277,19 @@ applies to it.
   both a record and a union case is not, as the positive half says. See also RF14, where a
   default that depends on a sibling gets no check.
 - **Fix (3):** The spec sentence now ends as proposed: a default whose type depends on a field's type is checked whatever that field's declared type, a top-level value sharing the field's name does not type it (RF14), and any other default is checked only when its type does not satisfy the field, as any other value is. The website says "whose type depends on another field" and covers union cases; `specs/future.md` says "treated as anywhere else"; `design.md` matches.
+- **Verification (3):** Confirmed. The spec sentence now matches the emitter in every case tried
+  with `nxlang ir explain`: defaults whose type depends on a field are checked (`{a}`, `{a - 1}`,
+  `{a + a}`, `{o ?? 3}` with `o?: int`, an `if` returning a sibling, the union-case `{r}`, and `{w}`
+  read from a field inherited through two abstract bases); any other default is checked only when
+  its type does not satisfy the field (`{inc(a)}`, `{five()}`, an `if` of literals and the union-case
+  `{inc(1)}` are checked; `{abs0(a)}`, an `if` whose branches are `abs0(…)` calls, the union-case
+  `{abs0(1)}`, `{limit}` with `let limit: int where >= 0 = 3`, `{helper(1)}` with a constrained
+  return, and the constant `3` are not; `{0 - 1}` is `constraint-violation` at compile time). A
+  sibling passed to a constrained parameter (`{g(a)}`) is checked at the call. `design.md` decision 5,
+  the website's "Where values are checked" (now "record or union-case" and "whose type depends on
+  another field") and `specs/future.md` agree with it. One nit: the rewritten `specs/future.md`
+  sentence leaves a 168-character line (line 1036) where the paragraph is otherwise wrapped at 100.
+  The spec's "each of its record's or case's fields" is what RF14 is reopened against.
 
 ### ✅ Verified - RF10 The comma heuristic reports a field separator or a stray parameter comma as a constraint listing alternatives
 - **Severity:** Low
@@ -408,6 +421,41 @@ applies to it.
   If that is not wanted now, record it in `specs/future.md` and say in `value-constraints` that a
   sibling name resolves to an outer binding when one exists.
 - **Fix:** `validate_local_record_defaults` binds every field of the record, inherited ones included (from `effective_record_shape`), as `Type::Error` in a scope pushed for its defaults, and `validate_local_union_defaults` does the same per case. A sibling read is therefore unknown whatever top-level value shares its name: `let a: int where >= 0` no longer proves `{a}` (now checked), and `let a: string` no longer makes `{ a: int  c: int = {a} }` a type error. Tests: `a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name` (IR, record and union case) and `a_default_is_not_typed_by_a_top_level_value_sharing_a_field_name` (checker). All nx-types, nx-syntax, nx-codegen, nx-interpreter, nx-language-service and nx-api tests pass.
+- **Verification:** The record path is fixed, but a union case still misses the fields it inherits
+  from the union's abstract base. Confirmed with `nxlang ir explain` and the TypeScript runtime:
+  with `let a: int where >= 0 = 5`, the record `{ a: int  c: int where >= 0 = {a} }` and the union
+  case `dot { a: int  c: … = {a} }` now emit `(check c: a …)` and `<Box a={0 - 7} />` fails with
+  `nx-ir-constraint`; a record default reading a field inherited through two abstract bases
+  (`type Kid extends Mid`, `Mid extends Base`, `k: int where >= 0 = {w}` under a top-level
+  `let w: int where >= 0`) is checked, also when `Base` is in another module of a workspace, and
+  so is a default on the abstract base itself. A case that does not have the field
+  (`sq { s: int  c: … = {a} }`) still reads the top-level `a` with no check, which is right.
+  Defaults that read a non-field
+  top-level value or function still type normally (`{limit}` and `{helper(1)}` get no check), an
+  outright mismatch with no sibling read is still `record-default-type-mismatch` /
+  `union-case-default-type-mismatch` (`{5}` at `string`, `{"s"}` at a constrained `int`), and
+  `{zzz}` is still refused by the emitter ("Name 'zzz' reaches no binding …"), since lookup of a
+  non-field name is unchanged. But `validate_local_union_defaults` binds only `case.fields`, not the
+  fields of `union_def.base`:
+  ```nx
+  let w: int where >= 0 = 5
+  abstract type Base = { w: int  t: int }
+  type Shape extends Base =
+    | dot { r: int  k: int where >= 0 = {w} }
+  let main(): Shape = <Shape.dot w={0 - 7} t=1 r=1 />
+  ```
+  emits `k: int where >= 0 = w` with no check, and `main()` fails in the TypeScript runtime with
+  `nx-ir-boundary-constraint` ("Expected Shape.dot.k to be in >= 0, got -7."), the RF1 symptom.
+  Likewise `let t: string = "x"` with a case `sq { s: int  u: int = {t} }` still reports "Default
+  value for union case field 'Shape.sq.u' expects int, found string". The spec now says a default is
+  typed with each of its "case's fields" as unknown, and inherited fields are the case's fields
+  (`ir explain` lists `w` and `t` under `case dot`). Still to do: in
+  `validate_local_union_defaults`, also bind the base's effective fields per case (the shape
+  `check_element_bindings_against_union_case` reads for `union_def.base`,
+  `crates/nx-types/src/infer.rs:5229-5236`), and add the union-with-base case to
+  `a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name` and the `let t: string` case
+  to `a_default_is_not_typed_by_a_top_level_value_sharing_a_field_name`.
+- **Fix (2):** `validate_local_union_defaults` now also binds the fields of the union's abstract base (from `effective_record_shape` of `union_def.base`) as unknown, beside each case's own fields. With `let w: int where >= 0 = 5`, `type Shape extends Base = | dot { … k: int where >= 0 = {w} }` checks `k`, and `let t: string` no longer types a case default `{t}`. Both tests gain the inherited-base case. The 168-character line in `specs/future.md` is rewrapped.
 
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
@@ -464,3 +512,12 @@ applies to it.
   constrained top-level value proves the default that reads it. Re-run: `cargo test -p nx-types
   --test value_constraints`, `-p nx-syntax`, `-p nx-codegen --lib` (default, sibling, check and
   constraint tests), and `openspec validate --strict`.
+- Verification (2026-10-31, commit `ea5b5ad`): RF9 is verified: the spec, `design.md`, the website
+  and `specs/future.md` now match what the emitter checks across sibling reads, arithmetic, `??`,
+  `if`, calls with constrained and unconstrained returns, constants, union cases and inherited
+  record fields. RF14 is reopened: records (inherited fields included) and union cases' own fields
+  now shadow a same-named top-level value, but a union case's fields inherited from the union's
+  abstract base do not, so such a default is still proven by the top-level value (no check,
+  `nx-ir-boundary-constraint` at run time) or falsely mistyped. No new findings. Re-run: `cargo test
+  -p nx-types`, `-p nx-codegen --lib`, `-p nx-language-service -p nx-interpreter -p nx-api`, and
+  `openspec validate --strict`.
