@@ -247,6 +247,36 @@ applies to it.
   (`reference/syntax/types.md`), which state the general rule with no exception. An IR assertion
   that `{abs0(a)}` gets no check would pin the boundary.
 - **Fix (2):** The sentence now says what the emitter does: a record or union-case default is typed without its sibling fields in scope, so a default whose type depends on a sibling field's type is checked when it runs, and one whose type does not (a call with a constrained return type) is not. The `Stroke` scenario gains an `{abs0(width)}` case with no check. `specs/future.md`, `design.md` decision 5 and the website's "Where values are checked" say the same. The IR test, renamed `a_default_whose_type_depends_on_a_sibling_field_is_always_checked`, also asserts `viaFn = {abs0(a)}` gets no check.
+- **Verification (2):** The positive half now matches the emitter, and `design.md` decision 5 is
+  accurate. But the negative half is too broad, and the website keeps the old overstatement:
+  - The spec's last clause says a default whose type does not depend on a sibling field's type
+    "SHALL NOT" be checked. The parenthetical is only an example, so the clause also covers defaults
+    whose type does not satisfy the field, and those are (rightly) checked by the general rule. In
+    `type Box = { a: int where >= 0 … }`, `nxlang ir explain` shows a check on `{inc(a)}` with
+    `let inc(x: int): int`, on `{abs0(a) - 1}`, on `{ if a > 0 { 1 } else { 2 } }` (an `if` of
+    literals is `int`, checked in a function result too) and on `{five()}`, which reads no sibling at
+    all; the union case `dot { a: int  e: int where >= 0 = {inc(a)} }` likewise. Each one's type
+    does not depend on a sibling, so the requirement forbids the check it needs. The rule the
+    emitter follows (`check_typed_binding_for`, `crates/nx-types/src/infer.rs:6971-6987`) is: a
+    default whose type is unknown because it depends on a sibling is always checked, and any other
+    default is checked exactly when its type does not satisfy the field, as anywhere else.
+  - The website (`reference/syntax/types.md`, "Where values are checked") says "a default computed
+    from another field … is checked when it runs". `{abs0(width)}` is computed from another field
+    and gets no check: this is the wording the previous verification reopened the spec for. It also
+    names only record fields, though union-case defaults behave the same.
+  - `specs/future.md` says such a default "is proven by that type as anywhere else". `{inc(a)}` is
+    not proven; "is treated as anywhere else" (proven when its type satisfies the field, checked
+    otherwise) would be exact.
+
+  Still to do: end the spec sentence with "and any other default is checked only when its type does
+  not satisfy the field, as anywhere else (a call whose return type satisfies it gets no check)",
+  say "a default whose type depends on another field" (and "record or union-case") on the website,
+  and adjust `specs/future.md` as above. The IR test and the `Stroke` scenario's `{abs0(width)}`
+  case are right as they are. `{a}` and `{a - 1}`, `{a + a}`, `{o ?? 3}` with `o?: int`, an `if`
+  returning a sibling, and the union-case `{a}` and `{r * 2.0}` are all checked, and `{abs0(a)}` in
+  both a record and a union case is not, as the positive half says. See also RF14, where a
+  default that depends on a sibling gets no check.
+- **Fix (3):** The spec sentence now ends as proposed: a default whose type depends on a field's type is checked whatever that field's declared type, a top-level value sharing the field's name does not type it (RF14), and any other default is checked only when its type does not satisfy the field, as any other value is. The website says "whose type depends on another field" and covers union cases; `specs/future.md` says "treated as anywhere else"; `design.md` matches.
 
 ### ✅ Verified - RF10 The comma heuristic reports a field separator or a stray parameter comma as a constraint listing alternatives
 - **Severity:** Low
@@ -316,7 +346,7 @@ applies to it.
 
 ## New Findings Discovered During 2026-10-31 03:32 Verification
 
-### 🟡 Fixed - RF13 A constraint whose alternative is on the next line is no longer named
+### ✅ Verified - RF13 A constraint whose alternative is on the next line is no longer named
 - **Severity:** Low
 - **Evidence:** The RF10 fix finds the text after the comma by skipping only spaces and tabs
   (`constraint_comma`, `crates/nx-syntax/src/validation.rs:1843-1845`), then requires
@@ -336,6 +366,48 @@ applies to it.
   `a_comma_in_a_constraint_is_named_not_a_parse_error` and a record with one field per line
   (`a: int where >= 0,` then `b: int`) to `a_separator_comma_after_a_constraint_is_a_plain_syntax_error`.
 - **Fix:** `constraint_comma` skips all whitespace after the comma, newlines included. The two-line `type Edge = int where < 0,` / `> 9` case is in `a_comma_in_a_constraint_is_named_not_a_parse_error`, and a record with one field per line (`a: int where >= 0,` then `b: int`) is in `a_separator_comma_after_a_constraint_is_a_plain_syntax_error`; both pass.
+- **Verification:** Confirmed. `constraint_comma` now skips `c.is_whitespace()` after the comma.
+  Re-tried through `nxlang codegen`: an alternative on the next line (`> 9`, `in 7..=9`, `-5`
+  after a blank line, `.5`, with LF or CRLF endings), in a type alias, a multi-line record field and
+  a multi-line parameter list, and a second constrained parameter after a valid
+  `x: int where >= 0,` line, are each named `invalid-constraint` at the comma. RF10's separators
+  are unchanged with a newline after the comma: a record with one field per line (LF and CRLF, a
+  blank line between, a next field named `inset` or `in_range`), a trailing comma before `}` or
+  `)`, a union-case field separator and a doubled parameter comma across lines all give the general
+  syntax error ("Invalid record definition", "Invalid function definition", "Invalid discriminated
+  union definition"), and a valid multi-line parameter list (`x: int where >= 0,` then `y: int`)
+  still compiles. One case is not named: a line comment between the comma and the next term
+  (`int where < 0, // c` then `> 9`) is a bare syntax error, as it already was after RF10. That is
+  rare enough to leave. `cargo test -p nx-syntax` and `-p nx-types --test value_constraints` pass.
+
+## New Findings Discovered During 2026-10-31 03:38 Verification
+
+### 🟡 Fixed - RF14 A sibling field that shares its name with a constrained top-level value proves the default that reads it, so the default gets no check
+- **Severity:** Low
+- **Evidence:** A record or union-case default is typed without its sibling fields in scope, so a
+  sibling name resolves to whatever an outer scope binds under that name. With
+  ```nx
+  let a: int where >= 0 = 5
+  type Box = { a: int  c: int where >= 0 = {a} }
+  let main(): Box = <Box a={0 - 7} />
+  ```
+  the checker types `{a}` as the top-level `int where >= 0`, which satisfies `c`, so `nxlang ir
+  explain` shows `c: int where >= 0 = a` with no check. At run time the default reads the sibling
+  (`-7`), and the TypeScript runtime refuses the record with `nx-ir-boundary-constraint` ("Expected
+  Box.c to be in >= 0, got -7."), the symptom RF1 fixed, also when the record is only built and read
+  inside the program (`{ (<Box a={0 - 7} />).c }`). `value-constraints` says a default whose type
+  depends on a sibling field's type SHALL be checked; this one is not. (`{a - 0}` in a union case
+  under the same top-level `a` is checked, since `sub` yields plain `int`.) The same mis-resolution
+  outside constraints is older: with `let a: string = "x"`, `{ a: int  c: int = {a} }` reports
+  "Default value for record property 'c' expects int, found string", though the default reads the
+  `int` sibling.
+- **Recommendation:** When typing a record or union-case default, bind each sibling field's name to
+  an unknown type, so it shadows any outer binding: the default is then checked as the spec says,
+  and the bogus string error goes away, while defaults are still not typed against their siblings'
+  types (RF9's decision). Add an IR test with a constrained top-level value named like a sibling.
+  If that is not wanted now, record it in `specs/future.md` and say in `value-constraints` that a
+  sibling name resolves to an outer binding when one exists.
+- **Fix:** `validate_local_record_defaults` binds every field of the record, inherited ones included (from `effective_record_shape`), as `Type::Error` in a scope pushed for its defaults, and `validate_local_union_defaults` does the same per case. A sibling read is therefore unknown whatever top-level value shares its name: `let a: int where >= 0` no longer proves `{a}` (now checked), and `let a: string` no longer makes `{ a: int  c: int = {a} }` a type error. Tests: `a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name` (IR, record and union case) and `a_default_is_not_typed_by_a_top_level_value_sharing_a_field_name` (checker). All nx-types, nx-syntax, nx-codegen, nx-interpreter, nx-language-service and nx-api tests pass.
 
 ## Questions
 - **Answered:** the node's own operation is intended, as for every node, and `docs/nx-ir-format.md`
@@ -385,3 +457,10 @@ applies to it.
   value_constraints`, `-p nx-codegen --lib` (check, constraint, default and corpus tests),
   `-p nx-syntax`, the TypeScript runtime's `npm test` (the rebuilt `dist` matches the commit), and
   `openspec validate --strict`.
+- Verification (2026-10-31, commit `04c1275`): RF13 is verified. RF9 is reopened again: the spec's
+  new "SHALL NOT" clause covers defaults whose type does not depend on a sibling but does not
+  satisfy the field (`{inc(a)}`, `{five()}`), which are rightly checked, and the website still says
+  every default computed from another field is checked. RF14 (Low) is new: a sibling named like a
+  constrained top-level value proves the default that reads it. Re-run: `cargo test -p nx-types
+  --test value_constraints`, `-p nx-syntax`, `-p nx-codegen --lib` (default, sibling, check and
+  constraint tests), and `openspec validate --strict`.

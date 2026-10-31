@@ -172,6 +172,13 @@ fn a_comma_in_a_constraint_is_named_not_a_parse_error() {
 }
 
 #[test]
+fn a_default_is_not_typed_by_a_top_level_value_sharing_a_field_name() {
+    // The default reads the sibling `a`, an `int`, not the top-level `string`.
+    assert_clean("let a: string = \"x\"\ntype Box = { a: int  c: int = {a} }");
+    assert_clean("let a: string = \"x\"\ntype Shape =\n  | dot { a: int  c: int = {a} }");
+}
+
+#[test]
 fn a_violation_spells_the_sites_resolved_interval() {
     let message = reported(
         "type Small = int where < 10\nlet s: Small = 10",

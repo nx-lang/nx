@@ -431,9 +431,10 @@ A value outside the interval fails evaluation with `nx-ir-constraint`, and a val
 fails with `nx-ir-boundary-constraint`, naming the argument. `NaN` fails every constraint. The author
 writes nothing for these checks, and a value checked once is not checked again where it is passed on.
 A [match arm](/reference/syntax/if/#numeric-patterns) narrows its scrutinee to its pattern, so a value
-matched there needs no check. A record field's default is typed without the other fields in scope,
-so a default computed from another field, such as `inset: int where >= 0 = {width - 1}`, is checked
-when it runs even when that field's own type would already satisfy the constraint.
+matched there needs no check. A record or union-case field's default is typed without the other
+fields' types, so a default whose type depends on another field, such as
+`inset: int where >= 0 = {width - 1}`, is checked when it runs even when that field's own type would
+already satisfy the constraint.
 
 The tree-walking interpreter reports every compile-time diagnostic but does not check values when
 the program runs; the IR runtimes do.

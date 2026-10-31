@@ -3176,6 +3176,23 @@ fn a_default_whose_type_depends_on_a_sibling_field_is_always_checked() {
 }
 
 #[test]
+fn a_default_reads_its_sibling_not_a_top_level_value_of_the_same_name() {
+    // The top-level `a` would prove the default; the sibling it reads at run time does not.
+    for source in [
+        "let a: int where >= 0 = 5\n\
+         type Box = { a: int  c: int where >= 0 = {a} }\n\
+         let main(): Box = <Box a=1 />",
+        "let a: int where >= 0 = 5\n\
+         type Shape =\n\
+         \x20 | dot { a: int  c: int where >= 0 = {a} }\n\
+         let main(): Shape = <Shape.dot a=1 />",
+    ] {
+        let text = explain_source(source);
+        assert_contains(&text, "(check c: a as int where >= 0)");
+    }
+}
+
+#[test]
 fn a_sequence_is_checked_by_one_node_over_its_items() {
     let text = explain_source(
         "type Score = int where >= 0\nlet scores(xs: int+): Score+ = { for x in xs { x - 1 } }",

@@ -1028,13 +1028,12 @@ It left these for later:
 - **Signature help.** The language service offers no signature help yet (it is a reserved query).
   When it does, a constrained parameter is to read as hover spells it, `amount: float32 where in
   0.0..=1.0`.
-- **Typing a default against its sibling fields.** A record or union-case default that reads a
-  sibling field is typed without that sibling in scope, so a constrained field's default whose type
-  depends on a sibling's type is checked when it runs, whatever that type is:
+- **Typing a default against its sibling fields.** A record or union-case default is typed with
+  its sibling fields as values of unknown type, so a constrained field's default whose type depends
+  on a sibling's type is checked when it runs, whatever that type is:
   `{ a: int where >= 0  c: int where >= 0 = {a} }` checks `c` though `a` already satisfies it. (A
   default whose type does not depend on a sibling, such as a call with a constrained return type, is
-  proven by that type as anywhere else.) Typing a default with the fields before it in scope
-  would drop that check and would also report a default that does not fit its field, such as
+  treated as anywhere else.) Typing a default with the fields' declared types would drop that check and would also report a default that does not fit its field, such as
   `{ n: int  label: string = {n} }`, at compile time rather than when it runs. That second effect
   changes what programs compile (some runtime tests rely on such a default), so it is its own change.
 - **Naming the alias in `constraint-violation`.** The message spells the site's resolved type, so

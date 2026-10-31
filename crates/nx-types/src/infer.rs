@@ -7765,6 +7765,22 @@ impl<'a> InferenceContext<'a> {
                     }
                 }
                 let previous_scope = std::mem::replace(&mut self.type_parameter_scope, scope);
+                // A default reads the record's own fields, inherited ones included, not a
+                // top-level value that shares a name with one. Their types are not known here, so
+                // each is bound as unknown: a default read from one is typed as unknown and, at a
+                // constrained field, checked when it runs.
+                let mut field_names: Vec<Name> = record_def
+                    .properties
+                    .iter()
+                    .map(|prop| prop.name.clone())
+                    .collect();
+                if let Ok(Some(shape)) = self.effective_record_shape(&record_def.name) {
+                    field_names.extend(shape.fields.iter().map(|field| field.name.clone()));
+                }
+                self.env.push_scope();
+                for name in field_names {
+                    self.env.bind(name, Type::Error);
+                }
                 for prop in &record_def.properties {
                     let expected = self.property_slot_type(prop.span, &prop.name, &prop.ty);
                     if let Some(default_expr) = prop.default {
@@ -7780,6 +7796,7 @@ impl<'a> InferenceContext<'a> {
                         );
                     }
                 }
+                self.env.pop_scope();
                 self.type_parameter_scope = previous_scope;
             }
         }
@@ -7876,6 +7893,11 @@ impl<'a> InferenceContext<'a> {
         for item in local_items {
             if let Item::Union(union_def) = item {
                 for case in &union_def.cases {
+                    // As for a record: a default reads the case's own fields, bound as unknown.
+                    self.env.push_scope();
+                    for field in &case.fields {
+                        self.env.bind(field.name.clone(), Type::Error);
+                    }
                     for field in &case.fields {
                         // Resolved whether or not it has a default, so a type reference that names
                         // nothing usable — a generic record with no arguments, say — is reported
@@ -7897,6 +7919,7 @@ impl<'a> InferenceContext<'a> {
                             );
                         }
                     }
+                    self.env.pop_scope();
                 }
             }
         }
