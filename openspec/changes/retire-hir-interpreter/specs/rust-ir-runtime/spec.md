@@ -1,21 +1,21 @@
 ## ADDED Requirements
 
-### Requirement: CLI source and IR execution use the Rust IR runtime
-The command line's `run` SHALL accept NX source and NX IR with explicit input-format selection.
-Existing source-file invocations SHALL retain their source interpretation. Source execution SHALL
-analyze and compile the selected program to IR before execution. Both input kinds SHALL execute
-through the Rust IR runtime with shared output and diagnostic handling. The CLI SHALL use a default
-budget of 1,000,000 IR operations per invocation. The runtime library's option defaults SHALL remain
-unchanged. No second Rust evaluator or fallback to direct HIR execution SHALL exist.
+### Requirement: CLI source execution uses the Rust IR runtime
+`nxlang run` SHALL execute NX source by analyzing it, emitting NX IR for every module the program
+needs, preparing and linking those images and evaluating the entry module's `root` through the Rust
+IR runtime. Existing `nxlang run <file.nx>` invocations SHALL keep their meaning and output
+formats. The CLI SHALL use a default budget of 1,000,000 IR operations per invocation. The runtime
+library's option defaults SHALL remain unchanged. No second Rust evaluator or fallback to direct
+HIR execution SHALL exist. Running an NX IR file directly is not part of this requirement.
 
-#### Scenario: Running source and its emitted IR produces the same value
-- **WHEN** a caller runs source `let root() = { 1 + 2 }` and runs its emitted IR with explicit IR input selection
-- **THEN** both executions SHALL produce `3` through the Rust IR runtime
+#### Scenario: Running source evaluates its emitted IR
+- **WHEN** a caller runs source `let root() = { 1 + 2 }`
+- **THEN** the CLI SHALL print `3`, computed by the Rust IR runtime from the emitted image
 
-#### Scenario: Imported IR requires supplied modules
-- **WHEN** an input IR image imports a module not supplied by the caller's module catalog or the runtime prelude
-- **THEN** running SHALL fail with a link diagnostic identifying the missing module
-- **AND** SHALL NOT fall back to compiling source or implicitly searching files by the imported identity
+#### Scenario: Root calls an imported module
+- **WHEN** a caller runs a file whose `root` calls a function imported from `../ui`
+- **THEN** the CLI SHALL emit, prepare and link the library module's image beside the entry's
+- **AND** SHALL print the value the imported function returns
 
 #### Scenario: Runtime errors preserve available locations
 - **WHEN** a caller runs a program whose root divides by zero
@@ -46,23 +46,29 @@ convenience APIs or replacement C/.NET execution bindings.
 - **THEN** they SHALL compose build, emission and IR execution in test-only helpers
 - **AND** SHALL NOT require a production source-evaluation export
 
-### Requirement: Rust runtime returns values that keep their NX spelling
-Beside `NxValue` results, the Rust runtime SHALL offer results in a value form in which a constant
-union case is distinguishable from a string and names its union and case, a function value is
-distinguishable from a record and names its declaration, and a `float32` value is distinguishable
-from a `float64`. NX text written from such a value SHALL spell a constant case as its qualified
-case, a function by its name, and a `float32` in its canonical text form, including where the
-value sits at a site typed `object`.
+### Requirement: Rust runtime results keep constant cases and function references
+Beside `NxValue` results, the Rust runtime SHALL offer a read-only view of a result in which a
+constant union case is distinguishable from a string and names its union and case, and a function
+value is distinguishable from a record and names its module and declaration. The view SHALL NOT
+expose the runtime's mutable internals or handler bodies, and the runtime SHALL stay independent of
+the compiler. NX text written from such a view SHALL spell a constant case as its qualified case
+and a function by its name, including where the value sits at a site typed `object`. Numbers SHALL
+be spelled by the type their position declares, as canonical-value formatting spells them; the
+runtime SHALL NOT carry a separate `float32` kind for this.
 
 #### Scenario: An enum case prints as a case
 - **WHEN** `type ThemeMode = light | dark` and `let root(): object = { ThemeMode.dark }` are
   evaluated and the result is written as NX text
 - **THEN** the text SHALL be `ThemeMode.dark` and SHALL NOT be `"dark"`
 
-#### Scenario: A float32 prints as a float32
-- **WHEN** a function returning the `float32` nearest to `0.1` is evaluated and the result is
-  written as NX text
+#### Scenario: A declared float32 prints as a float32
+- **WHEN** `let root(): float32 = { 0.1 }` is evaluated and the result is written as NX text
 - **THEN** the text SHALL be `0.1`
+
+#### Scenario: A float32 at an object site prints as its float64 widening
+- **WHEN** `let f(): float32 = { 0.1 }` and `let root(): object = { f() }` are evaluated and the
+  result is written as NX text
+- **THEN** the text SHALL be the shortest `float64` spelling of the widened value, `0.10000000149011612`
 
 ### Requirement: Rust runtime behavior is validated against the corpus and source-level expectations
 The Rust runtime's tests SHALL prepare, link where the module table requires, and evaluate every
@@ -94,6 +100,24 @@ component lifecycle.
 - **WHEN** a source-level test evaluates an NX program
 - **THEN** the expected value SHALL be stated in the test
 - **AND** SHALL NOT be computed by evaluating the program another way
+
+## MODIFIED Requirements
+
+### Requirement: The Rust IR runtime does not depend on the NX compiler
+The Rust IR runtime SHALL be a crate whose dependency closure contains the NX IR format crate and
+the NX value crate and no crate that parses, lowers, type-checks or emits NX. The NX IR format —
+its constants, kind tables, image writer, validating reader and explainer — SHALL be available from
+a crate that the emitter and the runtime both depend on and that depends on neither.
+
+#### Scenario: A host builds the runtime without the compiler
+- **WHEN** a Rust project depends on the IR runtime crate alone
+- **THEN** the build SHALL NOT compile the NX syntax, HIR, type-checking or codegen
+  crates
+
+#### Scenario: The emitter and the runtime share one format implementation
+- **WHEN** the emitter writes an image and the runtime reads it
+- **THEN** both SHALL use the same schema version, runtime ABI, feature names and kind numbers from
+  the format crate
 
 ## REMOVED Requirements
 

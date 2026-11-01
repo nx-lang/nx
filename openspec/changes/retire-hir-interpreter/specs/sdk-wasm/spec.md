@@ -10,8 +10,9 @@ native export SHALL be reflected in a new ABI version and corresponding wrapper 
 - **THEN** the formatter SHALL return annotated NX text without executing source
 
 #### Scenario: An older wrapper is rejected
-- **WHEN** a wrapper and module disagree on the ABI after the execution export is removed
-- **THEN** loading SHALL report a version mismatch before calling an incompatible export
+- **WHEN** the wrapper built by this change loads a module that still exports `nx_wasm_program_evaluate_nx`
+- **THEN** loading SHALL fail with the version mismatch error, naming versions 12 and 11
+- **AND** it SHALL fail before calling any export whose shape changed
 
 ## MODIFIED Requirements
 
@@ -45,10 +46,6 @@ answers SHALL equal the Node SDK's for the same inputs.
 #### Scenario: Parity with the Node SDK
 - **WHEN** the same workspace importing `@nx/agent` is built through the wasm SDK and the Node SDK
 - **THEN** the emitted entry and library images SHALL be byte-identical and the diagnostics equal
-
-#### Scenario: No new export is needed
-- **WHEN** the built module's exports are compared with those of the release before this change
-- **THEN** this change SHALL have added no export and changed no exchanged shape, so it alone SHALL NOT require a new ABI version
 
 ### Requirement: Program artifacts spell runtime values as annotated NX text
 A program artifact built by the wasm SDK SHALL offer `formatValue(value, options)`, which SHALL take
@@ -115,10 +112,6 @@ the empty string, and an item of a sequence SHALL be addressed by its index.
 - **THEN** the `Button` record's node SHALL carry `/content/0`, the `onTapped` property's node and
   the `ActionHandler` record's node SHALL both carry `/content/0/onTapped`, and the `Row` node SHALL
   carry the empty string
-
-#### Scenario: The ABI version moves with the new export
-- **WHEN** the wrapper for this version loads a module built before `formatValue` existed
-- **THEN** loading SHALL fail with the version mismatch error, naming versions 8 and 7
 
 ## REMOVED Requirements
 

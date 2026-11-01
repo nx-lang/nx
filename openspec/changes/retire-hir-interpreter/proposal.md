@@ -12,12 +12,13 @@ retire that engine and simplify the public APIs instead of rebuilding unused exe
 - Keep source/workspace/library construction, validation, diagnostics, schemas, language services,
   code generation, and program-aware value formatting. `nx-api` continues to expose execution
   through its existing `ir_runtime` namespace; runtime-only Rust hosts use `nx-ir-runtime` directly.
-- Preserve `nxlang run`: compile NX source to IR, prepare/link all required modules and execute the
-  selected entry module. Also support running an NX IR file with explicit input selection; both
-  paths use the same runtime and output handling.
-- Preserve annotated canonical-value formatting (`formatValue`) for the playground and other
-  tooling, removing its dependency on interpreter values. Preserve CLI NX/JSON output, including
-  distinctions needed to spell constant union cases, function references and `float32` values.
+- Preserve `nxlang run <file.nx>`: compile NX source to IR, prepare/link all required modules and
+  execute the selected entry module. Running an NX IR file directly is deferred to its own change.
+- Keep one annotated-NX-text formatter, replacing its interpreter `Value` with a small
+  formatter-owned model. It serves `formatValue` for the playground and other tooling, and CLI
+  NX/JSON output through a read-only Rust runtime result view that keeps constant cases and
+  function references. A `float32` is spelled by its declared type; at an `object` site it prints
+  as its `float64` widening.
 - **BREAKING**: Remove the legacy opaque component-snapshot binding contract and result wrappers.
   No snapshot conversion or replacement binding is added. Existing IR runtime instance storage,
   lifecycle, explicit-state rendering, tokens and atomic dispatch remain supported.
@@ -50,6 +51,14 @@ retire that engine and simplify the public APIs instead of rebuilding unused exe
 - `nx-ir-format`: Generate and check corpus results through the Rust IR runtime.
 - `typescript-ir-runtime`: Compare with the Rust IR runtime rather than the interpreter.
 - `primitive-type-names`: Remove int32-specific native wrapping without extending the integer precision contract.
+- `rust-crate-layering`: Drop `nx-interpreter` from the layering rules.
+- `value-constraints`: Remove the interpreter-only constraint requirement.
+- `artifact-model`, `component-action-handlers`, `conditional-result-types`, `content-properties`,
+  `discriminated-unions`, `external-components`, `implicit-primitive-conversions`, `occurrence-types`,
+  `playground`, `presence-operators`, `range-expressions`, `record-type-inheritance`,
+  `record-type-parameters`, `runtime-standard-functions`, `sequence-model`, `update-records`,
+  `visualizer-declarations`: Name the Rust IR runtime wherever a requirement names the interpreter
+  (usually as one of the engines that must agree), with no change of behavior.
 
 ## Impact
 

@@ -2594,3 +2594,12 @@ not the answer. Confirm by logging the order of events on the server side. If so
 should read and discard the rest of an oversized body before it answers, or answer with
 `Connection: close` and end the socket only after the response is flushed, and the test should
 then pass a few hundred times in a row.
+
+## Running NX IR Files From The CLI
+
+`retire-hir-interpreter` keeps `nxlang run <file.nx>` and leaves out running an `.nxir` file
+directly. That needs its own design: how the input format is chosen (an `--input-format ir` flag or
+the file's header), and how the images an entry imports are found. A caller-supplied catalog
+(`--ir-module <identity>=<path>`) avoids searching the filesystem by an untrusted identity; a
+missing module is then a link diagnostic. The corpus tests and hosts prepare images through the
+runtime API, so nothing needs this yet.

@@ -66,14 +66,14 @@ Node/WASM callers execute emitted images with `@nx-lang/ir-runtime`; Rust caller
 
 ### 2. CLI execution composes existing services
 
-`nxlang run` accepts NX source or NX IR with an explicit input-format choice; existing source-file
-invocations retain their meaning. Use `--input-format nx|ir` (default `nx`) and repeatable
-`--ir-module <identity>=<path>` catalog entries, documented and tested in CLI help. For source, preserve the existing import/build context behavior, reject
-static errors, emit all required module images with debug information, prepare them and link the
-selected entry. For IR, prepare the input image and resolve external modules by identity from an
-explicit caller-supplied module catalog (with the runtime's existing prelude handling). A missing
-module is a link diagnostic, not an implicit compile or filesystem search by untrusted identity.
-Both paths execute the same linked-program API and share output, runtime options and errors.
+`nxlang run <file.nx>` keeps its arguments and output formats. It preserves the existing
+import/build context behavior, rejects static errors, emits every module image the program needs
+(with debug information), prepares them, links the selected entry and evaluates `root`.
+
+Running an NX IR file directly (`--input-format ir`, a module catalog for imported identities) was
+considered and left out. It is a new feature rather than part of retiring an engine, it needs its
+own design for how imported modules are found, and no current caller needs it: the corpus tests and
+hosts already prepare images through the runtime API. It is recorded in `specs/future.md`.
 
 The CLI owns per-invocation prepared modules and the linked program. No execution cache is attached
 to `nx-program::ProgramArtifact`, so no invalidation, clone-sharing or cross-layer dependency is
@@ -90,24 +90,31 @@ debug source locations. Without source/debug information, identify the module/de
 unavailable line/column information rather than fabricate a location. Static errors still prevent
 IR emission/execution. Repeated source compilation is not a new API responsibility.
 
-### 3. Preserve formatting without preserving execution wrappers
+### 3. One formatter, two inputs
 
-There are two distinct formatting inputs:
+Today `format_program_artifact_value` reads canonical JSON into an interpreter `Value`, using the
+declared types to tell a whole `float64` from an `int` and a constant case from a string, and then
+`annotate_nx_text` writes annotated NX text from that `Value`. Keep that shape and replace only the
+interpreter type: a small formatter-owned value model in `nx-api` (scalars, sequences, records,
+constant cases, function references and action handlers) that the annotator writes from. Two
+converters feed it:
 
-- Canonical values from hosts: retain `format_program_artifact_value` / WASM `formatValue` and
-  annotations, using program declarations/types and canonical values directly. Remove the current
-  conversion through `nx_interpreter::Value`. Keep established canonical JSON ambiguities and
-  explicit type/state options; do not silently promise recovery of erased information.
-- CLI runtime results: retain NX spelling and JSON output, including enum cases at `object` sites,
-  function references and `float32` spelling. Expose the smallest read-only runtime result/value
-  view needed by the formatter without exposing mutable runtime internals or adding a source API.
-  Preserve float32 provenance through constants, operations and typed normalization if necessary.
-  Test nested/union/object positions and round-trip formatting explicitly. The runtime remains
-  compiler-independent; program/HIR lookups for annotated formatting stay above it.
+- Canonical values from hosts (`format_program_artifact_value`, WASM `formatValue`): read by the
+  declared types and `type`/`state` options exactly as today, keeping the established canonical
+  JSON ambiguities. No promise to recover erased information.
+- CLI results: the Rust runtime's read-only result view, which already knows constant cases and
+  function references (`Value::Case`, `Value::Function` inside the runtime). Numbers are read by the
+  root's declared result type and declared field types, the same rule the canonical path uses.
 
-Do not add value-returning lifecycle variants only to replace APIs being deleted. Existing canonical
-lifecycle results and runtime instance storage remain sufficient. Rich function-result access is
-justified by CLI spelling and must not alter the existing canonical result contract or IR schema.
+The runtime does not grow a `float32` value kind. It carries every number as a `float64` and rounds
+at `float32` operations and sites, so a `float32` is spelled correctly wherever its position
+declares `float32`. At an `object` or type-parameter site it is spelled as its `float64` widening.
+This is a declared difference from the interpreter, which carried `Float32` values; adding a kind
+to the runtime only for CLI spelling would touch arithmetic, equality and normalization everywhere.
+
+The runtime's view exposes no mutable state or handler bodies and stays compiler-independent; the
+program/HIR lookups for annotation stay in `nx-api`. Do not add value-returning lifecycle variants
+only to replace APIs being deleted. The canonical result contract and IR schema do not change.
 
 ### 4. Remove the legacy snapshot binding contract
 
@@ -120,8 +127,6 @@ Preserve component semantics (defaults, explicit state, update validation, handl
 invocations, atomic dispatch, effects and cross-module calls) in tests through existing IR runtime
 APIs. Tests of the removed binding envelope/overloads/transport are intentionally removed with an
 inventory explaining their disposition. DTO and serialization tests remain independent of execution.
-The pending `support-stateful-component-value-evaluation` change must be rebased/re-scoped if it
-still proposes interpreter or deleted binding work; it is not a prerequisite to preserve new wrappers.
 
 ### 5. Integer semantics follow the existing IR runtime
 
@@ -150,13 +155,31 @@ Run both engines temporarily where the interpreter supports the case. Record dec
 must be positive IR tests, not forced to pass in the old engine. Current examples include
 `a_tool_list_holds_a_subtype_declared_in_a_host_library`,
 `an_omitted_property_takes_a_library_default_that_names_a_library_agent` in
-`crates/nx-api/tests/codegen/ir_runtime_tests.rs`, and imported workspace values read by `root`.
+`crates/nx-api/tests/codegen/ir_runtime_tests.rs`, imported workspace values read by `root`, and
+the aliased-import failures in `specs/future.md` ("Aliased imports: the interpreter looks a value's
+type up in the wrong module"), which the IR runtime does not share. Keep each IR result as a
+positive test; retiring the interpreter closes that entry rather than fixing it.
 
 Use the Rust runtime for corpus generation and native parity, but retain independent handwritten
 expectations. Never silently bless changed goldens by regenerating from the implementation under
 test. Every changed result requires a declared behavior change or a separately reviewed correction.
 Generated JS and TypeScript IR comparisons remain useful; two runtimes consuming the same wrong IR
 cannot alone detect an emitter defect. The final differential inventory is a deletion gate.
+
+### 7. Every spec that names the interpreter gets a delta
+
+About thirty main specs name the interpreter, often as one of the engines that must agree ("the
+interpreter, the TypeScript IR runtime and every code generation target SHALL agree"). Each such
+requirement is modified here to name the Rust IR runtime instead, so archiving this change leaves
+no requirement that refers to a deleted engine. `value-constraints`' interpreter-only requirement
+is removed. `rust-crate-layering` drops `nx-interpreter` from its dependency lists, and the
+repository's layering check (`scripts/check-crate-layering.mjs`) drops it from its forbidden-edge
+list in the commit that deletes the crate. The `graphics-library`, `graphics-preview` and
+`resolved-program-runtime` Purpose paragraphs, which deltas cannot change, are edited at archive
+time. A trial archive confirmed that no other main-spec requirement names the interpreter after
+these deltas apply. Scenarios written for earlier
+changes that no longer read correctly (the WASM ABI 8/7 scenario and "no new export is needed")
+are removed.
 
 ## Risks / Trade-offs
 
@@ -169,14 +192,17 @@ cannot alone detect an emitter defect. The final differential inventory is a del
 - Formatting can lose erased type information: independently test rich CLI results and canonical
   host formatting, preserving each input contract.
 - Cold CLI execution adds compilation/emission: record small/large/multi-module timings and WASM
-  size before/after; investigate material regressions before claiming completion.
+  size before/after. A cold `nxlang run` more than twice as slow, or a WASM SDK more than 5%
+  larger, needs an explanation in the implementation PR before deletion; it is not otherwise a gate.
+- .NET and C hosts lose execution with no replacement. Accepted: ReachMe and FiddleEngine already
+  run IR, and a .NET IR runtime binding is a separate decision if a host needs one.
 - Removed SDK wrapper tests reduce raw counts: coverage accounting, not equal test counts, is the gate.
 
 ## Migration Plan
 
 1. Recheck consumers, audit IR coverage and record baseline behavior/tests/performance.
 2. Port semantic tests and prepare independent formatting/runtime-result support while both engines exist.
-3. Move CLI source and direct IR execution to the runtime; verify output, diagnostics and limits.
+3. Move CLI source execution to the runtime; verify output, diagnostics and limits.
 4. Remove legacy facade/binding APIs and obsolete tests; retain tooling/format/DTO coverage and update ABIs.
 5. Replace corpus/parity oracle calls and complete the differential/coverage inventory.
 6. Delete the interpreter in a separate final implementation commit, sweep specs/docs and validate.
@@ -185,7 +211,6 @@ No implementation is authorized by this proposal PR. Review the updated architec
 
 ## Open Questions
 
-- Acceptable cold-run regression thresholds should be settled from the baseline during review
-  before CLI cutover; flag spellings above are proposed for this review.
-- Which minimal read-only IR result interface best preserves CLI spelling without exposing runtime
-  internals? The implementation must demonstrate the object/enum/function/float32 cases first.
+None. The earlier questions are settled above: direct IR input is deferred (Decision 2), the CLI's
+result interface is a read-only view with cases and function references and no `float32` kind
+(Decision 3), and the performance check is the explanation threshold under Risks.

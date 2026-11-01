@@ -83,6 +83,27 @@ behavior for equivalent host operations.
   workflow, supported Node/platform targets, and how published artifacts relate to the local
   source-built workflow
 
+### Requirement: Node native resources have explicit lifecycle semantics
+The Node SDK SHALL define lifecycle semantics for native resources including library registries,
+program build contexts, and program artifacts. Long-lived resources SHALL support explicit
+disposal, and using a disposed resource SHALL fail predictably.
+
+#### Scenario: Program artifact remains usable after build context disposal
+- **WHEN** a Node caller builds a program artifact from a workspace using a build context
+- **AND** the caller disposes the build context
+- **THEN** generating IR from the program artifact SHALL still succeed
+
+#### Scenario: Disposed artifact rejects further operations
+- **WHEN** a Node caller disposes a program artifact
+- **AND** later calls `generateNxIr` on that artifact
+- **THEN** the call SHALL fail with a typed disposed-resource error
+
+#### Scenario: Finalizers are a backstop, not the primary contract
+- **WHEN** a Node process allows a native resource wrapper to be garbage collected
+- **THEN** the binding SHALL release the underlying native resource eventually
+- **AND** documentation SHALL still present explicit disposal as the supported lifecycle for
+  server-side reuse
+
 ## REMOVED Requirements
 
 ### Requirement: Node SDK evaluates supported entrypoints to JSON or bytes

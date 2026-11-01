@@ -2,7 +2,7 @@
 
 - [ ] 1.1 Confirm the merged runtime and `refactor-tooling-api` prerequisites; recheck source/artifact evaluation callers in NX, ReachMe and FiddleEngine, inventory exact removals/retained APIs, and record any new caller before deleting its API
 - [ ] 1.2 Audit all emitter rejection paths and unsupported constructs against source/interpreter behavior; record coverage and fix or resolve source-reachable CLI/semantic gaps before cutover
-- [ ] 1.3 Record semantic test inventory, small/large/multi-module CLI timings, WASM size and baseline checks; confirm proposed CLI flags and settle performance acceptance criteria before CLI implementation
+- [ ] 1.3 Record semantic test inventory, small/large/multi-module CLI timings, WASM size and baseline checks; and compare them later with the explanation threshold in the design
 
 ## 2. Preserve behavior through test-only IR composition
 
@@ -13,9 +13,9 @@
 
 ## 3. Formatting and CLI
 
-- [ ] 3.1 Refactor canonical-value formatting to remove interpreter Value conversions, retaining format_program_artifact_value/formatValue annotations, type/state options and existing canonical ambiguities; verify playground/value-view fixtures and formatting error recovery
-- [ ] 3.2 Implement minimal read-only runtime-result access for CLI NX spelling as needed, including float32 provenance; verify enum-at-object, nested values, function names, float32 and round trips without new lifecycle variants or compiler dependencies in the runtime
-- [ ] 3.3 Implement CLI source compilation through all-module IR emission/prepare/link and direct IR input with explicit format/module catalog selection; test equivalent source/IR results, cross-module entry selection, missing modules and missing root, with unchanged existing source invocation behavior
+- [ ] 3.1 Replace the formatter's interpreter Value with a formatter-owned value model in nx-api, retaining format_program_artifact_value/formatValue annotations, type/state options and existing canonical ambiguities; verify playground/value-view fixtures and formatting error recovery
+- [ ] 3.2 Add a read-only Rust runtime result view that keeps constant cases and function references and feeds the same formatter; verify enum-at-object, nested values, function names, declared float32, float32 at an object site and round trips, without a float32 value kind, new lifecycle variants or compiler dependencies in the runtime
+- [ ] 3.3 Implement CLI source execution through all-module IR emission/prepare/link; test single- and cross-module programs, entry selection, missing root and static-error gating, with unchanged invocation and output; record direct IR input in specs/future.md
 - [ ] 3.4 Share CLI runtime options/output/error handling; preserve NX/JSON formats, map debug locations and unavailable-source errors, enforce a per-invocation 1,000,000-operation default, and test exhaustion/reset without changing runtime library defaults or playground limits
 
 ## 4. Remove legacy API and binding execution surfaces
@@ -33,8 +33,8 @@
 
 ## 6. Delete, document and validate
 
-- [ ] 6.1 Delete nx-interpreter and its workspace/dependency entries, temporary differential helpers and remaining interpreter imports in a separate final implementation commit; verify crate-layering guards and runtime-only packaging/builds
-- [ ] 6.2 Sync the explicit API-removal/CLI/formatting deltas and sweep remaining interpreter wording without inventing replacement APIs; reconcile pending support-stateful-component-value-evaluation scope and validate all specs strictly
+- [ ] 6.1 Delete nx-interpreter and its workspace/dependency entries, temporary differential helpers and remaining interpreter imports in a separate final implementation commit; remove nx-interpreter from scripts/check-crate-layering.mjs and its test; verify crate-layering guards and runtime-only packaging/builds
+- [ ] 6.2 Archive the change so its deltas (including the interpreter-wording deltas for every affected spec) reach openspec/specs; edit the graphics-library, graphics-preview and resolved-program-runtime Purpose paragraphs by hand; grep openspec/specs for remaining interpreter references; remove or rewrite the interpreter-only specs/future.md entries (32-bit values, discarded range types, aliased imports); validate all specs strictly
 - [ ] 6.3 Update API/binding/CLI READMEs, generated declarations, examples, value-view docs, IR docs and corpus instructions with compile-then-run migration examples and exact breaking removals; document that .NET/C execution has no replacement binding in this change
 - [ ] 6.4 Run workspace build/test/clippy/fmt, crate-layering and package checks, Node/WASM/.NET suites, TypeScript runtime/parity, CLI and playground tests, native graphics/preview and supported runtime WASM checks; record results and justified removals
 - [ ] 6.5 Re-measure timings/WASM size against agreed criteria, document breaking API/snapshot/int32/diagnostic changes and run openspec validate retire-hir-interpreter --strict; leave implementation tasks unchecked in the proposal PR
