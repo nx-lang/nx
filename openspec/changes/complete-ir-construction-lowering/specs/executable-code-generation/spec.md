@@ -47,3 +47,18 @@ validation SHALL be preserved in Rust IR, TypeScript IR and generated JavaScript
 - **WHEN** an invocation combines conditional properties with body content
 - **THEN** content binding and duplicate validation SHALL follow the existing content-property rules
 - **AND** conditional compile-time type arguments SHALL remain rejected under existing rules
+
+#### Scenario: Conditional properties work for each existing invocation target
+- **WHEN** a supported fragment supplies properties to an intrinsic element, record, payload union case, component or named-argument function invocation
+- **THEN** each target SHALL receive only the selected bindings through its existing construction or invocation semantics
+- **AND** target-specific validation and defaults SHALL remain in force
+
+#### Scenario: Required property missing on a possible path is rejected
+- **WHEN** a required property has no default and a possible branch omits it
+- **THEN** shared source analysis SHALL reject the invocation under the existing property-path rules
+- **AND** lowering SHALL NOT insert an empty value to make the branch appear complete
+
+#### Scenario: Inactive branches remain statically checked
+- **WHEN** a fragment branch contains an invalid name or type under existing analysis rules
+- **THEN** shared source analysis SHALL still report that error
+- **AND** runtime branch laziness SHALL NOT bypass static validation

@@ -38,3 +38,18 @@ factory functions, first-class-function and shadowing rules SHALL remain unchang
 - **WHEN** checker-backed tooling analyzes an offending record call
 - **THEN** its diagnostics SHALL contain the same code and original source location
 - **AND** the error SHALL NOT be deferred into an attempted runtime function invocation
+
+#### Scenario: A callable binding is resolved before applying the record rule
+- **WHEN** existing name-resolution rules select an ordinary function or function-typed binding whose spelling also occurs as a record name
+- **THEN** the compiler SHALL apply the existing invocation rules for that binding
+- **AND** it SHALL NOT report this record-construction diagnostic solely because the spelling matches a type
+
+#### Scenario: Record type references remain valid outside constructor calls
+- **WHEN** a record name is used as a type annotation or as a permitted compile-time type argument
+- **THEN** this restriction SHALL NOT reject the type reference
+
+#### Scenario: Malformed record calls receive safe guidance
+- **WHEN** a resolved record call has an argument list that cannot be safely rewritten as named construction
+- **THEN** the diagnostic SHALL still explain the element-syntax requirement
+- **AND** it SHALL NOT present a complete rewrite that drops arguments or misbinds fields
+- **AND** it SHALL NOT cascade into a missing-function diagnostic for the record declaration

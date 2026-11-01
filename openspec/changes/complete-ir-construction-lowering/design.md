@@ -44,7 +44,8 @@ Follow `property-list-fragments` and `content-properties`: only the selected bra
 bindings; condition lists choose the first matching arm; match bindings keep lexical narrowing.
 Conditions, active property expressions and body/content expressions retain their authored order
 and are evaluated once where source semantics require it. Inactive guards/arms must not perform
-unneeded evaluation. Defaults are applied after active bindings have been selected. Omission and
+unneeded evaluation. Laziness applies to execution, not static checking: inactive branches must
+still be analyzed for invalid names and types under the existing rules. Defaults are applied after active bindings have been selected. Omission and
 an explicitly supplied empty value remain distinct.
 
 Keep path-sensitive static checking: reject a required property missing on a possible path and
@@ -71,6 +72,18 @@ component example test with their successful expectations. Replace the one posit
 test with active static-diagnostic coverage plus markup success/default coverage. Preserve the
 historical success expectation in the archived retirement inventory; do not rewrite that history.
 Rust/TypeScript parity supplements handwritten values and diagnostic expectations.
+
+| Existing regression | Planned outcome |
+| --- | --- |
+| `simple_functions::test_paren_call_constructs_record_type_positionally` | Replace with diagnostic assertions and equivalent named construction/default tests |
+| `conditionals::test_property_fragment_on_a_declared_record_is_kept` | Enable unchanged success expectation |
+| `conditionals::test_property_fragment_simple_conditional_selects_then_and_else` | Enable unchanged success expectation |
+| `conditionals::test_property_fragment_condition_list_selects_first_matching_arm_and_else` | Enable unchanged success expectation |
+| `conditionals::test_property_fragment_match_selects_matching_arm` | Enable unchanged success expectation |
+| `update_records::the_component_example_counts_and_resets` | Enable unchanged lifecycle expectations |
+
+These modules live under `crates/nx-api/tests/semantics/`. New diagnostic tests should also cover
+source-analysis and language-service entry points, rather than relying only on execution helpers.
 
 Remove the temporary runtime-spec exception through this change's delta on completion. Update the
 migration guide and future-work notes to state the permanent record syntax rule, rather than

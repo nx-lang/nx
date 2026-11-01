@@ -11,7 +11,7 @@
 - [ ] 2.2 If needed, specify/version any IR feature and update affected capability deltas before implementation; update preparation/evaluation in both runtimes and verify old-runtime refusal by feature name.
 - [ ] 2.3 Implement simple, condition-list and match fragments across the shared builder/backends, preserving first-match selection, lexical narrowing and lazy inactive expressions; activate the five retained conditional/example success tests.
 - [ ] 2.4 Verify required fields on every possible path, duplicate active properties, valid mutually exclusive duplicates, omission/default versus explicit empty, content binding, and existing restrictions on conditional type arguments.
-- [ ] 2.5 Add explicit expected-result/error tests across Rust IR, TypeScript IR and generated JavaScript for multiple fragments, inactive failing expressions, ordering and once-only evaluation; assert linear emitted image/code growth without flaky timing thresholds.
+- [ ] 2.5 Add explicit expected-result/error tests across Rust IR, TypeScript IR and generated JavaScript for multiple fragments, inactive failing expressions, ordering and once-only evaluation across each existing target kind; verify inactive branches still receive static diagnostics; assert linear emitted image/code growth without flaky timing thresholds.
 
 ## 3. Documentation and completion
 

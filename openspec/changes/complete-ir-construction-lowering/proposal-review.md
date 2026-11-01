@@ -23,5 +23,17 @@ Changes made during review:
   retired. Five conditional/example tests become active successes; the positional test becomes
   active rejection and equivalent markup/default coverage. Archived inventories remain historical.
 
+Artifact consistency pass:
+
+- All four core artifacts (proposal, design, capability deltas and tasks) use the new rejection
+  decision; no artifact still asks the compiler to implement positional record constructors.
+- Added a six-test migration table so replacement versus re-enabling is explicit.
+- Made cross-target conditional coverage, missing required properties and static checking of
+  inactive branches explicit in executable-generation scenarios.
+- Added source-analysis scenarios for safe fallback guidance, callable-name resolution and valid
+  type references; tightening constructors does not ban record type names in other contexts.
+- Main specs remain unchanged until implementation and sync; the removal delta explicitly closes
+  the previous temporary exception. No implementation task is marked complete.
+
 Validation: `openspec validate complete-ir-construction-lowering --strict` passes. No compiler,
 runtime, tests or main specifications were changed during this proposal revision.
