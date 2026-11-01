@@ -17,8 +17,8 @@ pub fn format_value_json_pretty(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nx_api::RuntimeModuleId;
     use nx_hir::{LoweredModule, Name, SourceId};
-    use nx_interpreter::RuntimeModuleId;
     use nx_value::NxValue;
     use rustc_hash::FxHashMap;
     use smol_str::SmolStr;

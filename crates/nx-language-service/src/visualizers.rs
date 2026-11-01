@@ -7,11 +7,11 @@
 //! modules in the order the host names them. `PropertyVisualizer`s merge by `property`.</para>
 
 use crate::{DeclarationOrigin, WorkspaceDeclarations};
-use nx_api::{
+use nx_hir::VisualizerRecord;
+use nx_program::{
     ProgramModule, ProgramVisualizer, VisualizerAttribute, VisualizerChild, VisualizerChoice,
     VisualizerValue,
 };
-use nx_hir::VisualizerRecord;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The visualizer declarations that apply to one document's program, by target.
@@ -39,10 +39,10 @@ impl ProgramVisualizers {
         workspace: &WorkspaceDeclarations,
         entry: &str,
         is_document: impl Fn(&str) -> bool,
-        build_context: &nx_api::ProgramBuildContext,
+        build_context: &nx_program::ProgramBuildContext,
         hosts: &[String],
     ) -> Self {
-        let modules = nx_api::program_modules(
+        let modules = nx_program::program_modules(
             entry,
             |identity| {
                 is_document(identity)
@@ -53,8 +53,8 @@ impl ProgramVisualizers {
             build_context,
         );
         let visualizers =
-            nx_api::program_visualizers(&modules, |identity| workspace.artifact(identity));
-        let duplicates = nx_api::duplicate_program_visualizers(&visualizers)
+            nx_program::program_visualizers(&modules, |identity| workspace.artifact(identity));
+        let duplicates = nx_program::duplicate_program_visualizers(&visualizers)
             .into_iter()
             .map(|(origin, _)| origin)
             .collect::<FxHashSet<_>>();
@@ -96,7 +96,7 @@ impl ProgramVisualizers {
                 via: None,
             }];
             for visualizer in
-                nx_api::program_visualizers(&module, |identity| workspace.artifact(identity))
+                nx_program::program_visualizers(&module, |identity| workspace.artifact(identity))
                     .into_iter()
                     .filter(|visualizer| visualizer.clean)
             {

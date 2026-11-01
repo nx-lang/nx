@@ -1,7 +1,7 @@
 //! Local IR-to-PNG host. Output is published by atomically replacing a pointer to an immutable revision.
+use nx_api::ir_runtime::{LinkOptions, Origins, PreparedModule, Program, RuntimeOptions};
 use nx_graphics::{Config, DeclarationResolver, Identity, TextRequest, TextService};
 use nx_graphics_skia::{render_png, Fonts};
-use nx_ir_runtime::{LinkOptions, Origins, PreparedModule, Program, RuntimeOptions};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -158,9 +158,9 @@ fn run(
     )
     .map_err(|d| std::io::Error::other(serde_json::to_string(&d).unwrap_or_default()))?;
     program_revision.set(Some(artifact.resolved_program.fingerprint));
-    let images = nx_codegen::emit_nx_ir(
+    let images = nx_api::codegen::emit_nx_ir(
         &artifact,
-        &nx_codegen::NxIrEmitOptions {
+        &nx_api::codegen::NxIrEmitOptions {
             modules: Some(vec![]),
             debug: true,
         },
@@ -168,7 +168,7 @@ fn run(
     let modules: BTreeMap<String, PreparedModule> = images
         .into_iter()
         .map(|image| Ok((image.identity, PreparedModule::prepare(image.bytes)?)))
-        .collect::<std::result::Result<_, nx_ir_runtime::NxIrRuntimeError>>()?;
+        .collect::<std::result::Result<_, nx_api::ir_runtime::NxIrRuntimeError>>()?;
     let entry = modules
         .get(&artifact.entry_identity)
         .ok_or("entry image missing")?;
@@ -374,7 +374,7 @@ fn main() {
                 }
             }
             let diagnostics = if let Some(runtime) =
-                error.downcast_ref::<nx_ir_runtime::NxIrRuntimeError>()
+                error.downcast_ref::<nx_api::ir_runtime::NxIrRuntimeError>()
             {
                 Value::Array(runtime.diagnostics.iter().map(|d|json!({"code":d.code,"message":d.message,"declaration":d.declaration,"source":d.source.as_ref().map(|s|json!({"module":s.identity,"start":s.start,"end":s.end}))})).collect())
             } else if let Some(graphics) = error.downcast_ref::<nx_graphics::Diagnostic>() {

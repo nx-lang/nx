@@ -1,0 +1,25 @@
+[package]
+name = "nx-program"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+nx-diagnostics = { path = "../nx-diagnostics" }
+nx-hir = { path = "../nx-hir" }
+nx-syntax = { path = "../nx-syntax" }
+nx-types = { path = "../nx-types" }
+nx-value = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+smol_str.workspace = true
+rustc-hash.workspace = true
+text-size.workspace = true
+serde_bytes = "0.11"
+
+[dev-dependencies]
+tempfile = "3"

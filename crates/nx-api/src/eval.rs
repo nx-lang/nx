@@ -1,14 +1,15 @@
-use crate::artifacts::{
-    build_library_artifact_from_directory, build_program_artifact_from_source, LibraryArtifact,
-    ProgramArtifact, ProgramBuildContext,
-};
-use crate::diagnostics::{diagnostics_to_api, diagnostics_to_api_with_sources};
 use crate::nx_text::{annotate_canonical_nx_text, annotate_nx_text, FormatOptions, NxValueText};
 use crate::value::entry_result_to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
 use nx_hir::{Item, LoweredModule, Name};
-use nx_interpreter::{Interpreter, ResourceLimits, RuntimeError, RuntimeModuleId, Value};
+use nx_interpreter::{Interpreter, ResourceLimits, RuntimeError, Value};
+use nx_program::RuntimeModuleId;
+use nx_program::{
+    build_library_artifact_from_directory, build_program_artifact_from_source, LibraryArtifact,
+    ProgramArtifact, ProgramBuildContext,
+};
+use nx_program::{diagnostics_to_api, diagnostics_to_api_with_source_entries};
 use nx_types::Type;
 use nx_value::NxValue;
 use std::fs;
@@ -92,7 +93,14 @@ pub(crate) fn program_artifact_error_diagnostics(
     fallback_source: &str,
 ) -> Option<Vec<NxDiagnostic>> {
     has_error_diagnostics(&program.diagnostics).then(|| {
-        diagnostics_to_api_with_sources(&program.diagnostics, fallback_source, &program.source_map)
+        diagnostics_to_api_with_source_entries(
+            &program.diagnostics,
+            fallback_source,
+            program
+                .source_entries()
+                .into_iter()
+                .map(|entry| (entry.identity, entry.source)),
+        )
     })
 }
 
@@ -106,7 +114,7 @@ pub(crate) fn program_root_source(program: &ProgramArtifact) -> String {
         return String::new();
     };
 
-    if let Some(source) = program.source_map.get(&root_module.file_name) {
+    if let Some(source) = program.source_text(&root_module.file_name) {
         source.to_string()
     } else if Path::new(&root_module.file_name).is_file() {
         fs::read_to_string(&root_module.file_name).unwrap_or_default()
@@ -434,7 +442,7 @@ pub fn eval_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifacts::{build_program_artifact_from_source, LibraryRegistry};
+    use nx_program::{build_program_artifact_from_source, LibraryRegistry};
     use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;

@@ -2,6 +2,11 @@
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use nx_api::codegen::{
+    emit_js_program_module, emit_nx_ir, write_nx_ir_bundle, GeneratedJsProgramModule,
+    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
+    JsProgramModuleOptions, NxIrEmitOptions,
+};
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
@@ -12,11 +17,6 @@ use nx_api::{
     ComponentDispatchResult, ComponentEvaluateEvalResult, ComponentInitEvalResult,
     ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
-};
-use nx_codegen::{
-    emit_js_program_module, emit_nx_ir, write_nx_ir_bundle, GeneratedJsProgramModule,
-    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
-    JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_ir::explain_nx_ir_image;
 use nx_value::NxValue;

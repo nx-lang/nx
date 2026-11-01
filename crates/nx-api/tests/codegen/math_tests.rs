@@ -1,7 +1,7 @@
 //! Standard math across compiled IR, legacy Rust evaluation, and executable targets.
 use crate::ir_runtime_tests::program;
-use crate::{build_nx_ir_artifacts, emit_nx_ir, NxIrEmitOptions};
 use nx_api::{build_program_artifact_from_source, ProgramBuildContext};
+use nx_codegen::{build_nx_ir_artifacts, emit_nx_ir, NxIrEmitOptions};
 use nx_ir::{write_nx_ir_image, IrItem};
 use nx_ir_runtime::{PreparedModule, RuntimeOptions};
 use nx_value::{math::MathOp, NxValue};
@@ -33,8 +33,10 @@ fn standard_math_reference_corpus_in_rust_runtimes() {
             .unwrap();
     let legacy =
         nx_interpreter::Interpreter::from_resolved_program(artifact.resolved_program.clone());
-    let cases: serde_json::Value =
-        serde_json::from_str(include_str!("../../../crates/nx-value/src/math-cases.json")).unwrap();
+    let cases: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../crates/nx-value/src/math-cases.json"
+    ))
+    .unwrap();
     for case in cases.as_array().unwrap() {
         let args = case["args"]
             .as_array()
@@ -126,8 +128,11 @@ fn standard_math_images_are_gated_validated_and_independent() {
         modules: Some(vec![]),
         debug: true,
     };
-    let images =
-        build_nx_ir_artifacts(&crate::build_codegen_program(&artifact).unwrap(), &options).unwrap();
+    let images = build_nx_ir_artifacts(
+        &nx_codegen::build_codegen_program(&artifact).unwrap(),
+        &options,
+    )
+    .unwrap();
     let math = images
         .iter()
         .find(|m| m.modules[0].identity == "@nx/math/math.nx")
@@ -233,7 +238,7 @@ fn standard_math_error_keeps_authored_call_origin() {
 
 #[test]
 fn standard_math_geometry_example() {
-    let p = program(include_str!("../../../examples/math-graphics/main.nx"));
+    let p = program(include_str!("../../../../examples/math-graphics/main.nx"));
     let value = p
         .evaluate_function("root", &[], &RuntimeOptions::default())
         .unwrap();
@@ -255,7 +260,7 @@ fn standard_math_geometry_example() {
 
 #[test]
 fn standard_math_operation_tables_agree() {
-    let ts = include_str!("../../../runtime/typescript/src/math.ts");
+    let ts = include_str!("../../../../runtime/typescript/src/math.ts");
     let ts_arities = ts
         .split_once("export const nxStandardMathArities = [")
         .unwrap()

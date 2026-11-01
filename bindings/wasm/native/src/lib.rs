@@ -15,6 +15,11 @@ mod graphics;
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
 
+use nx_api::codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
+use nx_api::language_service::{
+    DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
+    WorkspaceSnapshot,
+};
 use nx_api::{
     build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
     eval_program_artifact_nx_text_with_limits, format_program_artifact_value,
@@ -23,12 +28,7 @@ use nx_api::{
     NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule,
     ProgramArtifact, ProgramBuildContext, ResourceLimits, SchemaQueryError,
 };
-use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
-use nx_language_service::{
-    DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
-    WorkspaceSnapshot,
-};
 use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
@@ -904,7 +904,10 @@ fn program_diagnostics(program: &ProgramArtifact) -> Operation {
     result_json(&program_diagnostics_to_api(program, &program.diagnostics))
 }
 
-fn codegen_error(error: nx_codegen::CodegenError, program: &ProgramArtifact) -> OperationError {
+fn codegen_error(
+    error: nx_api::codegen::CodegenError,
+    program: &ProgramArtifact,
+) -> OperationError {
     evaluation_error(program_diagnostics_to_api(program, &error.diagnostics))
 }
 
@@ -999,7 +1002,7 @@ unsafe fn release(ptr: *mut u8, len: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_codegen::read_nx_ir_bundle;
+    use nx_api::codegen::read_nx_ir_bundle;
     use nx_ir::NxIrImage;
 
     /// Runs an operation the way the loader does: JSON in through `nx_wasm_alloc`, a result record

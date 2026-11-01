@@ -10,11 +10,10 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+nx-program = { path = "../nx-program" }
 nx-value.workspace = true
-nx-api = { path = "../nx-api" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 nx-hir = { path = "../nx-hir" }
-nx-interpreter = { path = "../nx-interpreter" }
 nx-ir = { workspace = true }
 nx-types = { path = "../nx-types" }
 rustc-hash = { workspace = true }

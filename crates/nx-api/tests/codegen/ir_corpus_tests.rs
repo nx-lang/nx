@@ -13,14 +13,14 @@
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
 
-use crate::ir::NxIrEmitOptions;
-use crate::{build_codegen_program, build_nx_ir_artifacts};
 use nx_api::{
     build_workspace_program_artifact, dispatch_component_actions_program_artifact,
     eval_program_artifact_function, initialize_component_program_artifact,
     ComponentDispatchEvalResult, ComponentInitEvalResult, EvalResult, NxWorkspace,
     NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
+use nx_codegen::NxIrEmitOptions;
+use nx_codegen::{build_codegen_program, build_nx_ir_artifacts};
 use nx_ir::{explain_nx_ir, explain_nx_ir_image};
 use nx_ir::{kinds, write_nx_ir_image, NxIrArtifact, NxIrImage};
 use nx_ir_runtime::{
@@ -1312,28 +1312,28 @@ fn generated_javascript_agrees_with_the_recorded_results() {
     let mut compared = 0;
     let mut skipped = Vec::new();
     for program in load_programs() {
-        let output =
-            match crate::emit_program(&program.artifact, &crate::CodegenOptions::javascript()) {
-                Ok(output) => output,
-                Err(error) => {
-                    let unexpected = error
-                        .diagnostics
-                        .iter()
-                        .filter(|diagnostic| {
-                            !is_unsupported_by_source_codegen(diagnostic.message())
-                        })
-                        .map(|diagnostic| diagnostic.message().to_string())
-                        .collect::<Vec<_>>();
-                    if !unexpected.is_empty() {
-                        failures.push(format!(
-                            "{}: JavaScript generation failed: {unexpected:?}",
-                            program.name
-                        ));
-                    }
-                    skipped.push(program.name.clone());
-                    continue;
+        let output = match nx_codegen::emit_program(
+            &program.artifact,
+            &nx_codegen::CodegenOptions::javascript(),
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                let unexpected = error
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| !is_unsupported_by_source_codegen(diagnostic.message()))
+                    .map(|diagnostic| diagnostic.message().to_string())
+                    .collect::<Vec<_>>();
+                if !unexpected.is_empty() {
+                    failures.push(format!(
+                        "{}: JavaScript generation failed: {unexpected:?}",
+                        program.name
+                    ));
                 }
-            };
+                skipped.push(program.name.clone());
+                continue;
+            }
+        };
         let entrypoints = program
             .manifest
             .entrypoints

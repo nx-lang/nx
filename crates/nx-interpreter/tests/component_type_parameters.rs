@@ -4,7 +4,8 @@
 //! component record an element with a type argument evaluates to carries the props and nothing
 //! for the parameter. The JSON form is covered in `nx-api`, which owns the value conversion.
 
-use nx_interpreter::{Interpreter, ResolvedProgram, Value};
+use nx_interpreter::{Interpreter, Value};
+use nx_program::ResolvedProgram;
 
 #[test]
 fn the_runtime_record_has_no_type_parameter_field() {

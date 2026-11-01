@@ -6,6 +6,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "verify:packages": "pnpm -r run verify:package",
+    "check:crate-layering": "node scripts/check-crate-layering.mjs && node --test scripts/check-crate-layering.test.mjs",
     "verify:crates": "node scripts/verify-crates.mjs"
   },
   "engines": {

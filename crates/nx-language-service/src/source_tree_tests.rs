@@ -2370,7 +2370,7 @@ fn preview_metadata_resolves_inheritance_and_entry_overrides() {
         .unwrap()
         .iter()
         .flat_map(|report| &report.diagnostics)
-        .all(|d| d.severity != nx_api::NxSeverity::Error.into()));
+        .all(|d| d.severity != nx_program::NxSeverity::Error.into()));
     let tree = with_visualizers(&snapshot, &[]);
     assert_eq!(
         visualizer(&tree, "Derived")

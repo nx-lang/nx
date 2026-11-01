@@ -4,7 +4,8 @@
 
 use nx_api::{eval_source, from_nx_value, to_nx_value, EvalResult, ProgramBuildContext};
 use nx_hir::LoweredModule;
-use nx_interpreter::{Interpreter, ResolvedProgram, Value};
+use nx_interpreter::{Interpreter, Value};
+use nx_program::ResolvedProgram;
 use nx_value::NxValue;
 use std::sync::Arc;
 

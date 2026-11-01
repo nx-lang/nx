@@ -2,8 +2,6 @@
 //! `nx-ir-runtime`. The scenario tests state the expected value; the differential tests compare
 //! with the interpreter's evaluation of the same source.
 
-use crate::emit_nx_ir;
-use crate::ir::NxIrEmitOptions;
 use crate::ir_runtime_sources::SOURCES;
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact,
@@ -13,6 +11,8 @@ use nx_api::{
     LibraryRegistry, NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule,
     ProgramArtifact, ProgramBuildContext,
 };
+use nx_codegen::emit_nx_ir;
+use nx_codegen::NxIrEmitOptions;
 use nx_ir_runtime::{
     apply, diff, input_size, merge, record_input_size, ComponentInit, Limit, LinkOptions,
     NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage, NX_DEFAULT_MAX_STACK_BYTES,

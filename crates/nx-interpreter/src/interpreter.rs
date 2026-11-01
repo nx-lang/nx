@@ -2,9 +2,6 @@
 
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
-use crate::resolved_program::{
-    ModuleQualifiedItemRef, ResolvedItemKind, ResolvedProgram, RuntimeModuleId,
-};
 use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
@@ -15,6 +12,7 @@ use nx_hir::{
     PreparedItemKind, PreparedModule, PropertyEntry, RecordKind, UnionCaseDef, UnionCaseField,
     UnionDef, UpdateIntrinsic,
 };
+use nx_program::{ModuleQualifiedItemRef, ResolvedItemKind, ResolvedProgram, RuntimeModuleId};
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
     type_satisfies_expected, Primitive, Type,

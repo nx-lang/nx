@@ -225,6 +225,8 @@ jobs:
     # with the `tsc` from the pnpm workspace this sets up.
     - name: Set up Rust and the pnpm workspace
       uses: ./.github/actions/setup-rust-node
+    - name: Verify crate layering
+      run: pnpm run check:crate-layering
     - name: 💅🏻 Verify formatted code
       run: cargo fmt --all --check
     # Clippy is part of the pinned toolchain's components. `-D warnings` is what keeps the

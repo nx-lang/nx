@@ -19,9 +19,7 @@ debug-trap = []
 nx-graphics = { path = "../../../crates/nx-graphics" }
 nx-value.workspace = true
 nx-api = { path = "../../../crates/nx-api" }
-nx-codegen = { path = "../../../crates/nx-codegen" }
 nx-ir = { workspace = true }
 nx-diagnostics = { path = "../../../crates/nx-diagnostics" }
-nx-language-service = { path = "../../../crates/nx-language-service" }
 serde.workspace = true
 serde_json.workspace = true

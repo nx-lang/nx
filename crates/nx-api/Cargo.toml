@@ -9,6 +9,10 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+nx-ir-runtime = { path = "../nx-ir-runtime" }
+nx-language-service = { path = "../nx-language-service" }
+nx-codegen = { path = "../nx-codegen" }
+nx-program = { path = "../nx-program" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
@@ -23,4 +27,5 @@ text-size.workspace = true
 serde_bytes = "0.11"
 
 [dev-dependencies]
+nx-ir.workspace = true
 tempfile = "3"

@@ -11,12 +11,12 @@
 //! [`NxValueText`] keeps them for a viewer. Nothing else decides layout, so annotated text is
 //! always the text the command line prints.</para>
 
-use crate::diagnostics::{text_range_to_span, LineIndex, NxTextSpan};
 use nx_hir::{
     ast::{spell_type_ref, TypeRef},
     Item, LoweredModule, Name, RecordField, UnionDef,
 };
 use nx_interpreter::Value;
+use nx_program::{LineIndex, NxTextSpan};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use smol_str::SmolStr;
@@ -680,7 +680,7 @@ impl<'a> Declarations<'a> {
     fn span(&self, range: TextRange) -> Option<NxTextSpan> {
         // A declaration synthesized by lowering (the implicit `root`, for one) may carry an empty
         // span, which names nothing to show.
-        (!range.is_empty()).then(|| text_range_to_span(range, self.source, &self.lines))
+        (!range.is_empty()).then(|| self.lines.span(self.source, range))
     }
 
     fn annotate(&self, node: RawNode, utf16: &Utf16Offsets) -> NxValueNode {
@@ -1439,7 +1439,7 @@ mod tests {
         let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
         let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
         let value = Value::ActionHandler {
-            module_id: nx_interpreter::RuntimeModuleId::new(0),
+            module_id: nx_program::RuntimeModuleId::new(0),
             component: nx_hir::Name::new("SearchBox"),
             emit: nx_hir::Name::new("SearchSubmitted"),
             action_name: nx_hir::Name::new("SearchSubmitted"),
@@ -1568,7 +1568,7 @@ mod tests {
         let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
         let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
         let value = Value::ActionHandler {
-            module_id: nx_interpreter::RuntimeModuleId::new(0),
+            module_id: nx_program::RuntimeModuleId::new(0),
             component: nx_hir::Name::new("Button"),
             emit: nx_hir::Name::new("Click"),
             action_name: nx_hir::Name::new("Button.Click"),

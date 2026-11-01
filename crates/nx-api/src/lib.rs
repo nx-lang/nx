@@ -1,4 +1,8 @@
-//! Public Rust API helpers intended to be shared across language bindings.
+//! External Rust entry point for NX tooling and language bindings.
+//!
+//! Program construction and inspection come from `nx-program`. Code generation, editor queries
+//! and IR execution are available through [`codegen`], [`language_service`] and [`ir_runtime`].
+//! Flat evaluation functions continue to use the HIR interpreter.
 //!
 //! This crate provides:
 //! - [`eval_source`]: evaluate NX source text to a stable [`NxValue`](nx_value::NxValue)
@@ -30,44 +34,17 @@
 //! submitted source text before any file-backed fallback. Workspace modules validate UTF-8 at
 //! construction and share decoded source text internally.
 
-mod artifacts;
 mod component;
-mod diagnostics;
 mod eval;
 mod nx_text;
-mod program_visualizers;
-mod schema;
-mod source_graph;
 mod value;
-mod workspace;
 
-#[cfg(test)]
-mod library_source_tests;
-#[cfg(test)]
-mod schema_tests;
-#[cfg(test)]
-mod standard_library_tests;
-#[cfg(test)]
-mod visualizer_declarations_tests;
-
-pub use artifacts::{
-    analyze_workspace_modules, build_library_artifact_from_directory,
-    build_program_artifact_from_source, build_workspace_program_artifact, prelude_library,
-    standard_libraries, standard_library, standard_library_entry, standard_library_for_module,
-    unknown_standard_library_message, validate_workspace, ConstructedDeclaration, LibraryArtifact,
-    LibraryExport, LibraryRegistry, NxLibraryModule, NxLibrarySource, ProgramArtifact,
-    ProgramBuildContext, ProgramSourceEntry, StandardLibrary, StandardLibraryModule,
-    StandardLibraryStability,
-};
 pub use component::{
     dispatch_component_actions_program_artifact, dispatch_component_actions_source,
     evaluate_component_program_artifact, evaluate_component_source,
     initialize_component_program_artifact, initialize_component_source,
     ComponentDispatchEvalResult, ComponentDispatchResult, ComponentEvaluateEvalResult,
     ComponentEvaluateResult, ComponentInitEvalResult, ComponentInitResult,
-};
-pub use diagnostics::{
-    diagnostics_to_api_with_source_entries, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan,
 };
 pub use eval::{
     eval_program_artifact, eval_program_artifact_function, eval_program_artifact_nx_text,
@@ -77,20 +54,17 @@ pub use eval::{
 };
 pub use nx_interpreter::ResourceLimits;
 pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};
-pub use program_visualizers::{
-    duplicate_program_visualizers, duplicate_visualizer_diagnostics, program_modules,
-    program_visualizers, read_visualizer_value, ProgramModule, ProgramVisualizer,
-    VisualizerAttribute, VisualizerChild, VisualizerChoice, VisualizerValue,
-};
-pub use schema::{
-    program_artifact_boundary_subtype_modules, program_artifact_function_schema,
-    program_artifact_function_schema_json, program_artifact_type_schema,
-    program_artifact_type_schema_json, DeclarationName, DeclarationRef, FunctionSchema,
-    FunctionSchemaOptions, ParameterSchema, SchemaDirection, SchemaQueryError, SchemaRequest,
-    SchemaValue, TypeSchema, TypeSchemaOptions, JSON_SCHEMA_DIALECT,
-    SCHEMA_AMBIGUOUS_DISCRIMINATOR, SCHEMA_INEXPRESSIBLE_TYPE, SCHEMA_UNKNOWN_DECLARATION,
-};
 pub use value::{entry_result_to_nx_value, from_nx_value, to_nx_value, FromNxValueError};
-pub use workspace::{
-    NxWorkspace, NxWorkspaceDirectoryError, NxWorkspaceInputError, NxWorkspaceModule,
-};
+
+pub use nx_program::*;
+
+/// Code generation for resolved programs.
+pub use nx_codegen as codegen;
+/// Execution of compiled NX IR.
+pub use nx_ir_runtime as ir_runtime;
+/// Editor analysis and queries.
+pub use nx_language_service as language_service;
+
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
