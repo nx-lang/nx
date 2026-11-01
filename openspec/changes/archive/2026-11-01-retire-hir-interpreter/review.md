@@ -3,7 +3,7 @@
 ## Scope
 **Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/** (all 31 deltas), implementation-audit.md,
 test-inventory.json, api-test-inventory.json, binding-test-inventory.json, proposal-review.md (context),
-`complete-ir-construction-lowering` proposal/design/tasks (context only), docs/hir-interpreter-retirement.md  
+`complete-ir-construction-lowering` proposal/design/tasks (context only), docs/hir-interpreter-retirement.md
 **Reviewed code:** `be7f870..d949683` (commits 0eee4f3 and d949683) plus the working-tree edits to
 `crates/nx-api/src/{eval.rs,nx_text.rs}`, `crates/nx-api/tests/runtime_result_view.rs`,
 `bindings/wasm/test/sdk-wasm.test.ts` and `scripts/verify-package.mjs`. Edits made during the review to
@@ -12,7 +12,7 @@ glanced at. Focus areas: `crates/nx-api/src/{eval,format_value,nx_text,lib}.rs`,
 `crates/nx-ir-runtime/src/{value,component,normalize}.rs`, `runtime/typescript/src/index.ts`,
 `crates/nx-codegen/src/builder.rs`, `crates/nx-cli/src/main.rs`, `crates/nx-ffi/src/lib.rs`, `bindings/c/nx.h`,
 .NET interop/ABI, Node/WASM native and TS wrappers, `crates/nx-api/tests/{support,semantics}/**`, corpus goldens,
-crate-layering script, binding/API READMEs, value-view and website scripts.  
+crate-layering script, binding/API READMEs, value-view and website scripts.
 **Method:** Read the code and compared the old CLI (`target/retire-validation/baseline-target/debug/nxlang`, built from
 `be7f870`) with the current one (`target/debug/nxlang`) on the same inputs. Ran the website code-block checker
 and the value-view fixture evaluator without writing anything. Ran a trial `openspec archive` in a scratch copy
