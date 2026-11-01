@@ -44,10 +44,10 @@ absence meet, and the system SHALL document rather than distinguish them.
 - **AND** `type Box2 = { T:type value?:T }` with `<Box2 T=int />` SHALL be accepted
 
 ### Requirement: A collecting position splices a sequence-valued item
-Every position that collects items into a sequence — a braced value, a call argument written as a
-braced value, element body content, and the yields of a `for` — SHALL treat an item whose static
-type carries an occurrence as contributing its items in order, and an item of exactly-one type as
-contributing itself. The item type of the collected sequence SHALL be the join of each item's item
+Every collecting position SHALL treat an item whose static type carries an occurrence as
+contributing its items in order, and an item of exactly-one type as contributing itself. The
+collecting positions are a braced value, a call argument written as a braced value, element body
+content, and the yields of a `for`. The item type of the collected sequence SHALL be the join of each item's item
 type, and its occurrence SHALL be the sum of each item's occurrence as `occurrence-types` defines
 it. An item of type `object` SHALL contribute `object`.
 
@@ -55,7 +55,7 @@ How many items are written alongside it SHALL make no difference to how one item
 braced value holding a single item SHALL apply the same rule to that item as a braced value holding
 several.
 
-The interpreter, the TypeScript IR runtime and every code generation target SHALL produce the same
+The Rust IR runtime, the TypeScript IR runtime and every code generation target SHALL produce the same
 value for the same source. A sequence value in a collecting position SHALL contribute its elements
 in every runtime, so no runtime SHALL produce a sequence holding a sequence.
 
@@ -96,13 +96,13 @@ from the item's own type and value.
 
 #### Scenario: Every backend splices body content
 - **WHEN** a component body binds `{some <Badge/>}` as content, with `some` a two-element sequence
-- **THEN** the interpreter, the TypeScript IR runtime and generated TypeScript SHALL each produce a
+- **THEN** the Rust IR runtime, the TypeScript IR runtime and generated TypeScript SHALL each produce a
   content sequence of three badges
 - **AND** none SHALL produce a sequence whose first element is a sequence
 
 ### Requirement: An item is a sequence of one, and only one level deep
-Where a type carrying an occurrence is expected and an exactly-one value of its item type is
-supplied, the system SHALL treat the value as a sequence of one. That lift SHALL apply once: because
+The system SHALL treat a supplied exactly-one value as a sequence of one where a type carrying an
+occurrence of that value's item type is expected. That lift SHALL apply once: because
 no type with an occurrence has an item type with an occurrence, no site SHALL lift a value twice,
 and a runtime SHALL NOT wrap a value in more than one sequence when coercing it to a declared type.
 The lift SHALL apply to an exactly-one value only: a value whose occurrence admits zero SHALL NOT
@@ -122,7 +122,7 @@ host and the type generated TypeScript declares for it all see a sequence.
 #### Scenario: A join that admits many is a sequence in every branch
 - **WHEN** a file contains `let pick(c:boolean, xs:int+) = { if c { xs } else { 5 } }` and `let each(c:boolean, xs:int+) = { for x in pick(c, xs) { x + 1 } }`
 - **THEN** `pick(false, {1 2})` SHALL evaluate to a one-item sequence holding `5`, and `each(false, {1 2})` to a one-item sequence holding `6`
-- **AND** the interpreter, the TypeScript IR runtime and generated JavaScript SHALL agree
+- **AND** the Rust IR runtime, the TypeScript IR runtime and generated JavaScript SHALL agree
 
 #### Scenario: A nullable item does not lift to a nullable sequence
 - **WHEN** a file contains `type Box = { names:string+ }`, `let maybe:string? = {}` and `let b = <Box names={maybe} />`

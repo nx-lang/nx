@@ -46,7 +46,8 @@
     "@types/node": "^22.20.0",
     "jsdom": "^26.1.0",
     "shiki": "^4.4.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@nx-lang/ir-runtime": "workspace:*"
   },
   "engines": {
     "node": ">=22.0.0"

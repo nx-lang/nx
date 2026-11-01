@@ -330,10 +330,10 @@ as the form scalar choices use, and SHALL NOT document a separate enum declarati
 - **AND** it SHALL NOT present these as two different kinds of declaration
 
 ### Requirement: Union absence is the empty value
-When a discriminated-union value is expected through a type whose occurrence admits zero — an
-optional property `p?:Union` or an optional type `Union?` — the system SHALL represent absence as
-the empty value `{}`. The system MUST NOT synthesize an undeclared fieldless case such as
-`<Union>.undefined` or `Union.undefined` to represent absence, in the interpreter, the TypeScript IR
+The system SHALL represent absence as the empty value `{}` when a discriminated-union value is
+expected through a type whose occurrence admits zero — an optional property `p?:Union` or an
+optional type `Union?`. The system MUST NOT synthesize an undeclared fieldless case such as
+`<Union>.undefined` or `Union.undefined` to represent absence, in the Rust IR runtime, the TypeScript IR
 runtime or any code generation target. A declared fieldless case SHALL continue to normalize as a
 scoped union case value and SHALL remain distinct from `{}`: a `State?` that holds `State.idle`
 is present. Absence of a `?`-typed union SHALL be matched with the `{}` pattern, and a match over

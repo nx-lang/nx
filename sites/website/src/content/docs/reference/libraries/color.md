@@ -5,9 +5,8 @@ description: 'Portable float32 colors, hex literals, CSS conversions and transfo
 
 `@nx/color` is unstable. Its ordinary color records work in surveys, chat links, design tokens,
 and graphics without a renderer or UI dependency. Evaluation targets are Rust and TypeScript IR;
-the legacy HIR interpreter is outside this profile. `nxlang run` currently uses that interpreter
-and reports that colors require the IR runtime. Use the playground, linked IR SDK evaluation,
-or `nx-graphics-preview` for color programs.
+`nxlang run` compiles source to IR and uses the Rust runtime. The playground and linked IR SDK
+hosts use the same color representation.
 
 ```nx
 import "@nx/color" as c

@@ -4,10 +4,9 @@ Shared foundation for NX tooling: workspaces and source graphs, library registry
 standard libraries, analyzed `ProgramArtifact` construction, resolved-program types, tooling
 diagnostics, schema queries and visualizer inspection.
 
-Code generation, the language service and the HIR interpreter depend on this crate. It depends
+Code generation and the language service depend on this crate. It depends
 on syntax/HIR/types/diagnostics/value foundations and has no dependency on those services, either
-execution engine or `nx-api`. The resolved types have a single definition here; the interpreter
-does not re-export them.
+execution engine or `nx-api`. The resolved types have a single definition here.
 
 ```rust
 use nx_program::{build_program_artifact_from_source, ProgramBuildContext};

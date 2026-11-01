@@ -1,6 +1,6 @@
 /**
  * A value spelled as NX text, with a node for each value, property and sequence in it: what
- * `NxProgramArtifact.evaluateNx()` in `@nx-lang/sdk-wasm` returns.
+ * `NxProgramArtifact.formatValue()` in `@nx-lang/sdk-wasm` returns.
  *
  * <para>Declared here structurally, rather than imported, so a host can show a value without
  * depending on the compiler package. The SDK's type is assignable to it.</para>

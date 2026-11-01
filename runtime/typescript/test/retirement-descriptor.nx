@@ -1,0 +1,9 @@
+action Ping = {}
+
+external component <Child label: string = "default" emits { Tap {} } />
+
+let preserve(child: Child): Child = { child }
+
+let root(): Child = {
+  preserve(<Child onTap=<Ping /> />)
+}

@@ -1,25 +1,24 @@
 # @nx-lang/sdk-node
 
 Node-only native SDK access for NX host, compiler, diagnostics, reusable program artifacts, NX IR
-generation, and `root()` evaluation. This package is backed by napi-rs / N-API and delegates to the
+generation, and editor queries. This package is backed by napi-rs / N-API and delegates to the
 same Rust `nx-api` host model used by the CLI and .NET SDK.
 
 This package is separate from `@nx-lang/ir-runtime` under `runtime/typescript`. Use
-`@nx-lang/sdk-node` when Node needs to build, validate, generate IR from, or evaluate NX source.
+`@nx-lang/sdk-node` when Node needs to build, validate, generate IR from NX source.
 Use the pure TypeScript IR runtime when JavaScript only needs to execute an already emitted NX IR
 image.
 
 It is also separate from [`@nx-lang/sdk-wasm`](../wasm/README.md), which compiles NX and answers
 editor queries from a WebAssembly module. Reach for the wasm SDK in a browser, in a Web Worker, or
 anywhere a native addon is unwelcome; reach for this package when Node needs what only a native host
-offers — library registries and workspaces loaded from disk, multi-module builds, and evaluation of
-`root()` to values or bytes.
+offers — library registries and workspaces loaded from disk, multi-module builds, and language services.
 
 ## Support Posture
 
 - Node only. Browsers, Web Workers and other WebAssembly hosts are served by `@nx-lang/sdk-wasm`,
   which covers compilation, NX IR generation and the language service; this package's
-  filesystem-backed and evaluation APIs have no counterpart there.
+  filesystem-backed APIs have no counterpart there.
 - Initial local source builds require Node 22 or newer. Release validation should cover supported
   Node LTS majors, starting with Node 22 and Node 24.
 - Native source builds currently use the host platform's Rust toolchain and produce one local
@@ -62,15 +61,7 @@ library to `bindings/node/native/nx_sdk_node.node`, where the ESM wrapper loads 
 ## Importing
 
 ```ts
-import {
-  NxEvaluationError,
-  NxLibraryRegistry,
-  NxProgramArtifact,
-  NxWorkspace,
-  evaluateJsonFromSource,
-  explainNxIr,
-  generateNxIrFromSource
-} from "@nx-lang/sdk-node";
+import { NxProgramArtifact, NxLibraryRegistry, NxWorkspace, NxEvaluationError } from "@nx-lang/sdk-node";
 ```
 
 ## Workspaces
@@ -203,14 +194,7 @@ const artifact = NxProgramArtifact.buildWorkspace(workspace, {
   buildContext,
   entryIdentity: "app/main.nx"
 });
-
-const [ir] = artifact.generateNxIr(); // one artifact per module; the entry alone by default
-const image = ir.bytes; // the NX IR image as a Buffer, what @nx-lang/ir-runtime reads
-const fingerprint = ir.metadata.fingerprint; // decimal string, safe for cache comparisons
-const text = explainNxIr(image); // the same text `nxlang ir explain` prints
-const jsonValue = artifact.evaluateJson();
-const messagePackBytes = artifact.evaluateBytes();
-const jsonBytes = artifact.evaluateBytes({ outputFormat: "json" });
+const images = artifact.generateNxIr({ modules: [], debug: true });
 ```
 
 `generateNxIr({ modules: [] })` emits every module of the program, and `{ debug: true }` keeps each
@@ -219,24 +203,13 @@ as `{ identity, source, version }` and every artifact built from that workspace 
 module table, which is what `@nx-lang/ir-runtime` compares when it links one artifact against
 another.
 
-`evaluateJson()` returns the value in NX's canonical JSON encoding, typed as `NxJsonValue`. NX has
+The standalone IR runtime returns the value in NX's canonical JSON encoding, typed as `NxJsonValue`. NX has
 no `null` of its own: its empty value (`{}` in NX source) is written the way a host spells absence.
 An empty optional field is an omitted key, and an empty result of a function whose result type is
 a standalone `T?` is `null`, which is what typegen's `T | null` expects. A `+` or `*` value is
 always an array, empty or not. The other `null` on the wire is a cleared field of an update record
 (a `$type` ending in `.Update`), where a present `null` means "clear this field" and an absent key
 means "unchanged".
-
-Source convenience APIs build and dispose a short-lived artifact for simple workflows:
-
-```ts
-const value = evaluateJsonFromSource("let root() = { 42 }");
-const generated = generateNxIrFromSource("let root() = { 42 }");
-```
-
-Only `root()` evaluation is exposed initially. Named entrypoint requests throw an
-`NxEvaluationError` with an `unsupported-entrypoint` diagnostic rather than performing
-JavaScript-side declaration lookup.
 
 ## Standard Libraries
 
@@ -314,15 +287,17 @@ minimum version for both.
 
 ## Diagnostics and Errors
 
-Validation returns `NxDiagnostic[]` as data. Build, IR generation, and evaluation failures throw
+Validation returns `NxDiagnostic[]` as data. Build, schema, and IR generation failures throw
 `NxEvaluationError` and preserve the same diagnostics array:
 
 ```ts
 try {
-  evaluateJsonFromSource("let root(): int = { \"oops\" }");
+  NxProgramArtifact.buildSource("let root() = { missingName }", { fileName: "main.nx" }).dispose();
 } catch (error) {
   if (error instanceof NxEvaluationError) {
-    console.log(error.diagnostics);
+    for (const diagnostic of error.diagnostics) console.error(diagnostic.code, diagnostic.message);
+  } else {
+    throw error;
   }
 }
 ```
@@ -335,17 +310,16 @@ disposed resource throw `NxDisposedResourceError`.
 Long-lived Node services should dispose native resources explicitly:
 
 ```ts
-const registry = new NxLibraryRegistry();
-const buildContext = registry.createBuildContext();
-const artifact = NxProgramArtifact.buildSource("let root() = { 42 }", { buildContext });
-
+const artifact = NxProgramArtifact.buildSource("let root() = { 42 }", { fileName: "main.nx" });
 try {
-  console.log(artifact.evaluateJson());
+  const images = artifact.generateNxIr();
+  console.log(images[0].identity);
 } finally {
   artifact.dispose();
-  buildContext.dispose();
-  registry.dispose();
 }
+workspace.dispose();
+buildContext.dispose();
+registry.dispose();
 ```
 
 The native addon uses JavaScript object lifetime as a backstop, but explicit disposal is the
@@ -358,3 +332,23 @@ The package metadata already declares napi-rs package naming and platform triple
 distribution should add Node 22+ prebuilt native artifacts produced from the same NX source
 revision as the TypeScript wrapper, validate active LTS Node majors, and document how each platform
 package maps to the local source-built workflow.
+
+## Execute emitted IR
+
+Source/artifact JSON and byte evaluation methods and their options have been removed. Build an
+artifact, emit all required modules, then run `@nx-lang/ir-runtime`:
+
+```ts
+import { evaluateFunction, linkNxIrProgram, prepareNxIrModule } from "@nx-lang/ir-runtime";
+
+const artifact = NxProgramArtifact.buildSource("let root() = { 42 }", { fileName: "main.nx" });
+try {
+  const modules = new Map(artifact.generateNxIr({ modules: [] }).map(image =>
+    [image.identity, prepareNxIrModule(image.bytes)]));
+  const program = linkNxIrProgram(modules.get("main.nx")!, { resolve: identity => modules.get(identity) });
+  console.log(evaluateFunction(program, "root")); // 42
+} finally {
+  artifact.dispose();
+}
+```
+No execution convenience wrapper is exported by this SDK.

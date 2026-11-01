@@ -1,0 +1,745 @@
+{
+  "removed_execution_api_tests": [
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void EvaluateBytes_JsonOutput_SyntaxError_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void EvaluateBytes_SyntaxError_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_StaticAnalysisDiagnostics_AreAggregated_AndKeepFileName()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_WithFileName_DiagnosticLabelsContainFileName()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_SyntaxError_DiagnosticLabelsHaveCorrectStructure()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_SyntaxError_DiagnosticsHaveCorrectStructure()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_MissingRootFunction_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_SyntaxError_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void FunctionRef_AtAFunctionReferenceMember_RoundTripsThroughBothOutputFormats()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void FunctionRef_RoundTripsThroughBothOutputFormats()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void EvaluateJson_WithAFunctionValuedProp_RendersTheFunctionRecord()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void Evaluate_WithAFunctionValuedProp_ReadsTheDeclarationItNames()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRangeCompanionTests.cs",
+      "    public void NxRangeUpdate_TracksThePreludeDeclaration()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithProgramArtifact_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithEnumTypedDtoMismatch_ThrowsWrappedSerializationError()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponentJson_RawConstantCaseResult_CanBeMappedToEnumTypedDto()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithPolymorphicDto_MapsConcreteRecordOutput()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithEnumTypedDto_MapsEnumStateAndOutput()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithEnumTypedDto_RoundTripsEnumThroughRuntimeWrapper()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithUnknownUnionCase_ThrowsEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithBareStringConstantUnionProp_ReturnsBareStringInRenderedOutput()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithBuildContextAndProgramArtifact_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithProgramArtifact_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithBuildContext_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithBuildContext_ResolvesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void PolymorphicTypedAction_DeserializesRuntimeProducedCanonicalBytes()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithUndeclaredAction_ThrowsEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void ComponentJsonWorkflows_ReturnExpectedJson()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithPersistedStateSnapshot_SucceedsAcrossCalls()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithSourceDiagnostics_ThrowsBeforeRuntimeExecution()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithInvalidState_ThrowsEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponentBytes_ReturnsSelectedFormatDirectly()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponentJson_ReturnsRenderedValueWithoutWrapperFields()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithTypedPropsAndState_ReturnsRenderedElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public SearchAction PrimaryAction { get; set; } = new SearchSubmitted();"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void NullAnEmptyArrayAndAMissingKey_AllDecodeAsTheEmptyValue()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void EmptyArrayAtAOneOrMoreSite_IsRejectedByTheRuntimeNamingIt()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void ClearingANonClearableField_IsRejectedByTheRuntimeNamingIt()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void ClearedOptionalField_RoundTripsAsNullThroughTheRuntime()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void BareUpdateRecord_FromARootBoundHandler_ReachesTheHostAsAnEffect()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void UpdateRecord_PassedAsAProp_WithAnUnknownField_IsRejectedAtInitialization()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void UpdateRecord_PassedAsAProp_DecodesNativelyWithOnlyThePresentField()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void RawEffect_CarryingAnUpdateRecord_PreservesAbsence()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void EvaluateComponent_HandlerReference_HasNoToken()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActions_WithStaleToken_ThrowsWithoutAResult()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActions_MixedBatch_RunsInvocationsAndActionsTogether()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActionsJson_WithHandlerInvocation_ReturnsRenderedEffectsAndSnapshot()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public NxActionHandlerRef OnTapped { get; set; } = new();"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_JsonOutput_WithFileName_DoesNotThrow()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_WithFileName_DoesNotThrow()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void Evaluate_NullSource_ThrowsArgumentNullException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_NullSource_ThrowsArgumentNullException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void Evaluate_SimpleString_ReturnsCorrectValue()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void Evaluate_SimpleInteger_ReturnsCorrectValue()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_ConstantUnionCase_ReturnsBareAuthoredCaseString()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_WithProgramArtifact_ReturnsCorrectJsonElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_WithBuildContext_ReturnsCorrectJsonElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_SimpleInteger_ReturnsCorrectJsonElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_JsonOutput_ReturnsCorrectJson()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_SimpleInteger_ReturnsCorrectBytes()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void RawConstantCaseResults_UseTheBareStringWireShape()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void EvaluateTypedUnionCase_DeserializesRuntimeProducedTypeMap()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void EvaluateBytes_PayloadUnionCase_ReturnsMessagePackTypeMap()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public static readonly LoadStateIdle Instance = new();"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxStandardLibraryTests.cs",
+      "    public void EvaluateJson_WithAnUnknownStandardLibrary_ReportsTheLibrariesThatExist()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxStandardLibraryTests.cs",
+      "    public void EvaluateJson_WithAnImportedStandardLibrary_ReturnsTheAgentRecord()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxStandardLibraryTests.cs",
+      "    public void EvaluateJson_MathUsesNativeRustImplementation()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRangeTests.cs",
+      "    public void NxRange_TracksThePreludeDeclaration()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRangeTests.cs",
+      "    public void EvaluatedRange_DeserializesIntoTheSdkType()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void LibraryRegistry_LoadFromDirectory_Succeeds()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithWorkspaceProgramArtifact_RemainsExecutableAfterWorkspaceBuffersAreReleased()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithWorkspaceProgramArtifact_UsesSelectedEntryRoot()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void BuildWorkspace_WithImplicitImports_ResolvesCatalogControlsWithoutAnImportLine()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithProgramArtifact_RemainsExecutableAfterBuildContextAndRegistryDispose()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithProgramArtifact_ReusesPreloadedLibraryAcrossBuildContexts()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void EvaluateBytes_JsonOutput_ComplexExpression_ReturnsValidJson()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_OptionalResult_ReadsAsNullableType()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_DifferentTypes_AllSucceed()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_ConcurrentEvaluations_AllSucceed()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithCustomFileName_UsesFileNameInDiagnostics()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_ComplexExpression_ReturnsCorrectValue()"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_init_round_trips_state_snapshot_in_json_with_msgpack_props"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_source_eval_returns_json_diagnostics_directly"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_dispatch_round_trips_constant_case_effect_payloads_in_msgpack_and_json"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_init_round_trips_constant_case_props_in_msgpack_and_json"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_dispatch_with_handler_token_returns_rendered_effects_and_snapshot"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_json"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_value_entry_points_reject_unknown_output_format"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_eval_program_artifact_returns_json_diagnostics_directly"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_evaluate_with_program_artifact_reuses_preloaded_library_component"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_evaluate_returns_invalid_state_diagnostics"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_evaluate_returns_rendered_value_in_msgpack_and_json"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_component_init_with_program_artifact_reuses_preloaded_library_component"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_eval_program_artifact_returns_json_success_directly"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_json_constant_case_emits_bare_authored_case_string"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_msgpack_constant_case_emits_bare_authored_case_string"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_json_success_round_trip"
+    ],
+    [
+      "crates/nx-ffi/tests/ffi_smoke.rs",
+      "ffi_msgpack_success_round_trip"
+    ],
+    [
+      "bindings/wasm/native/src/lib.rs",
+      "a_program_evaluates_to_annotated_nx_text"
+    ],
+    [
+      "bindings/wasm/native/src/lib.rs",
+      "an_evaluation_failure_answers_with_diagnostics"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void EvaluateBytes_JsonOutput_SyntaxError_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void EvaluateBytes_SyntaxError_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_StaticAnalysisDiagnostics_AreAggregated_AndKeepFileName()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_WithFileName_DiagnosticLabelsContainFileName()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_SyntaxError_DiagnosticLabelsHaveCorrectStructure()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_SyntaxError_DiagnosticsHaveCorrectStructure()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_MissingRootFunction_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeErrorTests.cs",
+      "    public void Evaluate_SyntaxError_ThrowsNxEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void FunctionRef_AtAFunctionReferenceMember_RoundTripsThroughBothOutputFormats()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void FunctionRef_RoundTripsThroughBothOutputFormats()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void EvaluateJson_WithAFunctionValuedProp_RendersTheFunctionRecord()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxFunctionValueTests.cs",
+      "    public void Evaluate_WithAFunctionValuedProp_ReadsTheDeclarationItNames()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRangeCompanionTests.cs",
+      "    public void NxRangeUpdate_TracksThePreludeDeclaration()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithProgramArtifact_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithEnumTypedDtoMismatch_ThrowsWrappedSerializationError()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponentJson_RawConstantCaseResult_CanBeMappedToEnumTypedDto()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithPolymorphicDto_MapsConcreteRecordOutput()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithEnumTypedDto_MapsEnumStateAndOutput()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithEnumTypedDto_RoundTripsEnumThroughRuntimeWrapper()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithUnknownUnionCase_ThrowsEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithBareStringConstantUnionProp_ReturnsBareStringInRenderedOutput()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithBuildContextAndProgramArtifact_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithProgramArtifact_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithBuildContext_ReusesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithBuildContext_ResolvesImportedComponentDefinition()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void PolymorphicTypedAction_DeserializesRuntimeProducedCanonicalBytes()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithUndeclaredAction_ThrowsEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void ComponentJsonWorkflows_ReturnExpectedJson()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void DispatchComponentActions_WithPersistedStateSnapshot_SucceedsAcrossCalls()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithSourceDiagnostics_ThrowsBeforeRuntimeExecution()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithInvalidState_ThrowsEvaluationException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponentBytes_ReturnsSelectedFormatDirectly()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponentJson_ReturnsRenderedValueWithoutWrapperFields()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void EvaluateComponent_WithTypedPropsAndState_ReturnsRenderedElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeComponentTests.cs",
+      "    public void InitializeComponent_WithTypedProps_ReturnsRenderedElementAndStateSnapshot()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void NullAnEmptyArrayAndAMissingKey_AllDecodeAsTheEmptyValue()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void EmptyArrayAtAOneOrMoreSite_IsRejectedByTheRuntimeNamingIt()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void ClearingANonClearableField_IsRejectedByTheRuntimeNamingIt()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void ClearedOptionalField_RoundTripsAsNullThroughTheRuntime()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void BareUpdateRecord_FromARootBoundHandler_ReachesTheHostAsAnEffect()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void UpdateRecord_PassedAsAProp_WithAnUnknownField_IsRejectedAtInitialization()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void UpdateRecord_PassedAsAProp_DecodesNativelyWithOnlyThePresentField()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void RawEffect_CarryingAnUpdateRecord_PreservesAbsence()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void EvaluateComponent_HandlerReference_HasNoToken()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActions_WithStaleToken_ThrowsWithoutAResult()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActions_MixedBatch_RunsInvocationsAndActionsTogether()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActionsJson_WithHandlerInvocation_ReturnsRenderedEffectsAndSnapshot()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUpdateRecordTests.cs",
+      "    public void DispatchComponentActions_WithHandlerInvocation_PatchesStateAndReRenders()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_JsonOutput_WithFileName_DoesNotThrow()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_WithFileName_DoesNotThrow()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void Evaluate_NullSource_ThrowsArgumentNullException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_NullSource_ThrowsArgumentNullException()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void Evaluate_SimpleString_ReturnsCorrectValue()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void Evaluate_SimpleInteger_ReturnsCorrectValue()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_ConstantUnionCase_ReturnsBareAuthoredCaseString()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_WithProgramArtifact_ReturnsCorrectJsonElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_WithBuildContext_ReturnsCorrectJsonElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateJson_SimpleInteger_ReturnsCorrectJsonElement()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_JsonOutput_ReturnsCorrectJson()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRuntimeBasicTests.cs",
+      "    public void EvaluateBytes_SimpleInteger_ReturnsCorrectBytes()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void RawConstantCaseResults_UseTheBareStringWireShape()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void EvaluateTypedUnionCase_DeserializesRuntimeProducedTypeMap()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void EvaluateBytes_PayloadUnionCase_ReturnsMessagePackTypeMap()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxUnionSerializationTests.cs",
+      "    public void EvaluateJson_PayloadUnionCase_ReturnsTypeMap()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxStandardLibraryTests.cs",
+      "    public void EvaluateJson_WithAnUnknownStandardLibrary_ReportsTheLibrariesThatExist()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxStandardLibraryTests.cs",
+      "    public void EvaluateJson_WithAnImportedStandardLibrary_ReturnsTheAgentRecord()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxStandardLibraryTests.cs",
+      "    public void EvaluateJson_MathUsesNativeRustImplementation()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRangeTests.cs",
+      "    public void NxRange_TracksThePreludeDeclaration()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxRangeTests.cs",
+      "    public void EvaluatedRange_DeserializesIntoTheSdkType()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void LibraryRegistry_LoadFromDirectory_Succeeds()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithWorkspaceProgramArtifact_RemainsExecutableAfterWorkspaceBuffersAreReleased()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithWorkspaceProgramArtifact_UsesSelectedEntryRoot()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void BuildWorkspace_WithImplicitImports_ResolvesCatalogControlsWithoutAnImportLine()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithProgramArtifact_RemainsExecutableAfterBuildContextAndRegistryDispose()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithProgramArtifact_ReusesPreloadedLibraryAcrossBuildContexts()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void EvaluateBytes_JsonOutput_ComplexExpression_ReturnsValidJson()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_OptionalResult_ReadsAsNullableType()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_DifferentTypes_AllSucceed()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_ConcurrentEvaluations_AllSucceed()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_WithCustomFileName_UsesFileNameInDiagnostics()"
+    ],
+    [
+      "bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs",
+      "    public void Evaluate_ComplexExpression_ReturnsCorrectValue()"
+    ],
+    [
+      "bindings/node/test/sdk-node.test.ts",
+      "\"builds source and workspace artifacts and evaluates JSON and bytes\""
+    ],
+    [
+      "bindings/wasm/test/sdk-wasm.test.ts",
+      "\"reports a runtime error at the expression that failed\""
+    ],
+    [
+      "bindings/wasm/test/sdk-wasm.test.ts",
+      "\"reports runaway recursion as the interpreter's limit, without trapping\""
+    ],
+    [
+      "bindings/wasm/test/sdk-wasm.test.ts",
+      "\"gives evaluateNx's nodes pointers too\""
+    ]
+  ],
+  "reason": "Deleted source/artifact execution overloads and opaque snapshot transport have no replacement. DTO/build/IR/formatting tests remain. Source and lifecycle behavior is asserted by nx-api source_semantics/codegen suites and the Rust/TypeScript IR corpus."
+}

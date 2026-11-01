@@ -689,6 +689,17 @@ impl Program {
         args: &[NxValue],
         options: &RuntimeOptions,
     ) -> Result<NxValue> {
+        self.evaluate_function_value(name, args, options)
+            .map(|value| value.canonical)
+    }
+
+    /// Evaluates a function retaining case and function identities for read-only tooling.
+    pub fn evaluate_function_value(
+        &self,
+        name: &str,
+        args: &[NxValue],
+        options: &RuntimeOptions,
+    ) -> Result<crate::FunctionValue> {
         self.call(
             options,
             |input| {
@@ -706,12 +717,9 @@ impl Program {
                     .iter()
                     .map(|arg| from_host(arg, &machine.stack).map(Some))
                     .collect::<Result<_>>()?;
-                entry_result(
-                    machine,
-                    0,
-                    index,
-                    machine.invoke(0, index, args, 0, Caller::Host)?,
-                )
+                let value = machine.invoke(0, index, args, 0, Caller::Host)?;
+                let canonical = entry_result(machine, 0, index, value.clone())?;
+                Ok(crate::FunctionValue { value, canonical })
             },
         )
     }

@@ -5,7 +5,7 @@ import { test } from "node:test";
 // @ts-expect-error: a plain script, not part of the package's typed sources.
 import { evaluateFixtures } from "../../scripts/update-fixtures.mjs";
 
-test("the committed fixtures are what evaluateNx() returns", async () => {
+test("the committed fixtures are what IR execution and formatValue() return", async () => {
   const committed = JSON.parse(readFileSync(new URL("../../test/fixtures/values.json", import.meta.url), "utf8"));
   assert.deepEqual(
     await evaluateFixtures(),

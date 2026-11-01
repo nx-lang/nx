@@ -1,6 +1,7 @@
+use crate::support::{eval_program_artifact, EvalResult};
 use nx_api::{
-    build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
-    EvalResult, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    build_program_artifact_from_source, build_workspace_program_artifact, NxWorkspace,
+    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_api::{ResolvedItemKind, RuntimeModuleId};
 use nx_codegen::{
@@ -394,7 +395,7 @@ fn a_record_field_read_resolves_its_type_in_the_declaring_module() {
 /// The interpreter and code generation must agree on both.
 ///
 /// <para>The interpreter keys on whether any content expression was written
-/// (`normalize_content_values` in `nx-interpreter`); code generation keys on whether the emitted
+/// (source occurrence normalization); code generation keys on whether the emitted
 /// content list is non-empty, in three separate places across two crates. Nothing but this test
 /// holds them together.</para>
 #[test]
@@ -2618,7 +2619,7 @@ fn generated_code_counts_over_a_range_through_the_runtime_helper() {
 
     // The interpreter's answer for the same program, so the two backends are compared rather than
     // each pinned to a literal.
-    let EvalResult::Ok(interpreted) = nx_api::eval_program_artifact(&artifact) else {
+    let EvalResult::Ok(interpreted) = crate::support::eval_program_artifact(&artifact) else {
         panic!("the interpreter should evaluate the program");
     };
     assert_json_values_eq(

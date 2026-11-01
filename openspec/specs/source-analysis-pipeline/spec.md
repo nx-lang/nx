@@ -43,17 +43,14 @@ the diagnostics preserved on the resulting `ModuleArtifact`.
 - **AND** each label span SHALL point at the offending source text within that file
 
 ### Requirement: Source-driven runtime execution stops on static analysis errors
-Source-driven runtime entry points SHALL treat shared source analysis as a required first phase. If
-the `ModuleArtifact` returned from shared analysis contains any error diagnostics, the entry point
-SHALL return those diagnostics and SHALL NOT build executable program state or execute interpreter
-behavior for that source.
+CLI source execution SHALL complete shared static analysis before IR emission or runtime execution.
+Any error diagnostic SHALL prevent emission and execution and SHALL be reported with the existing
+source identity and spans. Tooling construction SHALL remain independent of execution.
 
 #### Scenario: Root evaluation is gated by static analysis
-- **WHEN** `eval_source` is called with source that contains a lowering error and also defines a
-  `root` function
-- **THEN** `eval_source` SHALL return the static analysis diagnostics from the shared analysis phase
-- **AND** `eval_source` SHALL NOT build a `ProgramArtifact` or `ResolvedProgram`
-- **AND** `eval_source` SHALL not execute `root`
+- **WHEN** the CLI runs source with a lowering or type error and a root function
+- **THEN** it SHALL report the static diagnostics
+- **AND** SHALL NOT emit executable IR or execute root
 
 ### Requirement: Shared source analysis resolves imports through a supplied registry-backed build context
 Shared source analysis SHALL resolve local library imports through a supplied `ProgramBuildContext`
@@ -149,7 +146,6 @@ result's type environment, on the same terms as an expression written outside an
 - **WHEN** a module contains `let <Row count:int /> = <div>{count}</div>`
 - **THEN** the analysis result's type environment SHALL record `int` for the `count` expression
   written inside the `<div>`
-
 
 ### Requirement: Raw lowering remains file-local and does not require prepared visibility
 Raw lowering SHALL preserve unresolved top-level references that depend on peer files or imported

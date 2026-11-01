@@ -40,13 +40,15 @@ try {
     @'
 using NxLang.Nx;
 
-int value = NxRuntime.Evaluate<int>("let root() = { 42 }");
-if (value != 42)
+using NxProgramArtifact program = NxProgramArtifact.Build("let root() = { 42 }", "main.nx");
+NxGeneratedNxIr image = program.GenerateNxIr();
+if (image.Identity != "main.nx" || image.Bytes.Length == 0 ||
+    !Array.Exists(image.Metadata.FunctionEntrypoints, name => name == "root"))
 {
-    throw new InvalidOperationException($"Expected 42, got {value}.");
+    throw new InvalidOperationException("Expected a nonempty main.nx IR image with a root entrypoint.");
 }
 
-Console.WriteLine(value);
+Console.WriteLine($"Compiled {image.Identity}: {image.Bytes.Length} bytes.");
 '@ | Set-Content -Path (Join-Path $appRoot 'Program.cs')
 
     dotnet run --project $appRoot --runtime $RuntimeIdentifier --no-self-contained | Out-Host

@@ -21,6 +21,5 @@ serde.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
-nx-interpreter = { path = "../nx-interpreter" }
 nx-value = { workspace = true }
 tempfile = "3"

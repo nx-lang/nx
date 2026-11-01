@@ -297,7 +297,7 @@ NX IR SHALL encode an addition, subtraction, multiplication or division whose ch
 `float32` with its own binary operator: `fadd32` (`16`), `fsub32` (`17`), `fmul32` (`18`) or
 `fdiv32` (`19`). A runtime SHALL evaluate each by computing the operation on its operands and
 rounding the result to the nearest `float32`, so that a runtime which carries every number as a
-`float64` computes the value the interpreter computes, and widening or comparing that value
+`float64` computes the exact `float32` result, and widening or comparing that value
 observes no difference. A remainder whose checked type is `float32` SHALL stay `mod`, since a
 `float32` remainder is exact. A runtime SHALL round a number the host supplies at a `float32` site
 to the nearest `float32`, and SHALL refuse an integer there that a `float32` does not represent
@@ -309,10 +309,10 @@ exactly, so every `float32` value it holds is one.
 - **AND** for `let g(v:float32, d:float32) = v % d` the operator SHALL be `mod`
 - **AND** for `let h(v:float32, x:float64) = v * x` the operator SHALL be `mul`
 
-#### Scenario: A widened float32 product agrees with the interpreter
+#### Scenario: A widened float32 product agrees with the Rust IR runtime
 - **WHEN** `let scaled(v:float32): float64 = { v * 3 }` is evaluated by the TypeScript IR runtime
   with `v` holding the `float32` nearest `2.3`
-- **THEN** the result SHALL be `6.899999618530273`, as the interpreter computes it
+- **THEN** the result SHALL be `6.899999618530273`, as the Rust IR runtime computes it
 - **AND** `scaled(2.3) == 6.899999618530273` SHALL be `true`
 
 ### Requirement: NX IR encodes component contracts, descriptors, and state metadata
@@ -650,10 +650,12 @@ entrypoint the corpus names. A corpus program MAY also name component lifecycles
 initialize, optional props, and ordered batches to dispatch against it, whose entries are written
 as a host would send them, handler tokens included. The expected results SHALL then record the
 rendered output of initialization and, for each batch in turn, the rendered output and the ordered
-effects, all as canonical values with their handler tokens, as the interpreter produces them. The
-emitter's tests SHALL check that each program emits its expected artifact byte for byte, SHALL
-report a difference as explained text, and SHALL check that each committed explained text is the
-explanation of its committed artifact. Every supported runtime SHALL check that it evaluates each
+effects, all as canonical values with their handler tokens, as the Rust IR runtime produces them.
+The expected results are committed data: a regeneration that changes one SHALL be a reviewed change
+of behavior, and the emitter's tests SHALL fail when a committed result differs from what the Rust
+IR runtime produces. The emitter's tests SHALL check that each program emits its expected artifact
+byte for byte, SHALL report a difference as explained text, and SHALL check that each committed
+explained text is the explanation of its committed artifact. Every supported runtime SHALL check that it evaluates each
 expected artifact to the expected results, lifecycles included. One regeneration command SHALL
 write the artifacts, their explained text and the expected results together. The corpus SHALL cover
 every node kind, type kind and declaration kind, cross-artifact references, and a program emitted
@@ -942,10 +944,8 @@ NOT print the words "nullable" or "null" or the `[]` suffix.
 ### Requirement: NX IR carries the result type of a function and a value
 A function declaration SHALL carry its declared result type, and a value declaration its declared
 type, each absent when the source declares none. A runtime SHALL normalize a function's result and
-a value's initializer to that type as it normalizes an argument at a parameter, so the three
-engines agree: `let g(): int+ = { 5 }` returns `[5]`, and a one-item sequence returned where `int?`
-is declared is its item. Without a declared type the result SHALL be the body's value as it is,
-as the interpreter leaves it.
+a value's initializer to that type as it normalizes an argument at a parameter, so every engine agrees: `let g(): int+ = { 5 }` returns `[5]`, and a one-item sequence returned where `int?`
+is declared is its item. Without a declared type the result SHALL be the body's value as it is.
 
 A function declaration SHALL also carry result flags whose bit 0 is set when its result type,
 declared or inferred, is a standalone `T?`. An entry call — a host evaluating the function, by
@@ -956,7 +956,7 @@ name or through a function value — SHALL then return an empty result to the ho
 
 #### Scenario: A declared result is normalized in every engine
 - **WHEN** NX source contains `let g(): int+ = { 5 }`, `let h(o?:int): int? = { for x in o { x } }`, `let k(xs?:int+): int+ = { xs ?? 5 }` and `type Ints = int+ let fives: Ints = { 5 }`
-- **AND** the interpreter, the NX IR runtime and generated JavaScript each evaluate `g()`, `h(1)`, `k({})` and `fives`
+- **AND** the Rust IR runtime, the TypeScript IR runtime and generated JavaScript each evaluate `g()`, `h(1)`, `k({})` and `fives`
 - **THEN** every engine SHALL give `[5]`, `1`, `[5]` and `[5]`
 
 #### Scenario: An empty optional result is null at the host
@@ -986,7 +986,7 @@ print a default as `name: T = <node>` and an absent argument as `_`.
 - **AND** the explained text SHALL show `function f(a: int, b: int = (a add 1), c?: int)` and `f(1, _, 2)`
 
 #### Scenario: Every engine fills a parameter from the callee's module
-- **WHEN** the `parameter-defaults` corpus program is evaluated by the interpreter, the NX IR runtime and generated JavaScript
+- **WHEN** the `parameter-defaults` corpus program is evaluated by the Rust IR runtime, the TypeScript IR runtime and generated JavaScript
 - **THEN** every engine SHALL give the recorded result for each entrypoint, including a default that reads a value private to the called function's module
 
 ### Requirement: NX IR encodes the function reference type
@@ -1853,4 +1853,3 @@ SHALL cost what a literal pattern costs.
 - **WHEN** a module declares `let flag(n: int) = { if n is { < 0, > 100 => "out" else => "in" } }`
 - **THEN** the arm's pattern list SHALL hold two kind-29 nodes, one whose type has only a high end
   `-1`, inclusive, and one whose type has only a low end `101`, inclusive
-

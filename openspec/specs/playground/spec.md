@@ -227,7 +227,7 @@ typing, not on every keystroke.
 
 #### Scenario: Runaway recursion is a runtime error
 - **WHEN** `root` recurses without end, as `let f(n:int): int = { f(n + 1) }` does from `f(0)`
-- **THEN** the output pane SHALL show the interpreter's recursion limit as a runtime error, with its
+- **THEN** the output pane SHALL show the runtime's recursion limit as a runtime error, with its
   span marked in the source pane, and the compiler SHALL go on answering without being replaced
 
 #### Scenario: Last good output survives a broken edit
@@ -691,4 +691,3 @@ Source with the cursor at the start of the node and reveal it.
 #### Scenario: Opening an expression in Source
 - **WHEN** a visitor double-clicks a braced expression in Visual
 - **THEN** Source SHALL show, with the cursor at the start of that expression
-

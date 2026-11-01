@@ -2328,6 +2328,21 @@ fn build_element_expression(
             diagnostics,
         )?);
     }
+    if !mapped.content.is_empty()
+        && mapped
+            .properties
+            .iter()
+            .any(|property| property.name == "content")
+        && resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str()).is_none()
+    {
+        diagnostics.push(
+            Diagnostic::error("intrinsic-content-conflict")
+                .with_message("an intrinsic element cannot have both a 'content' property and element body content")
+                .with_label(nx_diagnostics::Label::primary(resolved_module.prepared_module_identity(), element.span))
+                .build(),
+        );
+        return None;
+    }
     // A tag that analysis resolved to a function-typed value in scope is a call of that value by
     // name, ahead of any declaration the name might also reach. Body content binds under the
     // callee type's content parameter, which analysis recorded with the call.

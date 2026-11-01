@@ -1,11 +1,13 @@
 //! The visualizer library `@nx/visualizer` and the analysis of `visualizer` declarations written
 //! with it.
 
+mod support;
 use nx_api::{
-    build_workspace_program_artifact, eval_program_artifact, EvalResult, LibraryRegistry,
-    NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    build_workspace_program_artifact, LibraryRegistry, NxLibraryModule, NxLibrarySource,
+    NxWorkspace, NxWorkspaceModule, ProgramArtifact,
 };
 use nx_value::NxValue;
+use support::{eval_program_artifact, EvalResult};
 
 fn workspace(files: &[(&str, &str)]) -> NxWorkspace {
     NxWorkspace::new(

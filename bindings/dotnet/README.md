@@ -1,6 +1,6 @@
 # NxLang.Sdk - NX .NET SDK
 
-`.NET 10` SDK for NX host, compiler, diagnostics, program artifact, IR generation, and evaluation
+`.NET 10` SDK for NX host, compiler, diagnostics, program artifact, IR generation, and DTO serialization
 workflows, implemented in C# and backed by the native Rust FFI library.
 
 - **Assembly**: `NxLang.Sdk.dll`
@@ -29,8 +29,8 @@ workflows, implemented in C# and backed by the native Rust FFI library.
 └─────────────────┘
 ```
 
-Rust and TypeScript are the NX runtime implementations. This SDK calls Rust through the native
-library; it does not implement an independent C# evaluator. C# type generation is separate from
+Rust and TypeScript are the NX runtime implementations. This SDK exposes compiler tooling through
+the native library and provides no execution binding. C# type generation is separate from
 NX execution and does not imply an executable C# backend.
 
 The managed binding validates the native ABI version at startup. Published package consumers get
@@ -162,62 +162,20 @@ To migrate an application from a vendored NX checkout to the package:
 
 ## Usage
 
-### Basic Evaluation
+Build and emit IR with `NxProgramArtifact.Build(source)` and `artifact.GenerateNxIr()`.
+Source/artifact evaluation and lifecycle methods have been removed, with no replacement C/.NET
+execution binding. DTO serialization and update helpers remain. See the
+[migration guide](../../docs/hir-interpreter-retirement.md).
 
 ```csharp
-using MessagePack;
-using NxLang.Nx;
-
-int result = NxRuntime.Evaluate<int>("let root() = { 42 }");
-string text = NxRuntime.Evaluate<string>("let root() = { \"Hello, NX!\" }");
-bool flag = NxRuntime.Evaluate<bool>("let root() = { true }");
-```
-
-### Canonical Raw Bytes
-
-```csharp
-using MessagePack;
-using NxLang.Nx;
-
-byte[] resultBytes = NxRuntime.EvaluateBytes("let root() = { 42 }");
-
-int value = MessagePackSerializer.Deserialize<int>(resultBytes);
-```
-
-The raw-byte APIs now let you choose the returned wire format per call. `MessagePack` remains the
-default:
-
-```csharp
-using System.Text;
-using NxLang.Nx;
-
-byte[] jsonBytes = NxRuntime.EvaluateBytes(
-    "let root() = { { answer: 42 } }",
-    NxOutputFormat.Json);
-
-string json = Encoding.UTF8.GetString(jsonBytes);
+using NxProgramArtifact artifact = NxProgramArtifact.Build("let root() = {42}", "main.nx");
+NxGeneratedNxIr image = artifact.GenerateNxIr();
 ```
 
 ### Reusable Program Artifacts
 
-```csharp
-using NxLang.Nx;
-
-using NxLibraryRegistry registry = new();
-registry.LoadFromDirectory("/app/question-flow");
-using NxProgramBuildContext buildContext = registry.CreateBuildContext();
-
-string source = """
-    import "../question-flow"
-    let root() = { answer() }
-    """;
-
-using NxProgramArtifact program = NxProgramArtifact.Build(source, buildContext, "/app/main.nx");
-int value = NxRuntime.Evaluate<int>(program);
-```
-
-Build a `NxProgramArtifact` when you want to reuse the same resolved program across evaluation or
-component lifecycle calls. If the source imports local NX libraries, preload them in a
+Build a `NxProgramArtifact` when you want to reuse the same resolved program across schema, validation and
+code-generation calls. If the source imports local NX libraries, preload them in a
 `NxLibraryRegistry` and build through a `NxProgramBuildContext` so program construction uses the
 selected loaded snapshots instead of reading libraries from disk on demand. The parameterless
 `NxProgramArtifact.Build(source, fileName)` convenience still exists, but it now creates a
@@ -226,7 +184,7 @@ transient empty registry/build-context pair internally before calling the native
 ### Program Module Codegen
 
 Use `NxProgramArtifact.GenerateJSProgramModule` when a managed host needs cacheable JavaScript source
-for a resolved NX program rather than immediate interpreter evaluation:
+for a resolved NX program for execution by a JavaScript host:
 
 ```csharp
 using NxLang.Nx;
@@ -286,20 +244,6 @@ malformed workspace inputs such as duplicate normalized identities are rejected 
 errors. Workspace artifact builds throw `NxEvaluationException` when static diagnostics or a missing
 entry identity prevent artifact creation.
 
-### Direct JSON Output
-
-```csharp
-using System.Text.Json;
-using NxLang.Nx;
-
-JsonElement json = NxRuntime.EvaluateJson("let root() = { { answer: 42 } }");
-int answer = json.GetProperty("answer").GetInt32();
-```
-
-Use the JSON convenience APIs when C# needs a parsed JSON view without introducing MessagePack into
-that call path. Use the raw-byte overloads with `NxOutputFormat.Json` when you want UTF-8 JSON
-bytes that can be forwarded directly to another client.
-
 ### Constant Case Encoding
 
 NX has one declaration form for a union. A case is **constant** when it declares no fields and its
@@ -317,11 +261,8 @@ This holds wherever the case appears. In a constant union such as `type ThemeMod
 every value takes this form; in a union that also has payload cases, the constant ones take it while
 the payload ones take the `$type` map described below.
 
-Raw APIs (`EvaluateBytes`, `EvaluateJson`, `EvaluateComponentJson`, `InitializeComponentJson`,
-`DispatchComponentActionsJson`) emit the case string directly. When the host feeds a raw value back
-into the runtime for a slot whose declared NX type is that union, the runtime resolves the string
-against the union's case list. Unknown cases surface through the standard argument type-mismatch
-error path.
+IR runtimes encode constant cases as their authored strings. DTOs deserialize those strings
+using the declared union type.
 
 Typed generated DTOs use the same string contract. A constant union generates a CLR `enum` plus an
 explicit wire-format mapping type, and relies on `NxEnumJsonConverter<TEnum, TWire>` and
@@ -377,178 +318,13 @@ the union's constant case of that name and a `$type` map as a payload case; gene
 constant case as a `[NxConstantCase]` singleton, for example `LoadStateIdle.Instance`, which
 serializes back to the bare string.
 
-### Component Evaluation
-
-Use `EvaluateComponent` when the host owns current component state and only needs the rendered body.
-Evaluation is pure: it does not create or consume `StateSnapshot`, dispatch actions, invoke action
-handlers, or return effects.
-
-```csharp
-using NxLang.Nx;
-
-string source = """
-    component <SearchBox placeholder:string = "Find docs" /> = {
-      state { query:string }
-      <TextInput value={query} placeholder={placeholder} />
-    }
-    """;
-
-TextInputElement rendered =
-    NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
-        source,
-        "SearchBox",
-        new SearchBoxProps { Placeholder = "Find docs" },
-        new SearchBoxState { Query = "docs" });
-```
-
-For JSON workflows, the result is the rendered value directly rather than a lifecycle wrapper:
-
-```csharp
-JsonElement renderedJson =
-    NxRuntime.EvaluateComponentJson(
-        source,
-        "SearchBox",
-        new SearchBoxProps { Placeholder = "Find docs" },
-        new SearchBoxState { Query = "docs" });
-
-string value = renderedJson.GetProperty("value").GetString()!;
-```
-
-Raw-byte overloads let the caller choose MessagePack or JSON output. Props and state inputs are
-always supplied as MessagePack bytes:
-
-```csharp
-byte[] propsBytes = MessagePackSerializer.Serialize(new SearchBoxProps { Placeholder = "Find docs" });
-byte[] stateBytes = MessagePackSerializer.Serialize(new SearchBoxState { Query = "docs" });
-
-byte[] jsonBytes = NxRuntime.EvaluateComponentBytes(
-    source,
-    "SearchBox",
-    NxOutputFormat.Json,
-    propsBytes,
-    stateBytes);
-```
-
-When evaluating repeatedly or resolving imports from preloaded libraries, build a
-`NxProgramArtifact` once and call the artifact overload:
-
-```csharp
-using NxProgramArtifact program = NxProgramArtifact.Build(source);
-
-TextInputElement renderedAgain =
-    NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
-        program,
-        "SearchBox",
-        new SearchBoxProps { Placeholder = "Find docs" },
-        new SearchBoxState { Query = "docs" });
-```
-
-### Component Lifecycle
-
-```csharp
-using NxLang.Nx;
-using System.Text.Json;
-
-string source = """
-    action SearchSubmitted = { searchString:string }
-
-    component <SearchBox placeholder:string emits { SearchSubmitted } /> = {
-      state { query:string = {placeholder} }
-      <TextInput value={query} placeholder={placeholder} />
-    }
-    """;
-
-NxComponentInitResult<TextInputElement> init =
-    NxRuntime.InitializeComponent<SearchBoxProps, TextInputElement>(
-        source,
-        "SearchBox",
-        new SearchBoxProps { Placeholder = "Find docs" });
-
-byte[] savedSnapshot = init.StateSnapshot;
-
-NxComponentDispatchResult<TextInputElement, SearchSubmittedAction> dispatch =
-    NxRuntime.DispatchComponentActions<SearchSubmittedAction[], TextInputElement, SearchSubmittedAction>(
-        source,
-        savedSnapshot,
-        new[]
-        {
-            new SearchSubmittedAction
-            {
-                SearchString = "docs"
-            }
-        });
-```
-
-A dispatch result carries the body re-rendered against the new state (`Rendered`), the effects for the host in
-order (`Effects`), and the snapshot to pass to the next call (`StateSnapshot`). A failing batch throws
-`NxEvaluationException` and leaves the snapshot you passed in as the current state.
-
-### Handlers in Rendered Output
-
-Rendered output from initialization and dispatch represents each bound handler as an `ActionHandler` record with the
-action it accepts and a `token`. Type the property as `NxActionHandlerRef` to read it, and dispatch a
-`NxHandlerInvocation<TAction>` to run the handler. A state update record it returns, written `<State.Update ... />`
-inside the component, patches the component's state:
-
-```csharp
-string source = """
-    external component <Button value:int = 0 emits { Tapped { } } />
-    component <Counter /> = {
-      state { count:int = 0 }
-      <Button value={count} onTapped=<State.Update count={count + 1} /> />
-    }
-    """;
-
-[MessagePackObject]
-public sealed class ButtonElement
-{
-    [Key("value")] public int Value { get; set; }
-    [Key("onTapped")] public NxActionHandlerRef OnTapped { get; set; } = new();
-}
-
-[MessagePackObject]
-public sealed class ButtonTapped
-{
-    [Key("$type")] public string Type { get; set; } = "Button.Tapped";
-}
-
-NxComponentInitResult<ButtonElement> init = NxRuntime.InitializeComponent<ButtonElement>(source, "Counter");
-
-NxComponentDispatchResult<ButtonElement, object> tapped =
-    NxRuntime.DispatchComponentActions<NxHandlerInvocation<ButtonTapped>[], ButtonElement, object>(
-        source,
-        init.StateSnapshot,
-        new[] { init.Rendered.OnTapped.Invoke(new ButtonTapped()) });
-
-// tapped.Rendered.Value == 1; use tapped.Rendered.OnTapped for the next dispatch.
-```
-
-A token is valid only with the snapshot returned by the same call: every dispatch, even one with an empty batch,
-returns fresh tokens and retires the previous ones. Pure evaluation output carries no tokens. A batch that mixes
-emitted actions and handler invocations can be passed as an `object[]`.
-
 ### Function Values in Rendered Output
 
 A function value in NX names a declaration and captures nothing, so rendered output represents one as a `Function`
 record with the declaring module's identity and the function's name — a template bound to a list, most often. Type the
 property as `NxFunctionRef` to read which function it was handed:
 
-```csharp
-string source = """
-    external component <List ItemTemplate:(<function Item:object Index:int />: string)? />
-    let <Row Item:object Index:int />: string = "r"
-    let root() = <List ItemTemplate={Row} />
-    """;
 
-[MessagePackObject]
-public sealed class ListElement
-{
-    [Key("ItemTemplate")] public NxFunctionRef? ItemTemplate { get; set; }
-}
-
-ListElement rendered = NxRuntime.Evaluate<ListElement>(source, "templates.nx");
-// rendered.ItemTemplate.Module == "templates.nx"; rendered.ItemTemplate.Name == "Row"
-```
 
 `typegen` types a function-typed member this way too. A .NET host can read a function value and pass the record
 along, but not call it: a function value is invoked by the NX program that received it, and a `Function` record
@@ -580,28 +356,6 @@ naming the field, so a DTO that has drifted from the NX source cannot turn "unch
 an optional field the NX value leaves empty is an omitted key, so it reads as `null`, and a host may send `null`, an
 empty array, or no key at all for one; the runtime reads all three as the empty value.
 
-If the host wants JSON results instead of typed MessagePack models:
-
-```csharp
-NxComponentInitResult<JsonElement> initJson =
-    NxRuntime.InitializeComponentJson(
-        source,
-        "SearchBox",
-        new SearchBoxProps { Placeholder = "Find docs" });
-
-NxComponentDispatchResult<JsonElement, JsonElement> dispatchJson =
-    NxRuntime.DispatchComponentActionsJson(
-        source,
-        initJson.StateSnapshot,
-        new[]
-        {
-            new SearchSubmittedAction
-            {
-                SearchString = "docs"
-            }
-        });
-```
-
 ### MessagePack Polymorphism Migration
 
 Generated C# polymorphic DTOs now use the canonical NX MessagePack map shape with a `$type`
@@ -611,47 +365,6 @@ string key instead of MessagePack `Union` envelopes.
 - Keep generated action/record DTO classes free of explicit `Type`/`$type` data members.
 - Ensure abstract polymorphic roots keep the generated polymorphism attributes so runtime
   serialization can resolve concrete descendants from `$type`.
-
-- Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
-- Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
-- Evaluation accepts explicit props and explicit current state, then returns only the rendered value.
-- Reuse a saved `StateSnapshot` only with the exact same `NxProgramArtifact` revision that produced it.
-  Mixing snapshots across program revisions is rejected.
-- Use evaluation for host-owned transparent state. Use initialization and dispatch for NX-owned
-  component lifecycles that need opaque snapshot round-tripping and handler effects.
-- The managed source-based component helpers build transient `NxProgramArtifact`s internally and then
-  call the native program-artifact component APIs. The public native C ABI itself is artifact-first.
-- State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
-- Component runtime inputs remain MessagePack-only in this phase. Typed prop/state/action overloads still
-  serialize those inputs as MessagePack before calling the runtime.
-- JSON component results encode `state_snapshot` as base64 on the wire, and the managed binding
-  decodes that back to `StateSnapshot` bytes for later dispatch calls.
-
-### Error Handling
-
-```csharp
-using NxLang.Nx;
-
-try
-{
-    int result = NxRuntime.Evaluate<int>("let x = ");
-}
-catch (NxEvaluationException ex)
-{
-    foreach (NxDiagnostic diagnostic in ex.Diagnostics)
-    {
-        if (diagnostic.Severity == NxSeverity.Error)
-        {
-            Console.WriteLine(diagnostic.Message);
-        }
-    }
-}
-```
-
-All source-driven APIs run the shared NX static-analysis pipeline before any runtime execution.
-If parsing, lowering, scope building, or type checking reports errors, the call returns the full
-diagnostic set and does not execute `root`, component evaluation, component initialization, or
-component dispatch.
 
 ### Generated Types
 
@@ -730,15 +443,6 @@ copy step.
 ### Native SDK ABI mismatch
 
 Rebuild both the managed and native pieces from the same NX source revision. `NxLang.Sdk.dll` and `nx_ffi` must come from the same checkout.
-
-### Entry point not found for new component lifecycle methods
-
-Build or rebuild the native `nx_ffi` library for the same configuration as your managed output. For example:
-
-```bash
-cargo build -p nx-ffi
-dotnet test bindings/dotnet/NxLang.sln -p:NxSdkNativeLibraryConfiguration=Debug
-```
 
 ## Project Structure
 

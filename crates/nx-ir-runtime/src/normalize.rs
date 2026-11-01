@@ -351,6 +351,32 @@ impl<'p> Machine<'p> {
                     self.carried(object),
                 ))
             }
+            DeclarationKind::Component(component) => {
+                let object = require_record(&value, path)?;
+                // Existing cross-type component compatibility remains unchanged; when the value
+                // names this declaration, its nested props must obey this declaration's schema.
+                if object.type_name().is_some_and(|name| name != &**display) {
+                    return Ok(value);
+                }
+                let (input, handlers) =
+                    self.split_handler_properties(module, index, object.fields.clone(), path)?;
+                let mut fields = self.normalize_fields(
+                    declared,
+                    &component.props,
+                    &input,
+                    &mut Vec::new(),
+                    path,
+                    false,
+                )?;
+                for (name, handler) in handlers {
+                    crate::value::set_field(&mut fields, name, Value::Handler(handler));
+                }
+                Ok(Value::record_from(
+                    Some(Arc::clone(display)),
+                    fields,
+                    self.carried(object),
+                ))
+            }
             DeclarationKind::Union(union) => {
                 // A constant case arrives as its bare name rather than as a `$type` object.
                 if let Some(text) = value.as_text() {

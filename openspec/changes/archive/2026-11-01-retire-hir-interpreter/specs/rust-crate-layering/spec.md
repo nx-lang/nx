@@ -1,0 +1,33 @@
+## MODIFIED Requirements
+
+### Requirement: nx-program owns program building and the resolved-program model
+The `nx-program` crate SHALL own workspaces, source graphs, library and standard-library loading,
+`ProgramArtifact` construction, the resolved-program types, binding-friendly diagnostics, schema
+queries and program visualizer inspection, and SHALL NOT depend on `nx-codegen`,
+`nx-language-service`, `nx-ir-runtime` or `nx-api`.
+
+#### Scenario: Resolved types have one definition
+- **WHEN** `nx-codegen` or `nx-api` refers to `ResolvedProgram`, `ResolvedItemKind` or
+  `RuntimeModuleId`
+- **THEN** it SHALL use the type defined in `nx-program`
+
+#### Scenario: The interpreter crate is gone
+- **WHEN** a contributor lists the workspace's crates
+- **THEN** there SHALL be no `nx-interpreter` crate and no crate SHALL depend on one
+
+### Requirement: nx-api is the external Rust entry point
+The `nx-api` crate SHALL be the Rust entry point for external adapters, depending on `nx-program`,
+`nx-codegen`, `nx-language-service` and `nx-ir-runtime`, re-exporting the foundation types flat and
+the services as the `codegen`, `language_service` and `ir_runtime` namespaces. Its only evaluator
+SHALL be the one `ir_runtime` re-exports.
+
+#### Scenario: An external caller builds, emits and runs a program through nx-api
+- **WHEN** a crate depending only on `nx-api` builds a `ProgramArtifact`, emits NX IR through
+  `nx_api::codegen` and evaluates it through `nx_api::ir_runtime`
+- **THEN** the program SHALL build, emit and run without a direct dependency on another NX crate
+
+#### Scenario: Adapters use nx-api for service calls
+- **WHEN** the CLI, the C/.NET FFI crate, the Node binding, the WASM binding or the native graphics
+  preview calls code generation, the language service or the IR runtime
+- **THEN** it SHALL reach that service through `nx-api`
+- **AND** `nx-lsp` MAY depend on `nx-language-service` directly as that service's protocol adapter

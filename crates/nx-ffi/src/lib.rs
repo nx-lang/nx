@@ -1,30 +1,21 @@
-//! C ABI wrapper for NX evaluation, intended for P/Invoke and other FFI consumers.
+//! C ABI wrapper for NX tooling, intended for P/Invoke and other FFI consumers.
 
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
 use nx_api::codegen::{
     emit_js_program_module, emit_nx_ir, write_nx_ir_bundle, GeneratedJsProgramModule,
     GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
     JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_api::{
-    build_workspace_program_artifact,
-    dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
-    eval_program_artifact as api_eval_program_artifact, eval_source,
-    evaluate_component_program_artifact as api_evaluate_component_program_artifact,
-    initialize_component_program_artifact as api_initialize_component_program_artifact,
-    load_program_artifact_from_source, validate_workspace, ComponentDispatchEvalResult,
-    ComponentDispatchResult, ComponentEvaluateEvalResult, ComponentInitEvalResult,
-    ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
+    build_workspace_program_artifact, load_program_artifact_from_source, validate_workspace,
+    LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_ir::explain_nx_ir_image;
-use nx_value::NxValue;
 use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 13;
+pub const NX_FFI_ABI_VERSION: u32 = 14;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -87,38 +78,6 @@ pub enum NxEvalStatus {
     Panic = 255,
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy)]
-pub enum NxOutputFormat {
-    MessagePack = 0,
-    Json = 1,
-}
-
-impl TryFrom<u32> for NxOutputFormat {
-    type Error = NxEvalStatus;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::MessagePack),
-            1 => Ok(Self::Json),
-            _ => Err(NxEvalStatus::InvalidArgument),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct JsonComponentInitResult<'a> {
-    rendered: &'a NxValue,
-    state_snapshot: String,
-}
-
-#[derive(Serialize)]
-struct JsonComponentDispatchResult<'a> {
-    rendered: &'a NxValue,
-    effects: &'a [NxValue],
-    state_snapshot: String,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonGeneratedJsProgramModule {
@@ -149,7 +108,6 @@ struct JsonGeneratedJsProgramModuleComponentExport {
 }
 
 enum FfiPayload {
-    Msgpack(Vec<u8>),
     Json(String),
     /// Bytes in a format the export documents: an NX IR bundle, or explained text.
     Bytes(Vec<u8>),
@@ -158,9 +116,7 @@ enum FfiPayload {
 impl FfiPayload {
     fn write(self, out_buffer: *mut NxBuffer) {
         match self {
-            Self::Msgpack(payload) | Self::Bytes(payload) => {
-                write_msgpack_payload(out_buffer, payload)
-            }
+            Self::Bytes(payload) => write_msgpack_payload(out_buffer, payload),
             Self::Json(payload) => write_json_payload(out_buffer, payload),
         }
     }
@@ -220,10 +176,6 @@ fn prepare_out_buffer(out_buffer: *mut NxBuffer) -> Result<(), NxEvalStatus> {
     }
 
     Ok(())
-}
-
-fn parse_output_format(output_format: u32) -> Result<NxOutputFormat, NxEvalStatus> {
-    NxOutputFormat::try_from(output_format)
 }
 
 fn prepare_out_program_artifact_handle(
@@ -288,20 +240,14 @@ fn finish_msgpack_entry(out_buffer: *mut NxBuffer, result: CaughtEntry<Vec<u8>>)
     }
 }
 
-fn finish_output_entry(
-    out_buffer: *mut NxBuffer,
-    output_format: NxOutputFormat,
-    result: CaughtEntry<FfiPayload>,
-) -> NxEvalStatus {
+fn finish_output_entry(out_buffer: *mut NxBuffer, result: CaughtEntry<FfiPayload>) -> NxEvalStatus {
     match result {
         Ok(Ok((status, payload))) => {
             payload.write(out_buffer);
             status
         }
         Ok(Err(message)) => {
-            if let Ok(payload) =
-                serialize_diagnostics_payload(output_format, &ffi_error_diagnostics(message))
-            {
+            if let Ok(payload) = serialize_diagnostics_payload(&ffi_error_diagnostics(message)) {
                 payload.write(out_buffer);
             }
             NxEvalStatus::Error
@@ -424,94 +370,11 @@ fn with_library_registry<T>(
     f(&handle.registry)
 }
 
-fn empty_record() -> NxValue {
-    NxValue::Record {
-        type_name: None,
-        properties: Default::default(),
-    }
-}
-
-fn parse_msgpack_value(bytes: &[u8]) -> Result<NxValue, String> {
-    NxValue::from_msgpack_slice(bytes).map_err(|e| format!("messagepack decode failed: {e}"))
-}
-
-fn parse_msgpack_actions(bytes: &[u8]) -> Result<Vec<NxValue>, String> {
-    rmp_serde::from_slice(bytes).map_err(|e| format!("messagepack decode failed: {e}"))
-}
-
-fn json_component_init_payload(result: &ComponentInitResult) -> Result<String, String> {
-    serde_json::to_string(&JsonComponentInitResult {
-        rendered: &result.rendered,
-        state_snapshot: BASE64_STANDARD.encode(&result.state_snapshot),
-    })
-    .map_err(|e| format!("json serialize failed: {e}"))
-}
-
-fn json_component_dispatch_payload(result: &ComponentDispatchResult) -> Result<String, String> {
-    serde_json::to_string(&JsonComponentDispatchResult {
-        rendered: &result.rendered,
-        effects: &result.effects,
-        state_snapshot: BASE64_STANDARD.encode(&result.state_snapshot),
-    })
-    .map_err(|e| format!("json serialize failed: {e}"))
-}
-
-fn serialize_eval_payload(
-    output_format: NxOutputFormat,
-    value: &NxValue,
-) -> Result<FfiPayload, String> {
-    match output_format {
-        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
-            rmp_serde::to_vec(value).map_err(|e| format!("messagepack serialize failed: {e}"))?,
-        )),
-        NxOutputFormat::Json => Ok(FfiPayload::Json(
-            value
-                .to_json_string()
-                .map_err(|e| format!("json serialize failed: {e}"))?,
-        )),
-    }
-}
-
-fn serialize_diagnostics_payload(
-    output_format: NxOutputFormat,
-    diagnostics: &[NxDiagnostic],
-) -> Result<FfiPayload, String> {
-    match output_format {
-        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
-            rmp_serde::to_vec_named(diagnostics)
-                .map_err(|e| format!("messagepack serialize failed: {e}"))?,
-        )),
-        NxOutputFormat::Json => Ok(FfiPayload::Json(
-            serde_json::to_string(diagnostics)
-                .map_err(|e| format!("json serialize failed: {e}"))?,
-        )),
-    }
-}
-
-fn serialize_component_init_payload(
-    output_format: NxOutputFormat,
-    result: &ComponentInitResult,
-) -> Result<FfiPayload, String> {
-    match output_format {
-        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
-            rmp_serde::to_vec_named(result)
-                .map_err(|e| format!("messagepack serialize failed: {e}"))?,
-        )),
-        NxOutputFormat::Json => Ok(FfiPayload::Json(json_component_init_payload(result)?)),
-    }
-}
-
-fn serialize_component_dispatch_payload(
-    output_format: NxOutputFormat,
-    result: &ComponentDispatchResult,
-) -> Result<FfiPayload, String> {
-    match output_format {
-        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
-            rmp_serde::to_vec_named(result)
-                .map_err(|e| format!("messagepack serialize failed: {e}"))?,
-        )),
-        NxOutputFormat::Json => Ok(FfiPayload::Json(json_component_dispatch_payload(result)?)),
-    }
+fn serialize_diagnostics_payload(diagnostics: &[NxDiagnostic]) -> Result<FfiPayload, String> {
+    Ok(FfiPayload::Json(
+        serde_json::to_string(diagnostics)
+            .map_err(|error| format!("json serialize failed: {error}"))?,
+    ))
 }
 
 fn json_generated_js_program_module_payload(
@@ -562,53 +425,6 @@ impl From<GeneratedJsProgramModuleComponentExport> for JsonGeneratedJsProgramMod
             render_export_name: export.render_export_name,
         }
     }
-}
-
-/// # Safety
-///
-/// `source_ptr`/`source_len` and `file_name_ptr`/`file_name_len` must each describe one readable
-/// region of that many bytes.
-///
-/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
-/// is released with [`nx_free_buffer`].
-#[no_mangle]
-pub unsafe extern "C" fn nx_eval_source(
-    source_ptr: *const u8,
-    source_len: usize,
-    file_name_ptr: *const u8,
-    file_name_len: usize,
-    output_format: u32,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let output_format = match parse_output_format(output_format) {
-        Ok(output_format) => output_format,
-        Err(status) => return status,
-    };
-
-    let result = panic::catch_unwind(|| {
-        let source = unsafe { slice_to_str(source_ptr, source_len) }?;
-        let file_name = parse_file_name(file_name_ptr, file_name_len)?;
-        let build_context = ProgramBuildContext::empty();
-
-        let payload = match eval_source(source, &file_name, &build_context) {
-            EvalResult::Ok(value) => (
-                NxEvalStatus::Ok,
-                serialize_eval_payload(output_format, &value)?,
-            ),
-            EvalResult::Err(diagnostics) => (
-                NxEvalStatus::Error,
-                serialize_diagnostics_payload(output_format, &diagnostics)?,
-            ),
-        };
-
-        Ok(payload)
-    });
-
-    finish_output_entry(out_buffer, output_format, result)
 }
 
 /// # Safety
@@ -945,51 +761,6 @@ pub unsafe extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifact
 ///
 /// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
 ///
-/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
-/// is released with [`nx_free_buffer`].
-#[no_mangle]
-pub unsafe extern "C" fn nx_eval_program_artifact(
-    program_artifact_ptr: *const NxProgramArtifactHandle,
-    output_format: u32,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let output_format = match parse_output_format(output_format) {
-        Ok(output_format) => output_format,
-        Err(status) => return status,
-    };
-
-    if program_artifact_ptr.is_null() {
-        return NxEvalStatus::InvalidArgument;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
-            match api_eval_program_artifact(program_artifact) {
-                EvalResult::Ok(value) => Ok((
-                    NxEvalStatus::Ok,
-                    serialize_eval_payload(output_format, &value)?,
-                )),
-                EvalResult::Err(diagnostics) => Ok((
-                    NxEvalStatus::Error,
-                    serialize_diagnostics_payload(output_format, &diagnostics)?,
-                )),
-            }
-        })?;
-
-        Ok(payload)
-    });
-
-    finish_output_entry(out_buffer, output_format, result)
-}
-
-/// # Safety
-///
-/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
-///
 /// `logical_module_name_ptr`/`logical_module_name_len` and
 /// `runtime_import_specifier_ptr`/`runtime_import_specifier_len` must each describe one readable
 /// region of that many bytes.
@@ -1013,7 +784,6 @@ pub unsafe extern "C" fn nx_codegen_js_program_module(
         return NxEvalStatus::InvalidArgument;
     }
 
-    let output_format = NxOutputFormat::Json;
     let result = panic::catch_unwind(|| {
         let logical_module_name =
             unsafe { slice_to_str(logical_module_name_ptr, logical_module_name_len) }?;
@@ -1048,7 +818,7 @@ pub unsafe extern "C" fn nx_codegen_js_program_module(
                         .collect::<Vec<_>>();
                     Ok((
                         NxEvalStatus::Error,
-                        serialize_diagnostics_payload(output_format, &diagnostics)?,
+                        serialize_diagnostics_payload(&diagnostics)?,
                     ))
                 }
             }
@@ -1057,7 +827,7 @@ pub unsafe extern "C" fn nx_codegen_js_program_module(
         Ok(payload)
     });
 
-    finish_output_entry(out_buffer, output_format, result)
+    finish_output_entry(out_buffer, result)
 }
 
 /// Explains an NX IR image as text with every table index resolved.
@@ -1091,7 +861,6 @@ pub unsafe extern "C" fn nx_ir_explain(
         unsafe { std::slice::from_raw_parts(image_ptr, image_len) }
     };
 
-    let output_format = NxOutputFormat::Json;
     let result = panic::catch_unwind(|| match explain_nx_ir_image(image) {
         Ok(text) => Ok((NxEvalStatus::Ok, FfiPayload::Bytes(text.into_bytes()))),
         Err(error) => {
@@ -1109,12 +878,12 @@ pub unsafe extern "C" fn nx_ir_explain(
             }];
             Ok((
                 NxEvalStatus::Error,
-                serialize_diagnostics_payload(output_format, &diagnostics)?,
+                serialize_diagnostics_payload(&diagnostics)?,
             ))
         }
     });
 
-    finish_output_entry(out_buffer, output_format, result)
+    finish_output_entry(out_buffer, result)
 }
 
 /// Emits NX IR artifacts from a program artifact.
@@ -1164,7 +933,6 @@ pub unsafe extern "C" fn nx_codegen_nx_ir(
         Err(_) => return NxEvalStatus::InvalidArgument,
     };
 
-    let output_format = NxOutputFormat::Json;
     let result = panic::catch_unwind(|| {
         let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
             match emit_nx_ir(program_artifact, &options) {
@@ -1186,7 +954,7 @@ pub unsafe extern "C" fn nx_codegen_nx_ir(
                     );
                     Ok((
                         NxEvalStatus::Error,
-                        serialize_diagnostics_payload(output_format, &diagnostics)?,
+                        serialize_diagnostics_payload(&diagnostics)?,
                     ))
                 }
             }
@@ -1195,227 +963,7 @@ pub unsafe extern "C" fn nx_codegen_nx_ir(
         Ok(payload)
     });
 
-    finish_output_entry(out_buffer, output_format, result)
-}
-
-/// # Safety
-///
-/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
-///
-/// `component_name_ptr`/`component_name_len` and `props_ptr`/`props_len` must each describe one
-/// readable region of that many bytes.
-///
-/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
-/// is released with [`nx_free_buffer`].
-#[no_mangle]
-pub unsafe extern "C" fn nx_component_init_program_artifact(
-    program_artifact_ptr: *const NxProgramArtifactHandle,
-    component_name_ptr: *const u8,
-    component_name_len: usize,
-    props_ptr: *const u8,
-    props_len: usize,
-    output_format: u32,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let output_format = match parse_output_format(output_format) {
-        Ok(output_format) => output_format,
-        Err(status) => return status,
-    };
-
-    if program_artifact_ptr.is_null() {
-        return NxEvalStatus::InvalidArgument;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let component_name = unsafe { slice_to_str(component_name_ptr, component_name_len) }?;
-        let props = if props_len == 0 {
-            empty_record()
-        } else {
-            let bytes = unsafe { slice_to_bytes(props_ptr, props_len) }?;
-            parse_msgpack_value(bytes)?
-        };
-
-        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
-            match api_initialize_component_program_artifact(
-                program_artifact,
-                component_name,
-                &props,
-            ) {
-                ComponentInitEvalResult::Ok(result) => Ok((
-                    NxEvalStatus::Ok,
-                    serialize_component_init_payload(output_format, &result)?,
-                )),
-                ComponentInitEvalResult::Err(diagnostics) => Ok((
-                    NxEvalStatus::Error,
-                    serialize_diagnostics_payload(output_format, &diagnostics)?,
-                )),
-            }
-        })?;
-
-        Ok(payload)
-    });
-
-    finish_output_entry(out_buffer, output_format, result)
-}
-
-/// Evaluates a component from a program artifact using MessagePack props/state inputs.
-///
-/// Successful output is the rendered value directly in the selected format, without lifecycle
-/// state snapshot, effects, or wrapper fields.
-///
-/// # Safety
-///
-/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
-///
-/// `component_name_ptr`/`component_name_len`, `props_ptr`/`props_len` and `state_ptr`/`state_len`
-/// must each describe one readable region of that many bytes.
-///
-/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
-/// is released with [`nx_free_buffer`].
-#[no_mangle]
-pub unsafe extern "C" fn nx_component_evaluate_program_artifact(
-    program_artifact_ptr: *const NxProgramArtifactHandle,
-    component_name_ptr: *const u8,
-    component_name_len: usize,
-    props_ptr: *const u8,
-    props_len: usize,
-    state_ptr: *const u8,
-    state_len: usize,
-    output_format: u32,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let output_format = match parse_output_format(output_format) {
-        Ok(output_format) => output_format,
-        Err(status) => return status,
-    };
-
-    if program_artifact_ptr.is_null() {
-        return NxEvalStatus::InvalidArgument;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let component_name = unsafe { slice_to_str(component_name_ptr, component_name_len) }?;
-        let props = if props_len == 0 {
-            empty_record()
-        } else {
-            let bytes = unsafe { slice_to_bytes(props_ptr, props_len) }?;
-            parse_msgpack_value(bytes)?
-        };
-        let state = if state_len == 0 {
-            empty_record()
-        } else {
-            let bytes = unsafe { slice_to_bytes(state_ptr, state_len) }?;
-            parse_msgpack_value(bytes)?
-        };
-
-        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
-            match api_evaluate_component_program_artifact(
-                program_artifact,
-                component_name,
-                &props,
-                &state,
-            ) {
-                ComponentEvaluateEvalResult::Ok(result) => Ok((
-                    NxEvalStatus::Ok,
-                    serialize_eval_payload(output_format, &result.rendered)?,
-                )),
-                ComponentEvaluateEvalResult::Err(diagnostics) => Ok((
-                    NxEvalStatus::Error,
-                    serialize_diagnostics_payload(output_format, &diagnostics)?,
-                )),
-            }
-        })?;
-
-        Ok(payload)
-    });
-
-    finish_output_entry(out_buffer, output_format, result)
-}
-
-/// Dispatches a MessagePack batch against a component snapshot from a program artifact.
-///
-/// Each batch entry is either an action record the component emits, which runs the handler its
-/// parent bound, or an `ActionHandlerInvocation` record `{ token, action }` that runs a handler
-/// from the snapshot's rendered output, identified by the `token` its `ActionHandler` record
-/// carried. The whole batch succeeds or fails together.
-///
-/// Successful output carries `rendered` (the body re-rendered against the final state, with fresh
-/// handler tokens), `effects`, and `state_snapshot` in the selected format.
-///
-/// # Safety
-///
-/// `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
-///
-/// `state_snapshot_ptr`/`state_snapshot_len` and `actions_ptr`/`actions_len` must each describe one
-/// readable region of that many bytes.
-///
-/// `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
-/// is released with [`nx_free_buffer`].
-#[no_mangle]
-pub unsafe extern "C" fn nx_component_dispatch_actions_program_artifact(
-    program_artifact_ptr: *const NxProgramArtifactHandle,
-    state_snapshot_ptr: *const u8,
-    state_snapshot_len: usize,
-    actions_ptr: *const u8,
-    actions_len: usize,
-    output_format: u32,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let output_format = match parse_output_format(output_format) {
-        Ok(output_format) => output_format,
-        Err(status) => return status,
-    };
-
-    if program_artifact_ptr.is_null() {
-        return NxEvalStatus::InvalidArgument;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let state_snapshot = if state_snapshot_len == 0 {
-            &[][..]
-        } else {
-            unsafe { slice_to_bytes(state_snapshot_ptr, state_snapshot_len) }?
-        };
-        let actions = if actions_len == 0 {
-            Vec::new()
-        } else {
-            let bytes = unsafe { slice_to_bytes(actions_ptr, actions_len) }?;
-            parse_msgpack_actions(bytes)?
-        };
-
-        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
-            match api_dispatch_component_actions_program_artifact(
-                program_artifact,
-                state_snapshot,
-                &actions,
-            ) {
-                ComponentDispatchEvalResult::Ok(result) => Ok((
-                    NxEvalStatus::Ok,
-                    serialize_component_dispatch_payload(output_format, &result)?,
-                )),
-                ComponentDispatchEvalResult::Err(diagnostics) => Ok((
-                    NxEvalStatus::Error,
-                    serialize_diagnostics_payload(output_format, &diagnostics)?,
-                )),
-            }
-        })?;
-
-        Ok(payload)
-    });
-
-    finish_output_entry(out_buffer, output_format, result)
+    finish_output_entry(out_buffer, result)
 }
 
 unsafe fn slice_to_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {

@@ -1,15 +1,10 @@
 //! The Rust IR runtime against NX source: each test compiles source, emits IR and runs it on
-//! `nx-ir-runtime`. The scenario tests state the expected value; the differential tests compare
-//! with the interpreter's evaluation of the same source.
+//! `nx-ir-runtime`. The scenario tests state the expected values directly.
 
-use crate::ir_runtime_sources::SOURCES;
 use nx_api::{
-    build_program_artifact_from_source, build_workspace_program_artifact,
-    dispatch_component_actions_program_artifact, eval_program_artifact_function,
-    evaluate_component_program_artifact, initialize_component_program_artifact,
-    ComponentDispatchEvalResult, ComponentEvaluateEvalResult, ComponentInitEvalResult, EvalResult,
-    LibraryRegistry, NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule,
-    ProgramArtifact, ProgramBuildContext,
+    build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
+    NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    ProgramBuildContext,
 };
 use nx_codegen::emit_nx_ir;
 use nx_codegen::NxIrEmitOptions;
@@ -3752,214 +3747,6 @@ fn the_update_helpers_follow_the_intrinsics() {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Differential: the interpreter evaluates the same source
-// ------------------------------------------------------------------------------------------------
-
-/// Compares the two engines on every entrypoint of a program's entry module: each function
-/// called with no arguments, and each component initialized with no props and then evaluated
-/// from the state initialization produced. Where both fail the program is one neither runs, and
-/// that agreement is all there is to check.
-/// The token and the action name of every handler in rendered output.
-fn rendered_handlers(value: &NxValue, handlers: &mut Vec<(String, String)>) {
-    match value {
-        NxValue::Array(items) => items
-            .iter()
-            .for_each(|item| rendered_handlers(item, handlers)),
-        NxValue::Record {
-            type_name,
-            properties,
-        } => match (properties.get("token"), properties.get("action")) {
-            (Some(NxValue::String(token)), Some(NxValue::String(action)))
-                if type_name.as_deref() == Some("ActionHandler") =>
-            {
-                handlers.push((token.clone(), action.clone()))
-            }
-            _ => properties
-                .values()
-                .for_each(|item| rendered_handlers(item, handlers)),
-        },
-        _ => {}
-    }
-}
-
-fn differences(source: &str, artifact: &ProgramArtifact, program: &Program) -> Vec<String> {
-    let mut differences = Vec::new();
-    let show = |value: &NxValue| value.to_json_string().unwrap_or_default();
-    let entry = program.entry();
-    let no_props = NxValue::Record {
-        type_name: None,
-        properties: BTreeMap::new(),
-    };
-    for name in entry.function_entrypoints() {
-        let native = eval_program_artifact_function(artifact, "main.nx", name);
-        match (program.evaluate_function(name, &[], &options()), native) {
-            (Ok(actual), EvalResult::Ok(expected)) if !same(&actual, &expected) => differences.push(format!(
-                "{name}(): the interpreter gives {}, the IR runtime {}\n{source}",
-                show(&expected),
-                show(&actual)
-            )),
-            (Ok(actual), EvalResult::Err(diagnostics)) => differences.push(format!(
-                "{name}(): the interpreter fails ({diagnostics:?}), the IR runtime gives {}\n{source}",
-                show(&actual)
-            )),
-            (Err(error), EvalResult::Ok(expected)) => differences.push(format!(
-                "{name}(): the interpreter gives {}, the IR runtime fails: {error}\n{source}",
-                show(&expected)
-            )),
-            _ => {}
-        }
-    }
-    for name in entry.component_entrypoints() {
-        let native = initialize_component_program_artifact(artifact, name, &no_props);
-        let initialized = program.initialize_component(
-            name,
-            &BTreeMap::new(),
-            &ComponentInit::default(),
-            &options(),
-        );
-        match (&initialized, native) {
-            (Ok(actual), ComponentInitEvalResult::Ok(expected)) if !same(&actual.rendered, &expected.rendered) => {
-                differences.push(format!(
-                    "<{name}/> initialized: the interpreter renders {}, the IR runtime {}\n{source}",
-                    show(&expected.rendered),
-                    show(&actual.rendered)
-                ))
-            }
-            (Ok(_), ComponentInitEvalResult::Err(diagnostics)) => differences.push(format!(
-                "<{name}/> initialized: the interpreter fails ({diagnostics:?}), the IR runtime does not\n{source}"
-            )),
-            // The interpreter renders an external component as its own descriptor; the IR
-            // runtimes initialize only a component with a body.
-            (Err(error), ComponentInitEvalResult::Ok(_)) if error.to_string().contains("has no body") => {}
-            (Err(error), ComponentInitEvalResult::Ok(_)) => differences.push(format!(
-                "<{name}/> initialized: the IR runtime fails and the interpreter does not: {error}\n{source}"
-            )),
-            _ => {}
-        }
-        let Ok(initialized) = initialized else {
-            continue;
-        };
-        // Each handler the body rendered, run once with the bare action it accepts: the engines
-        // agree on what it returns and on what the body renders against the state it leaves.
-        if let ComponentInitEvalResult::Ok(native) =
-            initialize_component_program_artifact(artifact, name, &no_props)
-        {
-            let mut handlers = Vec::new();
-            rendered_handlers(&initialized.rendered, &mut handlers);
-            for (token, action) in handlers {
-                let batch = [json(&format!(
-                    r#"{{ "$type": "ActionHandlerInvocation", "token": "{token}", "action": {{ "$type": "{action}" }} }}"#
-                ))];
-                let native = dispatch_component_actions_program_artifact(
-                    artifact,
-                    &native.state_snapshot,
-                    &batch,
-                );
-                let dispatched =
-                    program.dispatch_component_actions(&initialized.instance, &batch, &options());
-                match (dispatched, native) {
-                    (Ok(actual), ComponentDispatchEvalResult::Ok(expected))
-                        if !same(&actual.rendered, &expected.rendered)
-                            || !same(
-                                &NxValue::Array(actual.effects.clone()),
-                                &NxValue::Array(expected.effects.clone()),
-                            ) =>
-                    {
-                        differences.push(format!(
-                            "<{name}/> dispatched {action}: the interpreter renders {} with effects {}, the IR runtime {} with effects {}\n{source}",
-                            show(&expected.rendered),
-                            show(&NxValue::Array(expected.effects)),
-                            show(&actual.rendered),
-                            show(&NxValue::Array(actual.effects))
-                        ))
-                    }
-                    (Ok(_), ComponentDispatchEvalResult::Err(diagnostics)) => differences.push(format!(
-                        "<{name}/> dispatched {action}: the interpreter fails ({diagnostics:?}), the IR runtime does not\n{source}"
-                    )),
-                    (Err(error), ComponentDispatchEvalResult::Ok(_)) => differences.push(format!(
-                        "<{name}/> dispatched {action}: the IR runtime fails and the interpreter does not: {error}\n{source}"
-                    )),
-                    _ => {}
-                }
-            }
-        }
-        let state = NxValue::Record {
-            type_name: None,
-            properties: initialized.state.clone(),
-        };
-        let native = evaluate_component_program_artifact(artifact, name, &no_props, &state);
-        let evaluated =
-            program.evaluate_component(name, &BTreeMap::new(), &initialized.state, &options());
-        match (evaluated, native) {
-            (Ok(actual), ComponentEvaluateEvalResult::Ok(expected)) if !same(&actual, &expected.rendered) => {
-                differences.push(format!(
-                    "<{name}/> evaluated: the interpreter renders {}, the IR runtime {}\n{source}",
-                    show(&expected.rendered),
-                    show(&actual)
-                ))
-            }
-            (Ok(_), ComponentEvaluateEvalResult::Err(diagnostics)) => differences.push(format!(
-                "<{name}/> evaluated: the interpreter fails ({diagnostics:?}), the IR runtime does not\n{source}"
-            )),
-            (Err(error), ComponentEvaluateEvalResult::Ok(_)) => differences.push(format!(
-                "<{name}/> evaluated: the IR runtime fails and the interpreter does not: {error}\n{source}"
-            )),
-            _ => {}
-        }
-    }
-    differences
-}
-
-/// Every arithmetic and comparison operator at both numeric carriers, so a wrong operator in
-/// either engine shows as a difference.
-const OPERATOR_SOURCE: &str = "
-let sum(): int = { 7 + 5 }
-let difference(): int = { 7 - 5 }
-let product(): int = { 7 * 5 }
-let quotient(): int = { 7 / 5 }
-let remainder(): int = { -7 % 5 }
-let negated(): int = { -(7 - 9) }
-let floatSum(): float64 = { 7.5 + 5.25 }
-let floatDifference(): float64 = { 7.5 - 5.25 }
-let floatProduct(): float64 = { 7.5 * 5.25 }
-let floatQuotient(): float64 = { 7.5 / 2.5 }
-let floatRemainder(): float64 = { 7.5 % 2.0 }
-let mixed(): float64 = { 7 - 2.5 }
-let less(): boolean = { 1 < 2 }
-let lessOrEqual(): boolean = { 2 <= 2 }
-let greater(): boolean = { 3 > 4 }
-let greaterOrEqual(): boolean = { 4 >= 5 }
-let equal(): boolean = { 1 == 1 }
-let unequal(): boolean = { 1 != 1 }
-let both(): boolean = { true && false }
-let either(): boolean = { true || false }
-let inverted(): boolean = { !true }
-let joined(): string = { \"a\" + 1 + \"b\" + 2.5 + true }
-";
-
-/// Components whose rendered output shows their state, so a dispatch that patches the state
-/// wrongly, or returns the wrong effects, shows as a difference.
-const DISPATCH_SOURCE: &str = "
-external component <Label text:int />
-external component <Button label:string emits { Tapped { } } />
-external component <Card items:object+ header:object count:int />
-action Reset = { }
-component <Tally step:int = 2 emits { Reset } /> = {
-  state { count:int = 0 }
-  <Card
-    items={<Label text={count} />}
-    header=<Button label=\"Add\" onTapped=<State.Update count={count + step} /> />
-    count={count} />
-}
-component <Resetting emits { Reset } /> = {
-  state { count:int = 5 }
-  <Card
-    items={<Label text={count} />}
-    header=<Button label=\"Reset\" onTapped={<State.Update count=0 /> <Reset />} />
-    count={count} />
-}
-";
-
 /// A component's derived props record, built, patched and compared like any record.
 const PROPS_SOURCE: &str = "
 abstract component <Question label:string />
@@ -4048,49 +3835,6 @@ visualizer Card = <ElementVisualizer title=title />
 }
 
 #[test]
-fn emitted_ir_agrees_with_the_interpreter() {
-    let mut differences_found = Vec::new();
-    let mut compared = 0;
-    // The sources written here must compile; one of the shared list may be a program the
-    // compiler refuses, which the TypeScript test checks for and this one skips.
-    let own = [
-        COUNTER_SOURCE,
-        LIST_SOURCE,
-        OPERATOR_SOURCE,
-        DISPATCH_SOURCE,
-        PROPS_SOURCE,
-    ];
-    for source in SOURCES.iter().copied().chain(own) {
-        let emitted =
-            build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
-                .ok()
-                .and_then(|artifact| {
-                    Some((
-                        emit_nx_ir(&artifact, &NxIrEmitOptions::default()).ok()?,
-                        artifact,
-                    ))
-                });
-        let Some((images, artifact)) = emitted else {
-            assert!(
-                !own.contains(&source),
-                "the source does not compile:\n{source}"
-            );
-            continue;
-        };
-        let program = Program::prepare(images.into_iter().next().expect("the entry image").bytes)
-            .unwrap_or_else(|error| panic!("{error}\n{source}"));
-        compared += 1;
-        differences_found.extend(differences(source, &artifact, &program));
-    }
-    assert!(compared > 20, "only {compared} sources compiled");
-    assert!(
-        differences_found.is_empty(),
-        "{}",
-        differences_found.join("\n\n")
-    );
-}
-
-#[test]
 fn standard_math_smoke() {
     let source = "import \"@nx/math\" as math\nlet root() = { math.sin(math.pi / 2.0) }";
     let program = program(source);
@@ -4098,11 +3842,6 @@ fn standard_math_smoke() {
         program.evaluate_function("root", &[], &options()).unwrap(),
         NxValue::Float(1.0)
     );
-    let legacy = nx_api::eval_program_artifact_function(&artifact(source), "main.nx", "root");
-    match legacy {
-        EvalResult::Ok(value) => assert_eq!(value, NxValue::Float(1.0)),
-        EvalResult::Err(e) => panic!("legacy: {e:?}"),
-    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -4332,4 +4071,335 @@ fn interval_patterns_match_their_ranges_and_cost_what_a_literal_does() {
     let literal = cost(|options| program.evaluate_function("literal", &[NxValue::Int(1)], options));
     let ranged = cost(|options| program.evaluate_function("ranged", &[NxValue::Int(1)], options));
     assert_eq!(literal, ranged);
+}
+
+#[test]
+fn a_host_record_with_only_a_same_named_base_is_rejected() {
+    let modules = [
+        ("main.nx", "import { Shape } from \"./expected.nx\"\nimport { Other } from \"./wrong.nx\"\nlet f(s:Shape): string = { \"ok\" }"),
+        ("expected.nx", "export abstract type Shape = { label?:string }\nexport type Good extends Shape = { r:int }"),
+        ("wrong.nx", "abstract type Shape = { label?:string }\nexport type Other extends Shape = { r:int }"),
+    ];
+    let workspace = NxWorkspace::new(
+        modules
+            .into_iter()
+            .map(|(identity, source)| NxWorkspaceModule::from_source(identity, source).unwrap())
+            .collect(),
+    )
+    .unwrap();
+    let artifact =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    let runtime = link(&artifact, false);
+    let function = json(r#"{"$type":"Function","module":"main.nx","name":"f"}"#);
+    assert_code(
+        runtime.call_function(
+            &function,
+            &fields(r#"{"s":{"$type":"Other","r":1}}"#),
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["Shape", "Other"],
+    );
+    assert_same(
+        &runtime
+            .call_function(
+                &function,
+                &fields(r#"{"s":{"$type":"Good","r":1}}"#),
+                &options(),
+            )
+            .unwrap(),
+        r#""ok""#,
+    );
+}
+
+#[test]
+fn program_internal_component_descriptors_keep_defaults_handlers_and_cost() {
+    let runtime = program(include_str!(
+        "../../../../runtime/typescript/test/retirement-descriptor.nx"
+    ));
+    let (options, usage) = with_usage(budget(100_000));
+    let value = runtime.evaluate_function("root", &[], &options).unwrap();
+    assert_same(
+        &value,
+        r#"{"$type":"Child","label":"default","onTap":{"$type":"ActionHandler","action":"Child.Tap"}}"#,
+    );
+    assert_eq!(usage.operations(), Some(16));
+}
+
+#[test]
+fn component_boundary_widths_and_nominal_cases_are_validated() {
+    let runtime = program(
+        r#"
+        type Tone = light | dark
+        type Contact = { title:string subtitle:string }
+        component <Table sortBy:Contact.Property /> = { <TableView sortBy={sortBy} /> }
+        component <Sorted /> = { <Table sortBy={Contact.Property.subtitle} /> }
+        component <Panel n:int32 = 1 tone:Tone = light emits { Done { tone:Tone } } /> = {
+          <Text n={n} tone={tone} />
+        }
+        action Report = { tone:Tone }
+        component <Parent emits { Report } /> = {
+          <Panel onDone=<Report tone={action.tone} /> />
+        }
+        external component <External label:string = "hello" /> = { state { count:int = 0 } }
+        abstract component <Base />
+    "#,
+    );
+    let init = |name: &str, props: BTreeMap<String, NxValue>| {
+        runtime.initialize_component(name, &props, &ComponentInit::default(), &options())
+    };
+    assert_same(
+        &init("Panel", fields(r#"{"n":42,"tone":"dark"}"#))
+            .unwrap()
+            .rendered,
+        r#"{"$type":"Text","n":42,"tone":"dark"}"#,
+    );
+    assert_code(
+        init("Panel", fields(r#"{"n":2147483648}"#)),
+        "nx-ir-boundary-type",
+        &["int32"],
+    );
+    assert_code(
+        init("Panel", fields(r#"{"tone":"blue"}"#)),
+        "nx-ir-boundary-type",
+        &["Tone"],
+    );
+    assert_same(
+        &init("Table", fields(r#"{"sortBy":"title"}"#))
+            .unwrap()
+            .rendered,
+        r#"{"$type":"TableView","sortBy":"title"}"#,
+    );
+    assert_same(
+        &init("Sorted", BTreeMap::new()).unwrap().rendered,
+        r#"{"$type":"Table","sortBy":"subtitle"}"#,
+    );
+    assert_code(
+        init("Table", fields(r#"{"sortBy":"nickname"}"#)),
+        "nx-ir-boundary-type",
+        &["Contact.Property"],
+    );
+    let external = runtime
+        .construct_component_descriptor("External", &BTreeMap::new(), &[], &options())
+        .unwrap();
+    assert_same(&external, r#"{"$type":"External","label":"hello"}"#);
+    assert_code(
+        runtime.construct_component_descriptor(
+            "External",
+            &fields(r#"{"count":3}"#),
+            &[],
+            &options(),
+        ),
+        "nx-ir-boundary-field",
+        &["count"],
+    );
+    assert!(init("Base", BTreeMap::new()).is_err());
+    let parent = init("Parent", BTreeMap::new()).unwrap();
+    let NxValue::Record { properties, .. } = &parent.rendered else {
+        panic!("expected Panel")
+    };
+    let child = runtime
+        .initialize_component(
+            "Panel",
+            properties,
+            &ComponentInit {
+                parent: Some(&parent.instance),
+                state: None,
+            },
+            &options(),
+        )
+        .unwrap();
+    let result = runtime
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Panel.Done","tone":"dark"}"#)],
+            &options(),
+        )
+        .unwrap();
+    assert_eq!(result.effects.len(), 1);
+    assert_same(&result.effects[0], r#"{"$type":"Report","tone":"dark"}"#);
+    assert!(runtime
+        .dispatch_component_actions(&child.instance, &[json(r#"{"tone":"dark"}"#)], &options())
+        .is_err());
+    assert!(runtime
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"ActionHandlerInvocation","token":42}"#)],
+            &options()
+        )
+        .is_err());
+}
+
+#[test]
+fn imported_component_actions_use_the_declaring_modules_payload_and_defaults() {
+    let modules = [
+        (
+            "main.nx",
+            r#"
+          import { Base, Box } from "./base.nx"
+          action Submitted = { query:int }
+          action Report = { query:string }
+          component <Local extends Base /> = { <Text label={label} /> }
+          component <Parent emits { Report } /> = { <Local onSubmitted=<Report query={action.query} /> /> }
+          component <Imported emits { Report } /> = { <Box onSubmitted=<Report query={action.query} /> /> }
+        "#,
+        ),
+        (
+            "base.nx",
+            r#"
+          action Submitted = { query:string }
+          export abstract component <Base label:string = "default" emits { Submitted } />
+          export component <Box extends Base /> = { <Text label={label} /> }
+        "#,
+        ),
+    ];
+    let workspace = NxWorkspace::new(
+        modules
+            .into_iter()
+            .map(|(identity, source)| NxWorkspaceModule::from_source(identity, source).unwrap())
+            .collect(),
+    )
+    .unwrap();
+    let artifact =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    let runtime = link(&artifact, false);
+    let (parent_name, child_name) = ("Parent", "Local");
+    let parent = runtime
+        .initialize_component(
+            parent_name,
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    let NxValue::Record { properties, .. } = &parent.rendered else {
+        panic!("expected child")
+    };
+    let child = runtime
+        .initialize_component(
+            child_name,
+            properties,
+            &ComponentInit {
+                parent: Some(&parent.instance),
+                state: None,
+            },
+            &options(),
+        )
+        .unwrap();
+    assert_same(&child.rendered, r#"{"$type":"Text","label":"default"}"#);
+    assert_code(
+        runtime.dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":7}"#)],
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["query", "string"],
+    );
+    let result = runtime
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":"docs"}"#)],
+            &options(),
+        )
+        .unwrap();
+    assert_eq!(result.effects.len(), 1);
+    assert_same(&result.effects[0], r#"{"$type":"Report","query":"docs"}"#);
+
+    // Direct component APIs run a declaration in the selected entry module. Select the library
+    // image for the fully imported component; no flat source-evaluation API is involved.
+    let modules: BTreeMap<_, _> =
+        emit_nx_ir(&artifact, &NxIrEmitOptions::every_module_with_debug())
+            .unwrap()
+            .into_iter()
+            .map(|image| {
+                (
+                    image.identity,
+                    PreparedModule::prepare(image.bytes).unwrap(),
+                )
+            })
+            .collect();
+    let library = Program::link(
+        &modules["base.nx"],
+        |identity| modules.get(identity).cloned(),
+        &LinkOptions::default(),
+    )
+    .unwrap();
+    let child = library
+        .initialize_component(
+            "Box",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    assert_same(&child.rendered, r#"{"$type":"Text","label":"default"}"#);
+    assert_code(
+        library.dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":7}"#)],
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["query"],
+    );
+    assert!(library
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":"docs"}"#)],
+            &options()
+        )
+        .is_ok());
+}
+
+#[test]
+fn component_explicit_state_preserves_numeric_sites_and_polymorphic_results() {
+    let runtime = program(
+        r#"
+        external component <Gauge count:int32 ratio:float32 scale:float32 />
+        component <Meter count:int32 ratio:float32 scale:float32 /> = {
+          state { step:int32 }
+          <Gauge count={count + step} ratio={ratio} scale={scale} />
+        }
+        abstract type Question = { label:string }
+        type ShortTextQuestion extends Question = { placeholder:string }
+        component <Flow /> = {
+          state { label:string }
+          <ShortTextQuestion label={label} placeholder="Enter your name" />
+        }
+    "#,
+    );
+    let state = fields(r#"{"step":1}"#);
+    let props = fields(r#"{"count":7,"ratio":0.1,"scale":2}"#);
+    let rendered = runtime
+        .evaluate_component("Meter", &props, &state, &options())
+        .unwrap();
+    assert_same(
+        &rendered,
+        r#"{"$type":"Gauge","count":8,"ratio":0.10000000149011612,"scale":2.0}"#,
+    );
+    assert_code(
+        runtime.evaluate_component(
+            "Meter",
+            &fields(r#"{"count":1.5,"ratio":0.1,"scale":2}"#),
+            &state,
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["count"],
+    );
+    let rendered = runtime
+        .evaluate_component(
+            "Flow",
+            &BTreeMap::new(),
+            &fields(r#"{"label":"Name"}"#),
+            &options(),
+        )
+        .unwrap();
+    assert_same(
+        &rendered,
+        r#"{"$type":"ShortTextQuestion","label":"Name","placeholder":"Enter your name"}"#,
+    );
 }

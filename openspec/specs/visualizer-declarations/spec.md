@@ -13,7 +13,7 @@ only as the first token of a module member, so a prop, field, parameter, binding
 `visualizer` SHALL keep working. A visualizer declaration SHALL take no visibility modifier, SHALL declare no
 name, and SHALL NOT be referable from any expression or type. Analysis SHALL type-check its value
 like any other module member. A visualizer declaration SHALL NOT be lowered to NX IR, SHALL NOT be
-evaluated by any runtime or the interpreter, and SHALL NOT change the module's exports or
+evaluated by any runtime, and SHALL NOT change the module's exports or
 declaration schema.
 
 #### Scenario: A visualizer beside its type
@@ -277,4 +277,3 @@ the interval narrows it and SHALL NOT be reported.
 #### Scenario: A hint wider than the constraint
 - **WHEN** an element has `columns: int where in 1..=1000` and its visualizer has `<PropertyVisualizer property=columns min=0 max=2000>`
 - **THEN** analysis SHALL report `editor-hint-range` at `min=0` and at `max=2000`
-

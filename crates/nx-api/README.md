@@ -1,8 +1,7 @@
 # nx-api
 
 External Rust entry point for NX tooling. Program construction and inspection are re-exported
-flat from `nx-program`. Evaluation, component lifecycle, NX text and interpreter-value conversion
-retain their existing flat functions. The `codegen`, `language_service` and `ir_runtime` namespaces
+flat from `nx-program`. Program-aware value formatting remains independent of execution. The `codegen`, `language_service` and `ir_runtime` namespaces
 re-export the service crates without wrappers or changed defaults.
 
 A caller needs only `nx-api` as an NX dependency to build source, emit IR and execute it:
@@ -29,7 +28,13 @@ let value = program.evaluate_function("root", &[], &ir_runtime::RuntimeOptions::
 assert_eq!(value.to_json_string().unwrap(), "42");
 ```
 
-`tests/facade.rs` exercises this sequence and compares it with `eval_program_artifact`, which
-continues to use the HIR interpreter. This refactor changes ownership and dependency direction;
-it does not switch evaluation engines. Runtime-only hosts should depend on `nx-ir-runtime`
-directly to avoid compiling the compiler and other services.
+`tests/facade.rs` exercises this sequence against an explicit expected result. Runtime-only hosts
+should depend on `nx-ir-runtime` directly to avoid compiling the compiler and other services.
+
+`format_program_artifact_value` spells canonical host values as annotated NX text;
+`format_program_artifact_function_value` formats a read-only IR function result while retaining
+constant-case and function identities. Neither performs execution.
+
+The flat `eval_*`, source/artifact component lifecycle, `ResourceLimits`, interpreter-value
+conversion and `format_nx_text` APIs have been removed. See
+[the migration guide](../../docs/hir-interpreter-retirement.md) for exact removals and limitations.

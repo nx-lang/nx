@@ -233,7 +233,7 @@ member read of a field of an update record SHALL therefore be typed as a read of
 a field declared `name:X` or `name?:X` in `T` SHALL read as `X?`, and one declared `name:X+` or
 `name?:X+` SHALL read as `X*`, whether or not `T` declares the field optional. A present empty
 field SHALL read as the empty value too, so a read SHALL NOT distinguish an absent field from a
-cleared one; `changed` is what tells them apart. The interpreter, the TypeScript IR runtime and
+cleared one; `changed` is what tells them apart. The Rust IR runtime, the TypeScript IR runtime and
 generated code SHALL read an absent field and a cleared field as the same empty value.
 
 #### Scenario: A required field of the target reads as optional
@@ -249,4 +249,3 @@ generated code SHALL read an absent field and a cleared field as the same empty 
 - **WHEN** a file contains `type User = { name:string email?:string }` and `let e(u:User.Update) = { u.email ?? "same" }`
 - **THEN** `e(<User.Update />)` and `e(<User.Update email={} />)` SHALL both evaluate to `"same"` in every engine
 - **AND** `changed(<User.Update email={} />)` SHALL list `email` while `changed(<User.Update />)` SHALL be empty
-

@@ -152,4 +152,4 @@ integer ranges iterate. Evaluation SHALL NOT build the list of integers before r
 
 #### Scenario: Evaluation agrees across backends
 - **WHEN** a program builds ranges with both operators, compares two for equality, iterates one with an index, and iterates an empty one
-- **THEN** the interpreter, the generated executable code and the TypeScript IR runtime SHALL produce the same values
+- **THEN** the Rust IR runtime, the generated executable code and the TypeScript IR runtime SHALL produce the same values

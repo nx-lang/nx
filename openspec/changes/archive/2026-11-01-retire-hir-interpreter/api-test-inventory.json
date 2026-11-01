@@ -1,0 +1,297 @@
+[
+  {
+    "original": "crates/nx-api/src/eval.rs::doc_comments_do_not_change_evaluation",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::doc_comments_do_not_change_evaluation"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_evaluates_an_int_literal_at_a_float_site_to_a_float",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_evaluates_an_int_literal_at_a_float_site_to_a_float"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_returns_aggregated_static_diagnostics_before_runtime_execution",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_aggregated_static_diagnostics_before_runtime_execution"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_reports_missing_import_when_source_is_not_on_disk",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_reports_missing_import_when_source_is_not_on_disk"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_resolves_preloaded_local_imports",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_resolves_preloaded_local_imports"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_preserves_external_component_identity_props_and_handlers",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_preserves_external_component_identity_props_and_handlers"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_external_component_state_only_body_omits_state_fields",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_external_component_state_only_body_omits_state_fields"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_program_artifact_applies_imported_abstract_base_component_defaults",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_applies_imported_abstract_base_component_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_program_artifact_applies_imported_abstract_record_defaults",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_applies_imported_abstract_record_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_program_artifact_executes_root_across_imported_modules",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_executes_root_across_imported_modules"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_returns_bare_authored_case_string",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_bare_authored_case_string"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_returns_payload_union_case_as_type_map",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_payload_union_case_as_type_map"
+  },
+  {
+    "original": "crates/nx-api/src/eval.rs::eval_source_returns_constant_union_case_as_a_bare_string",
+    "disposition": "ported",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_constant_union_case_as_a_bare_string"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_returns_rendered_output_and_state_snapshot",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::initialization_returns_rendered_output_state_and_an_instance"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_program_artifact_returns_rendered_output",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::pure_evaluation_and_descriptors_carry_no_tokens"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_source_gives_json_numbers_the_width_of_their_site",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_explicit_state_preserves_numeric_sites_and_polymorphic_results (IR canonical numeric carriers replace the retired Int32/Float32 host variants)"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_source_refuses_a_json_number_its_site_cannot_hold",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_explicit_state_preserves_numeric_sites_and_polymorphic_results (IR canonical numeric carriers replace the retired Int32/Float32 host variants)"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_source_returns_static_diagnostics_before_runtime_work",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_aggregated_static_diagnostics_before_runtime_execution"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_program_artifact_resolves_imported_library_component",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_applies_imported_abstract_base_component_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_source_returns_json_compatible_constant_case_output",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::evaluate_component_source_preserves_polymorphic_record_output",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_explicit_state_preserves_numeric_sites_and_polymorphic_results (IR canonical numeric carriers replace the retired Int32/Float32 host variants)"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_supports_external_component_entrypoint",
+    "disposition": "interpreter-internal",
+    "coverage": "The removed wrapper synthesized a lifecycle instance for a body-less external declaration. IR hosts construct its descriptor instead; component_boundary_widths_and_nominal_cases_are_validated asserts the same external identity/defaults via construct_component_descriptor."
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_supports_external_component_state_only_entrypoint",
+    "disposition": "interpreter-internal",
+    "coverage": "The removed wrapper synthesized an external lifecycle instance. Source descriptor state omission remains covered by source_evaluation.rs::eval_source_external_component_state_only_body_omits_state_fields; external lifecycle initialization is not an existing IR operation."
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_rejects_external_state_as_host_prop",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_rejects_abstract_component_entrypoint",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_round_trips_effects_and_snapshot",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/semantics/update_records.rs::form_applies_its_update_and_re_emits_saved"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatching_a_rendered_handler_token_returns_rendered_effects_and_snapshot",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/semantics/update_records.rs::a_root_bound_handler_in_the_output_runs_and_its_results_are_effects"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_stale_handler_token_fails_dispatch_with_a_diagnostic",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::a_stale_token_is_rejected_and_the_instance_survives"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_malformed_handler_invocation_is_rejected_as_invalid_input",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_round_trips_constant_case_props_in_rendered_output",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_property_union_case_encodes_as_the_bare_field_name",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::host_input_with_a_valid_property_case_decodes",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::host_input_with_an_unknown_property_case_is_rejected",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_rejects_unknown_union_case_in_prop",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_round_trips_constant_case_effects_and_snapshot",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_supports_external_component_handlers",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_instance_tree_tests.rs::a_child_receives_the_handler_its_parent_bound"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_returns_runtime_diagnostics_for_invalid_snapshot",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::an_altered_instance_is_refused"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_returns_aggregated_static_diagnostics_before_runtime_work",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_aggregated_static_diagnostics_before_runtime_execution"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_returns_static_diagnostics_before_snapshot_validation",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_source_returns_aggregated_static_diagnostics_before_runtime_execution"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_source_rejects_component_records_in_host_props",
+    "disposition": "interpreter-internal",
+    "coverage": "The removed from_nx_value adapter categorically rejected component-shaped host records, even at object. Existing IR APIs intentionally accept canonical component descriptors; the removed adapter restriction is not an IR language rule."
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_rejects_component_records_in_action_payloads",
+    "disposition": "interpreter-internal",
+    "coverage": "The removed from_nx_value adapter banned all component-shaped records in opaque action payloads. Existing IR host-value decoding accepts canonical descriptors; no replacement adapter or blanket restriction is introduced."
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_rejects_untyped_action_records",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::component_boundary_widths_and_nominal_cases_are_validated"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::initialize_component_program_artifact_resolves_imported_library_component",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_applies_imported_abstract_base_component_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::imported_component_handler_bindings_from_abstract_base_lower_and_dispatch",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::imported_component_actions_use_the_declaring_modules_payload_and_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::imported_abstract_base_component_defaults_apply_during_initialization",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_applies_imported_abstract_base_component_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::dispatch_component_actions_source_keeps_loaded_snapshot_after_disk_changes",
+    "disposition": "interpreter-internal",
+    "coverage": "This tests embedding a resolved compiler program inside the removed opaque HIR snapshot transport. IR instances instead identify their immutable linked images; see an_instance_of_another_program_revision_is_refused."
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_host_action_is_validated_against_the_declaration_the_component_emits",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::imported_component_actions_use_the_declaring_modules_payload_and_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_host_action_matching_the_emitted_declaration_is_still_accepted",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::imported_component_actions_use_the_declaring_modules_payload_and_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_host_record_whose_lineage_only_shares_a_name_with_the_expected_base_is_rejected",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::a_host_record_with_only_a_same_named_base_is_rejected"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_host_record_extending_the_expected_base_in_another_module_is_accepted",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::a_host_record_with_only_a_same_named_base_is_rejected"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::a_host_action_for_a_fully_imported_component_is_checked_against_the_library_declaration",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/codegen/ir_runtime_tests.rs::imported_component_actions_use_the_declaring_modules_payload_and_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/component.rs::an_imported_component_is_evaluated_in_the_module_that_declares_it",
+    "disposition": "redundant",
+    "coverage": "crates/nx-api/tests/source_evaluation.rs::eval_program_artifact_applies_imported_abstract_base_component_defaults"
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::nx_value_round_trips_through_interpreter_value",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::interpreter_constant_case_lowers_to_bare_authored_case_string",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::a_list_of_property_cases_lowers_to_bare_field_names",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::from_nx_value_rejects_action_handler_records",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::a_function_value_renders_as_a_function_record",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::from_nx_value_rejects_function_records",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  },
+  {
+    "original": "crates/nx-api/src/value.rs::update_record_absence_survives_the_public_value_model",
+    "disposition": "interpreter-internal",
+    "coverage": "Deleted interpreter-Value conversion API; canonical encodings remain covered in nx-value, occurrence_boundary.rs, runtime_result_view.rs and IR corpus tests."
+  }
+]

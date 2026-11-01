@@ -4,7 +4,7 @@
 
 Allows NX programs and AI agents to author standalone vector drawings using portable graphics contracts and reusable parameterized shapes, without a UI layout engine.
 
-Graphics evaluation targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
+Graphics evaluation targets the Rust and TypeScript IR runtimes. The legacy HIR Rust IR runtime
 is outside this graphics profile; its import/type-matching limitations are accepted.
 Native preview compiles with nx-api/nx-codegen and evaluates linked images with nx-ir-runtime.
 Runtime acceptance and negative tests use IR, with no HIR parity requirement.

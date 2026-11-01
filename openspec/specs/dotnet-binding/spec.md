@@ -45,7 +45,7 @@ project, or forwarding assembly as part of this change.
 - **WHEN** contributors inspect managed binding tests, README files, package docs, and examples
 - **THEN** package/project references SHALL use `NxLang.Sdk`
 - **AND** user-facing prose SHALL describe the package as the .NET SDK for NX host, compiler,
-  diagnostics, artifact, and evaluation workflows rather than only as a runtime package
+  diagnostics, artifact and IR-generation workflows rather than only as a runtime package
 
 ### Requirement: Public managed API is CLS-compliant
 The managed NX binding SHALL declare explicit CLS compliance and SHALL expose a CLS-compliant
@@ -63,7 +63,7 @@ instead of stringly typed values.
 - **AND** internal pointer-sized interop details remain hidden from the public API
 
 #### Scenario: Severity is strongly typed
-- **WHEN** evaluation fails and diagnostics are returned through the managed API
+- **WHEN** source validation fails and diagnostics are returned through the managed API
 - **THEN** severity is exposed through a managed enum or equivalent strong type rather than a
   free-form string
 
@@ -75,11 +75,11 @@ consumption and source-based integration workflows.
 
 #### Scenario: ABI versions match
 - **WHEN** the managed binding loads a compatible native library
-- **THEN** the runtime proceeds with evaluation calls normally
+- **THEN** the runtime proceeds with tooling calls normally
 
 #### Scenario: ABI version mismatch is detected
 - **WHEN** the managed binding loads a native library with an incompatible ABI version
-- **THEN** the runtime fails before evaluation
+- **THEN** the runtime fails before tooling calls
 - **AND** it raises a managed exception that identifies the incompatibility
 
 #### Scenario: Native library load fails
@@ -106,7 +106,7 @@ contributor-oriented alternative to the primary published NuGet package workflow
 #### Scenario: Consumer uses a project reference
 - **WHEN** a repository vendors NX source and references the managed SDK project directly
 - **THEN** the documentation describes how to build NX and resolve the native library for local
-  execution
+  tooling use
 - **AND** the documentation identifies this as a source-based workflow rather than the primary
   application consumption workflow
 
@@ -159,69 +159,17 @@ reusable library-artifact host API.
 - **AND** later source-based program builds SHALL consume an `NxProgramBuildContext` created from
   that registry
 
-### Requirement: Managed source component convenience is implemented via transient program artifacts
-The managed binding SHALL keep source-based component convenience APIs, but implement them by
-building transient `NxProgramArtifact`s and then calling the native program-artifact component
-entry points rather than depending on separate source-based component FFI entry points.
-
-#### Scenario: Managed source component initialization uses a build context through a transient artifact
-- **WHEN** a .NET host calls a source-based component initialization helper with a
-  `NxProgramBuildContext`
-- **THEN** the managed binding SHALL build a transient `NxProgramArtifact` with that context
-- **AND** SHALL initialize the component through the native program-artifact component API
-
-#### Scenario: Managed source component dispatch uses the same source revision through a transient artifact
-- **WHEN** a .NET host calls a source-based component dispatch helper
-- **THEN** the managed binding SHALL build a transient `NxProgramArtifact` for that source revision
-- **AND** SHALL dispatch through the native program-artifact dispatch API
-
-### Requirement: Managed runtime APIs expose direct JSON result workflows
-The managed NX binding SHALL allow C# callers to request JSON output directly from evaluation and
-component lifecycle calls. The managed JSON workflow SHALL support both pass-through raw bytes and
-parsed `JsonElement` results without requiring a post-processing MessagePack-to-JSON conversion
-step.
-
-#### Scenario: C# caller requests raw JSON bytes for pass-through
-- **WHEN** a C# caller evaluates NX source through the managed raw-byte API and requests JSON output
-- **THEN** the binding SHALL request JSON from the native runtime for that call
-- **AND** SHALL return UTF-8 JSON bytes suitable for forwarding to a client
-
-#### Scenario: C# evaluation reads JSON as JsonElement
-- **WHEN** a C# caller evaluates `let root() = { { answer: 42 } }` through the managed JSON
-  workflow
-- **THEN** the binding SHALL return the result as `JsonElement`
-- **AND** the caller SHALL be able to read property `answer` as `42`
-
-#### Scenario: C# component lifecycle reads JSON results with JsonElement payloads
-- **WHEN** a C# caller initializes or dispatches a component through the managed JSON workflow
-- **THEN** initialization SHALL return `NxComponentInitResult<JsonElement>`
-- **AND** dispatch SHALL return `NxComponentDispatchResult<JsonElement>`
-- **AND** the opaque `StateSnapshot` bytes SHALL remain available for later dispatch calls
-
-### Requirement: Managed JSON support replaces debug conversion helpers
-The managed NX binding SHALL expose JSON by requesting it from the runtime call itself rather than
-by converting previously returned MessagePack bytes through public helper APIs.
-
-#### Scenario: Debug conversion helpers are not part of the managed JSON workflow
-- **WHEN** a consumer inspects the managed runtime API surface for JSON result support
-- **THEN** the supported JSON path SHALL be direct JSON-returning runtime calls and raw-byte format
-  selection
-- **AND** `NxRuntime` SHALL NOT require public `ValueBytesToJson`,
-  `DiagnosticsBytesToJson`, `ComponentInitResultBytesToJson`, or
-  `ComponentDispatchResultBytesToJson` methods
-
 ### Requirement: Managed raw-value and typed-model enum workflows share a single bare-string wire shape
 The managed NX binding SHALL represent constant union case values as the bare authored NX case
-string across both raw `NxValue` runtime-result workflows and schema-aware typed-model workflows.
-JSON and MessagePack output from raw runtime calls, typed DTO serialization, and the shared
+string across both canonical raw-value workflows and schema-aware typed-model workflows.
+Canonical JSON/MessagePack values, typed DTO serialization, and the shared
 `NxEnumJsonConverter` / `NxEnumMessagePackFormatter` helpers SHALL produce and consume the same
 string representation for a given case. The binding SHALL document and test that the raw and typed
 layers share this wire shape rather than presenting it as two distinct contracts.
 
 #### Scenario: Managed JSON raw-value workflow emits a bare authored member string
-- **WHEN** a C# caller evaluates NX source to `JsonElement` and the result is a constant case value
-  such as `ThemeMode.dark`
-- **THEN** the returned JSON SHALL be the bare string `"dark"` in the slot typed as `ThemeMode`
+- **WHEN** a C# caller reads a canonical `JsonElement` containing the constant case `ThemeMode.dark`
+- **THEN** the canonical JSON SHALL be the bare string `"dark"` in the slot typed as `ThemeMode`
 - **AND** the binding SHALL NOT wrap that raw JSON result in a `"$enum"` / `"$member"` object
 
 #### Scenario: Managed typed MessagePack workflow matches the raw-value wire shape
@@ -242,7 +190,7 @@ layers share this wire shape rather than presenting it as two distinct contracts
 
 ### Requirement: Managed raw-value and typed-model polymorphic record workflows share a single `$type` wire shape
 The managed NX binding SHALL represent polymorphic NX records with the same `$type`-discriminated
-map contract across both raw `NxValue` runtime-result workflows and schema-aware typed-model
+map contract across both canonical raw-value workflows and schema-aware typed-model
 MessagePack workflows. Generated typed DTO serialization and deserialization for polymorphic NX
 record families SHALL align with the canonical raw runtime shape rather than a separate
 MessagePack-specific union envelope.
@@ -355,16 +303,15 @@ identity bytes only for the duration of the native workspace call. A returned
 - **THEN** evaluating the returned artifact SHALL still succeed
 
 ### Requirement: Managed binding supports discriminated union raw and typed workflows
-The managed NX binding SHALL preserve discriminated union values through raw runtime-result
+The managed NX binding SHALL preserve discriminated union values through canonical raw-value
 workflows and schema-aware generated typed DTO workflows using the canonical `$type` map shape.
-JSON and MessagePack output from raw runtime calls, typed DTO serialization, and typed DTO
+Canonical JSON/MessagePack values, typed DTO serialization, and typed DTO
 deserialization SHALL agree on the fully scoped case discriminator string and authored field wire
 names.
 
 #### Scenario: Managed raw JSON returns union case discriminator
-- **WHEN** a C# caller evaluates NX source that returns `<LoadState.failed message={"Offline"} />`
-- **AND** requests JSON output through the managed runtime API
-- **THEN** the returned `JsonElement` SHALL contain `$type` with value `LoadState.failed`
+- **WHEN** a C# caller reads canonical JSON for `<LoadState.failed message={"Offline"} />`
+- **THEN** the `JsonElement` SHALL contain `$type` with value `LoadState.failed`
 - **AND** it SHALL contain field `message` with value `"Offline"`
 
 #### Scenario: Managed typed MessagePack deserializes union case from `$type`
@@ -386,78 +333,6 @@ names.
   `CardSortMode`, and raw output for the payload case `LoadState.failed`
 - **THEN** the managed workflow SHALL expose the constant case as the bare string `"closed"`
 - **AND** it SHALL expose the payload case as a map containing `$type: "LoadState.failed"`
-
-### Requirement: Managed binding evaluates components with explicit state
-The managed NX binding SHALL expose `EvaluateComponent` APIs that evaluate a named component with
-caller-provided props and caller-provided current state, then return the rendered component body.
-These APIs SHALL NOT expose or require `StateSnapshot`, SHALL NOT dispatch actions, and SHALL NOT
-return effect actions.
-
-#### Scenario: Managed typed component evaluation returns rendered element
-- **WHEN** a C# caller evaluates `SearchBox` from source containing `component <SearchBox placeholder:string = "Find docs" /> = { state { query:string } <TextInput value={query} placeholder={placeholder} /> }` with state `{ query = "docs" }`
-- **THEN** `NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>` SHALL
-  return a `TextInputElement` whose `Value` is `"docs"`
-- **AND** the returned `TextInputElement.Placeholder` SHALL be `"Find docs"`
-
-#### Scenario: Managed component evaluation does not return lifecycle fields
-- **WHEN** a C# caller evaluates a component through `EvaluateComponent`
-- **THEN** the managed result SHALL be the rendered element type requested by the caller
-- **AND** the API SHALL NOT require a prior `StateSnapshot`
-- **AND** the API SHALL NOT return a `StateSnapshot`
-- **AND** the API SHALL NOT return an effect action collection
-
-#### Scenario: Managed component evaluation rejects invalid state input
-- **WHEN** a C# caller evaluates a component whose state declaration requires `query:string`
-- **AND** the supplied state payload omits `query`
-- **THEN** the managed binding SHALL throw `NxEvaluationException` with diagnostics from the native
-  runtime instead of silently rendering with missing state
-
-### Requirement: Managed component evaluation supports source and artifact workflows
-The managed binding SHALL expose component evaluation overloads for both `NxProgramArtifact` and
-source strings. Source-string overloads SHALL build a transient `NxProgramArtifact` using either the
-default build context or a caller-provided `NxProgramBuildContext`, then invoke the artifact-first
-native evaluation entry point.
-
-#### Scenario: Managed program-artifact evaluation reuses imported libraries
-- **WHEN** a C# caller builds a `NxProgramArtifact` from source that imports a library through a
-  preconfigured `NxProgramBuildContext`
-- **AND** the caller evaluates a component from that artifact
-- **THEN** the managed binding SHALL evaluate the component using the already-built artifact and its
-  selected library snapshots
-
-#### Scenario: Managed source evaluation uses caller build context
-- **WHEN** a C# caller evaluates a component from source using an explicit `NxProgramBuildContext`
-- **THEN** the managed binding SHALL build a transient `NxProgramArtifact` with that context
-- **AND** SHALL evaluate the component through the native program-artifact component evaluation API
-
-#### Scenario: Managed source evaluation reports static diagnostics
-- **WHEN** a C# caller evaluates a component from source that contains static diagnostics
-- **THEN** the managed binding SHALL throw `NxEvaluationException` containing those diagnostics
-- **AND** SHALL NOT invoke component body evaluation
-
-### Requirement: Managed component evaluation exposes raw JSON and typed workflows
-The managed binding SHALL support component evaluation results as typed MessagePack DTOs, raw bytes
-with caller-selected output format, and parsed `JsonElement` values. JSON and MessagePack outputs
-SHALL represent the rendered component body directly rather than wrapping it in a lifecycle result
-object.
-
-#### Scenario: Managed JSON component evaluation returns rendered JsonElement
-- **WHEN** a C# caller evaluates `SearchBox` and requests JSON output
-- **THEN** `NxRuntime.EvaluateComponentJson` SHALL return a `JsonElement` representing the rendered
-  component body
-- **AND** the JSON value SHALL NOT contain `rendered`, `state_snapshot`, or `effects` wrapper fields
-
-#### Scenario: Managed raw-byte component evaluation returns selected format
-- **WHEN** a C# caller evaluates `SearchBox` through a raw-byte component evaluation API and selects
-  JSON output
-- **THEN** the binding SHALL return UTF-8 JSON bytes for the rendered component body
-- **AND** selecting MessagePack output SHALL return MessagePack bytes for the same rendered value
-
-#### Scenario: Managed typed component evaluation preserves generated DTO wire rules
-- **WHEN** a C# caller evaluates a component whose rendered body contains polymorphic records or enum
-  values
-- **THEN** typed DTO deserialization SHALL use the existing `$type` record and bare-string enum
-  contracts shared by root evaluation and component initialization
 
 ### Requirement: Managed binding emits NX IR from program artifacts
 The managed .NET binding SHALL expose artifact-first APIs that emit NX IR images and structured
@@ -502,7 +377,7 @@ uses the SDK. The package SHALL NOT include the `nxlang` CLI executable.
   NX source checkout
 
 #### Scenario: Consumer runs without building native SDK library
-- **WHEN** a package-consuming .NET application evaluates a trivial NX program through
+- **WHEN** a package-consuming .NET application compiles a trivial NX program to IR through
   `NxLang.Sdk`
 - **THEN** the application SHALL load the packaged native `nx_ffi` library
 - **AND** the application SHALL NOT invoke Cargo or build `crates/nx-ffi` in the consumer repository
@@ -549,28 +424,6 @@ supported native SDK asset is missing.
 - **THEN** the managed assembly and all included native `nx_ffi` libraries SHALL come from the same
   NX source revision
 - **AND** the existing managed native ABI validation SHALL remain in place as runtime defense
-
-### Requirement: Managed dispatch accepts handler invocations and returns rendered output
-The managed NX binding SHALL let a host build a dispatch batch that mixes emitted actions with
-handler invocations — a handler token read from rendered output plus the action to feed it — and
-SHALL return a dispatch result that exposes the rendered output, the ordered effects, and the next
-opaque snapshot. Raw JSON and MessagePack dispatch workflows SHALL expose the same three parts.
-
-#### Scenario: Typed dispatch of a handler invocation patches state and re-renders
-- **WHEN** a C# caller initializes a `Counter` component whose rendered `Button` carries an `onTapped` handler token, then dispatches one invocation of that token with a `Button.Tapped` action
-- **THEN** `NxRuntime.DispatchComponentActions` SHALL return a result whose `Rendered` reflects `count` equal to `1`
-- **AND** whose `Effects` is empty
-- **AND** whose `StateSnapshot` is the next opaque snapshot
-
-#### Scenario: Managed dispatch reads handler tokens from typed rendered elements
-- **WHEN** a C# caller deserializes rendered output into a typed element whose handler-bound property is typed as the managed handler reference type
-- **THEN** the property SHALL expose the action name and the token
-- **AND** the token SHALL be usable directly to build a handler invocation for the next dispatch
-
-#### Scenario: Managed dispatch surfaces batch failure as an exception without a snapshot
-- **WHEN** a C# caller dispatches a batch that contains a stale handler token
-- **THEN** the managed binding SHALL throw `NxEvaluationException` carrying the native diagnostic
-- **AND** SHALL NOT return a partial result
 
 ### Requirement: Managed typed models can express absence in update records
 The managed SDK SHALL let a generated update DTO distinguish a field that is unset from one that is
@@ -728,9 +581,9 @@ neither format can serialize. Calling a function value from .NET is out of scope
 which function it was handed and passes the record on.
 
 #### Scenario: A rendered function-typed property is read as a function reference
-- **WHEN** a C# caller evaluates a module `templates.nx` that declares `external component <List ItemTemplate?:<function Item:object Index:int />: string /> let <Row Item:object Index:int />: string = "r" let root() = <List ItemTemplate={Row} />` into a typed element whose `ItemTemplate` property is typed as the managed function reference type
+- **WHEN** a C# caller deserializes a canonical List record whose ItemTemplate is a Function record naming module `templates.nx` and function `Row` into a typed element whose property uses the managed function reference type
 - **THEN** the property SHALL expose the module `templates.nx` and the name `Row`
-- **AND** the same evaluation as JSON SHALL render `ItemTemplate` as a `Function` record with those
+- **AND** serializing the typed value as JSON SHALL render `ItemTemplate` as a `Function` record with those
   two fields
 
 #### Scenario: A contract with a function-typed member serializes in both formats
@@ -780,3 +633,19 @@ when these types stop matching the prelude's declarations.
 - **WHEN** the prelude's `Range` declaration renames a field
 - **THEN** an SDK test SHALL fail until `NxRange_update<T>` is updated to match
 
+### Requirement: Managed compiler tooling does not execute source or artifacts
+The managed SDK SHALL NOT expose source/artifact Evaluate, InitializeComponent, EvaluateComponent
+or DispatchComponentActions method families or the legacy opaque-snapshot result wrappers. It
+SHALL retain construction, validation, IR generation/explanation, generated DTOs and their
+serialization/update helpers. It SHALL NOT add a replacement .NET IR execution binding in this change.
+Native export removals SHALL update the generated header, native ABI and managed checks together.
+
+#### Scenario: Managed callers compile source to IR
+- **WHEN** a C# caller builds source or a workspace and requests its NX IR
+- **THEN** it SHALL receive images for execution by a separately chosen IR runtime
+- **AND** building and emission SHALL NOT execute root
+
+#### Scenario: Serialization does not require source execution
+- **WHEN** generated DTOs serialize or deserialize canonical NX values
+- **THEN** enum strings, discriminators, function references and update helpers SHALL retain their contracts
+- **AND** tests SHALL NOT require a removed managed evaluation method

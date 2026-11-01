@@ -10,36 +10,11 @@ backend — the widest range that C# `long`, JavaScript `number`, and Rust `i64`
 represent exactly. Enforcing that range is deferred; see "Bounds checks are specified
 but not enforced" below.
 
-### Interpreter does not produce 32-bit values from source
-
-The interpreter always produces `Value::Int` (`int`) and `Value::Float` (`float64`) for
-numeric literals. `Value::Int32` and `Value::Float32` only appear when injected
-by FFI or host code. This means `let x: int32 = 42` produces a 64-bit value at
-runtime.
-
-`int64` has no distinct runtime carrier either — it also evaluates to `Value::Int`, so
-`Value::type_name` reports `int` for both. The two separate when `int64` gets its
-checked, bigint-backed representation.
-
-Options to address:
-- **Type-directed literal narrowing**: thread the expected type into literal
-  evaluation so `let x: int32 = 42` produces `Value::Int32(42)`.
-- **Coercion at boundaries**: narrow values at `let` bindings and function call
-  sites when the target type is known. Note that coercion is currently check-only —
-  `coerce_non_record_value` returns a value unchanged or errors, and never converts.
-- **Keep as-is**: treat `int32`/`float32` as FFI/serialization hints only, with the
-  runtime always using 64-bit internally.
-
-The first two options are the "value-directed" design costed under "Bounds checks are
-specified but not enforced" below; making runtime values width-correct and enforcing
-bounds are largely the same piece of work.
-
 ### Bounds checks are specified but not enforced
 
 `int` is specified as exact over ±(2^53−1) on every backend, and arithmetic is
 specified as checked rather than wrapping. Neither is enforced yet:
-`crates/nx-interpreter/src/eval/arithmetic.rs` still uses `wrapping_add`,
-`wrapping_sub`, and `wrapping_mul` for every integer type, so the specified range is
+`nx-ir-runtime` uses wrapping i64 arithmetic, so the specified range is
 currently a documentation-level guarantee.
 
 Enforcing it is deliberately deferred. It most likely wants to be implemented
@@ -94,71 +69,6 @@ Work needed: a range table and a `checkRange` helper alongside the existing
 its specified range is not representable. See "`int64` is still a JavaScript
 `number`" below.
 
-#### Interpreter: the types are computed and then discarded
-
-The interpreter cannot distinguish `int` from `int64` at an arithmetic site, because
-it has no per-expression type information at all. That information does exist — it is
-dropped just before the interpreter would receive it:
-
-- `TypeEnvironment` holds `expr_types: FxHashMap<ExprId, Arc<Type>>`
-  (`crates/nx-types/src/env.rs`), populated by inference through
-  `Primitive::numeric_promotion`, so binary nodes already carry the correctly
-  promoted integer type.
-- Every `ModuleArtifact` carries that environment (`crates/nx-types/src/check.rs`).
-- `build_resolved_program` (`crates/nx-program/src/artifacts.rs`) walks
-  `&[ModuleArtifact]`, keeps `artifact.lowered_module`, and discards
-  `artifact.type_env` — the field directly beside it.
-
-Two designs, in increasing cost.
-
-**Type-directed** (roughly 1–1.5 days). Route the existing types through to
-evaluation:
-- `ResolvedModule` gains the expression-type map beside `lowered_module`.
-- `build_resolved_program` passes `artifact.type_env` instead of discarding it.
-- `Interpreter` keys the environments by `SourceId`, so `eval_expr` can look one up
-  from the `module` it already holds — no module-id threading through eval
-  signatures.
-- `eval_binary_op` gains its own `ExprId`; it currently receives only `lhs` and
-  `rhs`. Its single call site in `eval_expr` already has it. Same for `neg`.
-- `arithmetic.rs` takes bounds and uses `checked_*` plus a range check.
-
-This mirrors how the JavaScript runtime already works — static type on the expression
-node — which keeps the two runtimes structurally aligned. It needs no new `Value`
-variant, so it avoids exhaustive-match churn and leaves existing `Value::Int(...)`
-test expectations valid.
-
-Two decisions it forces:
-- **Missing type entries.** Defaulting to the `int` bounds when `get_expr_type`
-  returns `None` fails safe. Defaulting to "unchecked" would silently skip checks,
-  which is the worse failure mode.
-- **Direct-HIR paths have no inference.** `ResolvedProgram::single_root_module` and
-  the `interpreter_direct_hir.rs` tests build programs with no type environment, so
-  overflow tests must run through the real analysis pipeline.
-
-Its limit: this makes *expressions* width-correct, not *values*. `Value::Int` still
-cannot distinguish an `int` from an `int64` inside a record field or array element,
-and the FFI boundary cannot either — `NxValue` has `Int32` and `Int(i64)` but no
-`Int64`. That is sufficient for arithmetic, where the declared type is known at every
-operation.
-
-**Value-directed** (roughly 3–4 days). Add `Value::Int64` and make coercion convert
-rather than check. This is full width correctness, and it is where the cost lives:
-- Three mirror enums, not one: `Value`, `NxValue`, and the private `SerializedValue`
-  in `interpreter.rs` — plus their serde, and the .NET and Node bindings that
-  deserialize `NxValue` JSON.
-- Roughly 50 non-test match sites.
-- `coerce_non_record_value` currently returns a value unchanged or errors. Making it
-  convert changes semantics at every typed boundary — parameters, returns, fields,
-  array elements — and moves test expectations. This part is not mechanical.
-
-The value-directed work is best done with the `int64`-as-`bigint` change rather than
-before it: a JavaScript `bigint` crossing FFI needs a distinct Rust carrier, so both
-are solving the same boundary problem and would otherwise design it twice.
-
-Also fixed by this work: `interpreter.rs` negates with `Value::Int32(-n)`, which
-panics in debug builds on `i32::MIN`. It is reachable only through an FFI-supplied
-`int32`, since evaluation never produces `Value::Int32` from source.
-
 ### `int64` is still a JavaScript `number`
 
 `int64` is specified as a full 64-bit signed integer, but the TypeScript backend
@@ -167,13 +77,6 @@ still emits it as `number`, which is exact only to 2^53−1. Carrying it as `big
 direction and is deferred to its own change. Note that `JSON.stringify` throws on a
 `bigint`, so the IR's existing string encoding for large integer literals stays
 mandatory.
-
-### FFI boundary validation
-
-Even without full runtime 32-bit support, FFI calls should validate that values
-fit in the target width. Passing `i64::MAX` to a C# `int` parameter is silent
-data corruption. A narrowing check at FFI call sites (in nx-ffi) would catch
-this without adding complexity to the core interpreter.
 
 ## Braced List Minus Ambiguity
 
@@ -419,39 +322,9 @@ If this is revisited in the future:
   that is, if the ambiguity is actually reached by values that left the runtime and came back.
 - Do not qualify only on collision. A discriminator whose shape depends on what else is in the
   program means adding an unrelated module silently rewrites the wire format of existing values.
-- Whatever is chosen has to land in the interpreter too. Parity between the interpreter and the IR
+- Whatever is chosen has to land in both IR runtimes. Parity between the Rust and TypeScript IR
   runtimes is asserted value-for-value by `runtime/typescript/test/emitted-ir.test.mjs`, so a change
   to the stamped form in one is a change in both.
-
-### Aliased imports: the interpreter looks a value's type up in the wrong module
-
-A narrower failure, and one the IR runtime does not share. The interpreter stamps a value with its
-declaring name (`User`, `Load.failed`) and later resolves that name, and the name a type annotation
-or pattern is spelled with, in the module doing the checking. Under `import "../lib" as S`, `User`
-is not visible in the importing module and `S.User` is not what the value carries, so programs that
-type-check fail at run time:
-
-- `let n(u:S.User) = { u.name }` called with `S.ada()` fails: "expected S.User, got User". The same
-  happens for a union: `f(S.make())` and `f(S.Load.idle)` at an `S.Load` parameter.
-- `n(<S.User name="Bo" />)`, built in the importing module itself, fails: "Record type not found:
-  User".
-- `if S.make() is { S.Load.failed => … else => … }` takes `else`: the pattern flattens to
-  `S.Load.failed` and the value says `Load.failed`.
-
-A plain `import "../lib"` works, since both spellings agree, and so does a bare pattern (`failed =>`),
-which the checker resolves to its declaration. The union failures reproduce on c197f4e, before
-`occurrence-cardinality`; they were found as RF57 of that change's review.
-
-This does not need the wire-format decision above. It is enough for the interpreter to resolve a
-spelled type name to its declaring module and local name before comparing, as
-`Expr::ResolvedUnionCase` already does for a bare case name, and to resolve a stamped name against
-the module that declared it rather than the one that holds the value. The comparisons live in
-`coerce_value_to_resolved_type`, `record_value_matches_expected_type`,
-`union_case_value_matches_expected_type` and `eval_match_pattern`
-(`crates/nx-interpreter/src/interpreter.rs`), and record construction resolves its type name the
-same way. It spans every place the interpreter turns a name back into a declaration, so it wants its
-own change, with an aliased-import case in an `nx-api` workspace test and in a multi-module IR
-corpus program so both engines are held to it.
 
 ## A Declaration Named After A Primitive Is Constructible But Unnameable
 
@@ -1018,9 +891,6 @@ It left these for later:
 - **Integer overflow on the same node.** Overflow checking ("Bounds checks are specified but not
   enforced" above) could ride on the `check` node, `[28, operand, type, site]`, which is shaped so
   it can (design open question 2).
-- **The interpreter.** The tree-walking interpreter reports every compile-time diagnostic but does
-  not check values when a program runs. It is being retired, so the checks live only in the IR
-  runtimes.
 - **Executable source codegen.** Generated JavaScript and TypeScript check values bound inside the
   program (`nxCheckConstraint`), but their host types and schemas keep the base type, so a value a
   host passes in is not checked at the boundary, and a numeric match pattern is refused there as
@@ -1260,79 +1130,6 @@ So neither item is pressing on the evidence of this host. The case that would ch
 program of many components with large bodies where a small part changes often, which none of the
 fiddle's templates is.
 
-## Logical operands: the IR runtime coerces, the interpreter demands a boolean
-
-**Observed.** The two runtimes disagree about what a non-boolean operand of `&&` or `||` means. The
-TypeScript IR runtime passes each operand through a truthiness helper, `truthy` in
-`runtime/typescript/src/index.ts`, which is `Boolean(value)`, so a string or a number is accepted
-and coerced. The Rust interpreter rejects it, raising a type error naming `logical and` at
-`crates/nx-interpreter/src/interpreter.rs`.
-
-**Why it might matter.** This is the same family as the short-circuit divergence that was fixed by
-making the IR runtime non-strict in the right operand of `and` and `or`. That one was observable and
-wrong. This one may not be observable at all, because the type checker probably rejects a
-non-boolean operand before either runtime sees it, in which case the coercion is dead code rather
-than a semantic difference. It was not verified either way.
-
-**What would settle it.** Try to compile a program whose `&&` operand is not a boolean, for example
-`let root() = { "a" && true }`. If static analysis rejects it, the coercion is unreachable and the
-helper can be replaced with a check that fails loudly, which is the safer thing for a runtime that
-reads images written by strangers. If static analysis accepts it, the two runtimes genuinely
-disagree and one of them is wrong, and a conformance corpus case should pin whichever behavior the
-language intends.
-
-**Related.** The conformance corpus gained short-circuit cases in
-`specs/ir-conformance/expressions/main.nx`. A case for this would belong beside them.
-
-## `int32` overflow: the interpreter wraps, JavaScript does not
-
-**Observed.** An `int32` result outside the `int32` range differs between backends. The interpreter
-wraps it (`wrapping_add`, `wrapping_sub` and `wrapping_mul` in
-`crates/nx-interpreter/src/eval/arithmetic.rs`), so `2147483647 + 1` at `int32` is `-2147483648`.
-The TypeScript IR runtime and generated JavaScript carry an `int32` as a `number` and compute
-`2147483648`. The TS runtime refuses that value once it reaches an `int32` parameter or field
-(`normalizePrimitiveValue`), but generated JavaScript carries it on silently. Negating `int32::MIN`
-and dividing it by `-1` hit the same edge, and the interpreter's `a / b` on `i32` panics on the
-second.
-
-Measured three ways on one program, since the divergence had only ever been reasoned about:
-
-```nx
-let lo:int32 = 2000000000
-let hi:int32 = 2000000002
-let root() = { for i in lo..hi { i * 2 } }
-```
-
-The interpreter yields `-294967296 -294967294`; generated JavaScript and the NX IR runtime both
-yield `4000000000 4000000002`. The range is incidental — `let a:int32 = 2000000000` with `a + a`
-divides the backends the same way — but `for` over an `int32` range is a new place to meet it, and
-one an author reaches without writing an operator that looks like it could overflow.
-
-For contrast, `float32` agrees today: the emitters wrap every narrow operation in `Math.fround` and
-the IR carries the `fadd32` family, so `let a:float32 = 0.1` with `a + b` produces the same f32
-value under the interpreter and under generated JavaScript (verified; they differ only in how
-`console.log` renders it). There is no `iadd32` and no narrowing wrapper on the integer side.
-
-**Why it might matter.** It is the one remaining way a narrow numeric type can compute a different
-value on different backends, and it is reachable from ordinary checked NX — no host value, no
-hand-built image. `float32` arithmetic was made to agree by giving the IR `float32` operators
-(`fadd32` and siblings, `implicit-primitive-conversions` RF14). Integer arithmetic was not changed,
-because the `primitive-type-names` spec already says arithmetic should be checked rather than
-wrapping, and leaves that enforcement to a later change that also covers `int`'s ±(2^53−1) range and
-user-declared ranges.
-
-**What would settle it.** The range-enforcement change: make integer overflow an error in the
-interpreter (`checked_add` and siblings, including `MIN / -1`), and have the JS targets check the
-result of each `int32` operation. A check after the fact is enough for checked arithmetic, since a
-product that leaves the `int32` range stays outside it even when a `float64` rounds it. That may
-mean `int32` IR operators like the `float32` ones, or a range check the runtime derives from the
-operator's checked type. Add conformance corpus cases for overflow on each operator.
-
-**Related.** `int` has the same shape at a larger scale: the interpreter wraps an `i64`, and
-JavaScript loses precision beyond 2^53; the next section records how the Rust IR runtime behaves
-there. RF21 in the `add-range-type-and-operators` review records the range path to this section.
-"Range follow-ups" above lists what else `Range` landed without.
-
 ## Integers past 2^53: the Rust IR runtime computes, the TypeScript one refuses or rounds
 
 **Observed.** `int` is specified as exact over ±(2^53−1) with checked arithmetic, and no engine
@@ -1362,8 +1159,8 @@ TypeScript runtime", into `docs/nx-ir-format.md`, and pinned by
 **Why it might matter.** None of the three behaviors is the specified one, and two of them are
 silent: a wrapped product and a rounded product are both wrong numbers that look like results. A
 program that overflows gets a different wrong answer on each host, and only some overflows on one
-host report anything. Once `retire-hir-interpreter` lands, the Rust runtime is the engine behind
-`nxlang run`, the bindings and the corpus's recorded results, so wrapping becomes what NX does
+host report anything. The Rust IR runtime is the engine behind
+`nxlang run` and the corpus's recorded results, so wrapping becomes what NX does
 natively by default rather than one runtime's detail.
 
 **What would settle it.** The range-enforcement change described under "Bounds checks are specified
@@ -1385,7 +1182,7 @@ but not enforced" above, done in both IR runtimes at once so they agree again:
 - Remove the exception from the `rust-ir-runtime` requirement, and add conformance corpus cases for
   overflow on each operator, which both runtimes then have to pass.
 
-**Related.** The previous section is the same problem at 32 bits. `retire-hir-interpreter` lists
+**Related.** Integer-width range enforcement is also deferred. `retire-hir-interpreter` lists
 checked arithmetic as a non-goal and only removes the interpreter's 32-bit wrap.
 
 ## Entities in text content are kept as written
@@ -1638,7 +1435,7 @@ its module's private declarations. These are not done yet:
 - **Generated JavaScript fills a parameter only for `undefined`.** A JavaScript default parameter
   fires when the argument is `undefined`, so a host that calls a generated function directly and
   passes `null` for an optional parameter gets `null` in the body, not the empty value. NX callers
-  never pass `null`, and the interpreter and the IR runtime decode it at the boundary. Generated
+  never pass `null`, and the IR runtimes decode it at the boundary. Generated
   code has no such boundary for positional host calls.
 
 ### Language refinements to consider
@@ -1727,7 +1524,7 @@ fails at run time" above, which is the same walk over a record's fields.
 Code from `nxlang codegen --target javascript` fills a record or union-case field's
 default without binding the record's other fields, so the default reads whatever the name
 means at module level. `type Box = { a: int  c: int = {a} }` with a top-level `let a = 5` gives
-`c = 5` for `<Box a=1 />`, where the interpreter and both IR runtimes give `1`; with no top-level
+`c = 5` for `<Box a=1 />`, where both IR runtimes give `1`; with no top-level
 `a`, building a `Box` throws "a is not defined". It happens with or without constraints. The IR
 runtimes bind each field as they build the record, and the checker types such a default with the
 record's fields as unknown (see "Typing a default against its sibling fields" above), so only the
@@ -1766,71 +1563,16 @@ and the reserved recovery name. Every crate that builds or
 matches a `TypeRef` changes with it: the checker, codegen, typegen and the language service, about
 a dozen files. Found by the `occurrence-cardinality` review (RF39, RF48).
 
-## The interpreter rejects an `Element` argument the checker accepts
+## Built-in content conflicts need a checker diagnostic
 
-**Observed.** A property typed `Element` fails at run time in the Rust interpreter, although the
-checker accepts the program and the TypeScript IR runtime evaluates it:
+IR emission rejects a built-in element with both `content=` and body content using
+`intrinsic-content-conflict`. Source analysis still accepts it, so editor diagnostics and
+`buildProgramArtifact` do not find the conflict until emission. Move this check into analysis,
+where a declared component's duplicate content binding is already checked.
 
-```nx
-let <Card title:string content body:Element /> =
-  <article><h2>{title}</h2>{body}</article>
-
-<Card title="Hi"><p>Body</p></Card>
-```
-
-`nxlang run` answers `Runtime error: Type mismatch in function call parameter 'body': expected
-Element, got p`. Compiling the same source with `@nx-lang/sdk-wasm` and evaluating it with
-`@nx-lang/ir-runtime` gives `<article>` with the `h2` and the `p` inside it. It fails the same way for
-a `component` and for a `let` element function. The interpreter's argument check seems to compare the
-value's tag with the parameter type's name, so no element satisfies `Element`, which no declaration
-names (see "Reconsider `Element` As A Built-In Type Name" above).
-
-**Why it matters.** `Element` is how a component takes markup, so `nxlang run` can't run most
-component examples that pass content, including the language tour's `Card` and the design-tokens
-tutorial. The .NET SDK evaluates with the same interpreter and is likely affected, but wasn't tried.
-It was found while checking the documentation's code blocks, and the check only compiles them, so it
-doesn't catch this.
-
-**Now visible on the website.** `rebuild-language-playground` gave every complete `nx` code block on
-the website an "Open in playground" link, and the playground evaluates with this interpreter. The
-tour's `Card` block (`sites/website/src/content/docs/language-tour/elements.md`, "Content-marked
-body parameters") therefore opens showing this runtime error rather than a value. An `nx output`
-block after it would make the docs check fail on it, which is the way to keep it fixed once it is.
-
-## A built-in element given both `content=` and a body fails at run time
-
-**Observed.** Two documentation pages show markup in an attribute this way, and the checker accepts
-it:
-
-```nx
-<Tooltip
-  content=<span:>
-    <strong>Bold</strong> and <em>italic</em> text
-  </span>
->
-  Hover over me
-</Tooltip>
-```
-
-Evaluating it fails: `Type mismatch in element intrinsic call: expected content for 'content' passed
-either as a named property or as element body, got both a 'content' property and element body
-content`. `Tooltip` names no declaration, so it is a built-in element, and a built-in element's
-body binds to a property named `content`. The attribute and the body are then two values for one
-property.
-
-**Where.** `sites/website/src/content/docs/language-tour/elements.md` ("Attributes can be
-expressions or inline markup") and `sites/website/src/content/docs/reference/syntax/elements.md`.
-Both are complete blocks, so their "Open in playground" links open to this error.
-
-**Why the checker misses it.** Nothing under a built-in tag is checked (see "Built-In Element
-Content And Property Values Are Never Type-Checked" above), so the collision is found only by the
-interpreter.
-
-**To decide.** Either the examples are wrong, and should name the attribute something other than
-`content` (`tip=` says what it is), or a built-in element's body should not claim the name
-`content` when the element also sets it. Whichever it is, the checker should report the collision
-for a built-in tag as it would for a declared one, and an `nx output` block after each example
-would keep the docs honest.
+The website's Tooltip examples now use `tip=` for the tooltip value, leaving `content` for the
+body. Website blocks followed by an `nx output` block execute emitted IR and therefore catch emission
+failures as well as runtime errors; complete blocks without an output block are only analyzed.
 
 ## A misspelled component compiles as a plain element
 
@@ -2594,3 +2336,12 @@ not the answer. Confirm by logging the order of events on the server side. If so
 should read and discard the rest of an oversized body before it answers, or answer with
 `Connection: close` and end the socket only after the response is flushed, and the test should
 then pass a few hundred times in a row.
+
+## Running NX IR Files From The CLI
+
+`retire-hir-interpreter` keeps `nxlang run <file.nx>` and leaves out running an `.nxir` file
+directly. That needs its own design: how the input format is chosen (an `--input-format ir` flag or
+the file's header), and how the images an entry imports are found. A caller-supplied catalog
+(`--ir-module <identity>=<path>`) avoids searching the filesystem by an untrusted identity; a
+missing module is then a link diagnostic. The corpus tests and hosts prepare images through the
+runtime API, so nothing needs this yet.

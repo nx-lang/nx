@@ -28,11 +28,6 @@ fn probes() -> String {
 fn standard_math_reference_corpus_in_rust_runtimes() {
     let source = probes();
     let program = program(&source);
-    let artifact =
-        build_program_artifact_from_source(&source, "main.nx", &ProgramBuildContext::empty())
-            .unwrap();
-    let legacy =
-        nx_interpreter::Interpreter::from_resolved_program(artifact.resolved_program.clone());
     let cases: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../crates/nx-value/src/math-cases.json"
     ))
@@ -50,29 +45,16 @@ fn standard_math_reference_corpus_in_rust_runtimes() {
             &args.iter().copied().map(NxValue::Float).collect::<Vec<_>>(),
             &RuntimeOptions::default(),
         );
-        let legacy_result = legacy.execute_resolved_program_function(
-            op,
-            args.iter()
-                .copied()
-                .map(nx_interpreter::Value::Float)
-                .collect(),
-        );
         if let Some(code) = case["error"].as_str() {
             let error = result.unwrap_err();
             assert_eq!(error.code(), code, "{}", case["name"]);
             assert!(error.diagnostics[0].message.contains(op));
-            assert!(
-                matches!(legacy_result.unwrap_err().kind(),nx_interpreter::RuntimeErrorKind::Math(e) if e.code == code)
-            );
         } else {
             let NxValue::Float(actual) = result.unwrap() else {
                 panic!("expected float")
             };
-            let nx_interpreter::Value::Float(legacy_actual) = legacy_result.unwrap() else {
-                panic!("expected legacy float")
-            };
             let expected = case["expected"].as_str().unwrap().parse::<f64>().unwrap();
-            for value in [actual, legacy_actual] {
+            for value in [actual] {
                 if case["exact"] == true {
                     assert_eq!(value.to_bits(), expected.to_bits(), "{}", case["name"]);
                 } else {
@@ -110,9 +92,9 @@ let authored():float64 = { sin(1.0) }
     let artifact =
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
             .unwrap();
-    match nx_api::eval_program_artifact_function(&artifact, "main.nx", "root") {
-        nx_api::EvalResult::Ok(value) => assert_eq!(value, NxValue::Float(0.0)),
-        nx_api::EvalResult::Err(e) => panic!("{e:?}"),
+    match crate::support::eval_program_artifact_function(&artifact, "main.nx", "root") {
+        crate::support::EvalResult::Ok(value) => assert_eq!(value, NxValue::Float(0.0)),
+        crate::support::EvalResult::Err(e) => panic!("{e:?}"),
     }
 }
 

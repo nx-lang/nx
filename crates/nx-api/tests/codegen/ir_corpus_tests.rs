@@ -1,11 +1,10 @@
 //! The NX IR conformance corpus, from the emitter's side.
 //!
 //! <para>`specs/ir-conformance` holds NX programs with the images the emitter produces for them,
-//! the explained text of each image, the values the interpreter evaluates their entrypoints to,
+//! the explained text of each image, the values the Rust IR runtime evaluates their entrypoints to,
 //! what it renders and emits when a host drives their component lifecycles, and what each
 //! evaluation costs in operations. An entrypoint may name arguments to be evaluated with, as a
-//! *case*; the interpreter's source evaluation takes none, so a case's result is the Rust IR
-//! runtime's. A case may be marked as one that fails, and then the code and the argument of the
+//! *case*. A case may be marked as one that fails, and then the code and the argument of the
 //! Rust IR runtime's diagnostic are recorded in place of a result. These tests pin the images
 //! byte for byte, keep the explained text, the expected results, the recorded diagnostics, the
 //! operation counts, the input sizes and the origins reports in step, check that the corpus
@@ -13,11 +12,10 @@
 //! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
 //! diff of the explained text.</para>
 
+use crate::support::{eval_program_artifact_function, EvalResult};
 use nx_api::{
-    build_workspace_program_artifact, dispatch_component_actions_program_artifact,
-    eval_program_artifact_function, initialize_component_program_artifact,
-    ComponentDispatchEvalResult, ComponentInitEvalResult, EvalResult, NxWorkspace,
-    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    build_workspace_program_artifact, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    ProgramBuildContext,
 };
 use nx_codegen::NxIrEmitOptions;
 use nx_codegen::{build_codegen_program, build_nx_ir_artifacts};
@@ -413,45 +411,33 @@ fn run_lifecycle(program: &CorpusProgram, lifecycle: &Lifecycle) -> Value {
         "corpus program '{}': a lifecycle's component is reached through the entry module",
         program.name
     );
-    let props = NxValue::Record {
-        type_name: None,
-        properties: lifecycle
-            .props
-            .iter()
-            .map(|(name, value)| (name.clone(), nx_value(value)))
-            .collect(),
-    };
-    let initialized = match initialize_component_program_artifact(
-        &program.artifact,
-        &lifecycle.component,
-        &props,
-    ) {
-        ComponentInitEvalResult::Ok(result) => result,
-        ComponentInitEvalResult::Err(diagnostics) => panic!(
-            "corpus program '{}' lifecycle {} failed to initialize: {diagnostics:#?}",
-            program.name, lifecycle.component
-        ),
-    };
-    let mut snapshot = initialized.state_snapshot;
+    let linked =
+        crate::support::link(&program.artifact, &lifecycle.module).expect("lifecycle links");
+    let props = lifecycle
+        .props
+        .iter()
+        .map(|(k, v)| (k.clone(), nx_value(v)))
+        .collect();
+    let initialized = linked
+        .initialize_component(
+            &lifecycle.component,
+            &props,
+            &ComponentInit::default(),
+            &RuntimeOptions::default(),
+        )
+        .expect("initializes");
+    let mut snapshot = initialized.instance;
     let mut batches = Vec::with_capacity(lifecycle.batches.len());
     for (index, batch) in lifecycle.batches.iter().enumerate() {
         let entries = batch.iter().map(nx_value).collect::<Vec<_>>();
-        let dispatched = match dispatch_component_actions_program_artifact(
-            &program.artifact,
-            &snapshot,
-            &entries,
-        ) {
-            ComponentDispatchEvalResult::Ok(result) => result,
-            ComponentDispatchEvalResult::Err(diagnostics) => panic!(
-                "corpus program '{}' lifecycle {} batch {index} failed: {diagnostics:#?}",
-                program.name, lifecycle.component
-            ),
-        };
+        let dispatched = linked
+            .dispatch_component_actions(&snapshot, &entries, &RuntimeOptions::default())
+            .unwrap_or_else(|error| panic!("batch {index}: {error}"));
         batches.push(serde_json::json!({
             "rendered": canonical_nx_value(&dispatched.rendered),
             "effects": dispatched.effects.iter().map(canonical_nx_value).collect::<Vec<_>>(),
         }));
-        snapshot = dispatched.state_snapshot;
+        snapshot = dispatched.instance;
     }
     serde_json::json!({
         "initial": canonical_nx_value(&initialized.rendered),
@@ -479,7 +465,7 @@ fn diagnostic_record(error: &NxIrRuntimeError) -> Value {
 /// `diagnostics.json` and no result; a case fails only where its program says so, so that
 /// regenerating never turns a result into a recorded failure, or a failure into a result.
 #[test]
-fn corpus_results_match_the_interpreter() {
+fn corpus_results_match_the_rust_ir_runtime() {
     let mut failures = Vec::new();
     for program in load_programs() {
         let mut results = BTreeMap::new();

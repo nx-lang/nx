@@ -22,7 +22,7 @@ for (const kind of [null, "dev", "build"]) {
   }
 }
 
-for (const name of ["nx-interpreter", "nx-codegen", "nx-language-service"]) {
+for (const name of ["nx-codegen", "nx-language-service"]) {
   test(`rejects a foundation dev dependency on ${name}`, () => {
     const graph = structuredClone(metadata);
     graph.packages.find(pkg => pkg.name === "nx-program").dependencies.push({ name, kind: "dev" });

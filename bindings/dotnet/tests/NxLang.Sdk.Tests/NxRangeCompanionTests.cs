@@ -112,33 +112,5 @@ public class NxRangeCompanionTests
         Assert.False(fromMessagePack.Change.IsSet(NxRange_property.Start));
     }
 
-    /// <summary>
-    /// The companions and the prelude's declaration must not drift apart.
-    /// </summary>
-    /// <remarks>
-    /// The patch NX evaluates carries the prelude's declared field under its declared name, so comparing what
-    /// <c>diff</c> produces with what this type serializes fails as soon as the declaration renames a field.
-    /// </remarks>
-    [Fact]
-    public void NxRangeUpdate_TracksThePreludeDeclaration()
-    {
-        JsonElement evaluated = NxRuntime.EvaluateJson(
-            "let root() = { diff(1..5, 1..9) }",
-            "ranges.nx");
-        List<string> declared = evaluated
-            .EnumerateObject()
-            .Select(property => property.Name)
-            .OrderBy(name => name, System.StringComparer.Ordinal)
-            .ToList();
 
-        using JsonDocument sdk = JsonDocument.Parse(
-            JsonSerializer.Serialize(new NxRange_update<long> { End = 9 }));
-        List<string> members = sdk.RootElement
-            .EnumerateObject()
-            .Select(property => property.Name)
-            .OrderBy(name => name, System.StringComparer.Ordinal)
-            .ToList();
-
-        Assert.Equal(declared, members);
-    }
 }

@@ -243,22 +243,8 @@ export interface NxProgramArtifact {
   generateNxIr(options?: NxIrEmitOptions): readonly NxGeneratedNxIr[];
 
   /**
-   * Evaluates the entry module's `root` and spells the value as NX text, the text `nxlang run`
-   * prints, with nodes that say what each part of it is.
-   *
-   * <para>The artifact stays usable afterwards, whether the evaluation succeeds or not.</para>
-   *
-   * @throws NxEvaluationError when there is no `root`, evaluating it fails at run time (with the
-   * failing expression's span when it is in the entry module), or the value has no NX spelling
-   * (code `nx-text-unspellable`), as a value holding an action handler has none.
-   * @throws NxDisposedResourceError when this artifact has already been disposed.
-   * @throws NxHostCrashedError when the module traps, or has already trapped.
-   */
-  evaluateNx(): NxValueText;
-
-  /**
    * Spells a value in canonical JSON, as the IR runtimes return it, as NX text annotated against
-   * this program: the text {@link evaluateNx} would return for the same value, from the same
+   * this program: annotated text for the same value, from the same
    * formatter. An `ActionHandler` record, which the runtimes return for a handler, is spelled as
    * that record.
    *
@@ -726,14 +712,6 @@ class WasmProgramArtifact implements NxProgramArtifact {
       (exports, pointer, length) => exports.nx_wasm_program_graphics_prepare(handle, pointer, length),
       bytes,
     );
-  }
-
-  evaluateNx(): NxValueText {
-    const handle = this.#live();
-    const raw = this.#host.call<unknown>("nx_wasm_program_evaluate_nx", (exports) =>
-      exports.nx_wasm_program_evaluate_nx(handle)
-    );
-    return normalizeValueText(raw);
   }
 
   formatValue(value: unknown, options: NxFormatValueOptions = {}): NxValueText {

@@ -25,19 +25,19 @@ emits and SHALL reject ambiguous signature shapes.
 - **THEN** lowering SHALL fail because the declared prop name collides with the handler binding name for emitted action `SearchSubmitted`
 
 ### Requirement: Handler invocation binds the implicit action value
-The interpreter SHALL allow a lowered component action handler to be invoked with an emitted action
+The Rust and TypeScript IR runtimes SHALL allow a component action handler to be invoked with an emitted action
 value and SHALL expose that value to the handler body through the implicit `action` identifier.
 
 #### Scenario: Shared action payload fields are readable through `action`
 - **WHEN** a lowered `onSearchSubmitted` handler is invoked with `<SearchSubmitted searchString="docs" />`
-- **THEN** the interpreter SHALL evaluate `action.searchString` inside the handler body as `"docs"`
+- **THEN** the runtime SHALL evaluate `action.searchString` inside the handler body as `"docs"`
 
 #### Scenario: Inline emitted action payload fields are readable through `action`
 - **WHEN** a lowered `onValueChanged` handler for `ValueChanged { value:string }` is invoked with `<SearchBox.ValueChanged value="docs" />`
-- **THEN** the interpreter SHALL evaluate `action.value` inside the handler body as `"docs"`
+- **THEN** the runtime SHALL evaluate `action.value` inside the handler body as `"docs"`
 
 ### Requirement: Handler invocation returns a non-empty action list
-The interpreter SHALL normalize the result of invoking a component action handler into an ordered
+The Rust and TypeScript IR runtimes SHALL normalize the result of invoking a component action handler into an ordered
 sequence of one or more values — a `+` sequence as `occurrence-types` defines it — each of which
 SHALL be either an action record or an update record. A single record result SHALL be normalized to
 a one-item sequence by the one-level lift; a braced result SHALL preserve source order and MAY mix
@@ -185,4 +185,3 @@ was created.
 #### Scenario: Captured locals keep their snapshot
 - **WHEN** a component renders `for item in items { <Row onTapped=<State.Update selected={item} /> /> }` and the state field `items` is patched to a different list earlier in the same batch
 - **THEN** a handler created for a row of the original list SHALL still bind `item` to the original row's value
-

@@ -1,13 +1,15 @@
 //! Libraries a host loads from memory: logical roots, library-to-library imports, load order,
 //! immutable roots, and implicit imports that name a library.
 
+mod support;
 use nx_api::{
-    build_workspace_program_artifact, eval_program_artifact, validate_workspace, EvalResult,
-    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxWorkspace,
-    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    build_workspace_program_artifact, validate_workspace, LibraryRegistry, NxDiagnostic,
+    NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    ProgramBuildContext,
 };
 use nx_value::NxValue;
 use std::path::{Path, PathBuf};
+use support::{eval_program_artifact, EvalResult};
 
 const QUESTION_FLOW_ROOT: &str = "libraries/question-flow";
 const CHAT_LINK_ROOT: &str = "libraries/chat-link";

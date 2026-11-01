@@ -19,7 +19,7 @@ it is handed, including the sources of the libraries a host loads into a registr
 | Library registries loaded from in-memory modules           | Evaluating NX to JSON values (use the IR runtime) |
 | Validate a workspace, answering diagnostics as data        |                                              |
 | Emit one NX IR artifact per module, library modules too    |                                              |
-| Evaluate `root` to annotated NX text                       |                                              |
+| Format canonical values as annotated NX text                       |                                              |
 | JSON Schema and documentation for a function or a type     | Deriving schemas from an NX IR image         |
 | Hover, completions, diagnostics, document symbols          | Threads, streaming, incremental analysis     |
 | An in-process `NxLanguageService` over host documents      |                                              |
@@ -355,62 +355,10 @@ affected schema is absent and `diagnostics` says why, while the other side is an
 | `schema-ambiguous-discriminator` | Two shapes at one abstract-record site share a `$type`, which a runtime refuses as ambiguous. |
 | `schema-unknown-declaration` | The reference names nothing in the program. Thrown as `NxEvaluationError`, not answered. |
 
-## Evaluating root to NX text
-
-`artifact.evaluateNx()` runs the entry module's `root` and returns `{ text, nodes }`. `text` is the
-value spelled in NX, the text `nxlang run` prints for the same program, and the package's parity
-tests hold the two to it. `nodes` says what each part of the text is, for a viewer such as
-`@nx-lang/value-view`:
-
-```ts
-const artifact = host.buildProgramArtifact(`type User = { id:string name:string }
-<User id="1" name="Ada" />`);
-try {
-  const { text, nodes } = artifact.evaluateNx();
-  console.log(text); // <User id="1" name="Ada" />
-  for (const node of nodes) {
-    console.log(node.role, node.type, text.slice(node.start, node.end));
-  }
-  // record User <User id="1" name="Ada" />
-  // property string id="1"
-  // property string name="Ada"
-} finally {
-  artifact.dispose();
-}
-```
-
-Each node has:
-
-| Field         | Meaning                                                                          |
-| ------------- | -------------------------------------------------------------------------------- |
-| `start`, `end` | UTF-16 offsets into `text`, so `text.slice(start, end)` is the node                |
-| `parent`      | Index of the enclosing node, absent at the top; parents come before children     |
-| `role`        | `record`, `property`, `sequence`, `case`, `scalar`, `function` or `empty`         |
-| `type`        | The type in NX: `User`, `string`, `Status`, `User*`; a property's declared type   |
-| `name`        | A property's name, or a function value's                                          |
-| `optional`    | `true` for a property declared optional, as `subtitle?:string` is                  |
-| `count`       | A sequence's length                                                               |
-| `declaration` | Where the entry module declares the record, component, case, property or function, if it does |
-| `pointer`     | The JSON pointer of the node's value in the value's canonical JSON: `""` for the whole value, `/content/0` for an item; a property's is its value's |
-
-A number, string, boolean or `{}` written directly as a property's value has no node of its own; the
-property's node describes it. A sequence's type is its items' common type with `*`, or `object*`.
-
-`evaluateNx()` throws `NxEvaluationError` when there is no `root` (code `no-root`), when evaluating
-it fails at run time (`runtime-error`, labeled at the expression that failed, or at the entry
-module's call into the module where it failed), and when the value has no NX spelling
-(`nx-text-unspellable`): one holding an action handler, or a sequence directly inside a sequence.
-The artifact stays usable either way.
-
-Calls nest at most 200 deep when the module evaluates, a fifth of the interpreter's default, because
-a browser keeps the module's frames on a native stack the module cannot size: in a Chromium worker
-it ran out between 325 and 517 calls. Runaway recursion therefore ends in a `runtime-error` naming
-the limit rather than a trapped host.
-
 ## Spelling a runtime value
 
 The IR runtimes return values in canonical JSON. `artifact.formatValue(value, options)` spells such
-a value as `{ text, nodes }` against the artifact's program, from the formatter `evaluateNx()` uses,
+a value as `{ text, nodes }` against the artifact's program, from the formatter `formatValue(value)` uses,
 so a host that runs a program on `@nx-lang/ir-runtime` shows its values as the command line would.
 The program is not evaluated.
 
@@ -434,7 +382,7 @@ try {
 ```
 
 An `ActionHandler` record, which the runtimes return where a handler is bound, is spelled as that
-record; `evaluateNx()` refuses one, since an interpreter handler has no token. Canonical JSON writes
+record; `formatValue(value)` refuses one, since an interpreter handler has no token. Canonical JSON writes
 a whole `float64` as it writes an `int`, and a constant union case as a bare string, so each number
 and string is read by the type its record declares for it: `width=3.0` above. For a value with no
 record around it, `options.type` gives its type (`formatValue(3, { type: "float64" })` is `3.0`). The
@@ -514,7 +462,6 @@ and `nx_wasm_program_type_schema`; 7 added `nx_wasm_snapshot_source_tree`; 8 add
 | ------- | ------- |
 | `nx_wasm_abi_version`, `nx_wasm_alloc`, `nx_wasm_free`, `nx_wasm_result_free` | The version check and the module's memory |
 | `nx_wasm_program_build`, `nx_wasm_workspace_build`, `nx_wasm_workspace_validate` | Building and validating programs |
-| `nx_wasm_program_nx_ir`, `nx_wasm_program_evaluate_nx`, `nx_wasm_program_diagnostics`, `nx_wasm_program_function_schema`, `nx_wasm_program_type_schema`, `nx_wasm_program_format_value`, `nx_wasm_program_free` | A program artifact's operations |
 | `nx_wasm_registry_new`, `nx_wasm_registry_load`, `nx_wasm_registry_free`, `nx_wasm_build_context_new`, `nx_wasm_build_context_free` | Library registries and build contexts |
 | `nx_wasm_snapshot_new`, `nx_wasm_snapshot_hover`, `nx_wasm_snapshot_completions`, `nx_wasm_snapshot_diagnostics`, `nx_wasm_snapshot_document_symbols`, `nx_wasm_snapshot_source_tree`, `nx_wasm_snapshot_free` | Language snapshots |
 | `nx_wasm_ir_explain` | Explaining an image |
@@ -558,3 +505,9 @@ service, then call again with `measurements` to obtain a prepared scene. A prefl
 a scene with placeholder metrics. Diagnostics carry construction provenance and optional authored
 call sites. Graphics numbers are checked for finiteness before JSON encoding; malformed requests
 throw, and supported-profile preparation failures return structured diagnostics.
+
+## Execution migration
+
+`evaluateNx()` has been removed. Compile to IR and execute with `@nx-lang/ir-runtime`, then pass
+its canonical value to `artifact.formatValue(value, options)`. Formatting does not execute source.
+See the [migration guide](../../docs/hir-interpreter-retirement.md).

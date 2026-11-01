@@ -88,7 +88,7 @@ at every sequence site; every engine SHALL bind a lone child the same way.
 - **WHEN** a file contains `let <Bar content childItems:Baz+ />: Baz+ = { childItems }`
 - **AND** a call site contains `<Bar><Baz/></Bar>`
 - **THEN** the invocation SHALL bind `childItems` to a one-item sequence holding the `Baz`
-- **AND** the interpreter, the TypeScript IR runtime and every code generation target SHALL bind
+- **AND** the Rust IR runtime, the TypeScript IR runtime and every code generation target SHALL bind
   the same value
 
 #### Scenario: Paren-style function receives body content through markup invocation

@@ -3,7 +3,7 @@
 ## Purpose
 
 The `<nx-value>` custom element, published in `@nx-lang/value-view`, that shows an annotated NX
-value (the `NxValueText` that `evaluateNx()` returns) as NX text: highlighted with the published NX
+value (the `NxValueText` that `formatValue(value)` returns) as NX text: highlighted with the published NX
 grammar, folding long values, explaining nodes on hover and reporting where they are declared. It
 depends on no UI framework, so any host, the playground among them, can reuse it.
 
@@ -11,7 +11,7 @@ depends on no UI framework, so any host, the playground among them, can reuse it
 
 ### Requirement: One element shows an NX value in any host
 The repository SHALL publish `@nx-lang/value-view`, which defines an `<nx-value>` custom element
-that shows an `NxValueText`, the annotated NX text `evaluateNx()` returns. The element SHALL depend
+that shows an `NxValueText`, annotated NX text produced by value formatting independently of execution. The element SHALL depend
 on no UI framework and SHALL keep its markup and styles in a shadow root, so a host needs only to
 import the package, create the element and set its `value`.
 

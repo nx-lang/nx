@@ -11,7 +11,7 @@ The expression `x?` SHALL be a postfix operator binding as tightly as member acc
 `boolean`, that evaluates to `true` when `x` holds at least one item and `false` when `x` is the
 empty value. Its operand SHALL have an occurrence that admits zero (`?` or `*`); on an exactly-one or
 `+` operand the system SHALL report that the value is always present. The operand SHALL be evaluated
-once. The interpreter, the TypeScript IR runtime and every code generation target SHALL agree.
+once. The Rust IR runtime, the TypeScript IR runtime and every code generation target SHALL agree.
 
 #### Scenario: A presence test is a boolean
 - **WHEN** a file contains `type Book = { title:string author?:Person }` and `let has(b:Book): boolean = { b.author? }`
@@ -132,7 +132,7 @@ than every binary arithmetic, comparison and logical operator, and less tightly 
 #### Scenario: A fallback that admits many produces a sequence from an item
 - **WHEN** a file contains `let orFive(xs?:int+) = { xs ?? 5 }`, `let bumped(xs?:int+) = { for x in xs ?? 5 { x + 1 } }` and `let itemOr(ys:int+, o?:int) = { o ?? ys }`
 - **THEN** `orFive({})` SHALL evaluate to the sequence `5`, `bumped({})` to the sequence `6` and `itemOr({2 3}, 1)` to the sequence `1`, each a one-item sequence rather than a bare item
-- **AND** the interpreter, the TypeScript IR runtime and generated JavaScript SHALL agree
+- **AND** the Rust IR runtime, the TypeScript IR runtime and generated JavaScript SHALL agree
 
 #### Scenario: A fallback on a value that cannot be empty is reported
 - **WHEN** a file contains `let f(n:int) = { n ?? 0 }`

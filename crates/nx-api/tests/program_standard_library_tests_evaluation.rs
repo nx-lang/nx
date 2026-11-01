@@ -1,14 +1,16 @@
 //! Standard libraries: NX source the compiler carries and a module imports as `@nx/<name>`, and
 //! the agent library, the first of them.
 
+mod support;
 use nx_api::{
-    build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
-    standard_library, standard_library_entry, validate_workspace, EvalResult, LibraryRegistry,
-    NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule,
-    ProgramArtifact, ProgramBuildContext, StandardLibraryStability,
+    build_program_artifact_from_source, build_workspace_program_artifact, standard_library,
+    standard_library_entry, validate_workspace, LibraryRegistry, NxDiagnostic, NxLibraryModule,
+    NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    ProgramBuildContext, StandardLibraryStability,
 };
 use nx_value::NxValue;
 use std::sync::Arc;
+use support::{eval_program_artifact, EvalResult};
 
 const AGENT_ROOT: &str = "@nx/agent";
 const HOST_ROOT: &str = "libraries/chat-link";

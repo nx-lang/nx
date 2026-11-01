@@ -15,72 +15,17 @@ namespace NxLang.Nx.Tests;
 
 public class NxEndToEndTests
 {
-    [Fact]
-    public void Evaluate_ComplexExpression_ReturnsCorrectValue()
-    {
-        string source = "let root() = { 10 + 32 }";
 
-        int result = NxRuntime.Evaluate<int>(source);
 
-        Assert.Equal(42, result);
-    }
 
-    [Fact]
-    public void Evaluate_WithCustomFileName_UsesFileNameInDiagnostics()
-    {
-        string source = "let x = ";
-        string customFileName = "my-custom-file.nx";
 
-        NxEvaluationException ex = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.Evaluate<int>(source, customFileName));
 
-        Assert.NotEmpty(ex.Diagnostics);
-        if (ex.Diagnostics[0].Labels.Length > 0)
-        {
-            Assert.Equal(customFileName, ex.Diagnostics[0].Labels[0].File);
-        }
-    }
 
-    [Fact]
-    public void Evaluate_ConcurrentEvaluations_AllSucceed()
-    {
-        string source = "let root() = { 42 }";
 
-        Parallel.For(0, 10, _ =>
-        {
-            int result = NxRuntime.Evaluate<int>(source);
-            Assert.Equal(42, result);
-        });
-    }
 
-    [Fact]
-    public void Evaluate_DifferentTypes_AllSucceed()
-    {
-        Assert.Equal(42, NxRuntime.Evaluate<int>("let root() = { 42 }"));
-        Assert.Equal("text", NxRuntime.Evaluate<string>("let root() = { \"text\" }"));
-        Assert.True(NxRuntime.Evaluate<bool>("let root() = { true }"));
-    }
 
-    [Fact]
-    public void Evaluate_OptionalResult_ReadsAsNullableType()
-    {
-        Assert.Null(NxRuntime.Evaluate<string?>("let root(): string? = { if false { \"a\" } }"));
-        Assert.Equal("a", NxRuntime.Evaluate<string?>("let root(): string? = { \"a\" }"));
-        Assert.Null(NxRuntime.Evaluate<int?>("let root() = { if false { 1 } }"));
-        Assert.Equal(1, NxRuntime.Evaluate<int?>("let root(): int? = { 1 }"));
-        Assert.Empty(NxRuntime.Evaluate<int[]>("let root(): int* = { if false { 1 } }"));
-    }
 
-    [Fact]
-    public void EvaluateBytes_JsonOutput_ComplexExpression_ReturnsValidJson()
-    {
-        string source = "let root() = { 10 + 32 }";
 
-        byte[] resultBytes = NxRuntime.EvaluateBytes(source, NxOutputFormat.Json);
-        string json = Encoding.UTF8.GetString(resultBytes);
-
-        Assert.Equal("42", json);
-    }
 
     [Fact]
     public void NativeLibrary_IsStagedAlongsideTestOutput()
@@ -92,94 +37,9 @@ public class NxEndToEndTests
             $"Expected the staged NX native runtime at '{nativeLibraryPath}'. Build `cargo build --release -p nx-ffi` before running dotnet tests.");
     }
 
-    [Fact]
-    public void Evaluate_WithProgramArtifact_ReusesPreloadedLibraryAcrossBuildContexts()
-    {
-        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempPath);
 
-        try
-        {
-            string appRoot = Path.Combine(tempPath, "app");
-            string libraryRoot = Path.Combine(tempPath, "question-flow");
-            Directory.CreateDirectory(appRoot);
-            Directory.CreateDirectory(libraryRoot);
-            File.WriteAllText(
-                Path.Combine(libraryRoot, "QuestionFlow.nx"),
-                """
-                export let answer() = { 42 }
-                """);
 
-            string source = """
-                import "../question-flow"
-                let root() = { answer() }
-                """;
-            string mainPath = Path.Combine(appRoot, "main.nx");
-            File.WriteAllText(mainPath, source);
 
-            using NxLibraryRegistry registry = new();
-            registry.LoadFromDirectory(libraryRoot);
-            using NxProgramBuildContext firstContext = registry.CreateBuildContext();
-            using NxProgramBuildContext secondContext = registry.CreateBuildContext();
-            using NxProgramArtifact firstProgram = NxProgramArtifact.Build(source, firstContext, mainPath);
-            using NxProgramArtifact secondProgram = NxProgramArtifact.Build(source, secondContext, mainPath);
-
-            int firstResult = NxRuntime.Evaluate<int>(firstProgram);
-            int secondResult = NxRuntime.Evaluate<int>(secondProgram);
-
-            Assert.Equal(42, firstResult);
-            Assert.Equal(42, secondResult);
-        }
-        finally
-        {
-            Directory.Delete(tempPath, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void Evaluate_WithProgramArtifact_RemainsExecutableAfterBuildContextAndRegistryDispose()
-    {
-        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-disposed-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempPath);
-
-        try
-        {
-            string appRoot = Path.Combine(tempPath, "app");
-            string libraryRoot = Path.Combine(tempPath, "question-flow");
-            Directory.CreateDirectory(appRoot);
-            Directory.CreateDirectory(libraryRoot);
-            File.WriteAllText(
-                Path.Combine(libraryRoot, "QuestionFlow.nx"),
-                """
-                export let answer() = { 42 }
-                """);
-
-            string source = """
-                import "../question-flow"
-                let root() = { answer() }
-                """;
-            string mainPath = Path.Combine(appRoot, "main.nx");
-            File.WriteAllText(mainPath, source);
-
-            NxProgramArtifact programArtifact;
-            using (NxLibraryRegistry registry = new())
-            {
-                registry.LoadFromDirectory(libraryRoot);
-                using NxProgramBuildContext buildContext = registry.CreateBuildContext();
-                programArtifact = NxProgramArtifact.Build(source, buildContext, mainPath);
-            }
-
-            using (programArtifact)
-            {
-                int result = NxRuntime.Evaluate<int>(programArtifact);
-                Assert.Equal(42, result);
-            }
-        }
-        finally
-        {
-            Directory.Delete(tempPath, recursive: true);
-        }
-    }
 
     [Fact]
     public void GenerateJSProgramModule_WithProgramArtifact_ReturnsSourceAndMetadata()
@@ -460,25 +320,7 @@ public class NxEndToEndTests
         Assert.Contains("interop arguments were invalid", exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void BuildWorkspace_WithImplicitImports_ResolvesCatalogControlsWithoutAnImportLine()
-    {
-        NxWorkspace workspace = new([
-            NxWorkspaceModule.FromSourceText("drawnui.nx", "export external component <SkiaLabel Text:string />"),
-            NxWorkspaceModule.FromSourceText("input.nx", "let root() = <SkiaLabel Text=\"hi\" />"),
-        ]);
-        using NxLibraryRegistry registry = new();
-        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
-        string[] implicitImports = ["drawnui.nx"];
 
-        Assert.Empty(NxRuntime.ValidateWorkspace(workspace, buildContext, implicitImports));
-        using NxProgramArtifact artifact = NxProgramArtifact.BuildWorkspace(workspace, "input.nx", buildContext, implicitImports);
-        using JsonDocument document = JsonDocument.Parse(NxRuntime.EvaluateBytes(artifact, NxOutputFormat.Json));
-        Assert.Equal("SkiaLabel", document.RootElement.GetProperty("$type").GetString());
-
-        IReadOnlyList<NxDiagnostic> diagnostics = NxRuntime.ValidateWorkspace(workspace, buildContext, ["missing.nx"]);
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == "implicit-import-not-found");
-    }
 
     [Fact]
     public void GenerateNxIr_RecordsTheVersionTheWorkspaceGaveEachModule()
@@ -517,42 +359,9 @@ public class NxEndToEndTests
             diagnostic => diagnostic.Code == "workspace-entry-not-found");
     }
 
-    [Fact]
-    public void Evaluate_WithWorkspaceProgramArtifact_UsesSelectedEntryRoot()
-    {
-        NxWorkspace workspace = new([
-            NxWorkspaceModule.FromSourceText("a.nx", "let root() = { \"a\" }"),
-            NxWorkspaceModule.FromSourceText("b.nx", "let root() = { \"b\" }"),
-        ]);
-        using NxLibraryRegistry registry = new();
-        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
-        using NxProgramArtifact artifact = NxProgramArtifact.BuildWorkspace(workspace, "b.nx", buildContext);
 
-        string result = NxRuntime.Evaluate<string>(artifact);
 
-        Assert.Equal("b", result);
-    }
 
-    [Fact]
-    public void Evaluate_WithWorkspaceProgramArtifact_RemainsExecutableAfterWorkspaceBuffersAreReleased()
-    {
-        NxProgramArtifact artifact;
-        using (NxLibraryRegistry registry = new())
-        {
-            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
-            byte[] source = Encoding.UTF8.GetBytes("let root() = { 42 }");
-            NxWorkspace workspace = new([
-                new NxWorkspaceModule("main.nx", source),
-            ]);
-            artifact = NxProgramArtifact.BuildWorkspace(workspace, "main.nx", buildContext);
-        }
-
-        using (artifact)
-        {
-            int result = NxRuntime.Evaluate<int>(artifact);
-            Assert.Equal(42, result);
-        }
-    }
 
     [Fact]
     public void WorkspaceApis_ValidateArgumentsBeforeNativeCall()
@@ -574,43 +383,7 @@ public class NxEndToEndTests
             () => NxProgramArtifact.BuildWorkspace(workspace, string.Empty, buildContext));
     }
 
-    [Fact]
-    public void LibraryRegistry_LoadFromDirectory_Succeeds()
-    {
-        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-library-artifact-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempPath);
 
-        try
-        {
-            string appRoot = Path.Combine(tempPath, "app");
-            string libraryRoot = Path.Combine(tempPath, "question-flow");
-            Directory.CreateDirectory(appRoot);
-            Directory.CreateDirectory(libraryRoot);
-            File.WriteAllText(
-                Path.Combine(libraryRoot, "QuestionFlow.nx"),
-                """
-                export let answer() = { 42 }
-                """);
-            string source = """
-                import "../question-flow"
-                let root() = { answer() }
-                """;
-            string mainPath = Path.Combine(appRoot, "main.nx");
-            File.WriteAllText(mainPath, source);
-
-            using NxLibraryRegistry registry = new();
-            registry.LoadFromDirectory(libraryRoot);
-            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
-
-            int result = NxRuntime.Evaluate<int>(source, buildContext, mainPath);
-
-            Assert.Equal(42, result);
-        }
-        finally
-        {
-            Directory.Delete(tempPath, recursive: true);
-        }
-    }
 
     [Fact]
     public void LibraryRegistry_LoadFromDirectory_WithInvalidSource_ThrowsEvaluationException()
