@@ -231,19 +231,19 @@ deterministic output property, not part of NX record value semantics.
 - **AND** no runtime sorting helper SHALL be required for ordinary record construction
 
 ### Requirement: Program artifacts expose source text for codegen
-The public `nx-api` surface SHALL expose read-only source text access for `ProgramArtifact` inputs
-so `nx-codegen` can produce source maps and source-aware diagnostics without re-reading files or
-depending on artifact-internal storage details.
+The public `nx-program` surface SHALL expose read-only source text access for `ProgramArtifact`
+inputs so `nx-codegen` can produce source maps and source-aware diagnostics without re-reading files
+or depending on artifact-internal storage details.
 
 #### Scenario: Source text lookup by identity
 - **WHEN** a `ProgramArtifact` preserves source text for a source-provider module
-- **THEN** public `nx-api` accessors SHALL allow `nx-codegen` to retrieve that source text by the
-  module's normalized identity
+- **THEN** public `nx-program` accessors SHALL allow `nx-codegen` to retrieve that source text by
+  the module's normalized identity
 
 #### Scenario: Source entries are iterable
 - **WHEN** `nx-codegen` builds source maps for a generated program
-- **THEN** public `nx-api` accessors SHALL allow it to iterate the preserved source entries needed
-  for source-map construction
+- **THEN** public `nx-program` accessors SHALL allow it to iterate the preserved source entries
+  needed for source-map construction
 
 ### Requirement: Generated code emits component descriptor functions and schema entry objects
 Executable TypeScript and JavaScript code generation SHALL emit host-neutral component descriptor
