@@ -1,11 +1,10 @@
 //! The NX IR conformance corpus, from the emitter's side.
 //!
 //! <para>`specs/ir-conformance` holds NX programs with the images the emitter produces for them,
-//! the explained text of each image, the values the interpreter evaluates their entrypoints to,
+//! the explained text of each image, the values the Rust IR runtime evaluates their entrypoints to,
 //! what it renders and emits when a host drives their component lifecycles, and what each
 //! evaluation costs in operations. An entrypoint may name arguments to be evaluated with, as a
-//! *case*; the interpreter's source evaluation takes none, so a case's result is the Rust IR
-//! runtime's. A case may be marked as one that fails, and then the code and the argument of the
+//! *case*. A case may be marked as one that fails, and then the code and the argument of the
 //! Rust IR runtime's diagnostic are recorded in place of a result. These tests pin the images
 //! byte for byte, keep the explained text, the expected results, the recorded diagnostics, the
 //! operation counts, the input sizes and the origins reports in step, check that the corpus

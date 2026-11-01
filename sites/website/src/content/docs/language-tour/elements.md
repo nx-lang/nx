@@ -26,7 +26,7 @@ NX elements look like XML/JSX, but every attribute and body item is a typed expr
 let isLoading = true
 
 <Tooltip
-  content=<span:>
+  tip=<span:>
     <strong>Bold</strong> helper text
   </span>
   tone={if isLoading { "muted" } else { "info" }}>

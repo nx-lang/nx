@@ -15,15 +15,14 @@ use nx_api::codegen::{
     emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
     NxIrEmitOptions,
 };
-use nx_api::ir_runtime::{LinkOptions, PreparedModule, Program, RuntimeOptions};
+use nx_api::ir_runtime::{FunctionValue, LinkOptions, PreparedModule, Program, RuntimeOptions};
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
     NxDiagnostic, NxWorkspace, ProgramArtifact, ProgramBuildContext,
 };
-use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
+use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Label, Severity, TextSize, TextSpan};
 use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_ir::explain_nx_ir_image;
-use nx_types::Type;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -50,6 +49,7 @@ enum Commands {
     ///
     /// Executes the root function in the NX file and prints the result.
     /// If the file has no root element/function, an error is reported.
+    /// Each run allows 1,000,000 IR operations, 100 nested calls and a 1 MiB evaluation stack.
     Run {
         /// Path to the NX file to run
         file: PathBuf,
@@ -296,7 +296,7 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
             return ExitCode::from(1);
         }
     };
-    let output_text = match format_output(&value, None, format) {
+    let output_text = match format_output(&program, &value, format) {
         Ok(text) => text,
         Err(message) => {
             eprintln!("Error: {message}");
@@ -318,7 +318,7 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
 }
 
 /// Each invocation compiles, links and receives a fresh finite operation budget.
-fn execute_program(artifact: &ProgramArtifact) -> Result<RunOutput, String> {
+fn execute_program(artifact: &ProgramArtifact) -> Result<FunctionValue, String> {
     let images = emit_nx_ir(
         artifact,
         &NxIrEmitOptions {
@@ -326,12 +326,12 @@ fn execute_program(artifact: &ProgramArtifact) -> Result<RunOutput, String> {
             debug: true,
         },
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| codegen_error_text(artifact, &e.diagnostics))?;
     let modules = images
         .into_iter()
         .map(|image| PreparedModule::prepare(image.bytes).map(|m| (image.identity, m)))
         .collect::<Result<BTreeMap<_, _>, _>>()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| runtime_error_text(artifact, e))?;
     let entry = modules
         .get(&artifact.entry_identity)
         .ok_or("No selected entry module")?;
@@ -340,8 +340,8 @@ fn execute_program(artifact: &ProgramArtifact) -> Result<RunOutput, String> {
         |identity| modules.get(identity).cloned(),
         &LinkOptions::default(),
     )
-    .map_err(|e| e.to_string())?;
-    let value = program
+    .map_err(|e| runtime_error_text(artifact, e))?;
+    program
         .evaluate_function_value(
             "root",
             &[],
@@ -350,46 +350,68 @@ fn execute_program(artifact: &ProgramArtifact) -> Result<RunOutput, String> {
                 ..RuntimeOptions::default()
             },
         )
-        .map_err(|error| runtime_error_text(artifact, error))?;
-    Ok(RunOutput {
-        nx: nx_api::format_program_artifact_function_value(artifact, "root", &value)
-            .map(|v| v.text),
-        json: value
-            .canonical()
-            .to_json_string_pretty()
-            .map_err(|e| e.to_string()),
-    })
+        .map_err(|error| runtime_error_text(artifact, error))
+}
+
+fn program_sources(artifact: &ProgramArtifact) -> HashMap<String, String> {
+    artifact
+        .source_entries()
+        .into_iter()
+        .map(|entry| (entry.identity.to_string(), entry.source.to_string()))
+        .collect()
+}
+
+fn codegen_error_text(artifact: &ProgramArtifact, diagnostics: &[Diagnostic]) -> String {
+    let diagnostics: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let code = diagnostic.code().unwrap_or("codegen-error");
+            let mut builder = Diagnostic::error(code)
+                .with_message(format!("[{code}] {}", diagnostic.message()))
+                .with_labels(diagnostic.labels().iter().cloned());
+            if let Some(help) = diagnostic.help() {
+                builder = builder.with_help(help);
+            }
+            if let Some(note) = diagnostic.note() {
+                builder = builder.with_note(note);
+            }
+            builder.build()
+        })
+        .collect();
+    render_diagnostics_cli(&diagnostics, &program_sources(artifact))
 }
 
 fn runtime_error_text(
     artifact: &ProgramArtifact,
     error: nx_api::ir_runtime::NxIrRuntimeError,
 ) -> String {
+    let sources = program_sources(artifact);
     error
         .diagnostics
         .into_iter()
         .map(|d| {
-            let location = d
-                .source
-                .and_then(|span| {
-                    let source = artifact.source_text(&span.identity)?;
-                    let before = source.get(..span.start as usize)?;
-                    let line = before.bytes().filter(|b| *b == b'\n').count() + 1;
-                    let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-                    Some(format!("{}:{line}:{column}", span.identity))
-                })
-                .or(d.declaration)
-                .unwrap_or_default();
-            format!("{} {location}: {}", d.code, d.message)
+            let message = format!("[{}] {}", d.code, d.message);
+            if let Some(span) = d.source.filter(|span| {
+                sources
+                    .get(&span.identity)
+                    .is_some_and(|text| text.get(span.start as usize..span.end as usize).is_some())
+            }) {
+                let diagnostic = Diagnostic::error(d.code)
+                    .with_message(message)
+                    .with_label(Label::primary(
+                        span.identity,
+                        TextSpan::new(TextSize::from(span.start), TextSize::from(span.end)),
+                    ))
+                    .build();
+                render_diagnostics_cli(&[diagnostic], &sources)
+            } else {
+                let declaration = d
+                    .declaration
+                    .unwrap_or_else(|| format!("{}::root", artifact.entry_identity));
+                format!("error {declaration}: {message}\n")
+            }
         })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-#[derive(Debug)]
-struct RunOutput {
-    nx: Result<String, String>,
-    json: Result<String, String>,
+        .collect()
 }
 
 fn generate_types(
@@ -1017,16 +1039,19 @@ fn render_codegen_diagnostics(program: &ProgramArtifact, diagnostics: &[Diagnost
     ExitCode::from(1)
 }
 
-/// Formats `root`'s result; `result_type` is its declared or inferred type, which decides the JSON
-/// spelling of an empty result.
+/// Formats only the output requested by the caller; JSON does not require an NX spelling.
 fn format_output(
-    value: &RunOutput,
-    _result_type: Option<&Type>,
+    artifact: &ProgramArtifact,
+    value: &FunctionValue,
     format: OutputFormat,
 ) -> Result<String, String> {
     match format {
-        OutputFormat::Nx => value.nx.clone(),
-        OutputFormat::Json => value.json.clone(),
+        OutputFormat::Nx => nx_api::format_program_artifact_function_value(artifact, "root", value)
+            .map(|value| value.text),
+        OutputFormat::Json => value
+            .canonical()
+            .to_json_string_pretty()
+            .map_err(|error| error.to_string()),
     }
 }
 
@@ -1181,7 +1206,10 @@ mod tests {
         )
         .unwrap();
         for _ in 0..2 {
-            assert_eq!(execute_program(&small).unwrap().nx.unwrap(), "42");
+            assert_eq!(
+                format_output(&small, &execute_program(&small).unwrap(), OutputFormat::Nx).unwrap(),
+                "42"
+            );
         }
         assert_eq!(RuntimeOptions::default().max_operations, None);
     }
@@ -1196,7 +1224,7 @@ mod tests {
         .unwrap();
         let error = execute_program(&artifact).unwrap_err();
         assert!(
-            error.contains("nx-ir-division-by-zero main.nx:1:"),
+            error.contains("nx-ir-division-by-zero") && error.contains("main.nx:1:"),
             "{error}"
         );
         let image = emit_nx_ir(
@@ -1216,6 +1244,20 @@ mod tests {
         let text = runtime_error_text(&artifact, error);
         assert!(text.contains("main.nx::root"), "{text}");
         assert!(!text.contains(":1:"), "{text}");
+    }
+
+    #[test]
+    fn emission_and_unlocated_runtime_errors_keep_codes_and_entry_context() {
+        for (source, code) in [
+            ("<button if true { label=\"Save\" } else { label=\"No\" } />", "codegen-unsupported-construct"),
+            ("let a(n:int32): int32 = { n + n } let root() = { a(2000000000) }", "nx-ir-boundary-type"),
+            ("let down(n:int): int = { if n == 0 { 0 } else { down(n - 1) } } let root() = { down(120) }", "nx-ir-resource-limit"),
+        ] {
+            let artifact = build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty()).unwrap();
+            let text = execute_program(&artifact).unwrap_err();
+            assert!(text.contains("error") && text.contains(code) && text.contains("main.nx"), "{text}");
+            assert!(!text.contains("<unknown>") && !text.contains(" : "), "{text}");
+        }
     }
 
     #[test]
@@ -1261,7 +1303,7 @@ let root() = { Math.addOne(41) }"#,
         let result = result.expect("qualified imported function should execute");
 
         assert_eq!(
-            format_output(&result, None, OutputFormat::Nx).unwrap(),
+            format_output(&program, &result, OutputFormat::Nx).unwrap(),
             "42"
         );
     }
@@ -1291,7 +1333,7 @@ let root() = { Ui.title() }"#,
         let result = result.expect("qualified imported function should execute");
 
         assert_eq!(
-            format_output(&result, None, OutputFormat::Nx).unwrap(),
+            format_output(&program, &result, OutputFormat::Nx).unwrap(),
             "Hello"
         );
     }
@@ -1333,7 +1375,10 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, None, OutputFormat::Nx).unwrap(), "42");
+        assert_eq!(
+            format_output(&program, &value, OutputFormat::Nx).unwrap(),
+            "42"
+        );
     }
 
     #[test]
@@ -1353,7 +1398,7 @@ let root() = { Ui.title() }"#,
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(
-            format_output(&value, None, OutputFormat::Nx).unwrap(),
+            format_output(&program, &value, OutputFormat::Nx).unwrap(),
             "Hello, World!"
         );
     }
@@ -1374,7 +1419,10 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, None, OutputFormat::Nx).unwrap(), "14");
+        assert_eq!(
+            format_output(&program, &value, OutputFormat::Nx).unwrap(),
+            "14"
+        );
     }
 
     #[test]
@@ -1400,7 +1448,7 @@ let root() = { Ui.title() }"#,
         let result = execute_program(&program);
 
         assert!(result.is_ok());
-        let output = format_output(&result.unwrap(), None, OutputFormat::Nx).unwrap();
+        let output = format_output(&program, &result.unwrap(), OutputFormat::Nx).unwrap();
         assert!(output.contains("name=\"Alice\""));
         // Numbers are emitted unquoted so the output reads back at an int-typed site.
         assert!(output.contains("age=30"));
@@ -1423,7 +1471,7 @@ let root() = { Ui.title() }"#,
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(
-            format_output(&value, None, OutputFormat::Nx).unwrap(),
+            format_output(&program, &value, OutputFormat::Nx).unwrap(),
             "true"
         );
     }
@@ -1444,7 +1492,10 @@ let root() = { Ui.title() }"#,
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value, None, OutputFormat::Nx).unwrap(), "{}");
+        assert_eq!(
+            format_output(&program, &value, OutputFormat::Nx).unwrap(),
+            "{}"
+        );
     }
 
     // ===== CLI Integration Tests =====
@@ -3430,18 +3481,22 @@ let z = {
         }
 
         let main = app_dir.join("main.nx");
-        let evaluate = |source: &str| -> Result<RunOutput, String> {
+        let evaluate = |source: &str| -> Result<(String, String), String> {
             fs::write(&main, source).expect("main file");
             let program = build_program_reporting_errors(&main)?;
-            execute_program(&program)
+            let value = execute_program(&program)?;
+            Ok((
+                format_output(&program, &value, OutputFormat::Nx)?,
+                format_output(&program, &value, OutputFormat::Json)?,
+            ))
         };
 
         let value = evaluate(&format!("{preamble}\nlet root() = {root_body}\n"))
             .expect("the original program should analyze and evaluate");
-        let formatted = value.nx.expect("the value should have an NX spelling");
-        let read_back = evaluate(&format!("{preamble}\nlet root() = {formatted}\n"))
-            .and_then(|output| output.json);
-        let value = value.json.expect("canonical JSON");
+        let formatted = value.0;
+        let read_back =
+            evaluate(&format!("{preamble}\nlet root() = {formatted}\n")).map(|output| output.1);
+        let value = value.1;
 
         RoundTrip {
             value,
@@ -3455,13 +3510,10 @@ let z = {
         let (_dir, path) = create_temp_nx_file(source);
         let program =
             build_program_reporting_errors(&path).expect("the program should analyze cleanly");
-        nx_value::NxValue::from_json_str(
-            &execute_program(&program)
-                .expect("root should evaluate")
-                .json
-                .unwrap(),
-        )
-        .unwrap()
+        execute_program(&program)
+            .expect("root should evaluate")
+            .canonical()
+            .clone()
     }
 
     /// A fieldless case of a base-less union is a constant case, and carries no more information

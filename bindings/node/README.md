@@ -60,9 +60,9 @@ library to `bindings/node/native/nx_sdk_node.node`, where the ESM wrapper loads 
 
 ## Importing
 
-
-See the compile-then-run example below.
-
+```ts
+import { NxProgramArtifact, NxLibraryRegistry, NxWorkspace, NxEvaluationError } from "@nx-lang/sdk-node";
+```
 
 ## Workspaces
 
@@ -189,9 +189,13 @@ imports as they are.
 
 ## Program Artifacts
 
-
-See the compile-then-run example below.
-
+```ts
+const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+  buildContext,
+  entryIdentity: "app/main.nx"
+});
+const images = artifact.generateNxIr({ modules: [], debug: true });
+```
 
 `generateNxIr({ modules: [] })` emits every module of the program, and `{ debug: true }` keeps each
 artifact's debug section. A module's version is part of the workspace, not an emit option: give it
@@ -283,12 +287,20 @@ minimum version for both.
 
 ## Diagnostics and Errors
 
-Validation returns `NxDiagnostic[]` as data. Build, IR generation, and evaluation failures throw
+Validation returns `NxDiagnostic[]` as data. Build, schema, and IR generation failures throw
 `NxEvaluationError` and preserve the same diagnostics array:
 
-
-See the compile-then-run example below.
-
+```ts
+try {
+  NxProgramArtifact.buildSource("let root() = { missingName }", { fileName: "main.nx" }).dispose();
+} catch (error) {
+  if (error instanceof NxEvaluationError) {
+    for (const diagnostic of error.diagnostics) console.error(diagnostic.code, diagnostic.message);
+  } else {
+    throw error;
+  }
+}
+```
 
 Native addon load or ABI problems throw `NxNativeError` with local build guidance. Operations on a
 disposed resource throw `NxDisposedResourceError`.
@@ -297,9 +309,18 @@ disposed resource throw `NxDisposedResourceError`.
 
 Long-lived Node services should dispose native resources explicitly:
 
-
-See the compile-then-run example below.
-
+```ts
+const artifact = NxProgramArtifact.buildSource("let root() = { 42 }", { fileName: "main.nx" });
+try {
+  const images = artifact.generateNxIr();
+  console.log(images[0].identity);
+} finally {
+  artifact.dispose();
+}
+workspace.dispose();
+buildContext.dispose();
+registry.dispose();
+```
 
 The native addon uses JavaScript object lifetime as a backstop, but explicit disposal is the
 supported lifecycle for server-side reuse. Program artifacts remain usable after the build context
@@ -315,6 +336,19 @@ package maps to the local source-built workflow.
 ## Execute emitted IR
 
 Source/artifact JSON and byte evaluation methods and their options have been removed. Build an
-artifact, emit all required modules, then run `@nx-lang/ir-runtime`; see the complete
-[migration example](../../docs/hir-interpreter-retirement.md#compile-and-execute).
+artifact, emit all required modules, then run `@nx-lang/ir-runtime`:
+
+```ts
+import { evaluateFunction, linkNxIrProgram, prepareNxIrModule } from "@nx-lang/ir-runtime";
+
+const artifact = NxProgramArtifact.buildSource("let root() = { 42 }", { fileName: "main.nx" });
+try {
+  const modules = new Map(artifact.generateNxIr({ modules: [] }).map(image =>
+    [image.identity, prepareNxIrModule(image.bytes)]));
+  const program = linkNxIrProgram(modules.get("main.nx")!, { resolve: identity => modules.get(identity) });
+  console.log(evaluateFunction(program, "root")); // 42
+} finally {
+  artifact.dispose();
+}
+```
 No execution convenience wrapper is exported by this SDK.

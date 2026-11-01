@@ -1,6 +1,5 @@
 //! The Rust IR runtime against NX source: each test compiles source, emits IR and runs it on
-//! `nx-ir-runtime`. The scenario tests state the expected value; the differential tests compare
-//! with the interpreter's evaluation of the same source.
+//! `nx-ir-runtime`. The scenario tests state the expected values directly.
 
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
@@ -4072,4 +4071,335 @@ fn interval_patterns_match_their_ranges_and_cost_what_a_literal_does() {
     let literal = cost(|options| program.evaluate_function("literal", &[NxValue::Int(1)], options));
     let ranged = cost(|options| program.evaluate_function("ranged", &[NxValue::Int(1)], options));
     assert_eq!(literal, ranged);
+}
+
+#[test]
+fn a_host_record_with_only_a_same_named_base_is_rejected() {
+    let modules = [
+        ("main.nx", "import { Shape } from \"./expected.nx\"\nimport { Other } from \"./wrong.nx\"\nlet f(s:Shape): string = { \"ok\" }"),
+        ("expected.nx", "export abstract type Shape = { label?:string }\nexport type Good extends Shape = { r:int }"),
+        ("wrong.nx", "abstract type Shape = { label?:string }\nexport type Other extends Shape = { r:int }"),
+    ];
+    let workspace = NxWorkspace::new(
+        modules
+            .into_iter()
+            .map(|(identity, source)| NxWorkspaceModule::from_source(identity, source).unwrap())
+            .collect(),
+    )
+    .unwrap();
+    let artifact =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    let runtime = link(&artifact, false);
+    let function = json(r#"{"$type":"Function","module":"main.nx","name":"f"}"#);
+    assert_code(
+        runtime.call_function(
+            &function,
+            &fields(r#"{"s":{"$type":"Other","r":1}}"#),
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["Shape", "Other"],
+    );
+    assert_same(
+        &runtime
+            .call_function(
+                &function,
+                &fields(r#"{"s":{"$type":"Good","r":1}}"#),
+                &options(),
+            )
+            .unwrap(),
+        r#""ok""#,
+    );
+}
+
+#[test]
+fn program_internal_component_descriptors_keep_defaults_handlers_and_cost() {
+    let runtime = program(include_str!(
+        "../../../../runtime/typescript/test/retirement-descriptor.nx"
+    ));
+    let (options, usage) = with_usage(budget(100_000));
+    let value = runtime.evaluate_function("root", &[], &options).unwrap();
+    assert_same(
+        &value,
+        r#"{"$type":"Child","label":"default","onTap":{"$type":"ActionHandler","action":"Child.Tap"}}"#,
+    );
+    assert_eq!(usage.operations(), Some(16));
+}
+
+#[test]
+fn component_boundary_widths_and_nominal_cases_are_validated() {
+    let runtime = program(
+        r#"
+        type Tone = light | dark
+        type Contact = { title:string subtitle:string }
+        component <Table sortBy:Contact.Property /> = { <TableView sortBy={sortBy} /> }
+        component <Sorted /> = { <Table sortBy={Contact.Property.subtitle} /> }
+        component <Panel n:int32 = 1 tone:Tone = light emits { Done { tone:Tone } } /> = {
+          <Text n={n} tone={tone} />
+        }
+        action Report = { tone:Tone }
+        component <Parent emits { Report } /> = {
+          <Panel onDone=<Report tone={action.tone} /> />
+        }
+        external component <External label:string = "hello" /> = { state { count:int = 0 } }
+        abstract component <Base />
+    "#,
+    );
+    let init = |name: &str, props: BTreeMap<String, NxValue>| {
+        runtime.initialize_component(name, &props, &ComponentInit::default(), &options())
+    };
+    assert_same(
+        &init("Panel", fields(r#"{"n":42,"tone":"dark"}"#))
+            .unwrap()
+            .rendered,
+        r#"{"$type":"Text","n":42,"tone":"dark"}"#,
+    );
+    assert_code(
+        init("Panel", fields(r#"{"n":2147483648}"#)),
+        "nx-ir-boundary-type",
+        &["int32"],
+    );
+    assert_code(
+        init("Panel", fields(r#"{"tone":"blue"}"#)),
+        "nx-ir-boundary-type",
+        &["Tone"],
+    );
+    assert_same(
+        &init("Table", fields(r#"{"sortBy":"title"}"#))
+            .unwrap()
+            .rendered,
+        r#"{"$type":"TableView","sortBy":"title"}"#,
+    );
+    assert_same(
+        &init("Sorted", BTreeMap::new()).unwrap().rendered,
+        r#"{"$type":"Table","sortBy":"subtitle"}"#,
+    );
+    assert_code(
+        init("Table", fields(r#"{"sortBy":"nickname"}"#)),
+        "nx-ir-boundary-type",
+        &["Contact.Property"],
+    );
+    let external = runtime
+        .construct_component_descriptor("External", &BTreeMap::new(), &[], &options())
+        .unwrap();
+    assert_same(&external, r#"{"$type":"External","label":"hello"}"#);
+    assert_code(
+        runtime.construct_component_descriptor(
+            "External",
+            &fields(r#"{"count":3}"#),
+            &[],
+            &options(),
+        ),
+        "nx-ir-boundary-field",
+        &["count"],
+    );
+    assert!(init("Base", BTreeMap::new()).is_err());
+    let parent = init("Parent", BTreeMap::new()).unwrap();
+    let NxValue::Record { properties, .. } = &parent.rendered else {
+        panic!("expected Panel")
+    };
+    let child = runtime
+        .initialize_component(
+            "Panel",
+            properties,
+            &ComponentInit {
+                parent: Some(&parent.instance),
+                state: None,
+            },
+            &options(),
+        )
+        .unwrap();
+    let result = runtime
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Panel.Done","tone":"dark"}"#)],
+            &options(),
+        )
+        .unwrap();
+    assert_eq!(result.effects.len(), 1);
+    assert_same(&result.effects[0], r#"{"$type":"Report","tone":"dark"}"#);
+    assert!(runtime
+        .dispatch_component_actions(&child.instance, &[json(r#"{"tone":"dark"}"#)], &options())
+        .is_err());
+    assert!(runtime
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"ActionHandlerInvocation","token":42}"#)],
+            &options()
+        )
+        .is_err());
+}
+
+#[test]
+fn imported_component_actions_use_the_declaring_modules_payload_and_defaults() {
+    let modules = [
+        (
+            "main.nx",
+            r#"
+          import { Base, Box } from "./base.nx"
+          action Submitted = { query:int }
+          action Report = { query:string }
+          component <Local extends Base /> = { <Text label={label} /> }
+          component <Parent emits { Report } /> = { <Local onSubmitted=<Report query={action.query} /> /> }
+          component <Imported emits { Report } /> = { <Box onSubmitted=<Report query={action.query} /> /> }
+        "#,
+        ),
+        (
+            "base.nx",
+            r#"
+          action Submitted = { query:string }
+          export abstract component <Base label:string = "default" emits { Submitted } />
+          export component <Box extends Base /> = { <Text label={label} /> }
+        "#,
+        ),
+    ];
+    let workspace = NxWorkspace::new(
+        modules
+            .into_iter()
+            .map(|(identity, source)| NxWorkspaceModule::from_source(identity, source).unwrap())
+            .collect(),
+    )
+    .unwrap();
+    let artifact =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    let runtime = link(&artifact, false);
+    let (parent_name, child_name) = ("Parent", "Local");
+    let parent = runtime
+        .initialize_component(
+            parent_name,
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    let NxValue::Record { properties, .. } = &parent.rendered else {
+        panic!("expected child")
+    };
+    let child = runtime
+        .initialize_component(
+            child_name,
+            properties,
+            &ComponentInit {
+                parent: Some(&parent.instance),
+                state: None,
+            },
+            &options(),
+        )
+        .unwrap();
+    assert_same(&child.rendered, r#"{"$type":"Text","label":"default"}"#);
+    assert_code(
+        runtime.dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":7}"#)],
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["query", "string"],
+    );
+    let result = runtime
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":"docs"}"#)],
+            &options(),
+        )
+        .unwrap();
+    assert_eq!(result.effects.len(), 1);
+    assert_same(&result.effects[0], r#"{"$type":"Report","query":"docs"}"#);
+
+    // Direct component APIs run a declaration in the selected entry module. Select the library
+    // image for the fully imported component; no flat source-evaluation API is involved.
+    let modules: BTreeMap<_, _> =
+        emit_nx_ir(&artifact, &NxIrEmitOptions::every_module_with_debug())
+            .unwrap()
+            .into_iter()
+            .map(|image| {
+                (
+                    image.identity,
+                    PreparedModule::prepare(image.bytes).unwrap(),
+                )
+            })
+            .collect();
+    let library = Program::link(
+        &modules["base.nx"],
+        |identity| modules.get(identity).cloned(),
+        &LinkOptions::default(),
+    )
+    .unwrap();
+    let child = library
+        .initialize_component(
+            "Box",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    assert_same(&child.rendered, r#"{"$type":"Text","label":"default"}"#);
+    assert_code(
+        library.dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":7}"#)],
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["query"],
+    );
+    assert!(library
+        .dispatch_component_actions(
+            &child.instance,
+            &[json(r#"{"$type":"Submitted","query":"docs"}"#)],
+            &options()
+        )
+        .is_ok());
+}
+
+#[test]
+fn component_explicit_state_preserves_numeric_sites_and_polymorphic_results() {
+    let runtime = program(
+        r#"
+        external component <Gauge count:int32 ratio:float32 scale:float32 />
+        component <Meter count:int32 ratio:float32 scale:float32 /> = {
+          state { step:int32 }
+          <Gauge count={count + step} ratio={ratio} scale={scale} />
+        }
+        abstract type Question = { label:string }
+        type ShortTextQuestion extends Question = { placeholder:string }
+        component <Flow /> = {
+          state { label:string }
+          <ShortTextQuestion label={label} placeholder="Enter your name" />
+        }
+    "#,
+    );
+    let state = fields(r#"{"step":1}"#);
+    let props = fields(r#"{"count":7,"ratio":0.1,"scale":2}"#);
+    let rendered = runtime
+        .evaluate_component("Meter", &props, &state, &options())
+        .unwrap();
+    assert_same(
+        &rendered,
+        r#"{"$type":"Gauge","count":8,"ratio":0.10000000149011612,"scale":2.0}"#,
+    );
+    assert_code(
+        runtime.evaluate_component(
+            "Meter",
+            &fields(r#"{"count":1.5,"ratio":0.1,"scale":2}"#),
+            &state,
+            &options(),
+        ),
+        "nx-ir-boundary-type",
+        &["count"],
+    );
+    let rendered = runtime
+        .evaluate_component(
+            "Flow",
+            &BTreeMap::new(),
+            &fields(r#"{"label":"Name"}"#),
+            &options(),
+        )
+        .unwrap();
+    assert_same(
+        &rendered,
+        r#"{"$type":"ShortTextQuestion","label":"Name","placeholder":"Enter your name"}"#,
+    );
 }

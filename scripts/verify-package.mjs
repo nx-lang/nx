@@ -103,6 +103,9 @@ try {
     JSON.stringify(
       {
         name: "nx-verify-consumer",
+        // Keep the scratch install on the repository's toolchain: Corepack would otherwise
+        // select its global default, whose override configuration can differ.
+        packageManager: JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")).packageManager,
         private: true,
         type: "module",
         dependencies: {

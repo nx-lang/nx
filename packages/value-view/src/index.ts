@@ -1,7 +1,7 @@
 /**
  * `<nx-value>`: an NX value shown as NX text.
  *
- * <para>The element takes the annotated text `evaluateNx()` returns, highlights it with the grammar
+ * <para>The element takes the annotated text `formatValue()` returns, highlights it with the grammar
  * the editors use, folds what spans several lines, and explains each part on hover. It has no
  * framework dependency and keeps its markup and styles in a shadow root, so a page only imports
  * this module, creates the element and sets `value`.</para>
@@ -197,7 +197,7 @@ export class NxValueElement extends ElementBase {
     }
   }
 
-  /** The value to show: `{ text, nodes }`, as `evaluateNx()` returns it. */
+  /** The value to show: `{ text, nodes }`, as `formatValue()` returns it. */
   get value(): NxValueText | undefined {
     return this.#value;
   }

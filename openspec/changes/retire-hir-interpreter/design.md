@@ -222,3 +222,10 @@ fragments and positional record constructors are temporarily unsupported through
 Preserve their successful source expectations as ignored source-to-IR tests, each naming that
 follow-up change; do not assert failure as the intended behavior. Confirm expectations against HIR
 before deletion. These two gaps do not block retirement; other unexplained discrepancies still do.
+
+### Recorded IR numeric spelling difference
+
+Float64 joins that select an integer arm can retain the existing IR integer carrier. JSON and NX
+at an object site then spell `1`, where HIR spelled `1.0`. This is a documented spelling difference,
+not a new numeric conversion rule. Conversion/occurrence corpus goldens record it; emitter join
+widening remains outside this retirement.

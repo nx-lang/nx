@@ -114,6 +114,23 @@ documented until the follow-up enables those tests.
 - **THEN** it SHALL be ignored with the follow-up change named in its reason
 - **AND** its assertions SHALL describe successful evaluation, not the current failure
 
+### Requirement: Component descriptors are recursively validated at typed sites
+When a component-typed value has no discriminator or names the expected component declaration,
+its props SHALL be recursively normalized against that declaration at host and program-internal
+typed sites. Defaults SHALL be filled, unknown props and invalid nested records SHALL be rejected,
+and bound emit handlers SHALL retain their identity. Existing cross-component descriptor behavior
+SHALL remain unchanged. Both runtimes SHALL charge the same operations for equivalent work.
+
+#### Scenario: A descriptor passes through a typed parameter and result
+- **WHEN** a program constructs a component descriptor with a defaulted prop and a bound emit handler
+- **AND** passes it through a component-typed function parameter and result
+- **THEN** Rust and TypeScript SHALL preserve the same default and handler and report equal operation counts
+
+#### Scenario: A nested host update record is invalid
+- **WHEN** a host component-typed prop names the expected declaration and contains an update record with an unknown field or an invalid required-field clear
+- **THEN** both runtimes SHALL reject it with a boundary diagnostic
+
+
 ## MODIFIED Requirements
 
 ### Requirement: The Rust IR runtime does not depend on the NX compiler

@@ -242,7 +242,6 @@ export interface NxProgramArtifact {
    */
   generateNxIr(options?: NxIrEmitOptions): readonly NxGeneratedNxIr[];
 
-
   /**
    * Spells a value in canonical JSON, as the IR runtimes return it, as NX text annotated against
    * this program: annotated text for the same value, from the same
@@ -714,7 +713,6 @@ class WasmProgramArtifact implements NxProgramArtifact {
       bytes,
     );
   }
-
 
   formatValue(value: unknown, options: NxFormatValueOptions = {}): NxValueText {
     const handle = this.#live();

@@ -29,7 +29,7 @@ let <UserForm user:User isLocked:boolean /> =
 
 ```nx
 <Tooltip
-  content=<span:>
+  tip=<span:>
     <strong>Bold</strong> and <em>italic</em> text
   </span>
 >

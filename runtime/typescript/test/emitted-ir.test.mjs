@@ -5,6 +5,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   NxIrRuntimeError,
+  linkNxIrProgram,
+  prepareNxIrModule,
   applyComponentStatePatch,
   callFunction,
   constructComponentDescriptor,
@@ -2392,3 +2394,38 @@ let root(): int = {twice(2000000000)}`, (dir, sourcePath) => {
   assertEqual(nativeJson(sourcePath), 4000000000);
 });
 console.log("ok - int32 operands compute without a separate 32-bit wrap when returned as int");
+
+withSource(readFileSync(new URL("retirement-descriptor.nx", import.meta.url), "utf8"), (dir, sourcePath) => {
+  const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+  const usage = {};
+  const value = evaluateFunction(program, "root", [], { usage, maxOperations: 100000 });
+  assertEqual(value, { $type: "Child", label: "default", onTap: { $type: "ActionHandler", action: "Child.Tap" } });
+  assertEqual(value, nativeJson(sourcePath));
+  assertEqual(usage.operations, 16);
+});
+console.log("ok - program-internal typed component descriptors preserve defaults, handlers and operation parity");
+
+withSource(`import { Shape } from "./expected.nx"
+import { Other } from "./wrong.nx"
+let f(s:Shape): string = { "ok" }`, (dir, sourcePath) => {
+  writeFileSync(join(dir, "expected.nx"), `export abstract type Shape = { label?:string }
+export type Good extends Shape = { r:int }`);
+  writeFileSync(join(dir, "wrong.nx"), `abstract type Shape = { label?:string }
+export type Other extends Shape = { r:int }`);
+  runNxCli(["codegen", dir, "--entry", "test.nx", "--target", "nx-ir", "--output", join(dir, "ir")]);
+  const modules = new Map(["test", "expected", "wrong"].map(name => {
+    const module = prepareNxIrModule(new Uint8Array(readFileSync(join(dir, "ir", `${name}.nxir`))));
+    return [module.identity, module];
+  }));
+  const entry = [...modules.values()].find(module => module.identity.endsWith("test.nx"));
+  const program = linkNxIrProgram(entry, { resolve: identity => modules.get(identity) });
+  const fn = { $type: "Function", module: entry.identity, name: "f" };
+  try {
+    callFunction(program, fn, { s: { $type: "Other", r: 1 } });
+    throw new Error("Expected the unrelated same-named base to be rejected");
+  } catch (error) {
+    assertEqual(error.diagnostics?.[0]?.code, "nx-ir-boundary-type");
+  }
+  assertEqual(callFunction(program, fn, { s: { $type: "Good", r: 1 } }), "ok");
+});
+console.log("ok - a host subtype reaches the expected declaration, not a same-named base in another module");

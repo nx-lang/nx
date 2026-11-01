@@ -7,9 +7,9 @@
 //! decides line layout only, never whether a field becomes body content.</para>
 //!
 //! <para>The walk that writes the text also records a node for each value, property and sequence
-//! it writes: where it starts and ends, and what it is. [`format_nx_text`] discards them, and
-//! [`NxValueText`] keeps them for a viewer. Nothing else decides layout, so annotated text is
-//! always the text the command line prints.</para>
+//! it writes: where it starts and ends, and what it is. The CLI discards them, and
+//! [`NxValueText`] keeps them for a viewer. Both canonical host values and rich runtime
+//! results use this same layout walk.</para>
 
 use crate::format_value::Value;
 use nx_hir::{
@@ -832,6 +832,7 @@ impl<'a> Declarations<'a> {
         match ty {
             TypeRef::Name(name) => self.expect_name(name.as_str(), depth),
             TypeRef::Seq { inner, .. } => self.expect(inner, depth),
+            TypeRef::Constrained { base, .. } => self.expect(base, depth),
             _ => Expected::Any,
         }
     }
@@ -2327,7 +2328,7 @@ mod tests {
         }
 
         /// What root evaluates to, converted to canonical JSON and spelled again, reads as
-        /// `evaluateNx` spells it.
+        /// `formatValue` spells it.
         #[test]
         fn the_text_is_root_s_text() {
             let source = "type Status = active | paused\n\

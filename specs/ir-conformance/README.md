@@ -186,3 +186,7 @@ A failure names its seed and its case and prints the command that reproduces it,
 A step the tests find is listed as a known finding in `tests/cost/mod.rs` with a concrete case
 until a change to the cost model fixes it, and an entry whose case stops reproducing fails the
 run. `docs/nx-ir-format.md`, under *Validation against generated host values*, has the details.
+
+Float64 joins selecting an integer arm may retain the IR integer carrier (`1`, formerly `1.0`
+in HIR-generated results). Conversion and occurrence-lifting goldens document this spelling-only
+difference; see `docs/hir-interpreter-retirement.md`.

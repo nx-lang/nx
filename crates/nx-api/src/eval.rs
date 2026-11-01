@@ -205,7 +205,7 @@ pub fn format_program_artifact_function_value(
         .type_env
         .lookup(&nx_hir::Name::new(function))
         .and_then(nx_types::Type::function_parts)
-        .map(|(_, result)| result.to_string());
+        .map(|(_, result)| result.unconstrained().to_string());
     annotate_runtime_nx_text(
         value.view(),
         ty.as_deref(),

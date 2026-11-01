@@ -174,10 +174,8 @@ NxGeneratedNxIr image = artifact.GenerateNxIr();
 
 ### Reusable Program Artifacts
 
-
-
-Build a `NxProgramArtifact` when you want to reuse the same resolved program across evaluation or
-component lifecycle calls. If the source imports local NX libraries, preload them in a
+Build a `NxProgramArtifact` when you want to reuse the same resolved program across schema, validation and
+code-generation calls. If the source imports local NX libraries, preload them in a
 `NxLibraryRegistry` and build through a `NxProgramBuildContext` so program construction uses the
 selected loaded snapshots instead of reading libraries from disk on demand. The parameterless
 `NxProgramArtifact.Build(source, fileName)` convenience still exists, but it now creates a
@@ -186,7 +184,7 @@ transient empty registry/build-context pair internally before calling the native
 ### Program Module Codegen
 
 Use `NxProgramArtifact.GenerateJSProgramModule` when a managed host needs cacheable JavaScript source
-for a resolved NX program rather than immediate interpreter evaluation:
+for a resolved NX program for execution by a JavaScript host:
 
 ```csharp
 using NxLang.Nx;
@@ -358,10 +356,6 @@ naming the field, so a DTO that has drifted from the NX source cannot turn "unch
 an optional field the NX value leaves empty is an omitted key, so it reads as `null`, and a host may send `null`, an
 empty array, or no key at all for one; the runtime reads all three as the empty value.
 
-If the host wants JSON results instead of typed MessagePack models:
-
-
-
 ### MessagePack Polymorphism Migration
 
 Generated C# polymorphic DTOs now use the canonical NX MessagePack map shape with a `$type`
@@ -371,21 +365,6 @@ string key instead of MessagePack `Union` envelopes.
 - Keep generated action/record DTO classes free of explicit `Type`/`$type` data members.
 - Ensure abstract polymorphic roots keep the generated polymorphism attributes so runtime
   serialization can resolve concrete descendants from `$type`.
-
-- Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
-- Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
-- Evaluation accepts explicit props and explicit current state, then returns only the rendered value.
-- Reuse a saved `StateSnapshot` only with the exact same `NxProgramArtifact` revision that produced it.
-  Mixing snapshots across program revisions is rejected.
-- Use evaluation for host-owned transparent state. Use initialization and dispatch for NX-owned
-  component lifecycles that need opaque snapshot round-tripping and handler effects.
-- The managed source-based component helpers build transient `NxProgramArtifact`s internally and then
-  call the native program-artifact component APIs. The public native C ABI itself is artifact-first.
-- State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
-- Component runtime inputs remain MessagePack-only in this phase. Typed prop/state/action overloads still
-  serialize those inputs as MessagePack before calling the runtime.
-- JSON component results encode `state_snapshot` as base64 on the wire, and the managed binding
-  decodes that back to `StateSnapshot` bytes for later dispatch calls.
 
 ### Generated Types
 

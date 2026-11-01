@@ -2335,11 +2335,12 @@ fn build_element_expression(
             .any(|property| property.name == "content")
         && resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str()).is_none()
     {
-        diagnostics.push(unsupported_diagnostic(
-            resolved_module,
-            element.span,
-            "an intrinsic element cannot have both a 'content' property and element body content",
-        ));
+        diagnostics.push(
+            Diagnostic::error("intrinsic-content-conflict")
+                .with_message("an intrinsic element cannot have both a 'content' property and element body content")
+                .with_label(nx_diagnostics::Label::primary(resolved_module.prepared_module_identity(), element.span))
+                .build(),
+        );
         return None;
     }
     // A tag that analysis resolved to a function-typed value in scope is a call of that value by

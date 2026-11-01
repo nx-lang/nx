@@ -178,3 +178,26 @@ fn int32_arithmetic_uses_the_existing_wider_integer_carrier() {
         Some("int32")
     );
 }
+
+#[test]
+fn constrained_float32_sites_keep_their_numeric_spelling() {
+    let source = "type Ratio = float32 where in 0.0..=1.0\nlet root(): Ratio = {0.1}";
+    assert_eq!(formatted(source).text, "0.1");
+    let artifact =
+        load_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    let request = serde_json::json!({"value": f64::from(0.1_f32), "type": "Ratio"});
+    assert_eq!(
+        nx_api::format_program_artifact_value(&artifact, &request.to_string())
+            .unwrap()
+            .text,
+        "0.1"
+    );
+    assert_eq!(
+        formatted(
+            "type Size = { ratio:float32 where in 0.0..=1.0 }\nlet root() = <Size ratio=0.1 />"
+        )
+        .text,
+        "<Size ratio=0.1 />"
+    );
+}

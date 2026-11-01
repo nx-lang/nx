@@ -365,9 +365,21 @@ let root(): User* = { <User id="1" /> <User id="2" /> <User id="3" /> }`);
   it("leaves the artifact usable after a failed evaluation", () => {
     const artifact = host.buildProgramArtifact("let root() = { 1 / 0 }");
     try {
-      expect(() => formatIrResult(artifact)).toThrow(/nx-ir-division-by-zero/);
+      try {
+        formatIrResult(artifact);
+        expect.fail("Expected division by zero");
+      } catch (error) {
+        expect((error as { diagnostics: readonly { code: string }[] }).diagnostics[0]?.code)
+          .toBe("nx-ir-division-by-zero");
+      }
       expect(artifact.generateNxIr()).toHaveLength(1);
-      expect(() => formatIrResult(artifact)).toThrow(/nx-ir-division-by-zero/);
+      try {
+        formatIrResult(artifact);
+        expect.fail("Expected division by zero");
+      } catch (error) {
+        expect((error as { diagnostics: readonly { code: string }[] }).diagnostics[0]?.code)
+          .toBe("nx-ir-division-by-zero");
+      }
     } finally {
       artifact.dispose();
     }

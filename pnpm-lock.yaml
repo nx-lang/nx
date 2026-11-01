@@ -192,6 +192,9 @@ importers:
 
   packages/value-view:
     devDependencies:
+      '@nx-lang/ir-runtime':
+        specifier: workspace:*
+        version: link:../../runtime/typescript
       '@nx-lang/language':
         specifier: file:../../src/vscode
         version: nx-language@file:src/vscode
@@ -342,6 +345,9 @@ importers:
         specifier: ^0.12.0
         version: 0.12.0(@astrojs/markdown-remark@7.3.1)(@astrojs/markdown-satteri@0.4.2)(@astrojs/starlight@0.42.4(@astrojs/markdown-remark@7.3.1)(astro@7.3.5(@astrojs/markdown-remark@7.3.1)(@types/node@24.13.3)(tsx@4.23.13)(yaml@2.9.1))(typescript@5.9.3))(astro@7.3.5(@astrojs/markdown-remark@7.3.1)(@types/node@24.13.3)(tsx@4.23.13)(yaml@2.9.1))
     devDependencies:
+      '@nx-lang/ir-runtime':
+        specifier: workspace:*
+        version: link:../../runtime/typescript
       '@nx-lang/sdk-wasm':
         specifier: workspace:*
         version: link:../../bindings/wasm

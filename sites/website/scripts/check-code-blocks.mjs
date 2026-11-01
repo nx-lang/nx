@@ -8,7 +8,7 @@
  * - `fragment`: the block has no syntax diagnostics, so it may use names declared elsewhere;
  * - `invalid`: the block produces at least one error, because it shows a form NX rejects;
  * - `output`: the block is what the unmarked block just before it evaluates to, its `root` printed
- *   as NX text, compared with trailing whitespace ignored.
+ *   as canonical-host NX text at its declared type, compared with trailing whitespace ignored.
  *
  * Failures print as `file:line:column: message`, and any failure exits nonzero.
  *
@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { mdxFromMarkdown } from "mdast-util-mdx";
 import { mdxjs } from "micromark-extension-mdxjs";
+import { evaluateFunction, linkNxIrProgram, prepareNxIrModule, NxIrRuntimeError } from "@nx-lang/ir-runtime";
 import { createNxHost, loadNxModule, NxEvaluationError } from "@nx-lang/sdk-wasm";
 
 const siteRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -126,12 +127,22 @@ export function checkOutput(host, block, previous) {
   try {
     const artifact = host.buildProgramArtifact(previous.code);
     try {
-      text = artifact.evaluateNx().text;
+      const entry = artifact.generateNxIr()[0];
+      const modules = new Map(artifact.generateNxIr({ modules: [] }).map(image =>
+        [image.identity, prepareNxIrModule(image.bytes)]));
+      const program = linkNxIrProgram(modules.get(entry.identity), {
+        resolve: identity => modules.get(identity)
+      });
+      const value = evaluateFunction(program, "root");
+      const formatted = artifact.formatValue(value, {
+        type: artifact.functionSchema({ name: "root" }).resultType
+      });
+      text = formatted.text;
     } finally {
       artifact.dispose();
     }
   } catch (error) {
-    if (error instanceof NxEvaluationError) {
+    if (error instanceof NxEvaluationError || error instanceof NxIrRuntimeError) {
       return [{ line: 0, column: 1, message: `the block before this output does not evaluate: ${error.message}` }];
     }
     throw error;
@@ -153,7 +164,7 @@ function compileErrors(host, source) {
     host.buildProgramArtifact(source).dispose();
     return [];
   } catch (error) {
-    if (error instanceof NxEvaluationError) {
+    if (error instanceof NxEvaluationError || error instanceof NxIrRuntimeError) {
       return error.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     }
     throw error;

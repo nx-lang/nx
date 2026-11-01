@@ -1,5 +1,5 @@
 /**
- * Values as `evaluateNx()` returns them, from `test/fixtures/values.json`, which
+ * Values as `formatValue()` returns them, from `test/fixtures/values.json`, which
  * `scripts/update-fixtures.mjs` writes from `test/fixtures/sources.json`. `fixtures.test.ts` fails
  * when the compiler's output drifts from what is committed.
  */

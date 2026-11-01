@@ -1563,40 +1563,16 @@ and the reserved recovery name. Every crate that builds or
 matches a `TypeRef` changes with it: the checker, codegen, typegen and the language service, about
 a dozen files. Found by the `occurrence-cardinality` review (RF39, RF48).
 
-## A built-in element given both `content=` and a body fails at run time
+## Built-in content conflicts need a checker diagnostic
 
-**Observed.** Two documentation pages show markup in an attribute this way, and the checker accepts
-it:
+IR emission rejects a built-in element with both `content=` and body content using
+`intrinsic-content-conflict`. Source analysis still accepts it, so editor diagnostics and
+`buildProgramArtifact` do not find the conflict until emission. Move this check into analysis,
+where a declared component's duplicate content binding is already checked.
 
-```nx
-<Tooltip
-  content=<span:>
-    <strong>Bold</strong> and <em>italic</em> text
-  </span>
->
-  Hover over me
-</Tooltip>
-```
-
-Evaluating it fails: `Type mismatch in element intrinsic call: expected content for 'content' passed
-either as a named property or as element body, got both a 'content' property and element body
-content`. `Tooltip` names no declaration, so it is a built-in element, and a built-in element's
-body binds to a property named `content`. The attribute and the body are then two values for one
-property.
-
-**Where.** `sites/website/src/content/docs/language-tour/elements.md` ("Attributes can be
-expressions or inline markup") and `sites/website/src/content/docs/reference/syntax/elements.md`.
-Both are complete blocks, so their "Open in playground" links open to this error.
-
-**Why the checker misses it.** Nothing under a built-in tag is checked (see "Built-In Element
-Content And Property Values Are Never Type-Checked" above), so the collision is found only by the
-interpreter.
-
-**To decide.** Either the examples are wrong, and should name the attribute something other than
-`content` (`tip=` says what it is), or a built-in element's body should not claim the name
-`content` when the element also sets it. Whichever it is, the checker should report the collision
-for a built-in tag as it would for a declared one, and an `nx output` block after each example
-would keep the docs honest.
+The website's Tooltip examples now use `tip=` for the tooltip value, leaving `content` for the
+body. Website blocks followed by an `nx output` block execute emitted IR and therefore catch emission
+failures as well as runtime errors; complete blocks without an output block are only analyzed.
 
 ## A misspelled component compiles as a plain element
 
