@@ -16,7 +16,6 @@ members = [
     "crates/nx-lsp",
     "crates/nx-codegen",
     "crates/nx-cli",
-    "crates/nx-interpreter",
     "crates/nx-ffi",
     "bindings/node/native",
     "bindings/wasm/native",

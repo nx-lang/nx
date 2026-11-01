@@ -33,7 +33,7 @@
 
 ## 6. Delete, document and validate
 
-- [ ] 6.1 Delete nx-interpreter and its workspace/dependency entries, temporary differential helpers and remaining interpreter imports in a separate final implementation commit; remove nx-interpreter from scripts/check-crate-layering.mjs and its test; verify crate-layering guards and runtime-only packaging/builds
+- [x] 6.1 Delete nx-interpreter and its workspace/dependency entries, temporary differential helpers and remaining interpreter imports in a separate final implementation commit; remove nx-interpreter from scripts/check-crate-layering.mjs and its test; verify crate-layering guards and runtime-only packaging/builds
 - [ ] 6.2 Archive the change so its deltas (including the interpreter-wording deltas for every affected spec) reach openspec/specs; edit the graphics-library, graphics-preview and resolved-program-runtime Purpose paragraphs by hand; grep openspec/specs for remaining interpreter references; remove or rewrite the interpreter-only specs/future.md entries (32-bit values, discarded range types, aliased imports); validate all specs strictly
 - [x] 6.3 Update API/binding/CLI READMEs, generated declarations, examples, value-view docs, IR docs and corpus instructions with compile-then-run migration examples and exact breaking removals; document that .NET/C execution has no replacement binding in this change
 - [ ] 6.4 Run workspace build/test/clippy/fmt, crate-layering and package checks, Node/WASM/.NET suites, TypeScript runtime/parity, CLI and playground tests, native graphics/preview and supported runtime WASM checks; record results and justified removals

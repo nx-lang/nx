@@ -2382,3 +2382,13 @@ component <Wrap inner:Editor /> = { <Frame inner={inner} /> }`, (dir, sourcePath
   }
 });
 console.log("ok - nested component descriptor props validate their update records");
+
+
+withSource(`let twice(n:int32): int = { n + n }
+let root(): int = {twice(2000000000)}`, (dir, sourcePath) => {
+  const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+  assertEqual(evaluateFunction(program, "root"), 4000000000);
+  assertEqual(evaluateFunction(program, "twice", [2000000000]), 4000000000);
+  assertEqual(nativeJson(sourcePath), 4000000000);
+});
+console.log("ok - int32 operands compute without a separate 32-bit wrap when returned as int");

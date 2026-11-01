@@ -395,7 +395,7 @@ fn a_record_field_read_resolves_its_type_in_the_declaring_module() {
 /// The interpreter and code generation must agree on both.
 ///
 /// <para>The interpreter keys on whether any content expression was written
-/// (`normalize_content_values` in `nx-interpreter`); code generation keys on whether the emitted
+/// (source occurrence normalization); code generation keys on whether the emitted
 /// content list is non-empty, in three separate places across two crates. Nothing but this test
 /// holds them together.</para>
 #[test]
