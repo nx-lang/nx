@@ -25,24 +25,25 @@ validation SHALL be preserved in Rust IR, TypeScript IR and generated JavaScript
 - **THEN** construction SHALL apply the declared default
 - **AND** an explicitly empty binding SHALL keep its distinct source semantics
 
+#### Scenario: Mutually exclusive bindings are accepted
+- **WHEN** both branches of a conditional bind `label` exactly once
+- **THEN** compilation SHALL accept those bindings and execution SHALL supply the selected one
+
 #### Scenario: Duplicate active properties are rejected
 - **WHEN** two properties can bind the same name on an active path
 - **THEN** compilation SHALL reject the duplicate rather than apply last-wins behavior
 
-### Requirement: Executable code supports positional record constructors
-Executable code generation SHALL construct a record from positional arguments using declared field
-order and existing type validation and default rules, including inherited and imported fields.
-It SHALL NOT attempt to invoke the record declaration as a function value.
+#### Scenario: Properties preserve authored evaluation order
+- **WHEN** direct properties and multiple conditional fragments are mixed in one invocation
+- **THEN** guards and selected value expressions SHALL be evaluated once in their source-defined order
+- **AND** inactive expressions that would fail SHALL not be evaluated
 
-#### Scenario: Positional values bind in field order
-- **WHEN** `User` declares `name:string` followed by `age:int = 30`
-- **THEN** `User("Bob", 42).name` SHALL evaluate to `Bob`
-- **AND** `User("Bob", 42).age` SHALL evaluate to `42`
+#### Scenario: Multiple independent fragments compile compactly
+- **WHEN** an invocation contains an increasing number of independent conditional fragments
+- **THEN** emitted IR and generated code SHALL grow linearly with the fragments and bindings
+- **AND** lowering SHALL NOT enumerate every combination of branch outcomes
 
-#### Scenario: Omitted arguments use field defaults
-- **WHEN** the same record is constructed as `User("Bob")`
-- **THEN** its age SHALL be `30`
-
-#### Scenario: Imported and inherited constructors preserve order
-- **WHEN** a record with inherited fields is imported under an alias
-- **THEN** positional construction SHALL bind the same fields and defaults as its equivalent markup
+#### Scenario: Content properties retain their binding rules
+- **WHEN** an invocation combines conditional properties with body content
+- **THEN** content binding and duplicate validation SHALL follow the existing content-property rules
+- **AND** conditional compile-time type arguments SHALL remain rejected under existing rules

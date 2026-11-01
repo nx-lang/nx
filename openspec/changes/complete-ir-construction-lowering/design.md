@@ -1,43 +1,90 @@
 ## Context
 
-The shared codegen builder rejects conditional property entries and lowers a positional record
-constructor as a function call. The runtime already supports conditions and record construction.
-The retirement change retains source expectations as ignored tests naming this change.
+The shared codegen builder rejects conditional property fragments and currently treats a positional
+record constructor as a function call. These are separate issues: conditional fragments keep their
+existing language semantics; implicit positional record construction is intentionally removed.
+The runtime already supports conditional expressions and named record construction, but that alone
+does not establish a lazy, compact representation for conditional property presence.
 
 ## Goals / Non-Goals
 
-**Goals:** Restore both source behaviors through compilation and enable their regression tests.
-**Non-Goals:** Restore the HIR evaluator or source-evaluation SDK wrappers; alter other language rules.
+**Goals:** Diagnose record calls during shared analysis; preserve named record construction; execute
+conditional fragments consistently; replace every temporary ignore with an active test.
+
+**Non-goals:** Restore source-evaluation APIs or the interpreter; introduce positional or tuple
+records; change function declaration/call styles, first-class function types, factory functions,
+component invocation rules, or record defaults/inheritance semantics.
 
 ## Decisions
 
-### Preserve source semantics in compiler lowering
+### Reject record calls at the shared semantic boundary
 
-Positional record arguments map to the declaration's ordered fields, using existing construction
-and normalization for omitted defaults. Resolve imported records and inherited fields through the
-same semantic metadata used by markup construction. A record name must not become a function value.
+A call such as `User("Bob", 42)` receives `record-construction-requires-element` during shared
+source analysis, before emission or execution. This includes zero-argument calls and calls through
+imported, qualified or type-aliased names resolving to a named record. Resolve the actual callee;
+do not infer constructor status from capitalization or the result type. Existing function and
+lexical-shadowing rules remain authoritative.
 
-Conditional fragments must select only the active branch, preserve expression evaluation order,
-match-arm narrowing and omitted-versus-empty properties, and validate duplicates before invocation.
-Use existing condition and construction operations where they express that behavior; do not eagerly
-evaluate inactive branches or expand independent conditions into exponentially many constructions.
-If a linear lowering needs an IR feature, specify and version that feature before implementation,
-with both runtimes updated together. This follow-up does not assume the IR schema must remain fixed.
+Use the callee/call span and retain the caller's file identity. Explain that records use named
+element construction. For a simple unambiguous case, show `<User name="Bob" age=42 />`; for
+`User("Bob")`, show `<User name="Bob" />`, leaving the default to normal construction. Use resolved
+semantic field metadata for guidance, including inherited fields; if a complete rewrite cannot be
+shown safely (invalid arity, type arguments or unavailable source text), provide accurate generic
+guidance rather than dropping arguments or inventing field bindings. An automatic code action is
+not required. Do not cascade into misleading missing-function or runtime diagnostics.
 
-### Keep independent expectations
+Checker-backed tooling, CLI and all codegen paths must share this rejection. Named construction,
+including imported, inherited, generic and defaulted records, must continue to work. An explicit
+factory such as `let user(name:string, age:int): User = <User name={name} age={age} />` remains valid.
+The record declaration must not be emitted as a function reference to work around the rejection.
 
-The ignored tests keep the successful HIR expectations captured before retirement. Enable them
-as each behavior is implemented and add nested, imported, defaulted and rejected-input cases.
-Rust/TypeScript parity supplements explicit expected results; it does not replace them.
+### Preserve conditional property presence, laziness and order
+
+Follow `property-list-fragments` and `content-properties`: only the selected branch contributes
+bindings; condition lists choose the first matching arm; match bindings keep lexical narrowing.
+Conditions, active property expressions and body/content expressions retain their authored order
+and are evaluated once where source semantics require it. Inactive guards/arms must not perform
+unneeded evaluation. Defaults are applied after active bindings have been selected. Omission and
+an explicitly supplied empty value remain distinct.
+
+Keep path-sensitive static checking: reject a required property missing on a possible path and
+reject duplicate bindings that can coexist. Reusing a property in mutually exclusive branches is
+valid. Preserve existing rules for content properties and compile-time type-argument bindings;
+this change must not make conditional type arguments newly legal.
+
+Before coding, document how the representation handles absence, mixed direct/conditional entries,
+multiple fragments, targets (intrinsics, records, unions, components and functions) and content.
+Do not lower an omitted binding as an empty value or evaluate both branches. Avoid a Cartesian
+product of constructions: emitted image/code growth must be linear in fragments and bindings.
+Audit the checker's existing property-path enumeration separately so lowering does not compound
+analysis growth or silently change validation rules.
+
+Use existing operations if they express these semantics. If an IR feature is needed, update the
+proposal's affected capabilities and specify/version the feature first, including preparation and
+execution in both runtimes, old-runtime refusal and generated-JavaScript behavior. A schema change
+is neither assumed necessary nor ruled out in advance.
+
+### Replace temporary tests according to the language decision
+
+There are six ignores naming this change. Activate the four conditional-fragment tests and the
+component example test with their successful expectations. Replace the one positional constructor
+test with active static-diagnostic coverage plus markup success/default coverage. Preserve the
+historical success expectation in the archived retirement inventory; do not rewrite that history.
+Rust/TypeScript parity supplements handwritten values and diagnostic expectations.
+
+Remove the temporary runtime-spec exception through this change's delta on completion. Update the
+migration guide and future-work notes to state the permanent record syntax rule, rather than
+removing useful migration guidance or promising future positional support.
 
 ## Risks / Trade-offs
 
-- Conditional lowering may need an IR feature → settle the representation in this follow-up,
-  preserve version negotiation and runtime/compiler separation.
-- Wrong argument/field order or premature defaults → test inherited and imported declarations,
-  omitted values, and failures in inactive branches.
+- Positional convenience is lost; explicit factory functions retain opt-in positional interfaces.
+- Diagnostic suggestions must respect semantic resolution and never guess an unsafe rewrite.
+- Conditional presence/content may need an IR extension; settle/version it before runtime edits.
+- Eager branches, duplicated evaluation, premature defaults or exponential expansion can change
+  behavior or cost; cover failing inactive branches, ordering, nesting and image/code growth.
 
 ## Migration Plan
 
-Implement record construction and conditional fragments, enable the corresponding ignored tests,
-run compiler/runtime/CLI parity suites, and remove the documented temporary limitations.
+Implement shared rejection and conditional lowering, activate/replace the six tests as described,
+run checker/tooling and cross-backend suites, then sync specs and remove temporary-limit wording.
