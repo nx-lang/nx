@@ -638,6 +638,12 @@ pub fn apply_contextual_name_resolutions<T>(
     for (expr_id, resolution) in resolutions {
         let span = match raw_module.expr(*expr_id) {
             ast::Expr::ContextualName { span, .. } => *span,
+            // The checker resolves a lone `finite` as a contextual case for union scrutinees.
+            ast::Expr::NumericPattern { pattern, span }
+                if matches!(pattern.terms.as_slice(), [ast::PatternTerm::Finite]) =>
+            {
+                *span
+            }
             // Already rewritten, or never a contextual name: leave it alone.
             _ => continue,
         };

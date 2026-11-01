@@ -14,7 +14,7 @@ The system SHALL accept evaluated NX graphics values with their linked declarati
 - **THEN** preparation SHALL fail before any child is painted and SHALL identify the bad child
 
 #### Scenario: Name spoofing is rejected
-- **WHEN** a user declaration shares the display name Rect but is not the linked graphics Rect contract
+- **WHEN** a user declaration shares the display name Rectangle but is not the linked graphics Rectangle contract
 - **THEN** it SHALL NOT be accepted as that primitive merely by matching its name
 
 ### Requirement: Graphics painting preserves geometry and compositing semantics
@@ -84,7 +84,7 @@ Gradients SHALL be sampled in the painted element's local coordinate system and 
 - **AND** text geometry SHALL continue to use the measured shaped run
 
 ### Requirement: Prepared gradients are neutral and bounded
-Prepared paints SHALL retain kind, validated geometry and ordered canonical stop colors without platform objects. Host transport SHALL identify this contract as graphics-core-v3 and unsupported profile consumers SHALL reject it explicitly. A configurable positive integer gradient_stops limit SHALL bound total supplied stops per scene, defaulting to 100000; each consuming paint occurrence SHALL count even for shared values and invisible content. Budget checking SHALL precede stop-resource allocation and painting. Existing coordinate, surface and peak layer limits SHALL remain enforced, including any temporary gradient raster resources. Stops SHALL be fully validated before all-transparent paints are classified as nonpainting.
+Prepared paints SHALL retain kind, validated geometry and ordered canonical stop colors without platform objects. Host transport SHALL identify this contract as graphics-core-v4 and unsupported profile consumers SHALL reject it explicitly. A configurable positive integer gradient_stops limit SHALL bound total supplied stops per scene, defaulting to 100000; each consuming paint occurrence SHALL count even for shared values and invisible content. Budget checking SHALL precede stop-resource allocation and painting. Existing coordinate, surface and peak layer limits SHALL remain enforced, including any temporary gradient raster resources. Stops SHALL be fully validated before all-transparent paints are classified as nonpainting.
 
 #### Scenario: Aggregate stop budget cannot be bypassed with sharing
 - **WHEN** two elements reuse a three-stop paint and the configured gradient_stops limit is five
@@ -96,5 +96,5 @@ Prepared paints SHALL retain kind, validated geometry and ordered canonical stop
 
 #### Scenario: SDK transport preserves paint details
 - **WHEN** a prepared scene passes from neutral preparation through WASM serialization to the browser SDK
-- **THEN** paint kind, local geometry, stop ordering, offsets and float32 Color precision SHALL be preserved under graphics-core-v3
-- **AND** a host accepting only graphics-core-v2 SHALL reject the changed payload explicitly
+- **THEN** paint kind, local geometry, stop ordering, offsets and float32 Color precision SHALL be preserved under graphics-core-v4
+- **AND** a host accepting only graphics-core-v3 SHALL reject the changed payload explicitly

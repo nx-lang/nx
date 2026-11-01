@@ -1,0 +1,61 @@
+{
+  "counts": {
+    "main.nx::point#fractional": 14,
+    "main.nx::point#max": 14,
+    "main.nx::point#negativeMax": 14,
+    "main.nx::root#value": 154,
+    "main.nx::unbounded#value": 18
+  },
+  "failures": {
+    "main.nx::point#fractional": [
+      {
+        "budget": 7,
+        "declaration": "@nx/geometry/geometry.nx::Point"
+      },
+      {
+        "budget": 13,
+        "declaration": "main.nx::point"
+      }
+    ],
+    "main.nx::point#max": [
+      {
+        "budget": 7,
+        "declaration": "@nx/geometry/geometry.nx::Point"
+      },
+      {
+        "budget": 13,
+        "declaration": "main.nx::point"
+      }
+    ],
+    "main.nx::point#negativeMax": [
+      {
+        "budget": 7,
+        "declaration": "@nx/geometry/geometry.nx::Point"
+      },
+      {
+        "budget": 13,
+        "declaration": "main.nx::point"
+      }
+    ],
+    "main.nx::root#value": [
+      {
+        "budget": 77,
+        "declaration": "@nx/geometry/geometry.nx::Rect"
+      },
+      {
+        "budget": 153,
+        "declaration": "main.nx::root"
+      }
+    ],
+    "main.nx::unbounded#value": [
+      {
+        "budget": 9,
+        "declaration": "@nx/geometry/geometry.nx::Size"
+      },
+      {
+        "budget": 17,
+        "declaration": "main.nx::unbounded"
+      }
+    ]
+  }
+}

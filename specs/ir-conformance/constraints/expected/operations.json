@@ -1,8 +1,18 @@
 {
   "counts": {
     "main.nx::bands": 63,
+    "main.nx::classifyFinite#finite": 18,
+    "main.nx::classifyNan#nan": 19,
+    "main.nx::classifyOverflow#infinite": 15,
     "main.nx::faded": 6,
+    "main.nx::finite32#max": 4,
+    "main.nx::finite32#subnormal": 4,
+    "main.nx::finite64#max": 4,
+    "main.nx::finite64#negativeZero": 4,
+    "main.nx::finite64#subnormal": 4,
+    "main.nx::finiteCase": 12,
     "main.nx::flags": 68,
+    "main.nx::infiniteCase": 14,
     "main.nx::paint#inside": 9,
     "main.nx::pick#inside": 4,
     "main.nx::scores#items": 28,
@@ -27,6 +37,51 @@
         "declaration": "main.nx::bands"
       }
     ],
+    "main.nx::classifyFinite#finite": [
+      {
+        "budget": 9,
+        "declaration": "main.nx::classifyFinite",
+        "source": {
+          "end": 2117,
+          "identity": "main.nx",
+          "start": 2116
+        }
+      },
+      {
+        "budget": 17,
+        "declaration": "main.nx::classifyFinite"
+      }
+    ],
+    "main.nx::classifyNan#nan": [
+      {
+        "budget": 9,
+        "declaration": "main.nx::classifyNan",
+        "source": {
+          "end": 2331,
+          "identity": "main.nx",
+          "start": 2330
+        }
+      },
+      {
+        "budget": 18,
+        "declaration": "main.nx::classifyNan"
+      }
+    ],
+    "main.nx::classifyOverflow#infinite": [
+      {
+        "budget": 7,
+        "declaration": "main.nx::classifyFinite",
+        "source": {
+          "end": 2189,
+          "identity": "main.nx",
+          "start": 2078
+        }
+      },
+      {
+        "budget": 14,
+        "declaration": "main.nx::classifyOverflow"
+      }
+    ],
     "main.nx::faded": [
       {
         "budget": 3,
@@ -35,6 +90,71 @@
       {
         "budget": 5,
         "declaration": "main.nx::faded"
+      }
+    ],
+    "main.nx::finite32#max": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::finite32"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::finite32"
+      }
+    ],
+    "main.nx::finite32#subnormal": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::finite32"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::finite32"
+      }
+    ],
+    "main.nx::finite64#max": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::finite64"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::finite64"
+      }
+    ],
+    "main.nx::finite64#negativeZero": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::finite64"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::finite64"
+      }
+    ],
+    "main.nx::finite64#subnormal": [
+      {
+        "budget": 2,
+        "declaration": "main.nx::finite64"
+      },
+      {
+        "budget": 3,
+        "declaration": "main.nx::finite64"
+      }
+    ],
+    "main.nx::finiteCase": [
+      {
+        "budget": 6,
+        "declaration": "main.nx::classifyExtent",
+        "source": {
+          "end": 2577,
+          "identity": "main.nx",
+          "start": 2571
+        }
+      },
+      {
+        "budget": 11,
+        "declaration": "main.nx::finiteCase"
       }
     ],
     "main.nx::flags": [
@@ -50,6 +170,21 @@
       {
         "budget": 67,
         "declaration": "main.nx::flags"
+      }
+    ],
+    "main.nx::infiniteCase": [
+      {
+        "budget": 7,
+        "declaration": "main.nx::classifyExtent",
+        "source": {
+          "end": 2577,
+          "identity": "main.nx",
+          "start": 2571
+        }
+      },
+      {
+        "budget": 13,
+        "declaration": "main.nx::infiniteCase"
       }
     ],
     "main.nx::paint#inside": [

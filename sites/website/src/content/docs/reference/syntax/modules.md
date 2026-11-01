@@ -107,6 +107,7 @@ let assistant = <Agent name="support">Be brief.</Agent>
 | Library | Stability | What it holds |
 | --- | --- | --- |
 | [`@nx/agent`](/reference/libraries/agent) | unstable | Types for declaring an AI agent, its documents and its tools |
+| [`@nx/geometry`](/reference/libraries/geometry) | unstable | Shared float64 Point, Size, and Rect values with numeric constraints |
 | [`@nx/graphics`](/reference/libraries/graphics) | unstable | Standalone drawings and ordinary shape helpers for Rust/TypeScript IR runtimes |
 | [`@nx/math`](/reference/libraries/math) | unstable | Float64 mathematics, including trigonometry, distances, rounding and interpolation |
 | [`@nx/visualizer`](/reference/libraries/visualizer) | unstable | Records for `visualizer` declarations, which say how a viewer presents a declaration |

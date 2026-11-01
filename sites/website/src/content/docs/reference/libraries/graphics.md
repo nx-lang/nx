@@ -4,7 +4,7 @@ description: 'Unstable standalone graphics authoring, direct Skia rendering and 
 ---
 
 `@nx/graphics` is unstable: declarations may change incompatibly in any NX release. The
-`graphics-core-v3` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
+`graphics-core-v4` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
 will not be updated for graphics; `nxlang run` and SDK APIs that still use it are not graphics
 acceptance paths until the separate interpreter-retirement change lands. Use the preview below
 or emit/link IR directly. The TypeScript runtime evaluates authoring helpers; direct Skia painting
@@ -12,13 +12,13 @@ is provided by the optional Rust adapter.
 
 ```nx
 import "@nx/graphics" as g
-let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>
+let root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>
   <g.Star cx=50 cy=50 outerRadius=40 innerRadius=20 pointCount=5
           fill=<g.Paint.color color=#2563eb/>/>
 </g.Drawing>
 ```
 
-Drawing, Group, Rect, Circle, Ellipse, Line, Polyline, Polygon, Path and Text have no UI/layout
+Drawing, Group, Rectangle, Circle, Ellipse, Line, Polyline, Polygon, Path and Text have no UI/layout
 library dependency. The host supplies viewport dimensions and device scale. Drawing supports
 viewBox, contain/cover/fill, start/center/end alignment, background, opacity, accessibility and
 children. Shapes support solid/none and linear/radial gradient fills, centered strokes with caps/joins/dashes, local affine
@@ -29,7 +29,7 @@ relative forms. Open paths close for filling and remain open for strokes.
 
 Transforms concatenate in SVG order: translate(10,0), then scale(2,2) maps local (1,0) to (12,0).
 Closed shapes and Text default to black; Line and Polyline default to no fill. This Polyline default
-differs from SVG. Colors use the shared float32 sRGB [`@nx/color`](/reference/libraries/color) record; write hex literals such as `color=#2563eb`. Rect's omitted ry uses rx; corner radii clamp
+differs from SVG. Colors use the shared float32 sRGB [`@nx/color`](/reference/libraries/color) record; write hex literals such as `color=#2563eb`. Rectangle's omitted ry uses rx; corner radii clamp
 to half the corresponding dimension. Clip paths are path-data strings in the node's local space.
 
 Text is a shaped single-line run at an alphabetic baseline, with an explicit supplied font family,
@@ -47,6 +47,29 @@ clipping and accessibility. `Shape` extends it with fill/stroke properties for g
 `AxisAlignment = start | center | end` positions content along one viewport axis, and
 `ContentAlignment` combines its `x` and `y` values. `TextAnchor` remains a separate text concept.
 `pointCount` counts RegularPolygon vertices or Star outer tips; a five-point star emits ten vertices.
+
+## Shared geometry and migration
+
+Graphics re-exports `Point`, `Size`, and `Rect` from
+[`@nx/geometry`](/reference/libraries/geometry). Direct geometry imports and graphics aliases
+refer to the same declarations. `Drawing.viewBox` uses `Rect`, and Polygon/Polyline vertices
+use `Point`. A viewport requires positive width and height; a standalone Rect may have zero dimensions.
+
+For graphics-core-v4, replace former drawable `Rect` tags with `Rectangle`, and former `ViewBox`
+values with `Rect`. There are no compatibility aliases. A geometry Rect is data and cannot be a
+drawing child. Consumers must use the matching v4 profile and linked standard-library images.
+
+Public scalar inputs now carry NX value constraints. Coordinates, transforms, and angles must
+be finite; lengths and dash items must also be nonnegative. Opacity and stop offsets are in
+[0,1]. Radial paint radius and fontSize must be positive; miterLimit is at least 1.
+fontWeight remains float64 in [1,1000], with its whole-number rule checked during preparation.
+RegularPolygon/Star pointCount is in [3,4096]; Arc/RingSector sweepAngle is in [-360,360].
+Negative and zero scale factors remain valid.
+
+Invalid constants report `constraint-violation`; dynamic invalid inputs report
+`nx-ir-constraint` at their binding before rendering. These checks do not replace stop ordering,
+distinct gradient endpoints, helper dimension relationships, computed-overflow checks, backend
+precision rules, or resource limits. Preparation also validates raw SDK values.
 
 ## Gradient paints
 
@@ -69,8 +92,8 @@ let ramp(): Paint =
   />
 
 let root() =
-  <Drawing viewBox=<ViewBox x=0 y=0 width=100 height=100 />>
-    <Rect width=100 height=100 fill={ramp()} />
+  <Drawing viewBox=<Rect x=0 y=0 width=100 height=100 />>
+    <Rectangle width=100 height=100 fill={ramp()} />
   </Drawing>
 ```
 

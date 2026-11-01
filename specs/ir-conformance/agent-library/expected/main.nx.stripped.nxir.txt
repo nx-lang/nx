@@ -1,5 +1,5 @@
 module main.nx fingerprint 17177704571415329775
-links @nx/agent/agent.nx version "b06c00c30be50ada" fingerprint 11527925250760699671
+links @nx/agent/agent.nx version "0aeeab5b50b2f1fd" fingerprint 15097637627327149526
 requires function-values-v1
 entrypoints functions [findPlans lookupOrder openTicket root] components []
 

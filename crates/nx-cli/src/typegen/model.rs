@@ -1233,7 +1233,92 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
         };
     }
 
+    // Private aliases are implementation details, but public fields and their derived
+    // companions may use them. Emit their targets instead of undeclared host-language names.
+    let private_aliases = module
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            Item::TypeAlias(alias) if alias.visibility != Visibility::Export => {
+                Some((alias.name.clone(), alias.ty.clone()))
+            }
+            _ => None,
+        })
+        .collect::<FxHashMap<_, _>>();
+    for declaration in &mut declarations {
+        let expand_fields = |fields: &mut [ExportedRecordField], params: &[String]| {
+            for field in fields {
+                if field.declaring_module.is_none() {
+                    expand_private_aliases(
+                        &mut field.ty,
+                        &private_aliases,
+                        params,
+                        &mut BTreeSet::new(),
+                    );
+                }
+            }
+        };
+        match &mut declaration.item {
+            ExportedType::Alias(alias) => expand_private_aliases(
+                &mut alias.target,
+                &private_aliases,
+                &[],
+                &mut BTreeSet::new(),
+            ),
+            ExportedType::Record(record) => expand_fields(&mut record.fields, &record.type_params),
+            ExportedType::Union(union) => {
+                for case in &mut union.cases {
+                    expand_fields(&mut case.fields, &[]);
+                }
+            }
+            ExportedType::ComponentState(state) => {
+                expand_fields(&mut state.fields, &state.type_params)
+            }
+            ExportedType::Update(update) => expand_fields(&mut update.fields, &update.type_params),
+        }
+    }
     declarations
+}
+
+fn expand_private_aliases(
+    ty: &mut TypeRef,
+    aliases: &FxHashMap<nx_hir::Name, TypeRef>,
+    parameters: &[String],
+    seen: &mut BTreeSet<String>,
+) {
+    match ty {
+        TypeRef::Name(name) if !parameters.iter().any(|param| param == name.as_str()) => {
+            if let Some(target) = aliases.get(name) {
+                let name = name.as_str().to_string();
+                if seen.insert(name.clone()) {
+                    *ty = target.clone();
+                    expand_private_aliases(ty, aliases, parameters, seen);
+                    seen.remove(&name);
+                }
+            }
+        }
+        TypeRef::Applied { args, .. } => {
+            for (_, arg) in args {
+                expand_private_aliases(arg, aliases, parameters, seen);
+            }
+        }
+        TypeRef::Seq { inner, .. } | TypeRef::Constrained { base: inner, .. } => {
+            expand_private_aliases(inner, aliases, parameters, seen);
+        }
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                expand_private_aliases(&mut param.ty, aliases, parameters, seen);
+            }
+            expand_private_aliases(return_type, aliases, parameters, seen);
+        }
+        TypeRef::AnyFunction { return_type } => {
+            expand_private_aliases(return_type, aliases, parameters, seen)
+        }
+        TypeRef::Name(_) => {}
+    }
 }
 
 /// Whether `item` is a component's derived props record, or the update record or property union

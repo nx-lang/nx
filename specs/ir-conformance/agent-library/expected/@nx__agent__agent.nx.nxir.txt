@@ -1,20 +1,20 @@
-module @nx/agent/agent.nx fingerprint 11527925250760699671
+module @nx/agent/agent.nx fingerprint 15097637627327149526
 requires update-records-v1 property-unions-v1 function-reference-type-v1
 entrypoints functions [] components []
 
-record AgentLimits @11:1-16:2
+record AgentLimits @11:1-14:2
   maxSteps: int?
   maxToolCalls: int?
 
-record Document @19:1-24:2
+record Document @17:1-20:2
   title: string required
   content text: string required
 
-record Tool abstract @27:1-32:2
+record Tool abstract @23:1-26:2
   name: string?
   description: string?
 
-record Agent @35:1-50:2
+record Agent @29:1-38:2
   name: string required
   description: string?
   model: string?
@@ -23,45 +23,45 @@ record Agent @35:1-50:2
   limits: AgentLimits?
   content instructions: string required
 
-record FunctionTool extends Tool @54:1-58:2
+record FunctionTool extends Tool @42:1-45:2
   name: string?
   description: string?
   function: <function ... />: object* required
 
-record WebSearchTool extends Tool @61:1-64:2
+record WebSearchTool extends Tool @48:1-50:2
   name: string?
   description: string?
   allowedDomains: string*
 
-record ToolContext abstract @69:1-73:2
+record ToolContext abstract @55:1-58:2
   callId: string required
 
-union HttpMethod @76:1-76:59
+union HttpMethod @61:1-61:59
   case get constant
   case post constant
   case put constant
   case patch constant
   case delete constant
 
-record Connection abstract @79:1-84:2
+record Connection abstract @64:1-67:2
   name: string required
   description: string?
 
-record HttpConnection extends Connection @87:1-90:2
+record HttpConnection extends Connection @70:1-72:2
   name: string required
   description: string?
   baseUrl: string required
 
-record HttpParam @93:1-98:2
+record HttpParam @75:1-78:2
   name: string required
   value: string required
 
-record HttpArguments @101:1-108:2
+record HttpArguments @81:1-85:2
   pathParams: HttpParam*
   query: HttpParam*
   body: object?
 
-record HttpTool extends Tool @111:1-123:2
+record HttpTool extends Tool @88:1-97:2
   name: string?
   description: string?
   connection: HttpConnection required
@@ -70,19 +70,19 @@ record HttpTool extends Tool @111:1-123:2
   arguments: <function ... />: HttpArguments required
   maxCallsPerConversation: int?
 
-record AgentLimits.Update update of AgentLimits @11:1-16:2
+record AgentLimits.Update update of AgentLimits @11:1-14:2
   maxSteps: int?
   maxToolCalls: int?
 
-record Document.Update update of Document @19:1-24:2
+record Document.Update update of Document @17:1-20:2
   title: string
   content text: string
 
-record Tool.Update update of Tool @27:1-32:2
+record Tool.Update update of Tool @23:1-26:2
   name: string?
   description: string?
 
-record Agent.Update update of Agent @35:1-50:2
+record Agent.Update update of Agent @29:1-38:2
   name: string
   description: string?
   model: string?
@@ -91,38 +91,38 @@ record Agent.Update update of Agent @35:1-50:2
   limits: AgentLimits?
   content instructions: string
 
-record FunctionTool.Update update of FunctionTool @54:1-58:2
+record FunctionTool.Update update of FunctionTool @42:1-45:2
   name: string?
   description: string?
   function: <function ... />: object*
 
-record WebSearchTool.Update update of WebSearchTool @61:1-64:2
+record WebSearchTool.Update update of WebSearchTool @48:1-50:2
   name: string?
   description: string?
   allowedDomains: string*
 
-record ToolContext.Update update of ToolContext @69:1-73:2
+record ToolContext.Update update of ToolContext @55:1-58:2
   callId: string
 
-record Connection.Update update of Connection @79:1-84:2
+record Connection.Update update of Connection @64:1-67:2
   name: string
   description: string?
 
-record HttpConnection.Update update of HttpConnection @87:1-90:2
+record HttpConnection.Update update of HttpConnection @70:1-72:2
   name: string
   description: string?
   baseUrl: string
 
-record HttpParam.Update update of HttpParam @93:1-98:2
+record HttpParam.Update update of HttpParam @75:1-78:2
   name: string
   value: string
 
-record HttpArguments.Update update of HttpArguments @101:1-108:2
+record HttpArguments.Update update of HttpArguments @81:1-85:2
   pathParams: HttpParam*
   query: HttpParam*
   body: object?
 
-record HttpTool.Update update of HttpTool @111:1-123:2
+record HttpTool.Update update of HttpTool @88:1-97:2
   name: string?
   description: string?
   connection: HttpConnection
@@ -131,19 +131,19 @@ record HttpTool.Update update of HttpTool @111:1-123:2
   arguments: <function ... />: HttpArguments
   maxCallsPerConversation: int?
 
-union AgentLimits.Property property of AgentLimits @11:1-16:2
+union AgentLimits.Property property of AgentLimits @11:1-14:2
   case maxSteps constant
   case maxToolCalls constant
 
-union Document.Property property of Document @19:1-24:2
+union Document.Property property of Document @17:1-20:2
   case title constant
   case text constant
 
-union Tool.Property property of Tool @27:1-32:2
+union Tool.Property property of Tool @23:1-26:2
   case name constant
   case description constant
 
-union Agent.Property property of Agent @35:1-50:2
+union Agent.Property property of Agent @29:1-38:2
   case name constant
   case description constant
   case model constant
@@ -152,38 +152,38 @@ union Agent.Property property of Agent @35:1-50:2
   case limits constant
   case instructions constant
 
-union FunctionTool.Property property of FunctionTool @54:1-58:2
+union FunctionTool.Property property of FunctionTool @42:1-45:2
   case name constant
   case description constant
   case function constant
 
-union WebSearchTool.Property property of WebSearchTool @61:1-64:2
+union WebSearchTool.Property property of WebSearchTool @48:1-50:2
   case name constant
   case description constant
   case allowedDomains constant
 
-union ToolContext.Property property of ToolContext @69:1-73:2
+union ToolContext.Property property of ToolContext @55:1-58:2
   case callId constant
 
-union Connection.Property property of Connection @79:1-84:2
+union Connection.Property property of Connection @64:1-67:2
   case name constant
   case description constant
 
-union HttpConnection.Property property of HttpConnection @87:1-90:2
+union HttpConnection.Property property of HttpConnection @70:1-72:2
   case name constant
   case description constant
   case baseUrl constant
 
-union HttpParam.Property property of HttpParam @93:1-98:2
+union HttpParam.Property property of HttpParam @75:1-78:2
   case name constant
   case value constant
 
-union HttpArguments.Property property of HttpArguments @101:1-108:2
+union HttpArguments.Property property of HttpArguments @81:1-85:2
   case pathParams constant
   case query constant
   case body constant
 
-union HttpTool.Property property of HttpTool @111:1-123:2
+union HttpTool.Property property of HttpTool @88:1-97:2
   case name constant
   case description constant
   case connection constant

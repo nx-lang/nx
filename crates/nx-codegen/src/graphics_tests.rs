@@ -5,8 +5,8 @@ use nx_ir_runtime::RuntimeOptions;
 #[test]
 fn graphics_ir_links_transitive_math_and_applies_defaults() {
     let source = r#"import "@nx/graphics" as g
-let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>
-  <g.Rect width=20 height=30 opacity=0.5/>
+let root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>
+  <g.Rectangle width=20 height=30 opacity=0.5/>
 </g.Drawing>"#;
     let artifact =
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
@@ -19,7 +19,12 @@ let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>
         },
     )
     .unwrap();
-    for identity in ["main.nx", "@nx/graphics/graphics.nx", "@nx/math/math.nx"] {
+    for identity in [
+        "main.nx",
+        "@nx/geometry/geometry.nx",
+        "@nx/graphics/graphics.nx",
+        "@nx/math/math.nx",
+    ] {
         assert!(images
             .iter()
             .any(|image| image.modules[0].identity == identity));
@@ -45,7 +50,7 @@ let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>
     } else {
         children
     };
-    assert_eq!(child["$type"], "Rect");
+    assert_eq!(child["$type"], "Rectangle");
     assert_eq!(child["x"], 0.0);
     assert_eq!(child["y"], 0.0);
     assert_eq!(child["clipRule"], "nonzero");
@@ -115,14 +120,15 @@ fn graphics_helpers_evaluate_as_primitives_on_rust_ir() {
             .count(),
         2
     );
-    assert_eq!(
-        value("nonfiniteArc")["data"],
-        "nx-graphics-invalid: Arc radius must be finite"
-    );
-    assert_eq!(
-        value("nonfiniteRing")["data"],
-        "nx-graphics-invalid: RingSector outerRadius must be finite"
-    );
+    for name in ["nonfiniteArc", "nonfiniteRing"] {
+        assert_eq!(
+            program
+                .evaluate_function(name, &[], &RuntimeOptions::default())
+                .unwrap_err()
+                .code(),
+            "nx-ir-constraint"
+        );
+    }
 }
 
 #[test]
@@ -221,7 +227,7 @@ let negative() = { <g.Arc cx=5 cy=6 radius=10 sweepAngle=-90/> }
 #[test]
 fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
     let evaluate = |body: &str| {
-        let source = format!("import \"@nx/graphics\" as g\ntype ViewBox = {{ unrelated:string }}\nlet root() = {{ {body} }}");
+        let source = format!("import \"@nx/graphics\" as g\ntype Rect = {{ unrelated:string }}\nlet root() = {{ {body} }}");
         serde_json::to_value(
             crate::ir_runtime_tests::program(&source)
                 .evaluate_function("root", &[], &RuntimeOptions::default())
@@ -230,15 +236,15 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
         .unwrap()
     };
     assert_eq!(
-        evaluate("<g.ViewBox x=1 y=2 width=3 height=4/>"),
-        serde_json::json!({"$type":"ViewBox", "x":1.0, "y":2.0, "width":3.0, "height":4.0}),
+        evaluate("<g.Rect x=1 y=2 width=3 height=4/>"),
+        serde_json::json!({"$type":"Rect", "x":1.0, "y":2.0, "width":3.0, "height":4.0}),
     );
     assert_eq!(
         evaluate("<g.ContentAlignment/>"),
         serde_json::json!({"$type":"ContentAlignment", "x":"center", "y":"center"}),
     );
-    let rect = evaluate("<g.Rect width=2 height=3 transform={<g.Transform.translate x=1 y=2/>} fill=<g.Paint.color color=#ff0000/> stroke=<g.Stroke paint={g.Paint.none}/>/>");
-    assert_eq!(rect["$type"], "Rect");
+    let rect = evaluate("<g.Rectangle width=2 height=3 transform={<g.Transform.translate x=1 y=2/>} fill=<g.Paint.color color=#ff0000/> stroke=<g.Stroke paint={g.Paint.none}/>/>");
+    assert_eq!(rect["$type"], "Rectangle");
     assert_eq!(rect["width"], 2.0);
     assert_eq!(rect["height"], 3.0);
     assert_eq!(rect["opacity"], 1.0);
@@ -265,10 +271,10 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
 #[test]
 fn graphics_consumers_accept_aliased_shared_types_on_ir() {
     let source = r#"import "@nx/graphics" as g
-type ViewBox = { unrelated:string }
-type Holder = { box:g.ViewBox transform:g.Transform }
+type Rect = { unrelated:string }
+type Holder = { box:g.Rect transform:g.Transform }
 let id(t:g.Transform):g.Transform = { t }
-let root() = <Holder box=<g.ViewBox x=1 y=2 width=3 height=4/> transform={id(<g.Transform.translate x=5 y=6/>)}/>
+let root() = <Holder box=<g.Rect x=1 y=2 width=3 height=4/> transform={id(<g.Transform.translate x=5 y=6/>)}/>
 "#;
     let value = crate::ir_runtime_tests::program(source)
         .evaluate_function("root", &[], &RuntimeOptions::default())
@@ -277,7 +283,7 @@ let root() = <Holder box=<g.ViewBox x=1 y=2 width=3 height=4/> transform={id(<g.
     assert_eq!(value["$type"], "Holder");
     assert_eq!(
         value["box"],
-        serde_json::json!({"$type":"ViewBox", "x":1.0, "y":2.0, "width":3.0, "height":4.0})
+        serde_json::json!({"$type":"Rect", "x":1.0, "y":2.0, "width":3.0, "height":4.0})
     );
     assert_eq!(
         value["transform"],
@@ -458,4 +464,89 @@ fn graphics_gradients_cover_every_paint_location_on_ir() {
         value("radialPaint")
     );
     assert_eq!(value("radialPaint")["$type"], "Paint.radialGradient");
+}
+
+#[test]
+fn geometry_images_are_standalone_versioned_and_required_for_linking() {
+    use nx_ir_runtime::{LinkOptions, PreparedModule, Program};
+    use std::collections::BTreeMap;
+    let mut versions = Vec::new();
+    for alias in ["a", "geometry"] {
+        let source = format!("import \"@nx/geometry\" as {alias}\nlet root() = <{alias}.Rect x=0 y=0 width=0 height=1/>");
+        let artifact =
+            build_program_artifact_from_source(&source, "main.nx", &ProgramBuildContext::empty())
+                .unwrap();
+        let images = crate::emit_nx_ir(
+            &artifact,
+            &NxIrEmitOptions {
+                modules: Some(vec![]),
+                debug: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(images.len(), 2);
+        let modules: BTreeMap<_, _> = images
+            .into_iter()
+            .map(|image| {
+                (
+                    image.identity,
+                    PreparedModule::prepare(image.bytes).unwrap(),
+                )
+            })
+            .collect();
+        assert!(!modules.contains_key("@nx/graphics/graphics.nx"));
+        assert!(!modules.contains_key("@nx/math/math.nx"));
+        let entry = &modules["main.nx"];
+        assert!(Program::link(entry, |_| None, &LinkOptions::default()).is_err());
+        let program = Program::link(
+            entry,
+            |id| modules.get(id).cloned(),
+            &LinkOptions::default(),
+        )
+        .unwrap();
+        assert!(program
+            .evaluate_function("root", &[], &RuntimeOptions::default())
+            .is_ok());
+        versions.push(modules["@nx/geometry/geometry.nx"].version().to_string());
+    }
+    assert_eq!(versions[0], versions[1]);
+}
+
+#[test]
+fn geometry_finite_checks_reject_nonfinite_host_values_and_accept_unbounded_sizes() {
+    use nx_value::NxValue;
+    let program = crate::ir_runtime_tests::program(
+        r#"import "@nx/geometry" as g
+let point(x: float64): g.Point = <g.Point x={x} y=0/>
+let size(width: float64): g.Size = <g.Size width={width} height=0/>
+let rect(width: float64): g.Rect = <g.Rect x=0 y=0 width={width} height=0/>
+"#,
+    );
+    for bad in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+        for function in ["point", "rect"] {
+            assert_eq!(
+                program
+                    .evaluate_function(function, &[NxValue::Float(bad)], &RuntimeOptions::default())
+                    .unwrap_err()
+                    .code(),
+                "nx-ir-constraint"
+            );
+        }
+    }
+    assert!(program
+        .evaluate_function(
+            "size",
+            &[NxValue::Float(f64::INFINITY)],
+            &RuntimeOptions::default()
+        )
+        .is_ok());
+    for bad in [f64::NEG_INFINITY, f64::NAN, -1.0] {
+        assert_eq!(
+            program
+                .evaluate_function("size", &[NxValue::Float(bad)], &RuntimeOptions::default())
+                .unwrap_err()
+                .code(),
+            "nx-ir-constraint"
+        );
+    }
 }

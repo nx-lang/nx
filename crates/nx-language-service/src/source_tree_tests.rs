@@ -2409,7 +2409,7 @@ fn unreferenced_library_previews_are_opt_in_and_helper_icons_are_library_owned()
     );
     assert_eq!(visualizer(&tree, "Star").icon.as_deref(), Some("star"));
     assert_eq!(
-        visualizer(&tree, "Rect").icon.as_deref(),
+        visualizer(&tree, "Rectangle").icon.as_deref(),
         Some("rectangle-horizontal")
     );
     assert_eq!(
@@ -2420,7 +2420,7 @@ fn unreferenced_library_previews_are_opt_in_and_helper_icons_are_library_owned()
 
 #[test]
 fn entry_preview_metadata_overrides_the_library_without_losing_its_icon() {
-    let snapshot = snapshot_for("import \"@nx/graphics\" as g\nimport \"@nx/visualizer\"\nvisualizer g.Drawing = <ElementVisualizer preview=<PreviewVisualizer renderer=\"other.renderer\"/>/>\n<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=10 height=10/>/>");
+    let snapshot = snapshot_for("import \"@nx/graphics\" as g\nimport \"@nx/visualizer\"\nvisualizer g.Drawing = <ElementVisualizer preview=<PreviewVisualizer renderer=\"other.renderer\"/>/>\n<g.Drawing viewBox=<g.Rect x=0 y=0 width=10 height=10/>/>");
     let tree = with_visualizers(&snapshot, &[]);
     assert_eq!(
         visualizer(&tree, "Drawing")
@@ -2472,7 +2472,7 @@ fn unreferenced_host_visualizers_do_not_add_unloaded_library_targets() {
                 r#"import "@nx/graphics" as g
 import "@nx/visualizer"
 visualizer g.Drawing = <ElementVisualizer icon="host-frame"/>
-visualizer g.Rect = <ElementVisualizer icon="host-rect"/>"#,
+visualizer g.Rectangle = <ElementVisualizer icon="host-rect"/>"#,
             )
             .with_version(1),
         ],

@@ -2446,13 +2446,19 @@ impl<'a> InferenceContext<'a> {
                     } = self.module.raw_module().expr(*pattern)
                     {
                         let (numeric, pattern_span) = (numeric.clone(), *pattern_span);
-                        return self.infer_numeric_pattern(
-                            *pattern,
-                            &numeric,
-                            &scrutinee_ty,
-                            union_ty.is_some(),
-                            pattern_span,
-                        );
+                        // A lone `finite` remains a contextual union-case name. Its numeric
+                        // meaning applies only when the scrutinee is not a union.
+                        if !(union_ty.is_some()
+                            && matches!(numeric.terms.as_slice(), [ast::PatternTerm::Finite]))
+                        {
+                            return self.infer_numeric_pattern(
+                                *pattern,
+                                &numeric,
+                                &scrutinee_ty,
+                                union_ty.is_some(),
+                                pattern_span,
+                            );
+                        }
                     }
                     let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
@@ -2648,10 +2654,17 @@ impl<'a> InferenceContext<'a> {
         // A bare pattern resolves against the scrutinee's type in preference to any lexically
         // visible binding of the same name. The preference is reported so a pattern that used to
         // compare against a variable never changes meaning silently.
-        if let ast::Expr::ContextualName { name, span, .. } = self.module.raw_module().expr(pattern)
-        {
-            let name = name.clone();
-            let span = *span;
+        let contextual = match self.module.raw_module().expr(pattern) {
+            ast::Expr::ContextualName { name, span, .. } => Some((name.clone(), *span)),
+            ast::Expr::NumericPattern { pattern, span }
+                if matches!(scrutinee_ty.item(), Type::Union(_))
+                    && matches!(pattern.terms.as_slice(), [ast::PatternTerm::Finite]) =>
+            {
+                Some((Name::new("finite"), *span))
+            }
+            _ => None,
+        };
+        if let Some((name, span)) = contextual {
             if self.env.lookup(&name).is_some() {
                 self.error(
                     "contextual-name-displaces-binding",

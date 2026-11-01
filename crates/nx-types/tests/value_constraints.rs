@@ -579,3 +579,109 @@ fn an_arm_narrows_its_scrutinee() {
                   let safe(x: float64) = { if x is { in 0.0..=1.0 => fade(x) else => 0.0 } }";
     assert_clean(source);
 }
+
+#[test]
+fn finite_patterns_compose_and_preserve_identifiers() {
+    assert_clean(
+        r#"
+type Finite = float64 where finite
+type Extent = Finite where >= 0.0
+type Record = { finite: Extent }
+let finite(x: Finite): Finite = { x }
+let r = <Record finite=0.0/>
+let narrow(x: float64): float64 = {
+  if x is {
+    finite => finite(x)
+    else => 0.0
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn finite_rejects_nonfloating_bases() {
+    reported(
+        "type Bad = int where finite",
+        "invalid-constraint",
+        "finite",
+    );
+    reported(
+        "type Bad = string where finite",
+        "invalid-constraint",
+        "finite",
+    );
+    reported(
+        "let bad(x: int) = { if x is { finite => 1 else => 0 } }",
+        "invalid-constraint",
+        "finite",
+    );
+}
+
+#[test]
+fn finite_intervals_use_the_selected_precision() {
+    for base in [nx_types::Primitive::Float32, nx_types::Primitive::Float64] {
+        let checked = check_str(&format!("type F = {base} where finite"), "test.nx");
+        assert!(checked.errors().is_empty(), "{:?}", checked.errors());
+    }
+}
+
+#[test]
+fn finite_membership_includes_exact_boundaries_and_excludes_nonfinite_values() {
+    for (name, max, subnormal) in [
+        ("float32", f32::MAX as f64, f32::from_bits(1) as f64),
+        ("float64", f64::MAX, f64::from_bits(1)),
+    ] {
+        let ty = body_type(&format!("let id(x: {name} where finite) = {{ x }}"), "id");
+        let Type::Constrained { interval, .. } = ty else {
+            panic!("{ty:?}")
+        };
+        for value in [0.0, -0.0, subnormal, -subnormal, max, -max] {
+            assert!(interval.contains(value), "{name}: {value}");
+        }
+        for value in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert!(!interval.contains(value), "{name}: {value}");
+        }
+        assert_eq!(interval.high.unwrap().value.0, max);
+    }
+}
+
+#[test]
+fn finite_widening_alias_intersection_and_arithmetic_keep_existing_rules() {
+    assert_clean(
+        r#"
+type F = float32 where finite
+type Positive = F where > 0.0
+let widen(x: Positive): float64 where finite = { x }
+let checked(x: float32): float64 where finite = { x }
+let product(x: float64 where finite): float64 where finite = { x * x }
+"#,
+    );
+    assert_eq!(
+        body_type(
+            "let product(x: float64 where finite) = { x * x }",
+            "product"
+        ),
+        Type::Primitive(nx_types::Primitive::Float64)
+    );
+    assert_clean("let finite(): int = { 1 }\nlet n = { finite() }");
+    reported(
+        "type Bad = float64 where finite()",
+        "invalid-constraint",
+        "finite()",
+    );
+}
+
+#[test]
+fn finite_remains_a_contextual_union_case_pattern() {
+    assert_clean(
+        "type Extent = finite | infinite\n\
+         let classify(value: Extent): string = {\n\
+           if value is { finite => \"finite\" infinite => \"infinite\" }\n\
+         }\n\
+         type Result = finite { value: int } | infinite\n\
+         let payload(value: Result): int = {\n\
+           if value is { finite => value.value infinite => 0 }\n\
+         }",
+    );
+}

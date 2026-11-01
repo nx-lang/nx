@@ -4,13 +4,23 @@
     "high",
     "high"
   ],
+  "main.nx::classifyFinite#finite": "finite",
+  "main.nx::classifyNan#nan": "non-finite",
+  "main.nx::classifyOverflow#infinite": "non-finite",
   "main.nx::faded": 0.5,
+  "main.nx::finite32#max": 3.4028234663852886e+38,
+  "main.nx::finite32#subnormal": 1.401298464324817e-45,
+  "main.nx::finite64#max": 1.7976931348623157e+308,
+  "main.nx::finite64#negativeZero": -0.0,
+  "main.nx::finite64#subnormal": 5e-324,
+  "main.nx::finiteCase": "finite case",
   "main.nx::flags": [
     "out",
     "in",
     "in",
     "out"
   ],
+  "main.nx::infiniteCase": "infinite case",
   "main.nx::paint#inside": 1.0,
   "main.nx::pick#inside": 10,
   "main.nx::scores#items": [

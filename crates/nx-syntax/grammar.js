@@ -1139,9 +1139,20 @@ module.exports = grammar({
     )),
 
     _numeric_pattern_term: $ => choice(
+      $.finite_pattern,
       $.range_pattern,
       $.comparison_pattern,
     ),
+
+    finite_pattern: $ => prec(1, seq(
+      'finite',
+      // Keep a mistaken predicate call intact for an invalid-constraint diagnostic.
+      optional(seq(
+        token.immediate('('),
+        optional(seq($._call_argument, repeat(seq(',', $._call_argument)))),
+        ')',
+      )),
+    )),
 
     range_pattern: $ => seq(
       'in',

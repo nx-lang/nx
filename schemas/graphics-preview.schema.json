@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Unstable graphics-core-v3 preview manifest or failure",
+  "title": "Unstable graphics-core-v4 preview manifest or failure",
   "oneOf": [
     {
       "type": "object",
@@ -18,7 +18,7 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "profile": {
-          "const": "graphics-core-v3"
+          "const": "graphics-core-v4"
         },
         "renderer": {
           "type": "string"
@@ -43,7 +43,7 @@
               "type": "string"
             },
             "profile": {
-              "const": "graphics-core-v3"
+              "const": "graphics-core-v4"
             },
             "config": {
               "type": "object",

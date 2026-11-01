@@ -11,15 +11,15 @@ export let zeroArc() = <g.Arc cx=0 cy=0 radius=10 sweepAngle=0/>
 export let numericalFailure() = <g.Circle cx=0 cy=0 r={gRadius()}/>
 let gRadius():float64 = { badRadius(-1.0) }
 let badRadius(x:float64):float64 = { math.sqrt(x) }
-let identity(v:g.ViewBox):g.ViewBox = { v }
-export let aliasedValue() = { identity(<g.ViewBox x=1 y=2 width=3 height=4/>) }
+let identity(v:g.Rect):g.Rect = { v }
+export let aliasedValue() = { identity(<g.Rect x=1 y=2 width=3 height=4/>) }
 
 export let largeRotation() = <g.RegularPolygon cx=0 cy=0 radius=10 pointCount=3 rotation=1.0e100/>
 export let periodicRotation() = <g.RegularPolygon cx=0 cy=0 radius=10 pointCount=3 rotation=450/>
 export let periodicArc() = <g.Arc cx=0 cy=0 radius=10 startAngle=1.0e100 sweepAngle=360/>
 
-export let nonfiniteArc() = <g.Arc cx=0 cy=0 radius={1.0e309 - 1.0e309}/>
-export let nonfiniteRing() = <g.RingSector cx=0 cy=0 outerRadius=1.0e309/>
+export let nonfiniteArc() = <g.Arc cx=0 cy=0 radius={unbounded(1.0e309) - unbounded(1.0e309)}/>
+export let nonfiniteRing() = <g.RingSector cx=0 cy=0 outerRadius={unbounded(1.0e309)}/>
 
 export let gradientPaint(): g.Paint =
   <g.Paint.linearGradient
@@ -45,7 +45,7 @@ export let gradientShape() =
   />
 
 
-export let gradientRect() = <g.Rect width=100 height=100 fill={gradientPaint()} />
+export let gradientRect() = <g.Rectangle width=100 height=100 fill={gradientPaint()} />
 
 export let gradientLine() = <g.Line x1=0 y1=0 x2=100 y2=100
   stroke=<g.Stroke paint={gradientPaint()} width=2 /> />
@@ -59,4 +59,6 @@ export let radialPaint(): g.Paint =
   } />
 
 export let gradientBackground() =
-  <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100 /> background={radialPaint()} />
+  <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100 /> background={radialPaint()} />
+
+let unbounded(x: float64): float64 = { x }

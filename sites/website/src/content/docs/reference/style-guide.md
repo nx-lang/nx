@@ -10,8 +10,11 @@ language accepts. Existing examples may still use older formatting.
 ## Indentation and line length
 
 - Use **2 spaces** per indentation level, including continuation lines. Do not use tabs.
-- Aim for **100 characters** per line, including indentation. Treat this as a readability target;
-  preserve long URLs, indivisible tokens, and meaningful text rather than breaking them arbitrarily.
+- Aim for **120 characters** per line, including indentation and trailing comments. Treat this as a
+  readability target rather than a hard limit: preserve long URLs, indivisible tokens, and
+  meaningful text rather than breaking them arbitrarily.
+  A small overrun is preferable to awkward wrapping. Keep standalone prose comments around
+  **100 characters** where practical.
 - Use LF line endings, remove trailing whitespace, and end each file with one newline.
 - Let nesting determine indentation. Avoid aligning continuation lines under a distant opening
   parenthesis or attribute.
@@ -60,7 +63,7 @@ import "@nx/graphics"
 import "@nx/math" as math
 
 let root() =
-  <Drawing viewBox=<ViewBox x=0 y=0 width=100 height=100 />>
+  <Drawing viewBox=<Rect x=0 y=0 width=100 height=100 />>
     <Circle cx=50 cy=50 r={math.sqrt(1600)} />
   </Drawing>
 ```
@@ -197,15 +200,21 @@ export let lightSkyBlue = #87cefa
 export let darkOliveGreen = #556b2f
 ```
 
-A short field description can follow the field on the same line. Align adjacent trailing comments
-to the same column when possible within the 100-character line-length target. Leave at least
-2 spaces between code and a trailing comment: in an aligned group, place the comments at least
-2 spaces after the longest declaration. Align comments within a related group, such as one
-record, rather than across unrelated declarations.
+Prefer trailing `///` documentation for properties, including record fields, union-case fields,
+and component props. Keeping the declaration and its short description together makes property
+lists compact and easy to scan.
 
-Trailing comments must occupy no more than 2 lines. If more than 2 lines are needed, move the
-entire comment above the declaration or field as a leading comment. Wrap documentation at the
-same 100-character target.
+Align trailing comments within a related group, such as one record or component's props, rather
+than across unrelated declarations. Leave at least 2 spaces after the longest declaration with
+a trailing comment in that group; properties with leading documentation do not set that column.
+Include the comments when judging the 120-character line-length target; do not pad the
+declarations' colons or equals signs to align them.
+
+A trailing comment may continue onto a second line, with its `///` aligned with the first line's
+`///`. If an explanation needs more than 2 trailing lines, move the entire comment above the
+property as a leading documentation block. Use a leading block as well when a long declaration
+leaves too little room for a readable trailing comment. Keep standalone prose documentation
+around 100 characters per line where practical.
 
 When a leading documentation block follows a field with a trailing `///` comment, put a blank
 line before that block. This separates it from the previous field's documentation; without the
@@ -231,6 +240,23 @@ type RgbChannels = {
   g: float64      /// Green in [0, 255].
   b: float64      /// Blue in [0, 255].
   alpha: float64  /// Alpha in [0, 1].
+}
+```
+
+```nx
+/// A rectangle with finite coordinates and nonnegative dimensions.
+type Rect = {
+  x: float64 where finite                 /// Origin along the first axis.
+  y: float64 where finite                 /// Origin along the second axis.
+  width: float64 where finite && >= 0.0   /// Nonnegative extent along the first axis.
+  height: float64 where finite && >= 0.0  /// Nonnegative extent along the second axis.
+}
+```
+
+```nx
+type Limits = {
+  attempts: int  /// Maximum attempts before stopping; includes the initial attempt and retries.
+                 /// A value of one disables retries.
 }
 ```
 

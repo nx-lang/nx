@@ -476,7 +476,7 @@ mod tests {
                 } else if p == "/children/0" {
                     "Group"
                 } else {
-                    "Rect"
+                    "Rectangle"
                 }
                 .into(),
             })

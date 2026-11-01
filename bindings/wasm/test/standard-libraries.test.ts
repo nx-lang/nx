@@ -98,7 +98,7 @@ describe("standard libraries", () => {
       // The version is derived from the library's source, the same in every binding; the entry
       // records the same one, which is what linking compares.
       // Pinned to the value the native build computes (`the_shipped_agent_library_version_is_pinned`).
-      expect(library.version).toBe("b06c00c30be50ada");
+      expect(library.version).toBe("0aeeab5b50b2f1fd");
       const entry = prepareNxIrModule(images[0]!.bytes);
       expect(entry.artifact.modules).toContainEqual(
         expect.objectContaining({ identity: AGENT_MODULE, version: library.version })

@@ -1,0 +1,54 @@
+{
+  "main.nx::point#fractional": {
+    "$type": "Point",
+    "x": 1000000000000.125,
+    "y": 0.0
+  },
+  "main.nx::point#max": {
+    "$type": "Point",
+    "x": 1.7976931348623157e+308,
+    "y": 0.0
+  },
+  "main.nx::point#negativeMax": {
+    "$type": "Point",
+    "x": -1.7976931348623157e+308,
+    "y": 0.0
+  },
+  "main.nx::root#value": {
+    "$type": "Document",
+    "anchor": {
+      "$type": "Point",
+      "x": 1000000000000.125,
+      "y": -2000000000000.25
+    },
+    "available": {
+      "$type": "Size",
+      "height": 32.5,
+      "width": 0.0
+    },
+    "bounds": {
+      "$type": "Rect",
+      "height": 0.0,
+      "width": 0.0,
+      "x": -0.0,
+      "y": 12.75
+    },
+    "regions": [
+      {
+        "$type": "Rect",
+        "height": 4.0,
+        "width": 3.0,
+        "x": 1.0,
+        "y": 2.0
+      },
+      {
+        "$type": "Rect",
+        "height": 0.0,
+        "width": 0.0,
+        "x": -2.5,
+        "y": 0.0
+      }
+    ]
+  },
+  "main.nx::unbounded#value": true
+}

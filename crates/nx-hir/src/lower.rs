@@ -7527,6 +7527,17 @@ pub(crate) fn lower_numeric_pattern(node: SyntaxNode) -> NumericPattern {
     if node.kind() == SyntaxKind::NUMERIC_PATTERN {
         for child in node.children_with_tokens() {
             match child.kind() {
+                SyntaxKind::FINITE_PATTERN => {
+                    if child.text() == "finite" {
+                        terms.push(PatternTerm::Finite);
+                    } else {
+                        terms.push(PatternTerm::Unsupported {
+                            kind: UnsupportedTerm::Expression { suggestion: None },
+                            span: child.span(),
+                            text: SmolStr::new(child.text()),
+                        });
+                    }
+                }
                 SyntaxKind::RANGE_PATTERN => terms.push(lower_range_term(child)),
                 SyntaxKind::COMPARISON_PATTERN => terms.push(lower_comparison_term(child)),
                 _ if child.text() == "||" => {

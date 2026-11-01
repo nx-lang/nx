@@ -695,7 +695,7 @@ let root(compact:boolean) = { <Notice if compact { density="tight" } else { dens
 
       const { prepareNxIrModule } = await import("@nx-lang/ir-runtime");
       // Pinned to the value the native build computes (`the_shipped_agent_library_version_is_pinned`).
-      expect(prepareNxIrModule(library.bytes).version).toBe("b06c00c30be50ada");
+      expect(prepareNxIrModule(library.bytes).version).toBe("0aeeab5b50b2f1fd");
     } finally {
       artifact.dispose();
       workspace.dispose();

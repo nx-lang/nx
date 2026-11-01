@@ -137,7 +137,7 @@ impl ProgramArtifact {
         for module in self.resolved_program.modules() {
             let identity = module.prepared_module_identity();
             for (_, element) in module.lowered_module.elements() {
-                let Some(target) = self
+                let Some(mut target) = self
                     .resolved_program
                     .local_item(module.id, element.tag.as_str())
                     .or_else(|| {
@@ -147,6 +147,32 @@ impl ProgramArtifact {
                 else {
                     continue;
                 };
+                let mut seen = std::collections::BTreeSet::new();
+                while let Some(owner) = self.resolved_program.module(target.module_id) {
+                    let Some(Item::TypeAlias(alias)) = owner
+                        .lowered_module
+                        .item_by_definition(target.definition_id)
+                    else {
+                        break;
+                    };
+                    let nx_hir::ast::TypeRef::Name(name) = &alias.ty else {
+                        break;
+                    };
+                    if !seen.insert((owner.prepared_module_identity(), alias.name.to_string())) {
+                        break;
+                    }
+                    let Some(next) = self
+                        .resolved_program
+                        .local_item(target.module_id, name.as_str())
+                        .or_else(|| {
+                            self.resolved_program
+                                .imported_item(target.module_id, name.as_str())
+                        })
+                    else {
+                        break;
+                    };
+                    target = next;
+                }
                 let Some(owner) = self.resolved_program.module(target.module_id) else {
                     continue;
                 };
@@ -1305,7 +1331,7 @@ impl StandardLibrary {
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 5] = [
+static STANDARD_LIBRARIES: [StandardLibrary; 6] = [
     StandardLibrary::new(
         "@nx/agent",
         StandardLibraryStability::Unstable,
@@ -1334,6 +1360,17 @@ static STANDARD_LIBRARIES: [StandardLibrary; 5] = [
         ],
         "@nx-lang/color",
         "NxLang.Color",
+    ),
+    StandardLibrary::new(
+        "@nx/geometry",
+        StandardLibraryStability::Unstable,
+        &[StandardLibraryModule {
+            identity: "geometry.nx",
+            source: include_str!("std/geometry/geometry.nx"),
+            runtime_functions: &[],
+        }],
+        "@nx-lang/geometry",
+        "NxLang.Geometry",
     ),
     StandardLibrary::new(
         "@nx/graphics",

@@ -21,8 +21,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "29fb3ce555670393f8d795a4a0553a37a55be6e33b609d6661e1aefb80bceb81",
+      "profile": "graphics-core-v4",
+      "revision": "19c050fd28ebc1187b09e451eafaf5e2d25dfa1d64d462fd0334a99d545b106b",
       "root": {
         "accessibility": null,
         "children": [],
@@ -230,8 +230,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "5b2ae4a2defe39bc15bd28fae243bd3d47bc941c12ad0cf09cc61958b144b0c4",
+      "profile": "graphics-core-v4",
+      "revision": "67121011e81eb47452043a5b2812ed5872112484c0b9bba96cb840bac5aa0d3e",
       "root": {
         "accessibility": null,
         "children": [],
@@ -439,8 +439,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "a8b13edcd4e2a13fe9da7f8968c13db2818927df502f4c42bd146d0a0f023d30",
+      "profile": "graphics-core-v4",
+      "revision": "a4253d47dba12ac9cf84081d0c8013a95afc1485ffcf1861e80692450da13ee8",
       "root": {
         "accessibility": null,
         "children": [],
@@ -648,8 +648,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "36280fb224553e559f22d99b24e8bdb52274a9b2aa28470dcb99f214bdf76bec",
+      "profile": "graphics-core-v4",
+      "revision": "cb682394870a7b622f82c82f7f81fcea8f7fe538439d80e6289260cb44009873",
       "root": {
         "accessibility": null,
         "children": [
@@ -699,7 +699,7 @@
                 },
                 "id": "element/children/0/children/0",
                 "identity": {
-                  "declaration": "Rect",
+                  "declaration": "Rectangle",
                   "module": "@nx/graphics/graphics.nx",
                   "version": "test"
                 },
@@ -943,7 +943,7 @@
           "$type": "Group",
           "children": [
             {
-              "$type": "Rect",
+              "$type": "Rectangle",
               "fill": {
                 "$type": "Paint.radialGradient",
                 "cx": 0,
@@ -1019,8 +1019,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "6796f4c4306da1e076434b466bbc0132dea66c45fc481c0becab4be8df5d56d9",
+      "profile": "graphics-core-v4",
+      "revision": "9d2e057f40117acf150f30aba380d248cdf83f50a0770c7146550a105a35d059",
       "root": {
         "accessibility": null,
         "children": [
@@ -1303,8 +1303,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "3202e46d75f8ccb4df28a1088f25fc8b5d6a99dcd7ce71528b3740173c73d59f",
+      "profile": "graphics-core-v4",
+      "revision": "9fed0f8c3b40c31c6bfb7d8ea6b51f8ab42888e44de0ab23084ef1f791e744ac",
       "root": {
         "accessibility": null,
         "children": [
@@ -1355,7 +1355,7 @@
                 },
                 "id": "element/children/0/children/0",
                 "identity": {
-                  "declaration": "Rect",
+                  "declaration": "Rectangle",
                   "module": "@nx/graphics/graphics.nx",
                   "version": "test"
                 },
@@ -1463,7 +1463,7 @@
                 },
                 "id": "element/children/0/children/1",
                 "identity": {
-                  "declaration": "Rect",
+                  "declaration": "Rectangle",
                   "module": "@nx/graphics/graphics.nx",
                   "version": "test"
                 },
@@ -1671,7 +1671,7 @@
           "$type": "Group",
           "children": [
             {
-              "$type": "Rect",
+              "$type": "Rectangle",
               "fill": {
                 "$type": "Paint.linearGradient",
                 "stops": [
@@ -1703,7 +1703,7 @@
               "width": 75
             },
             {
-              "$type": "Rect",
+              "$type": "Rectangle",
               "fill": {
                 "$type": "Paint.linearGradient",
                 "stops": [
@@ -1769,8 +1769,8 @@
         "text_ink_padding": 0.0,
         "width": 100.0
       },
-      "profile": "graphics-core-v3",
-      "revision": "f0bf86a308360a08593e825307b976cdd3e3dd8f666dc2b69992568857a09792",
+      "profile": "graphics-core-v4",
+      "revision": "82ec6dffcc5b7df4cd51b204353c7a7400684007840f3010516aaa7a3cf81732",
       "root": {
         "accessibility": null,
         "children": [
@@ -1818,7 +1818,7 @@
             },
             "id": "element/children/0",
             "identity": {
-              "declaration": "Rect",
+              "declaration": "Rectangle",
               "module": "@nx/graphics/graphics.nx",
               "version": "test"
             },
@@ -1926,7 +1926,7 @@
             },
             "id": "element/children/1",
             "identity": {
-              "declaration": "Rect",
+              "declaration": "Rectangle",
               "module": "@nx/graphics/graphics.nx",
               "version": "test"
             },
@@ -2092,7 +2092,7 @@
       "$type": "Drawing",
       "children": [
         {
-          "$type": "Rect",
+          "$type": "Rectangle",
           "fill": {
             "$type": "Paint.linearGradient",
             "stops": [
@@ -2124,7 +2124,7 @@
           "width": 100
         },
         {
-          "$type": "Rect",
+          "$type": "Rectangle",
           "fill": {
             "$type": "Paint.linearGradient",
             "stops": [

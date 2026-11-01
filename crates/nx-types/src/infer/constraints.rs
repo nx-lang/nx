@@ -16,7 +16,7 @@ pub(crate) const MAX_EXACT_INTEGER: i64 = (1 << 53) - 1;
 
 /// What a constraint may use, for the `invalid-constraint` message.
 const SUPPORTED_TERMS: &str =
-    "a constraint is a pattern of `in a..b`, `in a..=b`, `<`, `<=`, `>` and `>=` terms joined by `&&`";
+    "a constraint is a pattern of `finite`, `in a..b`, `in a..=b`, `<`, `<=`, `>` and `>=` terms joined by `&&`";
 
 impl InferenceContext<'_> {
     /// The interval `pattern` admits on `base`, or `None` when a term was reported.
@@ -36,6 +36,20 @@ impl InferenceContext<'_> {
         let mut ok = true;
         for term in &pattern.terms {
             let term_interval = match term {
+                PatternTerm::Finite => {
+                    let Some(finite) = finite_interval(base) else {
+                        if report {
+                            self.error(
+                                "invalid-constraint",
+                                "`finite` applies only to floating types".to_owned(),
+                                pattern.span,
+                            );
+                        }
+                        ok = false;
+                        continue;
+                    };
+                    finite
+                }
                 PatternTerm::Range {
                     start,
                     end,
@@ -307,6 +321,7 @@ pub fn pattern_interval_at(base: Primitive, pattern: &NumericPattern) -> Option<
     let mut interval = Interval::ALL;
     for term in &pattern.terms {
         let term = match term {
+            PatternTerm::Finite => finite_interval(base)?,
             PatternTerm::Range {
                 start,
                 end,
@@ -492,4 +507,17 @@ impl InferenceContext<'_> {
             _ => None,
         }
     }
+}
+
+/// Inclusive finite magnitudes at the selected floating precision.
+fn finite_interval(base: Primitive) -> Option<Interval> {
+    let max = match base {
+        Primitive::Float32 => f32::MAX as f64,
+        Primitive::Float64 => f64::MAX,
+        _ => return None,
+    };
+    Some(Interval {
+        low: Some(IntervalEnd::inclusive(-max)),
+        high: Some(IntervalEnd::inclusive(max)),
+    })
 }

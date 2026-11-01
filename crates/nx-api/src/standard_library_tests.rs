@@ -145,6 +145,7 @@ fn the_table_holds_the_agent_and_visualizer_libraries() {
         [
             AGENT_ROOT,
             "@nx/color",
+            "@nx/geometry",
             "@nx/graphics",
             "@nx/math",
             "@nx/visualizer"
@@ -602,9 +603,11 @@ fn a_label_inside_a_standard_library_renders_the_library_source() {
     use nx_diagnostics::{Diagnostic, Label, TextSize, TextSpan};
 
     let source = standard_library_entry(AGENT_ROOT).expect("agent").modules[0].source;
-    let offset = source
-        .find("name: string\n  /// What the agent is for")
-        .expect("Agent.name");
+    let agent_offset = source.find("export type Agent = {").expect("Agent");
+    let offset = agent_offset
+        + source[agent_offset..]
+            .find("name: string")
+            .expect("Agent.name");
     let span = TextSpan::new(
         TextSize::from(u32::try_from(offset).expect("offset fits")),
         TextSize::from(u32::try_from(offset + "name".len()).expect("offset fits")),
@@ -630,7 +633,7 @@ fn a_label_inside_a_standard_library_renders_the_library_source() {
         .lines()
         .nth(usize::try_from(label.span.start_line - 1).expect("line fits"))
         .expect("the label's line");
-    assert_eq!(line.trim(), "name: string");
+    assert_eq!(line.split("///").next().unwrap().trim(), "name: string");
 }
 
 // --- Versions ---------------------------------------------------------------------------------
@@ -693,7 +696,7 @@ fn the_shipped_agent_library_version_is_pinned() {
     // here with no such edit means the embedded bytes moved, a line-ending change included.
     let agent = standard_library_entry(AGENT_ROOT).expect("the agent library");
     assert!(!agent.modules[0].source.contains('\r'));
-    assert_eq!(agent.version(), "b06c00c30be50ada");
+    assert_eq!(agent.version(), "0aeeab5b50b2f1fd");
     assert_eq!(
         standard_library(AGENT_ROOT)
             .expect("agent")
@@ -1108,8 +1111,8 @@ fn graphics_standard_library_is_standalone_and_links_math() {
         graphics.artifact().diagnostics
     );
     let source = r#"import "@nx/graphics" as g
-let root() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/> >
-  <g.Rect width=20 height=30 opacity=0.5/>
+let root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/> >
+  <g.Rectangle width=20 height=30 opacity=0.5/>
 </g.Drawing>"#;
     let artifact =
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
@@ -1124,8 +1127,8 @@ fn graphics_alias_checks_use_the_imported_contract_despite_local_decoy() {
         &[(
             "main.nx",
             r#"import "@nx/graphics" as g
-external component <Rect unrelated:string />
-let root() = <g.Rect width=20 height=30 opacity=0.5/>
+external component <Rectangle unrelated:string />
+let root() = <g.Rectangle width=20 height=30 opacity=0.5/>
 "#,
         )],
         &ProgramBuildContext::empty(),
@@ -1135,7 +1138,7 @@ let root() = <g.Rect width=20 height=30 opacity=0.5/>
 
 #[test]
 fn constructing_declaration_index_distinguishes_aliases_and_spoofs() {
-    let source = "import \"@nx/graphics\" as g\nexternal component <Rect width:float64 height:float64/>\nlet root() = { <g.Rect width=1 height=2/> <Rect width=1 height=2/> }";
+    let source = "import \"@nx/graphics\" as g\nexternal component <Rectangle width:float64 height:float64/>\nlet root() = { <g.Rectangle width=1 height=2/> <Rectangle width=1 height=2/> }";
     let artifact =
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
             .unwrap();
@@ -1146,14 +1149,14 @@ fn constructing_declaration_index_distinguishes_aliases_and_spoofs() {
     );
     let declarations = artifact.construction_declarations();
     for (tag, expected_module) in [
-        ("<g.Rect", "@nx/graphics/graphics.nx"),
-        ("<Rect width=1", "main.nx"),
+        ("<g.Rectangle", "@nx/graphics/graphics.nx"),
+        ("<Rectangle width=1", "main.nx"),
     ] {
         let start = source.find(tag).unwrap();
         let end = start + source[start..].find("/>").unwrap() + 2;
         let identity = declarations.get(&("main.nx".into(), start, end)).unwrap();
         assert_eq!(identity.module, expected_module);
-        assert_eq!(identity.declaration, "Rect");
+        assert_eq!(identity.declaration, "Rectangle");
     }
 }
 
@@ -1163,7 +1166,7 @@ fn graphics_domain_names_and_point_count_are_the_public_authoring_contract() {
 external component <CustomShape extends g.Shape/>
 external component <CustomGraphic extends g.GraphicsElement/>
 let axis:g.AxisAlignment = center
-<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>
+<g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>
   contentAlignment=<g.ContentAlignment x={axis} y=end/>>
   <g.RegularPolygon cx=25 cy=25 radius=10 pointCount=4/>
   <g.Star cx=75 cy=75 outerRadius=10 innerRadius=5 pointCount=5/>
@@ -1250,4 +1253,103 @@ let root() = { css(literal) css(parsed) css(record) c.toHex(brand.accent) }
         "{:?}",
         artifact.diagnostics
     );
+}
+
+#[test]
+fn geometry_import_forms_and_shared_graphics_values_resolve() {
+    let library = standard_library("@nx/geometry").unwrap();
+    assert!(library.diagnostics.is_empty(), "{:?}", library.diagnostics);
+    assert_eq!(
+        standard_library_entry("@nx/geometry")
+            .unwrap()
+            .typescript_package,
+        "@nx-lang/geometry"
+    );
+    for import in ["import \"@nx/geometry\"", "import \"@nx/geometry\" as geo"] {
+        let prefix = if import.ends_with("geo") { "geo." } else { "" };
+        let text = format!("{import}\nlet root() = <{prefix}Rect x=0 y=0 width=0 height=2/>");
+        assert!(errors(&[("main.nx", &text)], &ProgramBuildContext::empty()).is_empty());
+    }
+    let source = r#"import "@nx/geometry" as geo
+import "@nx/graphics" as g
+let root() =
+  <g.Drawing viewBox=<geo.Rect x=0 y=0 width=100 height=100/>>
+    <g.Polygon points={<geo.Point x=0 y=0/> <g.Point x=10 y=0/> <geo.Point x=0 y=10/>}/>
+  </g.Drawing>
+"#;
+    let artifact =
+        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
+            .unwrap();
+    assert!(
+        artifact.diagnostics.is_empty(),
+        "{:?}",
+        artifact.diagnostics
+    );
+    let declarations = artifact.construction_declarations();
+    for tag in ["<geo.Rect", "<geo.Point", "<g.Point"] {
+        let start = source.find(tag).unwrap();
+        let end = start + source[start..].find("/>").unwrap() + 2;
+        assert_eq!(
+            declarations[&("main.nx".into(), start, end)].module,
+            "@nx/geometry/geometry.nx"
+        );
+    }
+}
+
+#[test]
+fn geometry_and_graphics_scalar_domains_reject_invalid_source_bindings() {
+    for body in [
+        "<Point x=1.0e309 y=0/>",
+        "<Point x={1.0e309 - 1.0e309} y=0/>",
+        "<Rect x=0 y=0 width=-1 height=1/>",
+        "<Rect x=0 y=0 width=1.0e309 height=1/>",
+        "<Size width=-1 height=0/>",
+    ] {
+        let source = format!("import \"@nx/geometry\"\nlet root() = {body}");
+        assert!(
+            has_code(
+                &errors(&[("main.nx", &source)], &ProgramBuildContext::empty()),
+                "constraint-violation"
+            ),
+            "{source}"
+        );
+    }
+    for body in [
+        "<g.Rectangle width=-1 height=1/>",
+        "<g.Rectangle width=1 height=1 opacity=1.5/>",
+        "<g.Text fontFamily=\"Fixture\" fontSize=0 text=\"bad\"/>",
+        "<g.RegularPolygon cx=0 cy=0 radius=1 pointCount=2/>",
+        "<g.Stroke paint={g.Paint.none} dashArray={1 -2}/>",
+    ] {
+        let source = format!("import \"@nx/graphics\" as g\nlet root() = {body}");
+        assert!(
+            has_code(
+                &errors(&[("main.nx", &source)], &ProgramBuildContext::empty()),
+                "constraint-violation"
+            ),
+            "{source}"
+        );
+    }
+    for body in ["<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=1 height=1/>/>",
+        "<g.Drawing viewBox=<g.Rect x=0 y=0 width=1 height=1/>><g.Rect x=0 y=0 width=1 height=1/></g.Drawing>"] {
+        let source = format!("import \"@nx/graphics\" as g\nlet root() = {body}");
+        assert!(!errors(&[("main.nx", &source)], &ProgramBuildContext::empty()).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn geometry_required_fields_and_implicit_imports_are_checked() {
+    let context = ProgramBuildContext::empty().with_implicit_imports(["@nx/geometry"]);
+    assert!(errors(&[("main.nx", "let root() = <Point x=0 y=0/>")], &context).is_empty());
+    for body in ["<Point x=0/>", "<Size width=0/>", "<Rect x=0 y=0 width=0/>"] {
+        assert!(!errors(&[("main.nx", &format!("let root() = {body}"))], &context).is_empty());
+    }
+    assert!(!errors(
+        &[(
+            "main.nx",
+            "import \"@nx/graphics\" as g\nlet old(x: g.ViewBox) = { x }"
+        )],
+        &ProgramBuildContext::empty()
+    )
+    .is_empty());
 }

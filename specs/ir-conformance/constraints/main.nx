@@ -62,3 +62,37 @@ component <Meter step: int where in 1..=10 = 1 emits { Bump } /> = {
   state { count: int where in 0..=3 = 0 }
   <Button onTapped=<State.Update count={count + step} /> />
 }
+
+// Finite terms use the existing interval representation at both floating precisions.
+let finite64(x: float64 where finite): float64 where finite = { x }
+
+let finite32(x: float32 where finite): float64 where finite = { x }
+
+let finiteProduct(x: float64): float64 where finite = { x * x }
+
+let classifyFinite(x: float64): string = {
+  if x is {
+    finite => { if finite64(x) == x { "finite" } else { "unexpected" } }
+    else => "non-finite"
+  }
+}
+
+let classifyOverflow(x: float64): string = { classifyFinite(x * x) }
+
+let classifyNan(x: float64): string = { classifyFinite(x * x - x * x) }
+
+let finiteNan(x: float64): float64 where finite = { x * x - x * x }
+
+// The finite term does not reserve a union case of the same name.
+type Extent = finite | infinite
+
+let classifyExtent(value: Extent): string = {
+  if value is {
+    finite => "finite case"
+    infinite => "infinite case"
+  }
+}
+
+let finiteCase(): string = { classifyExtent(Extent.finite) }
+
+let infiniteCase(): string = { classifyExtent(Extent.infinite) }

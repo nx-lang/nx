@@ -1,4 +1,4 @@
-module @nx/math/math.nx fingerprint 14154561969793253313
+module @nx/math/math.nx fingerprint 7963937948937048613
 requires standard-math-v1
 entrypoints functions [sin cos tan asin acos atan atan2 sqrt hypot abs sign min max clamp floor ceil round roundTiesToEven trunc degreesToRadians radiansToDegrees lerp] components []
 

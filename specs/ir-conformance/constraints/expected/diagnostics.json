@@ -1,4 +1,10 @@
 {
+  "main.nx::finiteNan#nan": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::finiteProduct#overflow": {
+    "code": "nx-ir-constraint"
+  },
   "main.nx::inset#hostRecordDefaultFails": {
     "code": "nx-ir-constraint"
   },

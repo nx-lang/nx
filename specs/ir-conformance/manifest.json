@@ -42,11 +42,13 @@
         "expressions"
       ],
       "eq": [
+        "constraints",
         "conversions",
         "evaluation-cost",
         "expressions",
         "function-references",
         "function-values",
+        "geometry-library",
         "host-values",
         "occurrence-lifting",
         "question-flow",
@@ -97,6 +99,7 @@
         "expressions",
         "function-references",
         "function-values",
+        "geometry-library",
         "held-records",
         "parameter-defaults",
         "ranges"
@@ -112,7 +115,8 @@
       "sub": [
         "constraints",
         "expressions",
-        "generic-records"
+        "generic-records",
+        "geometry-library"
       ]
     },
     "constants": {
@@ -124,6 +128,7 @@
         "constraints",
         "conversions",
         "expressions",
+        "geometry-library",
         "large-catalog",
         "math-library",
         "occurrence-lifting",
@@ -185,6 +190,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -212,6 +218,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -235,8 +242,10 @@
         "agent-library",
         "agent-tool-context",
         "color-library",
+        "constraints",
         "evaluation-cost",
         "expressions",
+        "geometry-library",
         "handlers",
         "large-catalog",
         "question-flow",
@@ -369,6 +378,7 @@
         "expressions",
         "function-references",
         "function-values",
+        "geometry-library",
         "handlers",
         "large-catalog",
         "occurrence-lifting",
@@ -388,6 +398,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -421,6 +432,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "held-records",
         "host-values",
         "math-library",
@@ -434,7 +446,8 @@
         "two-module"
       ],
       "check": [
-        "constraints"
+        "constraints",
+        "geometry-library"
       ],
       "coalesce": [
         "handlers",
@@ -480,6 +493,7 @@
         "ranges"
       ],
       "if": [
+        "constraints",
         "conversions",
         "expressions",
         "large-catalog",
@@ -512,6 +526,7 @@
         "expressions",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "large-catalog",
@@ -540,6 +555,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -568,6 +584,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -592,6 +609,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -620,6 +638,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -680,6 +699,7 @@
       "unionCase": [
         "agent-library",
         "color-library",
+        "constraints",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -696,7 +716,8 @@
         "function-references"
       ],
       "constrained": [
-        "constraints"
+        "constraints",
+        "geometry-library"
       ],
       "function": [
         "argument-diagnostics",
@@ -717,6 +738,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "large-catalog",
@@ -743,6 +765,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -770,6 +793,7 @@
         "function-references",
         "function-values",
         "generic-records",
+        "geometry-library",
         "handlers",
         "held-records",
         "host-values",
@@ -806,6 +830,7 @@
     "function-references",
     "function-values",
     "generic-records",
+    "geometry-library",
     "handlers",
     "held-records",
     "host-values",

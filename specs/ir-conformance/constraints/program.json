@@ -6,6 +6,8 @@
   "recordFailures": true,
   "entrypoints": [
     { "module": "main.nx", "function": "flags" },
+    { "module": "main.nx", "function": "finiteCase" },
+    { "module": "main.nx", "function": "infiniteCase" },
     { "module": "main.nx", "function": "bands" },
     { "module": "main.nx", "function": "faded" },
     { "module": "main.nx", "function": "pick", "case": "inside", "arguments": [10] },
@@ -22,6 +24,16 @@
     { "module": "main.nx", "function": "paint", "case": "nestedField", "arguments": [{"$type": "Paint", "opacity": 1.5}], "fails": true },
     { "module": "main.nx", "function": "stroke", "case": "computedDefault", "arguments": [2] },
     { "module": "main.nx", "function": "stroke", "case": "computedDefaultFails", "arguments": [0], "fails": true },
-    { "module": "main.nx", "function": "inset", "case": "hostRecordDefaultFails", "arguments": [{"$type": "Stroke", "width": 0}], "fails": true }
+    { "module": "main.nx", "function": "inset", "case": "hostRecordDefaultFails", "arguments": [{"$type": "Stroke", "width": 0}], "fails": true },
+    {"module": "main.nx", "function": "finite64", "case": "max", "arguments": [1.7976931348623157e+308]},
+    {"module": "main.nx", "function": "finite64", "case": "subnormal", "arguments": [5e-324]},
+    {"module": "main.nx", "function": "finite64", "case": "negativeZero", "arguments": [-0.0]},
+    {"module": "main.nx", "function": "finite32", "case": "max", "arguments": [3.4028234663852886e+38]},
+    {"module": "main.nx", "function": "finite32", "case": "subnormal", "arguments": [1.401298464324817e-45]},
+    {"module": "main.nx", "function": "finiteProduct", "case": "overflow", "arguments": [1e+308], "fails": true},
+    {"module": "main.nx", "function": "finiteNan", "case": "nan", "arguments": [1e+308], "fails": true},
+    {"module": "main.nx", "function": "classifyOverflow", "case": "infinite", "arguments": [1e+308]},
+    {"module": "main.nx", "function": "classifyNan", "case": "nan", "arguments": [1e+308]},
+    {"module": "main.nx", "function": "classifyFinite", "case": "finite", "arguments": [0.5]}
   ]
 }

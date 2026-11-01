@@ -46,8 +46,10 @@ if (condition)
 ### NX Conventions
 
 - Follow the [NX Style Guide](sites/website/src/content/docs/reference/style-guide.md) for NX
-  source formatting. Use 2-space indentation, a 100-character line-length target, spaces after
-  type annotation colons and commas, and one blank line between top-level declarations.
+  source formatting. Use 2-space indentation, a 120-character line-length target, spaces after
+  type annotation colons and commas, and one blank line between top-level declarations. Prefer
+  aligned trailing `///` comments for properties, using at most two lines; use leading blocks for
+  longer explanations. Keep standalone prose comments around 100 characters where practical.
 - **Union declarations**: omit the leading `|` when the case list is on one line
   (`type ThemeMode = light | dark`). Use a leading `|` on every case, including the first, when the
   list spans multiple lines. This matches F#, OCaml, and TypeScript, where the leading bar is a

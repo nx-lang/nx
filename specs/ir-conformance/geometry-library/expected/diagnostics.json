@@ -1,0 +1,14 @@
+{
+  "main.nx::nan#computed": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::overflow#infinite": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::rect#negative": {
+    "code": "nx-ir-constraint"
+  },
+  "main.nx::size#negative": {
+    "code": "nx-ir-constraint"
+  }
+}

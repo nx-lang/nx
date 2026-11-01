@@ -1,0 +1,20 @@
+{
+  "main.nx::point#fractional": [
+    {"path": "", "module": "main.nx", "start": 765, "end": 792}
+  ],
+  "main.nx::point#max": [
+    {"path": "", "module": "main.nx", "start": 765, "end": 792}
+  ],
+  "main.nx::point#negativeMax": [
+    {"path": "", "module": "main.nx", "start": 765, "end": 792}
+  ],
+  "main.nx::root#value": [
+    {"path": "", "module": "main.nx", "start": 247, "end": 560},
+    {"path": "/anchor", "module": "main.nx", "start": 268, "end": 325},
+    {"path": "/available", "module": "main.nx", "start": 340, "end": 376},
+    {"path": "/bounds", "module": "main.nx", "start": 388, "end": 436},
+    {"path": "/regions/0", "module": "main.nx", "start": 457, "end": 498},
+    {"path": "/regions/1", "module": "main.nx", "start": 505, "end": 549}
+  ],
+  "main.nx::unbounded#value": []
+}

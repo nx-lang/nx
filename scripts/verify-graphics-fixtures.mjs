@@ -5,7 +5,7 @@ import {readFileSync,existsSync} from "node:fs";
 const read=p=>JSON.parse(readFileSync(new URL(`../${p}`,import.meta.url),"utf8"));
 const tasks=read("evaluations/graphics-v1/tasks.json");
 const schema=read("evaluations/graphics-v1/result.schema.json");
-assert.equal(tasks.profile,"graphics-core-v3");
+assert.equal(tasks.profile,"graphics-core-v4");
 assert.equal(tasks.version,1);assert.equal(tasks.tasks.length,4);
 assert.deepEqual([...tasks.requiredResultFields].sort(),[...schema.required].sort());
 assert.deepEqual(tasks.tasks.map(t=>t.id),schema.properties.task.enum);

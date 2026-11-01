@@ -17,7 +17,7 @@ after(() => session.dispose());
 let id = 0;
 const call = (call) => session.answer({ kind: "preview", id: ++id, call });
 const drawing =
-  'import "@nx/graphics" as g\n<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>><g.Rect width=12 height=20/></g.Drawing>';
+  'import "@nx/graphics" as g\n<g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>><g.Rectangle width=12 height=20/></g.Drawing>';
 
 test("the shared IR result supplies raw Output and graphics Preview, including aliased declarations", async () => {
   const state = await call({ op: "start", source: drawing });
@@ -120,12 +120,12 @@ test("a custom previewer can register an application type by declaration identit
 test("renderer failures retain the raw value and preview capability", async () => {
   const state = await call({
     op: "start",
-    source: drawing.replace("width=12", "width=-12"),
+    source: drawing.replace("width=100", "width=0"),
   });
   assert.equal(state.renderer, "graphics");
   assert.equal(state.drawing.scene, null);
   assert.ok(state.drawing.diagnostics.length > 0);
-  assert.match(state.structured.output.value.text, /width=-12/);
+  assert.match(state.structured.output.value.text, /width=0/);
 });
 
 test("compile and evaluation failures preserve prior availability, value, and source guards", async () => {
@@ -322,7 +322,7 @@ test("an imported helper's result discovers its library preview without an autho
   const source =
     'import "./helper.nx" as helper\nlet root() = { helper.make() }';
   const helper =
-    'import "@nx/graphics" as g\nexport let make() = <g.Drawing viewBox=<g.ViewBox x=0 y=0 width=10 height=10/>/>';
+    'import "@nx/graphics" as g\nexport let make() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=10 height=10/>/>';
   const workbench = new PreviewWorkbench(
     (source) =>
       host.buildWorkspaceArtifact({
@@ -507,9 +507,9 @@ test("formatting failures retain the evaluated value and registered graphics pre
 
 test("nested graphics reach a bounded graphics diagnostic instead of losing Preview", async () => {
   const source =
-    'import "@nx/graphics" as g\n<g.Drawing viewBox=<g.ViewBox x=0 y=0 width=100 height=100/>>' +
+    'import "@nx/graphics" as g\n<g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>' +
     "<g.Group>".repeat(63) +
-    "<g.Rect width=1 height=1/>" +
+    "<g.Rectangle width=1 height=1/>" +
     "</g.Group>".repeat(63) +
     "</g.Drawing>";
   const state = await call({ op: "start", source });

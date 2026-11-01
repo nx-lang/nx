@@ -255,7 +255,11 @@ CHROME_PATH=/usr/bin/chromium pnpm --dir sites/playground test:graphics-browser
 ```
 
 Set `NX_PLAYGROUND_PREVIEW=1` after `pnpm --dir sites/playground build` to test the production
-bundle instead of the development server (CI uses this).
+bundle instead of the development server (CI uses this). Build first so `dist/` matches the
+current source. Application-level checks run against the served app; the low-level gradient,
+hit-testing, rendering and text-measurement probes use a separate test-only bundle of the current
+graphics source modules in both modes. That harness inlines the fixture font. The app's own font
+loading and asset serving are checked before the harness loads its copy.
 
 Set `NX_GRAPHICS_SCREENSHOT=/tmp/nx-drawing.png` to save the browser integration's final image.
 
