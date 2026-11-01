@@ -50,78 +50,13 @@ public class NxFunctionValueTests
         let root() = <List ItemTemplate={Row} />
         """;
 
-    [Fact]
-    public void Evaluate_WithAFunctionValuedProp_ReadsTheDeclarationItNames()
-    {
-        TemplatedListElement rendered =
-            NxRuntime.Evaluate<TemplatedListElement>(TemplateSource, "templates.nx");
 
-        Assert.NotNull(rendered.ItemTemplate);
-        Assert.Equal("templates.nx", rendered.ItemTemplate!.Module);
-        Assert.Equal("Row", rendered.ItemTemplate.Name);
-    }
 
-    [Fact]
-    public void EvaluateJson_WithAFunctionValuedProp_RendersTheFunctionRecord()
-    {
-        JsonElement rendered = NxRuntime.EvaluateJson(TemplateSource, "templates.nx");
-        JsonElement template = rendered.GetProperty("ItemTemplate");
 
-        Assert.Equal("Function", template.GetProperty("$type").GetString());
-        Assert.Equal("templates.nx", template.GetProperty("module").GetString());
-        Assert.Equal("Row", template.GetProperty("name").GetString());
-    }
 
-    [Fact]
-    public void FunctionRef_RoundTripsThroughBothOutputFormats()
-    {
-        TemplatedListElement rendered =
-            NxRuntime.Evaluate<TemplatedListElement>(TemplateSource, "templates.nx");
 
-        byte[] messagePack = MessagePackSerializer.Serialize(
-            rendered,
-            cancellationToken: TestContext.Current.CancellationToken);
-        TemplatedListElement fromMessagePack = MessagePackSerializer.Deserialize<TemplatedListElement>(
-            messagePack,
-            cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("templates.nx", fromMessagePack.ItemTemplate!.Module);
-        Assert.Equal("Row", fromMessagePack.ItemTemplate.Name);
 
-        string json = JsonSerializer.Serialize(rendered);
-        TemplatedListElement fromJson = JsonSerializer.Deserialize<TemplatedListElement>(json)!;
-        Assert.Equal("templates.nx", fromJson.ItemTemplate!.Module);
-        Assert.Equal("Row", fromJson.ItemTemplate.Name);
-    }
 
-    [Fact]
-    public void FunctionRef_AtAFunctionReferenceMember_RoundTripsThroughBothOutputFormats()
-    {
-        // A member typed `<function ... />: R` takes a function of any parameters, and what a host reads there is
-        // the same record a function-typed member holds.
-        const string source = """
-            type Tool = { fn: <function ... />: object* fallback?: <function ... />: int }
-            let double(n:int): int = {n * 2}
-            let root() = <Tool fn={double} />
-            """;
-
-        ToolRecord rendered = NxRuntime.Evaluate<ToolRecord>(source, "main.nx");
-        Assert.Equal("main.nx", rendered.Fn.Module);
-        Assert.Equal("double", rendered.Fn.Name);
-        Assert.Null(rendered.Fallback);
-
-        byte[] messagePack = MessagePackSerializer.Serialize(
-            rendered,
-            cancellationToken: TestContext.Current.CancellationToken);
-        ToolRecord fromMessagePack = MessagePackSerializer.Deserialize<ToolRecord>(
-            messagePack,
-            cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("main.nx", fromMessagePack.Fn.Module);
-        Assert.Equal("double", fromMessagePack.Fn.Name);
-
-        ToolRecord fromJson = JsonSerializer.Deserialize<ToolRecord>(JsonSerializer.Serialize(rendered))!;
-        Assert.Equal("main.nx", fromJson.Fn.Module);
-        Assert.Equal("double", fromJson.Fn.Name);
-    }
 
     [Fact]
     public void FunctionRef_SerializesWhenTheMemberIsNull()

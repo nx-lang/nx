@@ -4,12 +4,13 @@
 //! `nx-types` because a range expression means the prelude's `Range`, and only a real build has a
 //! prelude.
 
+mod support;
 use nx_api::{
-    eval_source, evaluate_component_source, validate_workspace, ComponentEvaluateEvalResult,
-    EvalResult, NxDiagnostic, NxWorkspace, NxWorkspaceModule, ProgramBuildContext,
+    validate_workspace, NxDiagnostic, NxWorkspace, NxWorkspaceModule, ProgramBuildContext,
 };
 use nx_value::NxValue;
 use std::collections::BTreeMap;
+use support::{eval_source, EvalResult};
 
 fn diagnostics(source: &str) -> Vec<NxDiagnostic> {
     let workspace = NxWorkspace::new(vec![
@@ -402,23 +403,21 @@ fn a_host_supplied_range_iterates() {
         },
     );
 
-    let result = evaluate_component_source(
+    let artifact = nx_api::load_program_artifact_from_source(
         "component <Counted span:<Range T=int/> /> = { for i in span { <tick value={i} /> } }\n",
         "ranges.nx",
         &ProgramBuildContext::empty(),
-        "Counted",
-        &NxValue::Record {
-            type_name: None,
-            properties: props,
-        },
-        &NxValue::empty(),
-    );
-    let rendered = match result {
-        ComponentEvaluateEvalResult::Ok(result) => result.rendered,
-        ComponentEvaluateEvalResult::Err(diagnostics) => {
-            panic!("expected the host's range to iterate: {diagnostics:?}")
-        }
-    };
+    )
+    .unwrap();
+    let program = support::link(&artifact, "ranges.nx").unwrap();
+    let rendered = program
+        .evaluate_component(
+            "Counted",
+            &props,
+            &BTreeMap::new(),
+            &nx_api::ir_runtime::RuntimeOptions::default(),
+        )
+        .unwrap();
 
     let ticks = match &rendered {
         NxValue::Array(items) => items.len(),
@@ -429,7 +428,7 @@ fn a_host_supplied_range_iterates() {
 
 /// The budget, not a pre-allocation, is what stops a range that is merely enormous.
 #[test]
-fn an_enormous_range_exceeds_the_operation_budget() {
+fn an_enormous_range_exceeds_the_range_safety_limit() {
     let EvalResult::Err(diagnostics) = eval_source(
         "let root() = { for i in 0..2000000 { i } }\n",
         "ranges.nx",
@@ -440,7 +439,10 @@ fn an_enormous_range_exceeds_the_operation_budget() {
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.message.contains("Operation limit exceeded")),
+            .any(
+                |diagnostic| diagnostic.code.as_deref() == Some("nx-ir-resource-limit")
+                    && diagnostic.message.contains("maxRangeLength")
+            ),
         "{diagnostics:?}"
     );
 }

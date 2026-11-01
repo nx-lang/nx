@@ -211,7 +211,7 @@ follow `unbraced-literal-forms`: an empty optional attribute is omitted, an empt
 - **WHEN** a host evaluates `let root(): string? = { if false { "a" } }`, `let root() = { if false { 1 } }` and `let root(): int* = { if false { 1 } }`
 - **THEN** the first two SHALL return `null`
 - **AND** the third SHALL return `[]`
-- **AND** the .NET SDK's `NxRuntime.Evaluate<string?>` SHALL read the first as `null`
+- **AND** a .NET host deserializing the first result into a nullable `string` SHALL read `null`
 
 #### Scenario: A present optional encodes as its item and an absent one as a missing key
 - **WHEN** a file contains `type Book = { title:string author?:string }` and `let a = <Book title="A" author="X" />`, `let b = <Book title="B" />`

@@ -130,8 +130,8 @@ inventory explaining their disposition. DTO and serialization tests remain indep
 
 ### 5. Integer semantics follow the existing IR runtime
 
-Remove only interpreter-specific `int32` wrapping. For example, adding two `2000000000` values yields
-`4000000000` on the IR path. This does not promise exact integer equality across Rust i64 wrapping
+Remove only interpreter-specific `int32` wrapping. For example, adding two `2000000000` int32 operands and returning the result as `int` yields
+`4000000000` on the IR path; an int32 boundary still validates its existing range. This does not promise exact integer equality across Rust i64 wrapping
 and JavaScript number arithmetic beyond the shared safe range. Keep existing backend limitations
 and deferred checked arithmetic. Include boundary tests around 2^31, 2^53 and i64 overflow that
 state the applicable backend's actual contract rather than asserting false universal parity.
@@ -188,7 +188,7 @@ are removed.
 - Independent interpreter oracle is lost: retain source expectations, reviewed corpus results and
   generated-JS/two-runtime comparisons before deleting it.
 - Source-reachable emitter gaps can block CLI migration: audit all rejection paths, not only
-  `nx-ir-unsupported-construct`; fix required coverage or resolve a prerequisite before deletion.
+  `nx-ir-unsupported-construct`; resolve required coverage or explicitly defer it with preserved ignored tests before deletion.
 - Formatting can lose erased type information: independently test rich CLI results and canonical
   host formatting, preserving each input contract.
 - Cold CLI execution adds compilation/emission: record small/large/multi-module timings and WASM
@@ -214,3 +214,11 @@ No implementation is authorized by this proposal PR. Review the updated architec
 None. The earlier questions are settled above: direct IR input is deferred (Decision 2), the CLI's
 result interface is a read-only view with cases and function references and no `float32` kind
 (Decision 3), and the performance check is the explanation threshold under Risks.
+
+## Accepted follow-up gaps
+
+The user approved retirement before `complete-ir-construction-lowering`. Conditional property
+fragments and positional record constructors are temporarily unsupported through IR execution.
+Preserve their successful source expectations as ignored source-to-IR tests, each naming that
+follow-up change; do not assert failure as the intended behavior. Confirm expectations against HIR
+before deletion. These two gaps do not block retirement; other unexplained discrepancies still do.

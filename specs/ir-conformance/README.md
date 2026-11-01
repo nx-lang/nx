@@ -51,7 +51,7 @@ Each program is a directory:
 | `expected/<identity>.nxir` | The module's image with its debug section. `/` in an identity is written `__`. |
 | `expected/<identity>.stripped.nxir` | The same image without the debug section. |
 | `expected/<identity>.nxir.txt`, `.stripped.nxir.txt` | Each image as `nxlang ir explain` renders it, so a review reads text and a diff names what changed. The emitter's tests fail when a text is not the explanation of its image. |
-| `expected/results.json` | The canonical value of each entrypoint, keyed `identity::function`, as the interpreter evaluates it; of each case, keyed `identity::function#case`, as the Rust IR runtime evaluates it; and each lifecycle's record, keyed `identity::Component`. |
+| `expected/results.json` | The canonical value of each entrypoint, keyed `identity::function`, as the Rust IR runtime evaluates it; of each case, keyed `identity::function#case`, as the Rust IR runtime evaluates it; and each lifecycle's record, keyed `identity::Component`. |
 | `expected/diagnostics.json` | For each case marked as one that fails, keyed as `results.json` keys a case, the `code` of the diagnostic the call fails with and the `argument` it names, as the Rust IR runtime reports them; `argument` is left out when the diagnostic names none. A program with no such case has no such file. |
 | `expected/operations.json` | What each evaluation costs in operations, as `docs/nx-ir-format.md` (*Evaluation cost*) defines them, and, for a program that asks, where smaller budgets stop it and how large the input of each case and lifecycle step is. |
 | `expected/origins.json` | What the origins report gives for each evaluation from the images with their debug sections, as `docs/nx-ir-format.md` (*Where records came from*) defines it, as the Rust IR runtime reports it. |
@@ -87,12 +87,12 @@ default's failure from an argument's by where it was raised and not by its code.
 A lifecycle names the module and component to initialize, optional `props`, and `batches`: an
 ordered list of dispatch batches, each a list of entries written as a host would send them, either
 an action record the component emits or an `ActionHandlerInvocation` naming a handler by its
-`token`. Tokens are literal (`h1-1`): the interpreter assigns them deterministically, generation
+`token`. Tokens are literal (`h1-1`): the runtime assigns them deterministically, generation
 first and then position in a walk that visits lists in order and record fields by name, and a
 runtime is checked against the very same strings. The record holds `initial`, the rendered output
 of initialization, and one entry per batch with its `rendered` output and its ordered `effects`.
-State is not recorded, since the interpreter returns it only inside an opaque snapshot; the
-rendered output reflects it.
+State is asserted by lifecycle scenario tests; the corpus records rendered output and effects,
+which expose its transitions.
 
 `operations.json` holds `counts`, keyed as `results.json` is: an entrypoint's count, or a
 lifecycle's `{ "initial", "batches" }`, the count of initialization and of each batch in order, a

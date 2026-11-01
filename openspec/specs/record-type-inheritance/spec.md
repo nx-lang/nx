@@ -150,7 +150,7 @@ Generated NX IR SHALL carry the effective field set. A record declaration, a rec
 and a union case SHALL each list the fields the value carries — the base chain's first, in the order
 they are materialized, then the declaration's own — with each inherited field's default and declared
 type resolved in the module that declared that field. A runtime reading such IR SHALL therefore
-produce, for the same program, what the interpreter produces.
+produce, for the same program, what the Rust IR runtime produces.
 
 A value of a derived record SHALL be accepted wherever a record it extends is expected, and SHALL
 keep its own type and its own fields there rather than being narrowed to the base's. Generated NX IR
@@ -169,7 +169,7 @@ rather than stamped with a type NX itself refuses to construct.
   `permissions` field
 
 #### Scenario: Base default applies to concrete derived record construction
-- **WHEN** a file contains `abstract type UserBase = { name:string age:int = 18 } type User extends UserBase = { permissions:string }` and the interpreter constructs `User` without supplying `age`
+- **WHEN** a file contains `abstract type UserBase = { name:string age:int = 18 } type User extends UserBase = { permissions:string }` and the Rust IR runtime constructs `User` without supplying `age`
 - **THEN** the constructed `User` value SHALL include `age = 18` from the abstract base record
 
 #### Scenario: Duplicate inherited field name is rejected
@@ -187,7 +187,7 @@ rather than stamped with a type NX itself refuses to construct.
   the local `submittedAt` field
 
 #### Scenario: Base default applies to concrete derived action construction
-- **WHEN** a file contains `abstract action SearchAction = { source:string = "ui" } action SearchSubmitted extends SearchAction = { query:string }` and the interpreter constructs `SearchSubmitted` without supplying `source`
+- **WHEN** a file contains `abstract action SearchAction = { source:string = "ui" } action SearchSubmitted extends SearchAction = { query:string }` and the Rust IR runtime constructs `SearchSubmitted` without supplying `source`
 - **THEN** the constructed `SearchSubmitted` value SHALL include `source = "ui"` from the abstract
   base action
 
@@ -235,13 +235,13 @@ rather than stamped with a type NX itself refuses to construct.
 - **WHEN** a program declares `abstract type Base = { name:string = "anon" }` and
   `type User extends Base = { role:string }`, and constructs `<User role="admin" />`
 - **THEN** the value a runtime produces from the emitted IR SHALL carry `name` equal to `"anon"`
-- **AND** it SHALL equal the value the Rust interpreter produces for the same program
+- **AND** it SHALL equal the value the Rust IR runtime produces for the same program
 
 #### Scenario: A union case carries the fields of its base
 - **WHEN** a union extends an abstract record and one of its cases is constructed
 - **THEN** the value a runtime produces from the emitted IR SHALL carry the base's fields as well as
   the case's own
-- **AND** it SHALL equal the value the Rust interpreter produces for the same program
+- **AND** it SHALL equal the value the Rust IR runtime produces for the same program
 
 #### Scenario: A derived record is accepted where its base is expected
 - **WHEN** a program declares `abstract type Base = { name:string }` and
@@ -249,14 +249,14 @@ rather than stamped with a type NX itself refuses to construct.
   property declared `owner:Base`
 - **THEN** the value a runtime produces from the emitted IR SHALL carry `$type` of `"User"` and both
   fields
-- **AND** it SHALL equal the value the Rust interpreter produces for the same program
+- **AND** it SHALL equal the value the Rust IR runtime produces for the same program
 
 #### Scenario: A union case is accepted where the union's base is expected
 - **WHEN** a union extends an abstract record and one of its cases is passed to a property declared
   at that base's type
 - **THEN** the value a runtime produces from the emitted IR SHALL carry the case's own `$type` and
   the base's fields
-- **AND** it SHALL equal the value the Rust interpreter produces for the same program
+- **AND** it SHALL equal the value the Rust IR runtime produces for the same program
 
 #### Scenario: A value of the abstract base itself is rejected
 - **WHEN** a value offered at a boundary declared at an abstract record's type names that record, or

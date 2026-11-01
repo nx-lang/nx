@@ -412,24 +412,3 @@ fn color_schema_exports_numerical_fields_and_alpha_default() {
         .any(|name| name == "a"));
     assert!(color["properties"]["r"].get("minimum").is_none());
 }
-
-#[test]
-fn legacy_interpreter_refuses_color_literals_and_constants_explicitly() {
-    for source in [
-        "let root() = #f00",
-        "import \"@nx/color\" as c\nlet root() = { c.red }",
-    ] {
-        let artifact =
-            build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
-                .unwrap();
-        match nx_api::eval_program_artifact_function(&artifact, "main.nx", "root") {
-            nx_api::EvalResult::Err(diagnostics) => assert!(
-                diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.message.contains("color requires the IR runtime")),
-                "{diagnostics:?}"
-            ),
-            _ => panic!("expected explicit unsupported-runtime error"),
-        }
-    }
-}

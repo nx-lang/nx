@@ -45,14 +45,14 @@ behavior that is not plain array, record, or constant-case construction.
 - **AND** a caller requests TypeScript executable output
 - **THEN** generated TypeScript SHALL include an exported callable entrypoint for `root`
 - **AND** executing that entrypoint through the generated runtime helpers SHALL produce the same
-  value as interpreter evaluation
+  value as Rust IR runtime evaluation
 
 #### Scenario: Element-like record emits executable TypeScript
 - **WHEN** NX source defines an intrinsic element expression or record-like element construction
   that evaluates to a serializable `NxValue::Record`
 - **AND** a caller requests TypeScript executable output
 - **THEN** executing the generated entrypoint SHALL produce the same serialized `NxValue` shape as
-  interpreter evaluation
+  Rust IR runtime evaluation
 
 #### Scenario: Record emits as strongly typed direct object
 - **WHEN** NX source declares `type User = { name: string age: int }` and constructs a `User`
@@ -166,25 +166,6 @@ exposed through `nxlang typegen` and SHALL remain separate from executable gener
   contracts
 - **AND** the CLI SHALL NOT emit executable NX program behavior from `nxlang typegen`
 
-### Requirement: Generated behavior is validated against the interpreter
-The executable code generation implementation SHALL include tests that compare generated
-TypeScript/JavaScript behavior with existing interpreter behavior for supported non-reactive
-programs. The parity tests SHALL cover primitives, arithmetic, conditionals, arrays, loops,
-function calls, records, discriminated unions, enum values, element expressions that serialize to
-`NxValue::Record`, and cross-module imports.
-
-#### Scenario: Interpreter parity for supported program
-- **WHEN** a supported NX program is evaluated by the interpreter
-- **AND** the same program is emitted and executed as generated JavaScript or TypeScript
-- **THEN** both executions SHALL produce equivalent `NxValue` payloads
-- **AND** object property order SHALL NOT be treated as semantic during the comparison
-
-#### Scenario: Unsupported executable construct reports diagnostic
-- **WHEN** codegen encounters an NX construct outside the supported initial executable generation
-  subset
-- **THEN** codegen SHALL return a diagnostic that identifies the unsupported construct
-- **AND** codegen SHALL NOT emit silently incomplete executable output
-
 ### Requirement: Runtime helper encoding matches canonical NxValue
 Generated output SHALL encode values using the same canonical `NxValue` semantics as the existing
 public runtime boundary. Array values SHALL encode as plain JavaScript arrays. Constant union case
@@ -212,7 +193,7 @@ by this change.
 - **WHEN** NX source contains `type Book = { title:string author?:string tags?:string+ } let root() = <Book title="B" />`
 - **AND** JavaScript is generated and executed for `root`
 - **THEN** the output SHALL be `{ $type: "Book", title: "B" }` with neither an `author` nor a `tags` key
-- **AND** the output SHALL equal the interpreter's canonical output for the same program
+- **AND** the output SHALL equal the Rust IR runtime's canonical output for the same program
 
 ### Requirement: Generated output ordering is deterministic
 Executable TypeScript and JavaScript generation SHALL produce deterministic module ordering,
@@ -274,7 +255,7 @@ evaluable.
 - **AND** a caller initializes `SearchBox` through generated output without an explicit
   `placeholder`
 - **THEN** generated evaluation SHALL bind inherited prop `placeholder` to `"Docs"`
-- **AND** SHALL return rendered output equivalent to interpreter component initialization
+- **AND** SHALL return rendered output equivalent to Rust IR runtime component initialization
 
 #### Scenario: Defaulted prop is optional in typed props
 - **WHEN** NX source declares `component <SearchBox placeholder:string = "Find docs" /> = { placeholder }`
@@ -448,7 +429,7 @@ semantics for supported non-reactive component scenarios.
 - **THEN** both executions SHALL produce equivalent JSON-compatible component descriptor payloads
 
 #### Scenario: Component entry evaluation parity
-- **WHEN** a supported NX component is evaluated by the interpreter with explicit props and state
+- **WHEN** a supported NX component is evaluated by the Rust IR runtime with explicit props and state
 - **AND** the same component is emitted and evaluated through generated JavaScript or TypeScript
 - **THEN** both executions SHALL produce equivalent rendered payloads
 
@@ -527,7 +508,7 @@ names inside the single program module.
 - **THEN** the generated program module SHALL contain executable code for the imported declaration
   and the root entrypoint in the same ESM source module
 - **AND** executing the generated root entrypoint with the supplied NX runtime SHALL produce the
-  same JSON-compatible value as interpreter evaluation
+  same JSON-compatible value as Rust IR runtime evaluation
 - **AND** the generated program module SHALL NOT import another generated NX module by relative
   path
 
@@ -646,23 +627,6 @@ behavior unless a caller explicitly requests IR output.
   construct
 - **AND** it SHALL NOT emit silently incomplete IR
 
-### Requirement: NX IR emission is validated against interpreter semantics
-Executable generation tests SHALL verify that supported NX IR output can be executed by the
-TypeScript IR runtime with results equivalent to native interpreter evaluation. These tests SHALL
-cover functions, component descriptor construction, component initialization, explicit state
-component evaluation, and host-owned state update validation.
-
-#### Scenario: IR emission parity covers functions
-- **WHEN** executable generation emits NX IR for a supported function program
-- **THEN** tests SHALL execute the emitted IR through the TypeScript runtime
-- **AND** they SHALL compare the result with native interpreter evaluation
-
-#### Scenario: IR emission parity covers components
-- **WHEN** executable generation emits NX IR for a supported component program
-- **THEN** tests SHALL execute descriptor construction, initialization, explicit state evaluation,
-  and state patch validation through the TypeScript runtime
-- **AND** they SHALL compare rendered values with native interpreter behavior where applicable
-
 ### Requirement: Generated executable code evaluates property references and update intrinsics
 Generated executable TypeScript and JavaScript SHALL evaluate a property union case to the bare
 string of the field name, so that its serialized form matches the canonical encoding, and SHALL
@@ -673,13 +637,13 @@ helpers rather than inlined, SHALL preserve the absent-versus-empty rule — an 
 unchanged, a present empty field clears an optional field and is carried through `merge` and `diff`
 as present and empty — and SHALL NOT collide with an author's declarations, which the checker
 already prevents from using the intrinsic names. Generated behavior for both SHALL be validated
-against the interpreter on the same source.
+against the Rust IR runtime on the same source.
 
 #### Scenario: Generated JavaScript serializes a property union case as its field name
 - **WHEN** NX source contains `type User = { name:string email?:string } let root() = <Box key={User.Property.email} />`
 - **AND** JavaScript is generated and executed for `root`
 - **THEN** the serialized output SHALL carry `key` as the string `"email"`
-- **AND** the output SHALL equal the interpreter's canonical output for the same program
+- **AND** the output SHALL equal the Rust IR runtime's canonical output for the same program
 
 #### Scenario: Generated JavaScript applies an update through the runtime
 - **WHEN** NX source contains `type User = { name:string email?:string } let root() = {apply(<User name="Ada" email="x@y" />, <User.Update email={} />)}`
@@ -700,7 +664,7 @@ against the interpreter on the same source.
 ### Requirement: Generated executable code evaluates the presence operators
 Generated executable TypeScript and JavaScript SHALL evaluate the presence test `x?`, the step
 `x?.m` and the fallback `x ?? y` to the values `presence-operators` defines,
-so that the serialized result of a generated entrypoint equals the interpreter's canonical output
+so that the serialized result of a generated entrypoint equals the Rust IR runtime's canonical output
 for the same source. The generated expression for each operator is the emitter's choice; what is
 observable SHALL hold: `x?` is `true` exactly when `x` holds an item; `x?.m` is the empty value when
 `x` is empty and `x.m` otherwise, with `x` evaluated once; `x ?? y` is `x` when `x` holds an item
@@ -714,7 +678,7 @@ empty `*` value SHALL be an empty array, as `occurrence-types` defines the canon
 - **WHEN** NX source contains `type Book = { title:string author?:Person } let root() = { <Box has={<Book title="A" />.author?} /> }`
 - **AND** JavaScript is generated and executed for `root`
 - **THEN** the serialized output SHALL carry `has` as `false`
-- **AND** the output SHALL equal the interpreter's canonical output for the same program
+- **AND** the output SHALL equal the Rust IR runtime's canonical output for the same program
 
 #### Scenario: Generated JavaScript steps and falls back
 - **WHEN** NX source contains `type Book = { author?:Person } let root() = { <Box name={<Book />.author?.name ?? "anonymous"} /> }`
@@ -732,24 +696,24 @@ empty `*` value SHALL be an empty array, as `occurrence-types` defines the canon
 - **THEN** generation SHALL fail with a diagnostic saying match expressions are not supported by
   executable source codegen
 
-#### Scenario: Operator parity is validated against the interpreter
+#### Scenario: Operator parity is validated against the Rust IR runtime
 - **WHEN** a supported NX program uses `x?`, `x?.m` and `x ?? y`
 - **AND** the same program is emitted and executed as generated JavaScript or TypeScript
 - **THEN** automated tests SHALL verify that both executions produce equivalent `NxValue` payloads
 
 ### Requirement: A generated function's result takes its declared occurrence
 Generated TypeScript and JavaScript SHALL give a function's result, and a value's initializer, the
-occurrence of its declared type, as the interpreter's coercion does: an item returned where a `+`
+occurrence of its declared type, as the IR runtimes' coercion does: an item returned where a `+`
 or `*` type is declared SHALL be a one-item array. A generated function SHALL type its result by
 its declared or inferred type. A generated function is typed NX code rather than a host boundary:
 an empty `T?` result SHALL be the generated `nxEmpty`, as the function's TypeScript signature
-`T | NxEmpty` says, where an entry call through the interpreter or the NX IR runtime returns the
-host's `null`. Every other result SHALL equal the interpreter's canonical output.
+`T | NxEmpty` says, where an entry call through an NX IR runtime returns the
+host's `null`. Every other result SHALL equal the Rust IR runtime's canonical output.
 
 #### Scenario: A declared many result is lifted
 - **WHEN** NX source contains `let g(): int+ = { 5 }` and `type Ints = int+ let fives: Ints = { 5 }`
 - **AND** JavaScript is generated and executed
-- **THEN** `g()` and `fives` SHALL each be `[5]`, as the interpreter gives
+- **THEN** `g()` and `fives` SHALL each be `[5]`, as the Rust IR runtime gives
 
 #### Scenario: An empty optional result is nxEmpty
 - **WHEN** NX source contains `let maybe(): string? = { if false { "a" } }`
@@ -815,3 +779,40 @@ Executable TypeScript and JavaScript generation SHALL support direct calls and c
 #### Scenario: Generated signed-zero behavior
 - **WHEN** executable output evaluates atan2(-0.0,+0.0), sign(-0.0), round(-0.5) and max(-0.0,+0.0)
 - **THEN** the first three runtime values SHALL be negative zero and the last positive zero, checked by the target's sign-aware numeric observation rather than serialized text
+
+### Requirement: Generated behavior is validated against the native runtime
+The executable code generation implementation SHALL include tests that compare generated
+TypeScript/JavaScript behavior with native evaluation of the same program for supported
+non-reactive programs. The parity tests SHALL cover primitives, arithmetic, conditionals, arrays,
+loops, function calls, records, discriminated unions, enum values, element expressions that
+serialize to `NxValue::Record`, and cross-module imports.
+
+#### Scenario: Native parity for supported program
+- **WHEN** a supported NX program is evaluated natively
+- **AND** the same program is emitted and executed as generated JavaScript or TypeScript
+- **THEN** both executions SHALL produce equivalent `NxValue` payloads
+- **AND** object property order SHALL NOT be treated as semantic during the comparison
+
+#### Scenario: Unsupported executable construct reports diagnostic
+- **WHEN** codegen encounters an NX construct outside the supported initial executable generation
+  subset
+- **THEN** codegen SHALL return a diagnostic that identifies the unsupported construct
+- **AND** codegen SHALL NOT emit silently incomplete executable output
+
+### Requirement: NX IR emission is validated against source-level expectations
+Executable generation tests SHALL verify that NX IR emitted from source evaluates, on the Rust IR
+runtime and on the TypeScript IR runtime, to a value the test states. These tests SHALL cover
+functions, component descriptor construction, component initialization, explicit state component
+evaluation, and host-owned state update validation. Because both runtimes evaluate the same emitted
+IR, agreement between them SHALL NOT be the only check of what the emitter produced.
+
+#### Scenario: IR emission is checked for functions
+- **WHEN** executable generation emits NX IR for a supported function program
+- **THEN** tests SHALL execute the emitted IR through both IR runtimes
+- **AND** SHALL compare each result with the expected value the test states
+
+#### Scenario: IR emission is checked for components
+- **WHEN** executable generation emits NX IR for a supported component program
+- **THEN** tests SHALL execute descriptor construction, initialization, explicit state evaluation,
+  and state patch validation through both IR runtimes
+- **AND** SHALL compare rendered values with the expected values the test states

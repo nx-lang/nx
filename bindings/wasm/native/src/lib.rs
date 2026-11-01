@@ -21,19 +21,18 @@ use nx_api::language_service::{
     WorkspaceSnapshot,
 };
 use nx_api::{
-    build_workspace_program_artifact, eval_program_artifact_nx_text_with_limits,
-    format_program_artifact_value, load_program_artifact_from_source,
-    program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
-    FormatValueError, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
-    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, ResourceLimits,
-    SchemaQueryError,
+    build_workspace_program_artifact, format_program_artifact_value,
+    load_program_artifact_from_source, program_artifact_function_schema_json,
+    program_artifact_type_schema_json, validate_workspace, FormatValueError, LibraryRegistry,
+    NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule,
+    ProgramArtifact, ProgramBuildContext, SchemaQueryError,
 };
 use nx_ir::explain_nx_ir_image;
 use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 11;
+pub const ABI_VERSION: u32 = 12;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -330,19 +329,6 @@ pub unsafe extern "C" fn nx_wasm_program_nx_ir(
     len: usize,
 ) -> *mut NxWasmResult {
     into_result(program_nx_ir(&*handle, argument(ptr, len)))
-}
-
-/// Evaluates the `root` of the artifact `handle` names and answers with its NX text and the nodes
-/// that annotate it, `{ text, nodes }`: the text `nxlang run` prints. A missing `root`, a runtime
-/// error or a value with no NX spelling answers with diagnostics.
-///
-/// # Safety
-/// `handle` must be a live handle from [`nx_wasm_program_build`] or [`nx_wasm_workspace_build`].
-#[no_mangle]
-pub unsafe extern "C" fn nx_wasm_program_evaluate_nx(
-    handle: *mut ProgramArtifact,
-) -> *mut NxWasmResult {
-    into_result(program_evaluate_nx(&*handle))
 }
 
 /// Explains an NX IR image as text with every table index resolved; the payload is a JSON string.
@@ -685,26 +671,6 @@ fn program_nx_ir(program: &ProgramArtifact, argument: Result<&str, OperationErro
         .map_err(|error| internal_error(format!("NX IR emit options are not valid: {error}")))?;
     let artifacts = emit_nx_ir(program, &options).map_err(|error| codegen_error(error, program))?;
     write_nx_ir_bundle(&artifacts).map_err(internal_error)
-}
-
-/// How deep NX calls may nest when the module evaluates.
-///
-/// <para>The interpreter's own default, 1,000, is more than a browser can run. The engine keeps the
-/// module's frames on its native stack, which the module cannot size, and in a Chromium dedicated
-/// worker that stack ran out 325 to 517 NX calls deep depending on what each call does (measured
-/// through the playground: a `for` in the body 325, `n + f(n - 1)` 371, an element function 411, a
-/// plain countdown 517). A limit below all of them, with room for heavier calls and for engines with
-/// smaller stacks, makes runaway recursion the interpreter's readable error instead of a trap.</para>
-pub const MAX_RECURSION_DEPTH: usize = 200;
-
-fn program_evaluate_nx(program: &ProgramArtifact) -> Operation {
-    let limits = ResourceLimits {
-        max_recursion_depth: MAX_RECURSION_DEPTH,
-        ..ResourceLimits::default()
-    };
-    let text =
-        eval_program_artifact_nx_text_with_limits(program, limits).map_err(evaluation_error)?;
-    result_json(&text)
 }
 
 fn program_function_schema(
@@ -1494,53 +1460,6 @@ mod tests {
             let diagnostics: Vec<serde_json::Value> =
                 serde_json::from_str(&read_payload(result)).unwrap();
             assert_eq!(diagnostics[0]["code"], "nx-ir-malformed");
-            nx_wasm_result_free(result);
-            nx_wasm_program_free(handle);
-        }
-    }
-
-    /// Builds `source` and returns its handle.
-    fn build(source: &str) -> *mut ProgramArtifact {
-        let (status, payload) = call(
-            nx_wasm_program_build,
-            &serde_json::json!({ "source": source, "fileName": "input.nx" }).to_string(),
-        );
-        assert_eq!(status, STATUS_OK, "{payload}");
-        handle_from(&payload) as *mut ProgramArtifact
-    }
-
-    #[test]
-    fn a_program_evaluates_to_annotated_nx_text() {
-        let handle = build("type User = { id:string name:string }\n<User id=\"1\" name=\"Ada\" />");
-        unsafe {
-            let result = nx_wasm_program_evaluate_nx(handle);
-            assert_eq!((*result).status, STATUS_OK);
-            let value: serde_json::Value = serde_json::from_str(&read_payload(result)).unwrap();
-            assert_eq!(value["text"], r#"<User id="1" name="Ada" />"#);
-            assert_eq!(value["nodes"][0]["role"], "record");
-            assert_eq!(value["nodes"][0]["type"], "User");
-            assert_eq!(value["nodes"][0]["declaration"]["start_line"], 1);
-            assert_eq!(value["nodes"][1]["name"], "id");
-            nx_wasm_result_free(result);
-
-            // The artifact stays usable after an evaluation.
-            let result = nx_wasm_program_evaluate_nx(handle);
-            assert_eq!((*result).status, STATUS_OK);
-            nx_wasm_result_free(result);
-            nx_wasm_program_free(handle);
-        }
-    }
-
-    #[test]
-    fn an_evaluation_failure_answers_with_diagnostics() {
-        let handle = build("let root() = { 1 / 0 }");
-        unsafe {
-            let result = nx_wasm_program_evaluate_nx(handle);
-            assert_eq!((*result).status, STATUS_EVALUATION_ERROR);
-            let diagnostics: Vec<serde_json::Value> =
-                serde_json::from_str(&read_payload(result)).unwrap();
-            assert_eq!(diagnostics[0]["code"], "runtime-error");
-            assert_eq!(diagnostics[0]["labels"][0]["span"]["start_byte"], 15);
             nx_wasm_result_free(result);
             nx_wasm_program_free(handle);
         }

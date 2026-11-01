@@ -288,19 +288,6 @@ gains one, it is to spell a constrained parameter the same way.
 - **WHEN** a file contains `type Ratio = float32 where in 0.0..=1.0` and `type Fade = { amount: Ratio }`, and hover is asked on `amount`
 - **THEN** the hover SHALL show `amount: Ratio` and `float32 where in 0.0..=1.0`
 
-### Requirement: The interpreter checks constraints only at compile time
-The tree-walking interpreter SHALL run programs with constrained types and SHALL report every
-diagnostic the type checker reports for them, and it SHALL NOT be required to check constraints when
-a program runs. It SHALL evaluate numeric match patterns with the results the IR runtimes give.
-
-#### Scenario: The interpreter accepts a constrained program
-- **WHEN** the interpreter evaluates a program declaring `type Ratio = float32 where in 0.0..=1.0` and `let r: Ratio = 0.5`
-- **THEN** evaluation SHALL succeed with `r` equal to `0.5`
-
-#### Scenario: The interpreter matches a range pattern
-- **WHEN** the interpreter evaluates `if 0.5 is { in 0.0..1.0 => "valid" else => "no" }`
-- **THEN** the result SHALL be `"valid"`
-
 ### Requirement: Finite patterns preserve existing scalar and constraint behavior
 The finite term SHALL accept positive/negative zero, subnormal values, and the maximum positive
 and negative finite values of its floating base, and SHALL reject both infinities and all NaNs.

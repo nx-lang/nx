@@ -73,3 +73,11 @@ retire that engine and simplify the public APIs instead of rebuilding unused exe
   tests and documented examples do use them. Recheck callers at implementation time.
 - No implementation is part of this proposal PR. LSP snippet APIs, compiler constant evaluation,
   new runtime bindings for .NET/C, and execution caching are separate future decisions.
+
+## Accepted follow-up gaps
+
+The user approved retirement before `complete-ir-construction-lowering`. Conditional property
+fragments and positional record constructors are temporarily unsupported through IR execution.
+Preserve their successful source expectations as ignored source-to-IR tests, each naming that
+follow-up change; do not assert failure as the intended behavior. Confirm expectations against HIR
+before deletion. These two gaps do not block retirement; other unexplained discrepancies still do.

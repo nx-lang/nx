@@ -101,6 +101,19 @@ component lifecycle.
 - **THEN** the expected value SHALL be stated in the test
 - **AND** SHALL NOT be computed by evaluating the program another way
 
+
+### Requirement: Retirement preserves pending construction regression expectations
+Interpreter retirement MAY precede executable support for conditional property fragments and
+positional record constructors. The source tests for these two gaps SHALL retain their intended
+successful results as ignored regressions naming `complete-ir-construction-lowering`. No other
+unexpected discrepancy SHALL be accepted under this exception. Temporary CLI limitations SHALL be
+documented until the follow-up enables those tests.
+
+#### Scenario: A deferred source behavior keeps its intended result
+- **WHEN** a retained test exercises either approved construction gap
+- **THEN** it SHALL be ignored with the follow-up change named in its reason
+- **AND** its assertions SHALL describe successful evaluation, not the current failure
+
 ## MODIFIED Requirements
 
 ### Requirement: The Rust IR runtime does not depend on the NX compiler

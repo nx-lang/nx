@@ -215,118 +215,15 @@ public class NxUpdateRecordTests
         }
         """;
 
-    [Fact]
-    public void DispatchComponentActions_WithHandlerInvocation_PatchesStateAndReRenders()
-    {
-        NxComponentInitResult<CounterButtonElement> init =
-            NxRuntime.InitializeComponent<CounterButtonElement>(CounterSource, "Counter");
 
-        Assert.Equal(0, init.Rendered.Value);
-        Assert.Equal("Button.Tapped", init.Rendered.OnTapped.Action);
-        Assert.False(string.IsNullOrEmpty(init.Rendered.OnTapped.Token));
 
-        NxComponentDispatchResult<CounterButtonElement, object> dispatched =
-            NxRuntime.DispatchComponentActions<NxHandlerInvocation<ButtonTapped>[], CounterButtonElement, object>(
-                CounterSource,
-                init.StateSnapshot,
-                new[] { init.Rendered.OnTapped.Invoke(new ButtonTapped()) });
 
-        Assert.Equal(1, dispatched.Rendered.Value);
-        Assert.Empty(dispatched.Effects);
-        Assert.NotEmpty(dispatched.StateSnapshot);
 
-        // The re-rendered handler carries the token for the next dispatch.
-        NxComponentDispatchResult<CounterButtonElement, object> again =
-            NxRuntime.DispatchComponentActions<NxHandlerInvocation<ButtonTapped>[], CounterButtonElement, object>(
-                CounterSource,
-                dispatched.StateSnapshot,
-                new[] { dispatched.Rendered.OnTapped.Invoke(new ButtonTapped()) });
-        Assert.Equal(2, again.Rendered.Value);
-    }
 
-    [Fact]
-    public void DispatchComponentActionsJson_WithHandlerInvocation_ReturnsRenderedEffectsAndSnapshot()
-    {
-        NxComponentInitResult<CounterButtonElement> init =
-            NxRuntime.InitializeComponent<CounterButtonElement>(CounterSource, "Counter");
 
-        NxComponentDispatchResult<JsonElement, JsonElement> dispatched =
-            NxRuntime.DispatchComponentActionsJson(
-                CounterSource,
-                init.StateSnapshot,
-                new[] { init.Rendered.OnTapped.Invoke(new ButtonTapped()) });
 
-        Assert.Equal(1, dispatched.Rendered.GetProperty("value").GetInt32());
-        Assert.Equal(
-            "ActionHandler",
-            dispatched.Rendered.GetProperty("onTapped").GetProperty("$type").GetString());
-        Assert.Empty(dispatched.Effects);
-        Assert.NotEmpty(dispatched.StateSnapshot);
-    }
 
-    [Fact]
-    public void DispatchComponentActions_MixedBatch_RunsInvocationsAndActionsTogether()
-    {
-        string source = """
-            action Saved = { }
-            external component <Button value:int = 0 emits { Tapped { } } />
-            component <Counter emits { Saved } /> = {
-              state { count:int = 0 }
-              <Button value={count} onTapped=<State.Update count={count + 1} /> />
-            }
-            """;
-        NxComponentInitResult<CounterButtonElement> init =
-            NxRuntime.InitializeComponent<CounterButtonElement>(source, "Counter");
 
-        // No parent bound `onSaved`, so the emitted action runs nothing; the batch still succeeds.
-        NxComponentDispatchResult<CounterButtonElement, object> dispatched =
-            NxRuntime.DispatchComponentActions<object[], CounterButtonElement, object>(
-                source,
-                init.StateSnapshot,
-                new object[] { init.Rendered.OnTapped.Invoke(new ButtonTapped()), new SavedAction() });
-
-        Assert.Equal(1, dispatched.Rendered.Value);
-        Assert.Empty(dispatched.Effects);
-    }
-
-    [Fact]
-    public void DispatchComponentActions_WithStaleToken_ThrowsWithoutAResult()
-    {
-        NxComponentInitResult<CounterButtonElement> init =
-            NxRuntime.InitializeComponent<CounterButtonElement>(CounterSource, "Counter");
-        NxHandlerInvocation<ButtonTapped> stale = init.Rendered.OnTapped.Invoke(new ButtonTapped());
-        NxComponentDispatchResult<CounterButtonElement, object> dispatched =
-            NxRuntime.DispatchComponentActions<NxHandlerInvocation<ButtonTapped>[], CounterButtonElement, object>(
-                CounterSource,
-                init.StateSnapshot,
-                new[] { stale });
-
-        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.DispatchComponentActions<NxHandlerInvocation<ButtonTapped>[], CounterButtonElement, object>(
-                CounterSource,
-                dispatched.StateSnapshot,
-                new[] { stale }));
-
-        Assert.Contains(
-            error.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(stale.Token, StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void EvaluateComponent_HandlerReference_HasNoToken()
-    {
-        CounterButtonElement rendered =
-            NxRuntime.EvaluateComponent<Dictionary<string, object>, CounterState, CounterButtonElement>(
-                CounterSource,
-                "Counter",
-                new Dictionary<string, object>(),
-                new CounterState { Count = 3 });
-
-        Assert.Equal(3, rendered.Value);
-        Assert.Equal("Button.Tapped", rendered.OnTapped.Action);
-        Assert.Null(rendered.OnTapped.Token);
-        Assert.Throws<InvalidOperationException>(() => rendered.OnTapped.Invoke(new ButtonTapped()));
-    }
 
     [Fact]
     public void UpdateRecord_Json_OmitsUnsetAndWritesClearedAsNull()
@@ -445,101 +342,13 @@ public class NxUpdateRecordTests
         Assert.Equal("h1-1", document.RootElement.GetProperty("token").GetString());
     }
 
-    [Fact]
-    public void RawEffect_CarryingAnUpdateRecord_PreservesAbsence()
-    {
-        string source = """
-            type User = { name:string email?:string }
-            action Apply = { patch:User.Update }
-            external component <Button value:int = 0 emits { Tapped { } } />
-            component <Form emits { Apply } /> = {
-              state { count:int = 0 }
-              <Button value={count} onTapped=<Apply patch=<User.Update name="Ada" /> /> />
-            }
-            """;
 
-        NxComponentInitResult<CounterButtonElement> init =
-            NxRuntime.InitializeComponent<CounterButtonElement>(source, "Form");
 
-        NxComponentDispatchResult<JsonElement, JsonElement> dispatched =
-            NxRuntime.DispatchComponentActionsJson(
-                source,
-                init.StateSnapshot,
-                new[] { init.Rendered.OnTapped.Invoke(new ButtonTapped()) });
 
-        JsonElement effect = Assert.Single(dispatched.Effects);
-        Assert.Equal("Apply", effect.GetProperty("$type").GetString());
-        JsonElement patch = effect.GetProperty("patch");
-        string[] keys = patch.EnumerateObject().Select(property => property.Name).ToArray();
-        Assert.Equal(new[] { "$type", "name" }, keys);
-        Assert.Equal("User.Update", patch.GetProperty("$type").GetString());
-    }
 
-    [Fact]
-    public void UpdateRecord_PassedAsAProp_DecodesNativelyWithOnlyThePresentField()
-    {
-        string source = """
-            type User = { name:string email?:string }
-            component <Editor patch:User.Update /> = { <Panel patch={patch} /> }
-            """;
 
-        NxComponentInitResult<JsonElement> init = NxRuntime.InitializeComponentJson(
-            source,
-            "Editor",
-            new EditorProps { Patch = new User_update { Name = "Ada" } });
 
-        JsonElement patch = init.Rendered.GetProperty("patch");
-        string[] keys = patch.EnumerateObject().Select(property => property.Name).ToArray();
-        Assert.Equal(new[] { "$type", "name" }, keys);
-        Assert.Equal("User.Update", patch.GetProperty("$type").GetString());
-        Assert.Equal("Ada", patch.GetProperty("name").GetString());
-    }
 
-    [Fact]
-    public void UpdateRecord_PassedAsAProp_WithAnUnknownField_IsRejectedAtInitialization()
-    {
-        string source = """
-            type User = { name:string email?:string }
-            component <Editor patch:User.Update /> = { <Panel patch={patch} /> }
-            """;
-
-        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.InitializeComponentJson(source, "Editor", new DriftedEditorProps()));
-
-        Assert.Contains(
-            error.Diagnostics,
-            diagnostic => diagnostic.Message.Contains("nick", StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    /// A handler bound at the root belongs to no component, so a bare update record it returns is the host's to
-    /// apply: it arrives as an effect with only the discriminator and the fields that were set.
-    /// </summary>
-    [Fact]
-    public void BareUpdateRecord_FromARootBoundHandler_ReachesTheHostAsAnEffect()
-    {
-        string source = """
-            type User = { name:string email?:string }
-            external component <Button emits { Tapped { } } />
-            let saveButton() = <Button onTapped=<User.Update name="Ada" /> />
-            component <Form /> = { <Panel>{saveButton()}</Panel> }
-            """;
-
-        NxComponentInitResult<JsonElement> init = NxRuntime.InitializeComponentJson(source, "Form");
-        string token = Assert.Single(HandlerTokens(init.Rendered));
-
-        NxComponentDispatchResult<JsonElement, JsonElement> dispatched =
-            NxRuntime.DispatchComponentActionsJson(
-                source,
-                init.StateSnapshot,
-                new[] { new NxHandlerInvocation<ButtonTapped>(token, new ButtonTapped()) });
-
-        JsonElement effect = Assert.Single(dispatched.Effects);
-        string[] keys = effect.EnumerateObject().Select(property => property.Name).ToArray();
-        Assert.Equal(new[] { "$type", "name" }, keys);
-        Assert.Equal("User.Update", effect.GetProperty("$type").GetString());
-        Assert.Equal("Ada", effect.GetProperty("name").GetString());
-    }
 
     [Fact]
     public void UpdateRecord_Fields_EnumerateOnlyTheSetFields()
@@ -814,105 +623,13 @@ public class NxUpdateRecordTests
         component <BookViewer book:Book /> = { <Panel book={book} /> }
         """;
 
-    /// <summary>
-    /// <see langword="null"/> is the .NET spelling of a cleared field: it crosses the boundary as
-    /// <see langword="null"/>, the NX runtime reads it as the empty value for the optional <c>author</c>, and it comes
-    /// back as a carried <see langword="null"/>.
-    /// </summary>
-    [Fact]
-    public void ClearedOptionalField_RoundTripsAsNullThroughTheRuntime()
-    {
-        BookEditorProps props = new() { Patch = new Book_update { Author = null } };
 
-        NxComponentInitResult<JsonElement> asJson =
-            NxRuntime.InitializeComponentJson(BookSource, "BookEditor", props);
-        JsonElement patch = asJson.Rendered.GetProperty("patch");
-        string[] keys = patch.EnumerateObject().Select(property => property.Name).ToArray();
-        Assert.Equal(new[] { "$type", "author" }, keys);
-        Assert.Equal("Book.Update", patch.GetProperty("$type").GetString());
-        Assert.Equal(JsonValueKind.Null, patch.GetProperty("author").ValueKind);
 
-        NxComponentInitResult<BookPanelElement> typed =
-            NxRuntime.InitializeComponent<BookEditorProps, BookPanelElement>(BookSource, "BookEditor", props);
-        Book_update read = typed.Rendered.Patch;
-        Assert.Equal(new[] { Book_property.Author }, read.Changed());
-        Assert.True(read.Author.HasValue);
-        Assert.Null(read.Author.Value);
-        Assert.False(read.Title.HasValue);
-    }
 
-    /// <summary>
-    /// The generated companion types <c>Name</c> as <c>NxOptional&lt;string&gt;</c>, so clearing it is a nullability
-    /// diagnostic in C#; a payload that clears it anyway is refused when the runtime constructs the
-    /// <c>User.Update</c>, naming the field, while clearing the optional <c>email</c> is accepted.
-    /// </summary>
-    [Fact]
-    public void ClearingANonClearableField_IsRejectedByTheRuntimeNamingIt()
-    {
-        string source = """
-            type User = { name:string email?:string }
-            component <Editor patch:User.Update /> = { <Panel patch={patch} /> }
-            """;
 
-        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.InitializeComponentJson(source, "Editor", new ClearingEditorProps()));
-        Assert.Contains("name", DiagnosticText(error), StringComparison.Ordinal);
 
-        NxComponentInitResult<JsonElement> cleared = NxRuntime.InitializeComponentJson(
-            source,
-            "Editor",
-            new EditorProps { Patch = new User_update { Email = null } });
-        JsonElement patch = cleared.Rendered.GetProperty("patch");
-        Assert.Equal(new[] { "$type", "email" }, patch.EnumerateObject().Select(property => property.Name).ToArray());
-        Assert.Equal(JsonValueKind.Null, patch.GetProperty("email").ValueKind);
-    }
 
-    /// <summary>
-    /// A <c>+</c> field is a plain array in C#, so an empty one compiles; the boundary is where <c>+</c> is
-    /// enforced.
-    /// </summary>
-    [Fact]
-    public void EmptyArrayAtAOneOrMoreSite_IsRejectedByTheRuntimeNamingIt()
-    {
-        BookViewerProps props = new()
-        {
-            Book = new BookRecord { Authors = Array.Empty<PersonRecord>() },
-        };
 
-        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.InitializeComponentJson(BookSource, "BookViewer", props));
-
-        Assert.Contains("authors", DiagnosticText(error), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void NullAnEmptyArrayAndAMissingKey_AllDecodeAsTheEmptyValue()
-    {
-        object[] inputs =
-        {
-            new BookViewerProps { Book = new BookRecord { Tags = null, Author = null } },
-            new BookViewerProps { Book = new BookRecord { Tags = Array.Empty<string>() } },
-            new BareBookViewerProps(),
-        };
-
-        foreach (object props in inputs)
-        {
-            NxComponentInitResult<JsonElement> init;
-            try
-            {
-                init = NxRuntime.InitializeComponentJson(BookSource, "BookViewer", props);
-            }
-            catch (NxEvaluationException error)
-            {
-                Assert.Fail($"{props.GetType().Name}: {DiagnosticText(error)}");
-                return;
-            }
-
-            JsonElement book = init.Rendered.GetProperty("book");
-            string[] keys = book.EnumerateObject().Select(property => property.Name).ToArray();
-            Assert.Equal(new[] { "$type", "authors", "title" }, keys);
-        }
-    }
 
     /// <summary>
     /// A decoded optional sequence may read as <see langword="null"/> or as an empty array depending on where it came

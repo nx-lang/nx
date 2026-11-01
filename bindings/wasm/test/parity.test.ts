@@ -1,3 +1,4 @@
+import { formatIrResult } from "./execution-support.js";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -411,35 +412,12 @@ describe("evaluation parity with the command line", () => {
       const artifact = host.buildProgramArtifact(source, { fileName: `${name}.nx` });
       try {
         // `nxlang run` ends its output with a newline; the text is the value alone.
-        expect(artifact.evaluateNx().text).toBe(printed.replace(/\n$/, ""));
+        expect(formatIrResult(artifact, name === "union" ? { type: "Status" } : {}).text).toBe(printed.replace(/\n$/, ""));
       } finally {
         artifact.dispose();
       }
     });
   }
-});
-
-describe("recursion past the module's limit", () => {
-  const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-
-  it("is an error here and a value from nxlang run, which allows deeper calls", () => {
-    const source = "let f(n:int): int = { if n == 0 { 0 } else { f(n - 1) } }\nlet root() = { f(250) }";
-    const directory = mkdtempSync(path.join(tmpdir(), "nx-parity-"));
-    try {
-      const file = path.join(directory, "deep.nx");
-      writeFileSync(file, source);
-      expect(execFileSync(buildCommandLine(repositoryRoot), ["run", file], { encoding: "utf8" })).toBe("0\n");
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-
-    const artifact = host.buildProgramArtifact(source);
-    try {
-      expect(() => artifact.evaluateNx()).toThrow(/recursion depth 200 exceeded/);
-    } finally {
-      artifact.dispose();
-    }
-  }, 600_000);
 });
 
 /**

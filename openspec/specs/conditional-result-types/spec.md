@@ -22,7 +22,7 @@ branches' occurrence with zero admitted. A conditional with no `else` whose bran
 SHALL therefore have type `T?`, one whose branches produce `T+` SHALL have type `T*`, and one whose
 branches already admit zero SHALL have that type unchanged.
 
-The interpreter, the TypeScript IR runtime and every code generation target SHALL agree on this.
+The Rust IR runtime, the TypeScript IR runtime and every code generation target SHALL agree on this.
 
 #### Scenario: An untaken conditional is the empty sequence
 - **WHEN** a file binds `let x:int? = { if c { 1 } }` and `c` evaluates to false
@@ -48,10 +48,10 @@ The interpreter, the TypeScript IR runtime and every code generation target SHAL
 - **AND** evaluation SHALL produce the content property holding only the sibling element
 
 ### Requirement: A conditional with no `else` contributes no items in a collecting position
-Where an `if` or `if … is` expression with no `else` branch appears in a collecting position as
-`sequence-model` defines it — an element body, a content-property binding, a braced value list, or
-the body of a `for` — and no branch is taken, it SHALL contribute no items. It SHALL NOT contribute
-an item of any kind.
+An `if` or `if … is` expression with no `else` branch SHALL contribute no items when no branch is
+taken and it appears in a collecting position as `sequence-model` defines it — an element body, a
+content-property binding, a braced value list, or the body of a `for`. It SHALL NOT contribute an
+item of any kind.
 
 This SHALL follow from the requirement above together with the splice rule, and SHALL NOT be a
 separate rule that an implementation applies to conditionals: the conditional's value admits zero,
@@ -72,8 +72,8 @@ one that also holds an item that is always present does not.
 - **THEN** evaluation SHALL produce the content property holding the sibling element and the
   conditional's element, in source order
 
-#### Scenario: Generated code and the interpreter agree
-- **WHEN** a source containing a conditional child with no `else` is evaluated by the interpreter and
+#### Scenario: Generated code and the Rust IR runtime agree
+- **WHEN** a source containing a conditional child with no `else` is evaluated by the Rust IR runtime and
   by generated TypeScript, with the condition false
 - **THEN** both SHALL produce the same content property value
 

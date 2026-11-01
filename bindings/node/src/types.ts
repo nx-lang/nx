@@ -3,10 +3,6 @@
  */
 export type NxSourceInput = string | Buffer | Uint8Array;
 
-/**
- * Binary representation returned by byte-oriented evaluation APIs.
- */
-export type NxOutputFormat = "messagePack" | "json";
 
 /**
  * Severity level reported for an NX diagnostic.
@@ -230,28 +226,9 @@ export interface NxGeneratedNxIr {
   readonly metadata: NxIrMetadata;
 }
 
-/**
- * Options shared by evaluation APIs.
- */
-export interface NxEvaluationOptions {
-  /**
-   * Entrypoint to evaluate.
-   *
-   * Only `root` is supported by the current native host API. Other values throw `NxEvaluationError` with an
-   * `unsupported-entrypoint` diagnostic.
-   */
-  readonly entrypoint?: "root" | string;
-}
 
-/**
- * Options for byte-oriented evaluation APIs.
- */
-export interface NxByteEvaluationOptions extends NxEvaluationOptions {
-  /**
-   * Requested output encoding. Defaults to `messagePack`.
-   */
-  readonly outputFormat?: NxOutputFormat;
-}
+
+
 
 /**
  * Options for building a program artifact from a single NX source payload.
@@ -270,15 +247,7 @@ export interface NxSourceBuildOptions {
   readonly fileName?: string;
 }
 
-/**
- * Options for evaluating a single NX source payload to JSON.
- */
-export interface NxSourceEvaluationOptions extends NxSourceBuildOptions, NxEvaluationOptions {}
 
-/**
- * Options for evaluating a single NX source payload to bytes.
- */
-export interface NxSourceByteEvaluationOptions extends NxSourceBuildOptions, NxByteEvaluationOptions {}
 
 /**
  * One module of a library loaded from memory.

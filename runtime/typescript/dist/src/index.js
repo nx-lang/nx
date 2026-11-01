@@ -4176,6 +4176,16 @@ function normalizeNominalValue(context, ty, value, path) {
             ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false, context.evaluation),
         }, object, context.evaluation);
     }
+    if (kind.tag === "component") {
+        const object = requireObject(value, path);
+        if (object.$type !== undefined && object.$type !== display) {
+            return value;
+        }
+        const { $type: _discard, ...properties } = object;
+        const { fields, handlers } = splitHandlerProperties(linked, declaration, properties, path);
+        const normalized = normalizeFields(context.program, linked, declaration, kind.props, fields, [], path, false, context.evaluation);
+        return carryOrigin({ $type: display, ...normalized, ...handlerObject(handlers) }, object, context.evaluation);
+    }
     if (kind.tag === "union") {
         // A constant case arrives as its bare name rather than as a `$type` object.
         if (typeof value === "string") {

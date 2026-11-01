@@ -113,7 +113,7 @@ let root(): int = { answer() + 1 + (7 / 2) + (7 % 2) }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - emitted function IR matches native interpreter output");
+    console.log("ok - emitted function IR matches Rust IR runtime output");
   },
 );
 
@@ -136,10 +136,10 @@ let root(): int = { 1 / 0 }
     const native = nativeFailure(sourcePath);
     if (native.status === 0 || !`${native.stdout}\n${native.stderr}`.includes("Division by zero")) {
       throw new Error(
-        `Expected native interpreter to fail with Division by zero\nstdout:\n${native.stdout}\nstderr:\n${native.stderr}`,
+        `Expected Rust IR runtime to fail with Division by zero\nstdout:\n${native.stdout}\nstderr:\n${native.stderr}`,
       );
     }
-    console.log("ok - emitted division-by-zero IR matches native interpreter failure");
+    console.log("ok - emitted division-by-zero IR matches Rust IR runtime failure");
   },
 );
 
@@ -152,7 +152,7 @@ let root() = { <Stack><Item label="only" /></Stack> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a single child of a list-typed content property matches the native interpreter");
+    console.log("ok - a single child of a list-typed content property matches the Rust IR runtime");
   },
 );
 
@@ -165,7 +165,7 @@ let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a single value at a list-typed property matches the native interpreter");
+    console.log("ok - a single value at a list-typed property matches the Rust IR runtime");
   },
 );
 
@@ -183,7 +183,7 @@ let root(): User.Update = { <User.Update email={} /> }
     const expected = { $type: "User.Update", email: null };
     assertEqual(evaluateFunction(prepared, "root"), expected);
     assertEqual(nativeJson(sourcePath), expected);
-    console.log("ok - an emitted update record keeps absent fields absent like the native interpreter");
+    console.log("ok - an emitted update record keeps absent fields absent like the Rust IR runtime");
   },
 );
 
@@ -196,7 +196,7 @@ let root() = { <User role="admin" /> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - an inherited record field and its default match the native interpreter");
+    console.log("ok - an inherited record field and its default match the Rust IR runtime");
   },
 );
 
@@ -211,7 +211,7 @@ let root(): UiEvent = { <UiEvent.clicked x=3 /> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a union case carries its base's fields like the native interpreter");
+    console.log("ok - a union case carries its base's fields like the Rust IR runtime");
   },
 );
 
@@ -225,7 +225,7 @@ let root() = { <Card owner={<User name="Ada" role="admin" />} /> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a derived record at a base-typed field matches the native interpreter");
+    console.log("ok - a derived record at a base-typed field matches the Rust IR runtime");
   },
 );
 
@@ -241,7 +241,7 @@ let root() = { <Frame held={<Figure.circle r=2 />} /> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a union case at a base-typed field matches the native interpreter");
+    console.log("ok - a union case at a base-typed field matches the Rust IR runtime");
   },
 );
 
@@ -258,7 +258,7 @@ let root() = { <Box xs={3}><Leaf /></Box> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a list spelled through aliases coerces like the native interpreter");
+    console.log("ok - a list spelled through aliases coerces like the Rust IR runtime");
   },
 );
 
@@ -272,7 +272,7 @@ let root() = { <Panel Padding={<Thickness Left=4.0 />}><Panel /></Panel> }
   (dir, sourcePath) => {
     const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
-    console.log("ok - a record-typed property matches the native interpreter");
+    console.log("ok - a record-typed property matches the Rust IR runtime");
   },
 );
 
@@ -368,7 +368,7 @@ let keys(): User.Property* = { changed(<User.Update age={} name="Ada" />) }
     assertEqual(evaluateFunction(prepared, "key"), "email");
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
     assertEqual(evaluateFunction(prepared, "keys"), ["name", "age"]);
-    console.log("ok - an emitted property reference and apply match the native interpreter");
+    console.log("ok - an emitted property reference and apply match the Rust IR runtime");
   },
 );
 
@@ -471,7 +471,7 @@ let root() = { viaComponent() viaFunction() }
     // The braced value at the top splices too, so the six items of `viaFunction()` sit beside the
     // one element of `viaComponent()` rather than nested inside a list of their own.
     assertEqual(root.length, 7);
-    console.log("ok - list-valued content children are spliced as the native interpreter splices them");
+    console.log("ok - list-valued content children are spliced as the Rust IR runtime splices them");
   },
 );
 
@@ -486,7 +486,7 @@ let root(): string+ = { xs ys }
     const root = evaluateFunction(prepared, "root");
     assertEqual(root, nativeJson(sourcePath));
     assertEqual(root, ["a", "b", "c"]);
-    console.log("ok - two sequences in a braced value concatenate as the native interpreter concatenates them");
+    console.log("ok - two sequences in a braced value concatenate as the Rust IR runtime concatenates them");
   },
 );
 
@@ -505,7 +505,7 @@ let root() = { flat() evens() }
     // A list-yielding body concatenates, and an iteration whose conditional is not taken
     // contributes nothing.
     assertEqual(root, [1, 2, 3, 4, 2, 4]);
-    console.log("ok - a list-yielding and a conditional `for` body match the native interpreter");
+    console.log("ok - a list-yielding and a conditional `for` body match the Rust IR runtime");
   },
 );
 
@@ -522,7 +522,7 @@ let root(): Box = { <Box><A/>{if c { <A/> }}</Box> }
     assertEqual(root, nativeJson(sourcePath));
     // A conditional child that does not fire contributes no items, and never a null.
     assertEqual(root.items, [{ $type: "A", n: 1 }]);
-    console.log("ok - an untaken conditional child contributes no items, as in the native interpreter");
+    console.log("ok - an untaken conditional child contributes no items, as in the Rust IR runtime");
   },
 );
 
@@ -2364,3 +2364,21 @@ component <Stepper /> = {
     console.log("ok - a member that is undefined is not counted by the measure");
   },
 );
+
+
+// The component descriptor's own nominal type must recursively validate nested host records.
+withSource(`type User = { name:string email?:string }
+component <Editor pending:User.Update /> = { <Panel pending={pending} /> }
+component <Wrap inner:Editor /> = { <Frame inner={inner} /> }`, (dir, sourcePath) => {
+  const program = prepareNxIrProgram(emitIr(dir, sourcePath));
+  const props = pending => ({inner: {$type: "Editor", pending}});
+  assertEqual(initializeComponent(program, "Wrap", props({$type: "User.Update", email: null})).rendered,
+    {$type: "Frame", inner: {$type: "Editor", pending: {$type: "User.Update", email: null}}});
+  for (const pending of [{$type: "User.Update", nick: "a"}, {$type: "User.Update", name: null}]) {
+    let refused = false;
+    try { initializeComponent(program, "Wrap", props(pending)); }
+    catch (error) { if (!(error instanceof NxIrRuntimeError)) throw error; refused = true; }
+    if (!refused) throw new Error("Expected nested component props to be validated");
+  }
+});
+console.log("ok - nested component descriptor props validate their update records");

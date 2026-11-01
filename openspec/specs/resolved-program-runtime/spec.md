@@ -1,100 +1,70 @@
 # resolved-program-runtime Specification
 
 ## Purpose
-Defines the interpreter-facing resolved program model and the module-qualified runtime reference
+Defines the Rust IR runtime-facing resolved program model and the module-qualified runtime reference
 rules required for multi-module execution and serialized runtime state.
 
 ## Requirements
-### Requirement: Interpreter execution is defined by ResolvedProgram
-The interpreter SHALL execute NX code through a `ResolvedProgram` rather than through one merged
-lowered module. `ResolvedProgram` SHALL provide the executable view of the program across multiple
-`LoweredModule`s, including entrypoint lookup and resolved symbol tables for runtime-visible items.
-
-#### Scenario: Root evaluation crosses module boundaries through resolved program state
-- **WHEN** a root source file imports a library function `answer()` from another file and `root()`
-  returns `answer()`
-- **THEN** the interpreter SHALL resolve `answer()` through `ResolvedProgram`
-- **AND** the interpreter SHALL execute the call without requiring the source file and imported file
-  to be merged into one `LoweredModule`
-
-#### Scenario: Component initialization resolves component definitions through ResolvedProgram
-- **WHEN** a host initializes a component whose definition is exported from an imported library file
-- **THEN** the runtime SHALL locate that component through `ResolvedProgram`
-- **AND** the runtime SHALL execute the component using the owning `LoweredModule` for that
-  definition
-
 ### Requirement: Runtime references are module-qualified
-Any runtime-owned reference to executable NX code SHALL identify both the owning module and the
-stable local item, expression, or element within that module. Item references in a resolved program
-SHALL preserve the exact local definition identity of the target declaration and SHALL NOT require
-top-level runtime lookup to rediscover that declaration by visible string name once the program has
-been resolved.
+Runtime-owned executable references SHALL identify the owning IR module and exact local declaration
+or node. Resolved source declaration identities SHALL be preserved during compilation rather than
+rediscovered through ambiguous global name lookup.
 
 #### Scenario: Function references identify the owning lowered module and exact local definition
-- **WHEN** runtime resolution records a callable reference for a function exported from
-  `forms/input.nx`
-- **THEN** that callable reference SHALL include the identity of `forms/input.nx`
-- **AND** that callable reference SHALL include the exact local function item reference within that
-  module
+- **WHEN** functions or handlers originate in an imported module
+- **THEN** the emitted/runtime references SHALL preserve that owning module and local declaration or node
 
 #### Scenario: Imported component references do not require a name rescan at execution time
-- **WHEN** a root source file imports a component exported from another module and runtime
-  resolution records a reference to that component
-- **THEN** the resolved component reference SHALL include the owning module identity and exact local
-  component item reference
-- **AND** runtime execution SHALL use that resolved reference without rescanning the owning module
-  for the visible component name
+- **WHEN** a host initializes a component exported from an imported module through an IR runtime
+- **THEN** execution SHALL use the exact resolved component in that module's linked image
+- **AND** SHALL NOT rescan by a globally visible component name
 
 #### Scenario: Captured handler references identify the owning lowered module
-- **WHEN** a component action handler captures an expression from `search-box.nx`
-- **THEN** the runtime-owned handler reference SHALL include the identity of `search-box.nx`
-- **AND** the runtime-owned handler reference SHALL include the local expression reference within
-  that module
+- **WHEN** a handler captures an expression from `search-box.nx`
+- **THEN** its emitted/runtime reference SHALL retain that module identity and the exact local IR node
 
 ### Requirement: Serialized runtime state is program-specific and module-aware
-Serialized component snapshots and any serialized handler payloads SHALL encode the
-module-qualified runtime references needed by `ResolvedProgram`. Runtime entry points SHALL reject
-serialized state that does not match the target program revision or that lacks the required module
-identity.
+Stored IR runtime component instances and captured handlers SHALL encode module-qualified IR
+references and identify the exact linked images that produced them. Restoration SHALL reject a
+mismatched program revision or invalid references. The removed interpreter snapshot binding SHALL
+NOT be replaced with a new opaque binding transport.
 
 #### Scenario: Snapshot from the same program revision can be reused
-- **WHEN** a host stores a component snapshot produced from one `ProgramArtifact` revision and later
-  dispatches actions against that same `ProgramArtifact` revision
-- **THEN** dispatch SHALL accept the snapshot
-- **AND** the runtime SHALL resolve the snapshot's code references through module-qualified runtime
-  references
+- **WHEN** a host stores and restores an instance using the existing IR runtime storage API against the same images
+- **THEN** later dispatch SHALL preserve its state and module-qualified handlers
 
 #### Scenario: Snapshot from a different program revision is rejected
-- **WHEN** a host dispatches actions using a snapshot produced by a different `ProgramArtifact`
-  revision
-- **THEN** dispatch SHALL reject the snapshot as incompatible
-- **AND** the runtime SHALL NOT silently reinterpret bare local IDs against the new program
+- **WHEN** a host restores an instance against different linked images
+- **THEN** restoration SHALL fail without silently reinterpreting local IDs
 
 ### Requirement: Workspace program evaluation uses entry-module scoped root
-Runtime evaluation of a `ProgramArtifact` built from an `NxWorkspace` SHALL execute `root()` from
-the artifact's selected entry module. Runtime entrypoint resolution SHALL NOT choose `root()` from
-another workspace module merely because that module appears earlier in a global symbol table.
+Executing IR compiled from a workspace SHALL run `root()` from the workspace's selected entry
+module and SHALL NOT select another module's root from a global symbol table.
 
 #### Scenario: Two workspace modules can define root
-- **WHEN** a workspace contains `a.nx` with `let root() = { "a" }`
-- **AND** the same workspace contains `b.nx` with `let root() = { "b" }`
-- **AND** the caller builds a workspace program artifact with entry identity `b.nx`
-- **THEN** evaluating that artifact SHALL return `"b"`
+- **WHEN** a workspace contains `a.nx` returning `"a"` and `b.nx` returning `"b"` from root
+- **AND** the caller compiles with entry identity `b.nx` and executes the linked IR
+- **THEN** the result SHALL be `"b"`
 
 #### Scenario: Entry module without root reports that entry module
-- **WHEN** a workspace contains `entry.nx` without a `root()` function
-- **AND** another workspace module contains a valid `root()` function
-- **AND** the caller builds and evaluates a workspace program artifact with entry identity
-  `entry.nx`
-- **THEN** NX SHALL report a no-root diagnostic for `entry.nx`
-- **AND** NX SHALL NOT execute `root()` from the other module
+- **WHEN** the selected entry lacks root but another module defines it
+- **THEN** CLI execution SHALL report the missing entrypoint for the selected module
+- **AND** SHALL NOT execute the other module's root
 
 ### Requirement: Workspace entrypoints are module-qualified in resolved programs
-`ResolvedProgram` SHALL provide enough module-qualified entrypoint information for workspace program
-artifacts to resolve runtime entrypoints by selected module id and symbol name.
+Resolved workspace programs SHALL preserve selected entry-module identity and resolved declaration
+references for IR compilation. Execution SHALL resolve the selected entry through linked IR rather
+than execute a lowered module directly.
 
 #### Scenario: Workspace root lookup uses selected runtime module reference
-- **WHEN** a workspace program artifact records `app/main.nx` as its selected entry identity
-- **AND** the selected entry module lowers successfully
-- **THEN** runtime `root()` lookup SHALL use the selected entry module's `RuntimeModuleId`
-- **AND** execution SHALL use the owning lowered module for that reference
+- **WHEN** a workspace selects `app/main.nx` and it lowers successfully
+- **THEN** emission and linking SHALL preserve that module as the entry
+- **AND** execution SHALL use its IR declaration rather than an HIR execution path
+
+### Requirement: Native execution is defined by the program's emitted IR
+Native NX execution SHALL evaluate linked NX IR, not execute `ResolvedProgram` directly.
+`ResolvedProgram` SHALL remain the compiler's resolved view across lowered modules.
+
+#### Scenario: Root calls an imported function
+- **WHEN** source root calls a function imported from another module
+- **THEN** native execution SHALL call that module's linked image without merging lowered modules

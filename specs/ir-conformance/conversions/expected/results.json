@@ -12,16 +12,16 @@
   },
   "main.nx::integerDivisionOf": 3,
   "main.nx::integralFloat": "1",
-  "main.nx::joinedArmDivision": 3.0,
+  "main.nx::joinedArmDivision": 3,
   "main.nx::joinedFloat32Product": 6.899999618530273,
   "main.nx::joinedIf": 1.5,
-  "main.nx::joinedIntegerDivision": 3.0,
+  "main.nx::joinedIntegerDivision": 3,
   "main.nx::joinedList": [
-    3.0,
+    3,
     1.5
   ],
   "main.nx::joinedListDivision": [
-    3.0,
+    3,
     0.5
   ],
   "main.nx::joinedMatch": 1.5,

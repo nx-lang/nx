@@ -76,59 +76,9 @@ public class NxRangeTests
             new NxRange<long>(1, 5, false).GetHashCode());
     }
 
-    [Fact]
-    public void EvaluatedRange_DeserializesIntoTheSdkType()
-    {
-        NxRange<long> range = NxRuntime.Evaluate<NxRange<long>>("let root() = { 1..=5 }", "ranges.nx");
 
-        Assert.Equal(1, range.Start);
-        Assert.Equal(5, range.End);
-        Assert.True(range.EndInclusive);
-    }
 
-    /// <summary>
-    /// The prelude's <c>Range</c> and this type must not drift apart.
-    /// </summary>
-    /// <remarks>
-    /// <para>The range NX evaluates carries the prelude's declared fields, and a field with a default is materialized
-    /// into the value, so comparing its canonical JSON members with this type's fails as soon as the declaration gains,
-    /// loses or renames one.</para>
-    /// <para>The member names alone would not catch a field whose <em>type</em> changed — <c>endInclusive:boolean</c>
-    /// becoming an <c>int</c> keeps the name — so the JSON value kinds are compared too. A change in the shape the
-    /// emitter would generate is caught on the compiler side instead, by the checked-in
-    /// <c>Generated/PreludeCompanions.g.cs</c> fixture.</para>
-    /// </remarks>
-    [Fact]
-    public void NxRange_TracksThePreludeDeclaration()
-    {
-        JsonElement evaluated = NxRuntime.EvaluateJson("let root() = { 1..=5 }", "ranges.nx");
-        List<KeyValuePair<string, JsonValueKind>> declared = evaluated
-            .EnumerateObject()
-            .Where(property => property.Name != "$type")
-            .Select(property => new KeyValuePair<string, JsonValueKind>(property.Name, Kind(property.Value)))
-            .OrderBy(member => member.Key, System.StringComparer.Ordinal)
-            .ToList();
 
-        using JsonDocument sdk = JsonDocument.Parse(JsonSerializer.Serialize(new NxRange<long>(1, 5, true)));
-        List<KeyValuePair<string, JsonValueKind>> members = sdk.RootElement
-            .EnumerateObject()
-            .Select(property => new KeyValuePair<string, JsonValueKind>(property.Name, Kind(property.Value)))
-            .OrderBy(member => member.Key, System.StringComparer.Ordinal)
-            .ToList();
-
-        Assert.Equal(declared, members);
-
-        // The comparison is only as strong as the kinds it distinguishes, so assert what they are rather than trusting
-        // two lists that would also match if every field serialized the same way.
-        Assert.Equal(
-            new List<KeyValuePair<string, JsonValueKind>>
-            {
-                new("end", JsonValueKind.Number),
-                new("endInclusive", JsonValueKind.True),
-                new("start", JsonValueKind.Number),
-            },
-            declared);
-    }
 
     /// <summary>
     /// A JSON value's kind, with <see cref="JsonValueKind.False"/> folded into <see cref="JsonValueKind.True"/> so a

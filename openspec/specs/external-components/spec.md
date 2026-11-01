@@ -27,7 +27,7 @@ invocation surface.
 - **AND** SHALL preserve `query` as declared external state rather than as an invocable prop
 
 ### Requirement: Evaluating an external component produces a typed component record
-When NX evaluates an element targeting a concrete external component, the interpreter SHALL produce
+When NX evaluates an element targeting a concrete external component, the Rust and TypeScript IR runtimes SHALL produce
 a typed record-like component value whose type name is the component name and whose fields are the
 normalized effective props, inherited or defaulted prop values, content bindings, and any bound
 emitted-action handlers. Declared external state SHALL remain host-managed metadata and SHALL NOT
@@ -88,7 +88,7 @@ from that abstract base through the declared `extends` chain.
 - **WHEN** a file contains `abstract external component <Question label:string /> external component <ShortTextQuestion extends Question placeholder?:string /> let question: Question = <ShortTextQuestion label={"Name"} placeholder={"Enter your name"} />`
 - **THEN** type checking SHALL report no errors for the binding to `question`
 
-#### Scenario: Interpreter returns derived value through function typed at base
+#### Scenario: A runtime returns a derived value through function typed at base
 
 - **WHEN** the same declarations exist and a function `render()` returns `{ question }` where
   `question` is typed as `Question` and initialized with `<ShortTextQuestion ... />`
@@ -101,7 +101,7 @@ from that abstract base through the declared `extends` chain.
 - **THEN** type checking SHALL report at least one error for the binding to `x`
 
 ### Requirement: Runtime external component record values match expected types using contract ancestry
-The interpreter SHALL accept an external component record value for an expected named type when the
+The Rust and TypeScript IR runtimes SHALL accept an external component record value for an expected named type when the
 expected name resolves to an external component contract and either the runtime component type name
 matches that contract’s component name or that contract’s component name appears in the actual
 runtime component value’s effective ancestor list, consistent with static named-type compatibility.
@@ -113,7 +113,7 @@ runtime component value’s effective ancestor list, consistent with static name
 - **AND** the returned sequence SHALL contain two records whose runtime type names are `ShortTextQuestion`
   and `LongTextQuestion` respectively
 
-#### Scenario: Interpreter rejects unrelated external component at parameter coercion
+#### Scenario: A runtime rejects an unrelated external component at parameter coercion
 
 - **WHEN** a file contains `abstract external component <A label:string /> external component <C label:string /> let take(a: A): string = { "ok" } let render() = { take(<C label={"x"} />) }`
 - **THEN** interpreting `render()` SHALL fail with a type mismatch attributable to parameter coercion

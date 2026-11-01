@@ -11,11 +11,11 @@
 //! [`NxValueText`] keeps them for a viewer. Nothing else decides layout, so annotated text is
 //! always the text the command line prints.</para>
 
+use crate::format_value::Value;
 use nx_hir::{
     ast::{spell_type_ref, TypeRef},
     Item, LoweredModule, Name, RecordField, UnionDef,
 };
-use nx_interpreter::Value;
 use nx_program::{LineIndex, NxTextSpan};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -108,7 +108,8 @@ fn is_false(value: &bool) -> bool {
 /// that rendering never depends on reasoning about defaults. Emptiness is not what decides the
 /// nested case: `{{"a"}}` is ungrammatical, and `{{}}` reads back as the empty value rather than a
 /// list holding one.</para>
-pub fn format_nx_text(value: &Value) -> Result<String, String> {
+#[cfg(test)]
+pub(crate) fn format_nx_text(value: &Value) -> Result<String, String> {
     let mut writer = Writer::default();
     writer.value(value, 0)?;
     Ok(writer.output)
@@ -308,7 +309,7 @@ impl Writer {
             Value::Record { type_name, fields } => {
                 self.record(type_name, fields, indent)?;
             }
-            Value::ActionHandler { .. } => return Err(unspellable_action_handler()),
+            Value::ActionHandler => return Err(unspellable_action_handler()),
         }
 
         Ok(())
@@ -514,7 +515,7 @@ impl Writer {
                 self.output.push('}');
                 self.end();
             }
-            Value::ActionHandler { .. } => return Err(unspellable_action_handler()),
+            Value::ActionHandler => return Err(unspellable_action_handler()),
         }
 
         Ok(())
@@ -563,7 +564,7 @@ fn value_type(value: &Value) -> Option<String> {
         Value::UnionCase { union, .. } => Some(union.as_str().to_string()),
         Value::Record { type_name, .. } => Some(type_name.as_str().to_string()),
         Value::Array(elements) if !elements.is_empty() => Some(sequence_type(elements)),
-        Value::Array(_) | Value::Function { .. } | Value::ActionHandler { .. } => None,
+        Value::Array(_) | Value::Function { .. } | Value::ActionHandler => None,
     }
 }
 
@@ -849,7 +850,7 @@ impl<'a> Declarations<'a> {
         }
     }
 
-    /// Converts a canonical JSON value, as the IR runtimes return it, to the interpreter's value,
+    /// Converts a canonical JSON value, as the IR runtimes return it, to the formatter value,
     /// reading what a number or a string is from `expected` and from the declarations of the
     /// records it holds.
     fn canonical(
@@ -1122,6 +1123,71 @@ pub(crate) fn annotate_canonical_nx_text(
     })
 }
 
+/// Converts the runtime's rich result to the same model canonical formatting writes from.
+pub(crate) fn annotate_runtime_nx_text(
+    value: nx_ir_runtime::ValueView<'_>,
+    ty: Option<&str>,
+    module: &LoweredModule,
+    libraries: &[&LoweredModule],
+    source: &str,
+) -> Result<NxValueText, String> {
+    let declarations = Declarations::new(module, libraries, source);
+    let expected = ty.map_or(Expected::Any, |ty| {
+        declarations.expect_name(ty.trim_end_matches(['?', '*', '+']), 0)
+    });
+    let value = declarations.runtime(value, expected);
+    annotate_nx_text(&value, module, libraries, source)
+}
+
+impl Declarations<'_> {
+    fn runtime(&self, value: nx_ir_runtime::ValueView<'_>, expected: Expected<'_>) -> Value {
+        use nx_ir_runtime::ValueKind;
+        match value.kind() {
+            ValueKind::Boolean(v) => Value::Boolean(v),
+            ValueKind::Int(v) => match expected {
+                Expected::Primitive("float32") => Value::Float32(v as f32),
+                Expected::Primitive("float64") => Value::Float(v as f64),
+                Expected::Primitive("int32") => {
+                    i32::try_from(v).map_or(Value::Int(v), Value::Int32)
+                }
+                _ => Value::Int(v),
+            },
+            ValueKind::Float(v) => match expected {
+                Expected::Primitive("float32") => Value::Float32(v as f32),
+                _ => Value::Float(v),
+            },
+            ValueKind::String(v) => Value::String(SmolStr::new(v)),
+            ValueKind::Case { union, case } => Value::UnionCase {
+                union: Name::new(union),
+                case: SmolStr::new(case),
+            },
+            ValueKind::Function { module, name } => Value::Function {
+                module: SmolStr::new(module),
+                name: SmolStr::new(name),
+            },
+            ValueKind::ActionHandler { .. } => Value::ActionHandler,
+            ValueKind::Sequence(items) => {
+                Value::Array(items.map(|v| self.runtime(v, expected)).collect())
+            }
+            ValueKind::Record { type_name, fields } => {
+                let name = Name::new(type_name.unwrap_or("object"));
+                let fields = fields
+                    .map(|(key, value)| {
+                        let expected = self
+                            .field(&name, key)
+                            .map_or(Expected::Any, |f| self.expect(f.ty_ref, 0));
+                        (SmolStr::new(key), self.runtime(value, expected))
+                    })
+                    .collect();
+                Value::Record {
+                    type_name: name,
+                    fields,
+                }
+            }
+        }
+    }
+}
+
 /// UTF-16 offsets for every byte offset of a text, so a node's byte range converts in O(1).
 struct Utf16Offsets {
     offsets: Vec<u32>,
@@ -1174,7 +1240,7 @@ fn format_real_literal(rendered: String, finite: bool) -> String {
 /// Whether a value forces the one-property-per-line layout.
 fn is_complex_value(value: &Value) -> bool {
     match value {
-        Value::Record { .. } | Value::ActionHandler { .. } => true,
+        Value::Record { .. } | Value::ActionHandler => true,
         Value::Array(elements) => !elements.is_empty(),
         _ => false,
     }
@@ -1437,19 +1503,8 @@ mod tests {
     #[test]
     fn test_format_action_handler() {
         let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
-        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
-        let value = Value::ActionHandler {
-            module_id: nx_program::RuntimeModuleId::new(0),
-            component: nx_hir::Name::new("SearchBox"),
-            emit: nx_hir::Name::new("SearchSubmitted"),
-            action_name: nx_hir::Name::new("SearchSubmitted"),
-            action_module_identity: "format-test.nx".to_string(),
-            body,
-            captured: FxHashMap::default(),
-            owner: None,
-            owner_state: Vec::new(),
-            token: None,
-        };
+        let _body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
+        let value = Value::ActionHandler;
 
         // `<ActionHandler ... />` is not a real element, so printing one produced output that
         // could never be read back. It fails explicitly instead.
@@ -1507,9 +1562,19 @@ mod tests {
             source
         );
         let module = nx_hir::lower(parsed.root().expect("root"), nx_hir::SourceId::new(0));
-        nx_interpreter::Interpreter::new()
-            .execute_function(&module, function, Vec::new())
-            .unwrap_or_else(|e| panic!("rendered output should evaluate, got: {e}"))
+        {
+            let program = crate::load_program_artifact_from_source(
+                source,
+                "roundtrip.nx",
+                &crate::ProgramBuildContext::empty(),
+            )
+            .unwrap();
+            let p = crate::test_support::link(&program, "roundtrip.nx").unwrap();
+            let result = p
+                .evaluate_function_value(function, &[], &nx_ir_runtime::RuntimeOptions::default())
+                .unwrap();
+            Declarations::new(&module, &[], source).runtime(result.view(), Expected::Any)
+        }
     }
 
     /// Superseded `test_format_empty_list_property_has_no_readable_spelling`: `{}` is the spelling.
@@ -1566,19 +1631,8 @@ mod tests {
     #[test]
     fn test_format_action_handler_is_still_unspellable() {
         let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
-        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
-        let value = Value::ActionHandler {
-            module_id: nx_program::RuntimeModuleId::new(0),
-            component: nx_hir::Name::new("Button"),
-            emit: nx_hir::Name::new("Click"),
-            action_name: nx_hir::Name::new("Button.Click"),
-            action_module_identity: "test.nx".to_string(),
-            body,
-            captured: FxHashMap::default(),
-            owner: None,
-            owner_state: Vec::new(),
-            token: None,
-        };
+        let _body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
+        let value = Value::ActionHandler;
 
         let error = format_nx_text(&value).expect_err("an action handler has no NX spelling");
         assert!(error.contains("action handler"), "got: {error}");
@@ -1677,10 +1731,7 @@ mod tests {
     /// Node tests: what the formatter records beside the text.
     mod annotations {
         use super::super::*;
-        use crate::{
-            eval_program_artifact_nx_text, load_program_artifact_from_source, NxDiagnostic,
-            ProgramBuildContext,
-        };
+        use crate::{load_program_artifact_from_source, NxDiagnostic, ProgramBuildContext};
         use rustc_hash::FxHashMap;
         use smol_str::SmolStr;
 
@@ -1716,7 +1767,7 @@ mod tests {
                 "input.nx",
                 &ProgramBuildContext::empty(),
             )?;
-            eval_program_artifact_nx_text(&program)
+            crate::test_support::eval_program_artifact_nx_text(&program)
         }
 
         fn evaluated(source: &str) -> NxValueText {
@@ -1997,14 +2048,14 @@ mod tests {
         #[test]
         fn no_root_is_a_diagnostic() {
             let diagnostic = failure("type User = { id:string }");
-            assert_eq!(diagnostic.code.as_deref(), Some("no-root"));
+            assert_eq!(diagnostic.code.as_deref(), Some("nx-ir-missing-entrypoint"));
         }
 
         #[test]
         fn a_runtime_error_carries_its_span() {
             let diagnostic = failure("let root() = { 1 / 0 }");
-            assert_eq!(diagnostic.code.as_deref(), Some("runtime-error"));
-            assert_eq!(diagnostic.message, "Division by zero");
+            assert_eq!(diagnostic.code.as_deref(), Some("nx-ir-division-by-zero"));
+            assert_eq!(diagnostic.message, "Division by zero.");
             let label = diagnostic.labels.first().expect("the error is located");
             assert_eq!(label.file, "input.nx");
             assert_eq!(
@@ -2035,13 +2086,13 @@ mod tests {
                 &ProgramBuildContext::empty(),
             )
             .unwrap_or_else(|diagnostics| panic!("{diagnostics:?}"));
-            let diagnostics =
-                eval_program_artifact_nx_text(&program).expect_err("division by zero");
+            let diagnostics = crate::test_support::eval_program_artifact_nx_text(&program)
+                .expect_err("division by zero");
             let diagnostic = &diagnostics[0];
-            assert_eq!(diagnostic.message, "Division by zero");
+            assert_eq!(diagnostic.message, "Division by zero.");
             let label = diagnostic.labels.first().expect("labeled at the call");
-            assert_eq!(label.file, "app/main.nx");
-            assert_eq!(label.span.start_line, 3, "{label:?}");
+            assert_eq!(label.file, "ui/math.nx");
+            assert_eq!(label.span.start_line, 1, "{label:?}");
         }
 
         #[test]
@@ -2064,8 +2115,8 @@ mod tests {
     /// Values in canonical JSON, as the IR runtimes return them, spelled against a program.
     mod canonical {
         use crate::{
-            eval_program_artifact_nx_text, format_program_artifact_value, FormatValueError,
-            NxValueRole, NxValueText, ProgramBuildContext,
+            format_program_artifact_value, FormatValueError, NxValueRole, NxValueText,
+            ProgramBuildContext,
         };
         use serde_json::json;
 
@@ -2105,7 +2156,7 @@ mod tests {
             let source = "import \"@nx/agent\"\n\
                           type Call = { method:HttpMethod limits:AgentLimits }\n\
                           let root() = <Call method=post limits=<AgentLimits maxSteps=6 /> />\n";
-            let expected = eval_program_artifact_nx_text(&program(source))
+            let expected = crate::test_support::eval_program_artifact_nx_text(&program(source))
                 .unwrap_or_else(|diagnostics| panic!("{diagnostics:?}"));
             let value = json!({
                 "$type": "Call",
@@ -2284,8 +2335,11 @@ mod tests {
                           type Job = { status:Status name:string size:Size tags?:string+ }\n\
                           <Job status=paused name=\"Ada\" size=<Size width=3 /> tags={\"a\" \"b\"} />";
             let artifact = program(source);
-            let expected = eval_program_artifact_nx_text(&artifact).expect("root evaluates");
-            let crate::EvalResult::Ok(value) = crate::eval_program_artifact(&artifact) else {
+            let expected = crate::test_support::eval_program_artifact_nx_text(&artifact)
+                .expect("root evaluates");
+            let crate::test_support::EvalResult::Ok(value) =
+                crate::test_support::eval_program_artifact(&artifact)
+            else {
                 panic!("root evaluates");
             };
             let value: serde_json::Value =

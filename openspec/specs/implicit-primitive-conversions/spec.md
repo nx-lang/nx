@@ -369,8 +369,7 @@ requirement.
 - **THEN** the body SHALL bind as it does today, without stringification
 
 ### Requirement: Every primitive has one canonical text form
-The system SHALL define one text form for each stringifiable primitive, and every backend — the
-interpreter, the NX IR runtime, and generated code — SHALL produce that same text wherever this
+The system SHALL define one text form for each stringifiable primitive, and every backend — the Rust and TypeScript IR runtimes and generated code — SHALL produce that same text wherever this
 capability converts a value to a string. The forms SHALL be:
 
 - `int`, `int32`, `int64`: the value's decimal digits with no grouping, no leading zeros, and a
@@ -405,7 +404,7 @@ JavaScript `number` until the `int64` carrier change, and its text is outside th
 
 #### Scenario: Backends agree
 - **WHEN** the same program concatenates the same `float64` value to a string
-- **THEN** the interpreter, the NX IR runtime, and generated JavaScript SHALL produce identical text
+- **THEN** the Rust IR runtime, the TypeScript IR runtime and generated JavaScript SHALL produce identical text
 
 ### Requirement: A widened value takes the site's type at run time
 Where analysis accepted a value by widening, evaluation SHALL produce a value of the site's declared

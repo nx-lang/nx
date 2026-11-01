@@ -1,12 +1,9 @@
 //! An external caller can compile and execute with nx-api as its only NX import.
-use nx_api::{
-    build_program_artifact_from_source, codegen, eval_program_artifact, ir_runtime, EvalResult,
-    ProgramBuildContext,
-};
+use nx_api::{build_program_artifact_from_source, codegen, ir_runtime, ProgramBuildContext};
 use std::collections::BTreeMap;
 
 #[test]
-fn facade_builds_emits_and_runs_both_execution_engines() {
+fn facade_builds_emits_and_runs_ir() {
     let artifact = build_program_artifact_from_source(
         "let root(): int = { 6 * 7 }",
         "main.nx",
@@ -37,9 +34,5 @@ fn facade_builds_emits_and_runs_both_execution_engines() {
     let compiled = program
         .evaluate_function("root", &[], &ir_runtime::RuntimeOptions::default())
         .expect("execute IR");
-    let EvalResult::Ok(interpreted) = eval_program_artifact(&artifact) else {
-        panic!("execute through the interpreter-backed API");
-    };
     assert_eq!(compiled.to_json_string().unwrap(), "42");
-    assert_eq!(compiled, interpreted);
 }

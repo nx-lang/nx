@@ -1,0 +1,2767 @@
+[
+  {
+    "original": "crates/nx-interpreter/src/context.rs::test_context_creation",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/context.rs::test_variable_define_and_lookup",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/context.rs::test_undefined_variable",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/context.rs::test_scope_stack",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/context.rs::test_operation_limit",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/context.rs::test_variable_update",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/error.rs::test_error_creation",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/error.rs::test_error_with_location",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/error.rs::test_error_kinds",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_int",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_int32",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_int32_int_promotes",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_float",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_float32",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_float32_float_promotes",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_int_and_float_widens_to_float64",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_int32_and_float32_widens_to_float64",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_mixed_category_arithmetic_is_float64",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_add_string_is_not_arithmetic",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_sub",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_mul",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_div",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_div_by_zero",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_div_i32_by_zero",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_mod",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_mod_float",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_mod_int_and_float_widens_to_float64",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_mod_by_zero_float",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/arithmetic.rs::test_empty_operand_is_a_type_mismatch",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_eq_int",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_eq_int32",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_eq_int32_int_cross_width",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_eq_int_and_float_compares_numerically",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_ne",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_lt",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_lt_int32_int_cross_width",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_ordering_int_and_float_compares_numerically",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_ordering_with_nan_is_false_every_way",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_ordering_a_number_with_a_string_is_an_error",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_le",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_gt",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_ge",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_string_comparison",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_and",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_or",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_not",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_type_mismatch_logical",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_empty_values_compare_equal_only_to_each_other",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/eval/logical.rs::test_empty_operand_in_an_ordering_is_a_type_mismatch",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_interpreter_creation",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_function_not_found",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_function_not_found"
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_property_fragment_evaluation_preserves_active_property_order",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_bare_interpreter_rejects_action_handler_creation_without_resolved_program",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_bare_interpreter_rejects_component_snapshot_creation_without_resolved_program",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_captures_values_and_returns_single_action",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_shadows_outer_action_and_captures_other_values",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_action_handler_captures_snapshot_not_live_reference",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_record_literal_reports_missing_record_type",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_runtime_prepared_module_is_cached_per_runtime_module",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_normalizes_host_supplied_action_defaults_and_optional_fields",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_applies_inherited_inline_emit_defaults",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_rejects_missing_required_action_input_fields",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_rejects_missing_required_inherited_fields",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_supports_inline_emit_public_names_and_multiple_actions",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_rejects_empty_and_non_action_results",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_rejects_wrong_action_type_name",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_invoke_action_handler_rejects_non_action_record_results",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_component_applies_prop_and_state_defaults_once",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_component_succeeds_without_state_group",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_evaluate_component_uses_explicit_state_for_rendering",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_evaluate_component_accepts_empty_state_for_stateless_component",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_evaluate_component_validates_explicit_state_fields",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_evaluate_component_rejects_abstract_component",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_evaluate_component_does_not_invoke_action_handlers",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_component_rejects_abstract_component",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_external_component_invocation_returns_typed_record_with_defaults_and_handlers",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_external_component_returns_typed_record_and_empty_state",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_external_component_with_declared_state_skips_state_materialization",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_evaluate_external_component_preserves_prop_only_rendering",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::merge_and_diff_reject_records_of_different_types",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_typed_value_binding_accepts_derived_external_component_value",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_typed_value_binding_accepts_mixed_derived_external_component_sequence",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_function_call_rejects_unrelated_external_component_for_abstract_base_param",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_external_component_rejects_declared_state_as_prop",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_dispatch_external_component_actions_uses_bound_handlers",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_initialize_component_rejects_missing_required_state_initializer",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_dispatch_component_actions_preserves_state_snapshot_without_reevaluating_defaults",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_dispatch_component_actions_orders_host_actions_and_handler_effects",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_dispatch_component_actions_rejects_undeclared_action_types",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_dispatch_component_actions_rejects_non_record_action_values",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::test_dispatch_component_actions_rejects_invalid_or_incompatible_snapshots",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::update_record_construction_keeps_only_the_supplied_fields",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::update_record_construction_rejects_unknown_fields_and_empty_for_required_fields",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::handlers_carry_their_owner_and_its_state_names",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::a_snapshot_from_before_the_handler_table_is_rejected",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::handler_results_may_mix_update_records_and_actions",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::lifecycle_output_carries_handler_tokens_and_pure_evaluation_does_not",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::dispatching_a_handler_token_patches_state_and_re_renders",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::two_increments_in_one_batch_move_twice",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::a_later_handler_sees_an_earlier_patch",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::captured_loop_variables_keep_their_snapshot",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::mixed_handler_results_route_item_by_item",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::update_records_from_a_parent_bound_handler_are_effects",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::a_failing_entry_fails_the_whole_batch",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::a_stale_token_is_rejected",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::an_invocation_with_the_wrong_action_type_is_rejected",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::a_mistyped_update_aborts_the_batch",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/interpreter.rs::a_patch_with_a_mistyped_field_is_refused_when_applied",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/lib.rs::test_interpreter_creation",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_value_types",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_to_text_prints_floats_in_the_ecmascript_form",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_to_text_prints_a_float32_as_a_float32",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_to_text_prints_integers_booleans_and_strings",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_to_text_declines_values_with_no_text_form",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_value_display",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/src/value.rs::test_type_names",
+    "disposition": "interpreter-internal",
+    "reason": "Retired engine implementation/value/context/error behavior. Source arithmetic/logical/default/lifecycle semantics are asserted by source_semantics.rs, codegen_parity.rs and the native/TS corpus."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_literal_integers",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_literal_integers"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_literal_single_element",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_literal_single_element"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_literal_strings",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_literal_strings"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_literal_booleans",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_literal_booleans"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_literal_floats",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_literal_floats"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_empty_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_empty_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_braced_call_arguments_arrive_as_sequences",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_braced_call_arguments_arrive_as_sequences"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_empty_body_content_binds_the_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_empty_body_content_binds_the_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_absent_body_content_leaves_the_content_property_to_its_default",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_absent_body_content_leaves_the_content_property_to_its_default"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_a_body_that_produced_nothing_binds_the_empty_value_over_a_default",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_a_body_that_produced_nothing_binds_the_empty_value_over_a_default"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_with_expressions",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_with_expressions"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_with_function_calls",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_with_function_calls"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_as_argument",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_as_argument"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_of_strings_as_argument",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_of_strings_as_argument"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_array_of_records",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_array_of_records"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_transform_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_transform_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::test_mixed_type_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::test_mixed_type_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::braced_value_items_splice",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::braced_value_items_splice"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_for_concatenates_what_its_body_yields",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_for_concatenates_what_its_body_yields"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_for_whose_body_yields_nothing_yields_the_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_for_whose_body_yields_nothing_yields_the_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_conditional_for_body_filters",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_conditional_for_body_filters"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::an_untaken_conditional_child_contributes_no_items",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::an_untaken_conditional_child_contributes_no_items"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_conditional_nested_in_a_conditional_contributes_no_items",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_conditional_nested_in_a_conditional_contributes_no_items"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::an_else_on_the_outer_conditional_does_not_resurrect_an_empty_item",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::an_else_on_the_outer_conditional_does_not_resurrect_an_empty_item"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_nested_conditional_that_is_taken_contributes_its_item",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_nested_conditional_that_is_taken_contributes_its_item"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_for_over_an_optional_value_iterates_once_when_it_holds_an_item",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_for_over_an_optional_value_iterates_once_when_it_holds_an_item"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_taken_branch_beside_a_sequence_is_a_one_item_sequence_not_a_bare_item",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_taken_branch_beside_a_sequence_is_a_one_item_sequence_not_a_bare_item"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_lifted_branch_that_widens_widens_inside_its_sequence",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_lifted_branch_that_widens_widens_inside_its_sequence"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::a_spliced_sequence_widens_to_the_joined_item_type",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::a_spliced_sequence_widens_to_the_joined_item_type"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/arrays.rs::an_empty_else_beside_a_sequence_evaluates_to_the_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/arrays.rs::an_empty_else_beside_a_sequence_evaluates_to_the_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/component_type_parameters.rs::the_runtime_record_has_no_type_parameter_field",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/component_type_parameters.rs::the_runtime_record_has_no_type_parameter_field"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_if_else_true_branch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_if_else_true_branch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_if_else_false_branch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_if_else_false_branch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_if_without_else",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_if_without_else"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_if_with_an_explicit_empty_else",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_if_with_an_explicit_empty_else"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_property_fragment_on_a_declared_record_is_kept",
+    "disposition": "deferred",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_property_fragment_on_a_declared_record_is_kept; complete-ir-construction-lowering"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_property_fragment_simple_conditional_selects_then_and_else",
+    "disposition": "deferred",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_property_fragment_simple_conditional_selects_then_and_else; complete-ir-construction-lowering"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_property_fragment_condition_list_selects_first_matching_arm_and_else",
+    "disposition": "deferred",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_property_fragment_condition_list_selects_first_matching_arm_and_else; complete-ir-construction-lowering"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_property_fragment_match_selects_matching_arm",
+    "disposition": "deferred",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_property_fragment_match_selects_matching_arm; complete-ir-construction-lowering"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_property_fragment_runtime_rejects_duplicate_active_property",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_property_fragment_runtime_rejects_duplicate_active_property"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_nested_conditionals",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_nested_conditionals"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_chained_else_if",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_chained_else_if"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_deeply_nested_conditionals",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_deeply_nested_conditionals"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_and_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_and_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_or_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_or_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_if_with_inverted_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_if_with_inverted_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_boolean_literal_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_boolean_literal_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_boolean_parameter_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_boolean_parameter_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_equality_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_equality_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_not_equal_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_not_equal_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_less_than_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_less_than_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_less_equal_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_less_equal_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_greater_than_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_greater_than_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_greater_equal_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_greater_equal_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_expression_in_then_branch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_expression_in_then_branch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_expression_in_else_branch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_expression_in_else_branch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_function_call_in_condition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_function_call_in_condition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_inline_if_else_basic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_inline_if_else_basic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_inline_if_else_nested",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_inline_if_else_nested"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_inline_if_else_as_argument",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_inline_if_else_as_argument"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_inline_if_else_with_arithmetic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_inline_if_else_with_arithmetic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_inline_if_else_boolean_result",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_inline_if_else_boolean_result"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_inline_if_else_string_result",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_inline_if_else_string_result"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_if_else_containing_inline_if_else",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_if_else_containing_inline_if_else"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_condition_list_basic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_condition_list_basic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_condition_list_without_else",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_condition_list_without_else"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_condition_list_complex_conditions",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_condition_list_complex_conditions"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_condition_list_with_arithmetic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_condition_list_with_arithmetic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_expression_integers",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_expression_integers"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_expression_without_else",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_expression_without_else"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_expression_multiple_patterns",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_expression_multiple_patterns"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_expression_booleans",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_expression_booleans"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_expression_computed_scrutinee",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_expression_computed_scrutinee"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_expression_evaluates_scrutinee_once",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_expression_evaluates_scrutinee_once"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/conditionals.rs::test_match_multiple_patterns_evaluates_scrutinee_once",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/conditionals.rs::test_match_multiple_patterns_evaluates_scrutinee_once"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_variable_shadowing_in_block",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_parameter_usage",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_parameter_usage"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_multiple_parameters",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_multiple_parameters"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_empty_string",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_empty_string"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_unicode_string_basic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_unicode_string_basic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_unicode_string_emoji",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_unicode_string_emoji"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_string_with_special_chars",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_string_with_special_chars"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_deeply_nested_arithmetic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_deeply_nested_arithmetic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_deeply_nested_function_calls",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_deeply_nested_function_calls"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_deeply_nested_blocks",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_empty_braced_body_is_the_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_empty_braced_body_is_the_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_constant_case_access",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_constant_case_access"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_undefined_union_case",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_undefined_union_case"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_undefined_union",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_undefined_union"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_complex_boolean_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_complex_boolean_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_boolean_double_negation",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_large_integers",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_large_integers"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_negative_integers",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_negative_integers"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_division_by_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_division_by_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_integer_overflow",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_integer_overflow"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_type_mismatch_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_type_mismatch_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_unstored_optional_record_field_reads_as_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_unstored_optional_record_field_reads_as_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_empty_record",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_empty_record"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_top_level_value_omitting_a_defaulted_field_terminates",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_top_level_value_omitting_a_defaulted_field_terminates"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_a_field_default_still_sees_the_other_top_level_values",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_a_field_default_still_sees_the_other_top_level_values"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_a_value_depending_on_the_one_being_bound_is_still_bound_afterwards",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_a_value_depending_on_the_one_being_bound_is_still_bound_afterwards"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_a_field_default_naming_the_value_it_fills_is_an_error",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::test_a_field_default_naming_the_value_it_fills_is_an_error"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/edge_cases.rs::test_a_failure_in_a_value_bound_by_a_nested_pass_is_reported_by_the_outer_pass",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/edge_cases.rs::a_failure_in_a_referenced_global_is_reported"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/error_handling.rs::test_division_by_zero_int",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/error_handling.rs::test_function_not_found",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_function_not_found"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/error_handling.rs::test_paren_function_parameter_count_mismatch",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/error_handling.rs::test_paren_function_argument_type_mismatch",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/error_handling.rs::test_paren_function_invalid_return_type_usage",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/error_handling.rs::test_undeclared_union_runtime_error",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_literal_simple",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_literal_simple"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_literal_with_exponent",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_literal_with_exponent"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_literal_negative_exponent",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_literal_negative_exponent"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_literal_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_literal_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_addition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_addition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_subtraction",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_subtraction"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_multiplication",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_multiplication"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_division",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_division"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_division_by_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_division_by_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_smaller_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_smaller_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_exact",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_exact"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_by_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_by_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_mixed_int_float_modulo",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_mixed_int_float_modulo"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_in_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_in_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_negative_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_negative_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_negative_divisor",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_negative_divisor"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_modulo_both_negative",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_modulo_both_negative"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_division_negative_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_division_negative_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_division_negative_divisor",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_division_negative_divisor"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_division_both_negative",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_division_both_negative"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_negation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_negation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_complex_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_complex_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_equal",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_equal"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_not_equal",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_not_equal"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_less_than",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_less_than"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_less_than_or_equal",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_less_than_or_equal"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_greater_than",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_greater_than"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_greater_than_or_equal",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_greater_than_or_equal"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_in_conditional",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_mixed_int_float_addition",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_mixed_int_float_addition"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_float_literal_in_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_float_literal_in_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_int_plus_float64_is_float64",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_int_plus_float64_is_float64"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_int_compared_with_float64_compares_numerically",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_int_compared_with_float64_compares_numerically"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_integer_division_of_mixed_widths_stays_integer",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_integer_division_of_mixed_widths_stays_integer"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_an_int_bound_at_a_float64_site_evaluates_as_a_float",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_an_int_bound_at_a_float64_site_evaluates_as_a_float"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_an_int_bound_at_a_float64_component_property_evaluates_as_a_float",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_an_int_bound_at_a_float64_component_property_evaluates_as_a_float"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_widening_applies_to_each_element_of_a_sequence",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_widening_applies_to_each_element_of_a_sequence"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_widening_applies_at_an_optional_site",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_widening_applies_at_an_optional_site"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_host_number_takes_the_width_of_its_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_host_number_takes_the_width_of_its_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_an_optional_int_widens_at_an_optional_float64_site",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_an_optional_int_widens_at_an_optional_float64_site"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_widening_applies_at_a_declared_return_type_and_a_typed_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_widening_applies_at_a_declared_return_type_and_a_typed_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_an_int_branch_joined_with_a_float64_branch_evaluates_as_a_float",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_an_int_branch_joined_with_a_float64_branch_evaluates_as_a_float"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_an_int_element_of_a_float64_list_evaluates_as_a_float",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_an_int_element_of_a_float64_list_evaluates_as_a_float"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_narrower_match_arm_evaluates_as_the_join",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_narrower_match_arm_evaluates_as_the_join"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_joined_sequence_or_optional_branch_widens_item_by_item",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_joined_sequence_or_optional_branch_widens_item_by_item"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_branch_joined_with_an_optional_float_through_empty_evaluates_as_a_float",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_branch_joined_with_an_optional_float_through_empty_evaluates_as_a_float"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_join_of_one_integer_width_is_left_alone",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_join_of_one_integer_width_is_left_alone"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_literal_is_evaluated_at_the_width_its_site_chose",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_literal_is_evaluated_at_the_width_its_site_chose"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_constant_expression_takes_its_site_width_after_folding",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_constant_expression_takes_its_site_width_after_folding"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_constant_operand_takes_the_other_operands_width",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_constant_operand_takes_the_other_operands_width"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_folded_real_is_rounded_once_at_its_site",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_folded_real_is_rounded_once_at_its_site"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_constant_expression_that_cannot_take_its_site_is_reported",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_constant_expression_that_cannot_take_its_site_is_reported"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/floats.rs::test_a_constant_expression_without_a_narrow_site_evaluates_at_run_time",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/floats.rs::test_a_constant_expression_without_a_narrow_site_evaluates_at_run_time"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_parameters.rs::a_positional_call_leaves_out_trailing_parameters",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_parameters.rs::a_positional_call_leaves_out_trailing_parameters"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_parameters.rs::an_element_call_leaves_out_a_parameter_in_the_middle",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_parameters.rs::an_element_call_leaves_out_a_parameter_in_the_middle"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_parameters.rs::an_element_style_default_reads_the_parameters_before_it",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_parameters.rs::an_element_style_default_reads_the_parameters_before_it"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_parameters.rs::a_host_call_leaves_out_trailing_parameters",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_parameters.rs::a_host_call_leaves_out_trailing_parameters"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_parameters.rs::a_host_call_must_reach_every_required_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_parameters.rs::a_host_call_must_reach_every_required_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_parameters.rs::a_default_is_lifted_to_its_parameters_occurrence",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_parameters.rs::a_default_is_lifted_to_its_parameters_occurrence"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_function_bound_to_a_function_typed_property_is_the_function_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_function_bound_to_a_function_typed_property_is_the_function_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_function_bound_to_a_function_reference_field_is_the_function_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_function_bound_to_a_function_reference_field_is_the_function_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_function_reference_field_default_names_a_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_function_reference_field_default_names_a_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::function_reference_values_compare_by_declaration",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::function_reference_values_compare_by_declaration"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::function_values_are_equal_when_they_name_the_same_declaration",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::function_values_are_equal_when_they_name_the_same_declaration"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_function_typed_parameter_is_invoked_as_an_element",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_function_typed_parameter_is_invoked_as_an_element"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_function_typed_parameter_of_a_paren_function_is_invoked_as_an_element",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_function_typed_parameter_of_a_paren_function_is_invoked_as_an_element"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::the_function_ignores_a_parameter_the_type_supplied",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::the_function_ignores_a_parameter_the_type_supplied"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_function_typed_component_prop_is_invoked_as_an_element",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_function_typed_component_prop_is_invoked_as_an_element"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_declared_parameter_without_an_argument_is_an_error",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_declared_parameter_without_an_argument_is_an_error"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::a_lexical_binding_shadows_a_function_of_the_same_name",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::a_lexical_binding_shadows_a_function_of_the_same_name"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::an_undefined_name_is_still_undefined",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::an_undefined_name_is_still_undefined"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/function_values.rs::two_function_values_are_equal_exactly_when_they_name_the_same_declaration",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/function_values.rs::two_function_values_are_equal_exactly_when_they_name_the_same_declaration"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_add_function_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_subtract_function_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_multiply_function_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_divide_function_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_division_by_zero_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_string_concat_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_block_with_variables_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_complex_arithmetic_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_array_index_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/interpreter_direct_hir.rs::test_array_index_out_of_bounds_direct_hir",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_simple",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_with_index",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_nested_for_loops",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_empty_array",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_over_a_single_item_iterates_once",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_string_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_string_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_record_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_record_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_index_arithmetic",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_item_plus_index",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_item_plus_index"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_multiply",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_multiply"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_subtract",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_subtract"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_boolean_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_boolean_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_float_array",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_single_element",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_single_element"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/loops.rs::test_for_loop_preserves_order",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/loops.rs::test_for_loop_preserves_order"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::exactly_one_binds_as_an_item_at_an_optional_site_and_as_a_sequence_at_a_plus_site",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::exactly_one_binds_as_an_item_at_an_optional_site_and_as_a_sequence_at_a_plus_site"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::every_source_of_emptiness_is_the_same_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::every_source_of_emptiness_is_the_same_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::an_optional_beside_an_item_makes_one_or_more",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::an_optional_beside_an_item_makes_one_or_more"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::an_empty_array_is_rejected_where_at_least_one_is_required",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::an_empty_array_is_rejected_where_at_least_one_is_required"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_for_over_an_optional_yields_its_item",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_for_over_an_optional_yields_its_item"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_for_over_an_optional_yields_its_item_without_an_annotation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_for_over_an_optional_yields_its_item_without_an_annotation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::an_item_compares_as_a_sequence_of_one",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::an_item_compares_as_a_sequence_of_one"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_literal_compared_with_an_optional_float32_takes_its_item_type",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_literal_compared_with_an_optional_float32_takes_its_item_type"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::an_unstored_optional_field_of_a_union_case_reads_as_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::an_unstored_optional_field_of_a_union_case_reads_as_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::an_absent_optional_field_is_an_omitted_key_and_reads_as_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::an_absent_optional_field_is_an_omitted_key_and_reads_as_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_cleared_update_record_field_is_stored_as_the_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_cleared_update_record_field_is_stored_as_the_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_presence_test_is_a_boolean",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_presence_test_is_a_boolean"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_test_on_zero_or_more_is_non_emptiness",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_test_on_zero_or_more_is_non_emptiness"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_step_through_an_absent_receiver_is_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_step_through_an_absent_receiver_is_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_fallback_makes_an_optional_exactly_one",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_fallback_makes_an_optional_exactly_one"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_fallback_binds_tighter_than_concatenation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_fallback_binds_tighter_than_concatenation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::the_right_operand_is_evaluated_only_when_needed",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::the_right_operand_is_evaluated_only_when_needed"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::the_empty_pattern_matches_absence",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::the_empty_pattern_matches_absence"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::the_empty_pattern_completes_a_match_over_an_optional_union",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::the_empty_pattern_completes_a_match_over_an_optional_union"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::a_bare_pattern_naming_a_payload_case_matches_its_records",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::a_bare_pattern_naming_a_payload_case_matches_its_records"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/occurrence_runtime.rs::optional_state_starts_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/occurrence_runtime.rs::optional_state_starts_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_positive_numbers",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_positive_numbers"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_exact_division",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_exact_division"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_smaller_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_smaller_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_with_one",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_with_one"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_by_zero_error",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_by_zero_error"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_in_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_in_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_chained",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_chained"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_with_arithmetic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_with_arithmetic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_negative_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_negative_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_negative_divisor",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_negative_divisor"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_both_negative",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_both_negative"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_negative_exact_division",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_negative_exact_division"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_modulo_negative_small_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_modulo_negative_small_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_positive",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_positive"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_negative_dividend",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_negative_dividend"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_negative_divisor",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_negative_divisor"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_both_negative",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_both_negative"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_by_zero_error",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_by_zero_error"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_exact",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_exact"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_division_and_modulo_relationship",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_division_and_modulo_relationship"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_equal_integers_different",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_equal_integers_different"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_equal_integers_same",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_equal_integers_same"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_equal_booleans",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_equal_booleans"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_equal_strings",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_equal_strings"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_equal_strings_same",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_equal_strings_same"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_greater_or_equal_greater",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_greater_or_equal_greater"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_greater_or_equal_equal",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_greater_or_equal_equal"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_greater_or_equal_less",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_greater_or_equal_less"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_greater_or_equal_negative_numbers",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_greater_or_equal_negative_numbers"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_logical_or_both_true",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_logical_or_both_true"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_logical_or_first_true",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_logical_or_first_true"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_logical_or_second_true",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_logical_or_second_true"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_logical_or_both_false",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_logical_or_both_false"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_unary_negation_positive",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_unary_negation_positive"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_unary_negation_negative",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_unary_negation_negative"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_unary_negation_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_unary_negation_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_unary_negation_in_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_unary_negation_in_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_double_negation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_double_negation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_unary_not_true",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_unary_not_true"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_unary_not_false",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_unary_not_false"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_double_not",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_double_not"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_triple_not",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_triple_not"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_with_comparison",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_with_comparison"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_with_equality",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_with_equality"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_with_and",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_with_and"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_with_or",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_with_or"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_not_in_complex_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_not_in_complex_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_and_short_circuit_false_first",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_and_short_circuit_false_first"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_or_short_circuit_true_first",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_or_short_circuit_true_first"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_chained_and",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_chained_and"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_chained_or",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_chained_or"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_mixed_and_or",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_mixed_and_or"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_comparison_chain",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_comparison_chain"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_complex_boolean_expression",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_complex_boolean_expression"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_all_comparison_operators",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_all_comparison_operators"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_and_short_circuit_avoids_division_by_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_and_short_circuit_avoids_division_by_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_or_short_circuit_avoids_division_by_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_or_short_circuit_avoids_division_by_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_and_evaluates_both_when_first_is_true",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_and_evaluates_both_when_first_is_true"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_or_evaluates_both_when_first_is_false",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_or_evaluates_both_when_first_is_false"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_nested_short_circuit",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_nested_short_circuit"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_string_plus_int_concatenates",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_string_plus_int_concatenates"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_primitive_on_the_left_concatenates",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_primitive_on_the_left_concatenates"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_float32_concatenates_as_a_float32",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_float32_concatenates_as_a_float32"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_boolean_concatenates",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_boolean_concatenates"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_concatenation_is_left_associative",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_concatenation_is_left_associative"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_a_string_field_access_concatenates",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_a_string_field_access_concatenates"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/operators.rs::test_a_literal_operand_is_rendered_at_the_width_it_took",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/operators.rs::test_a_literal_operand_is_rendered_at_the_width_it_took"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/property_references.rs::a_property_case_in_state_round_trips_through_init_snapshot_and_dispatch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/property_references.rs::a_property_case_in_state_round_trips_through_init_snapshot_and_dispatch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/record_type_parameters.rs::a_constructed_generic_record_has_no_type_parameter_field",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/record_type_parameters.rs::a_constructed_generic_record_has_no_type_parameter_field"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/record_type_parameters.rs::a_field_of_a_generic_record_reads_and_patches",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/record_type_parameters.rs::a_field_of_a_generic_record_reads_and_patches"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/record_type_parameters.rs::two_instantiations_with_equal_fields_are_equal_values",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/record_type_parameters.rs::two_instantiations_with_equal_fields_are_equal_values"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/recursion.rs::test_factorial_recursion",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/recursion.rs::test_fibonacci_recursion",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/recursion.rs::test_recursion_depth_limit",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/recursion.rs::test_deep_recursion_within_limit",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/resolved_program.rs::resolved_program_executes_cross_module_entries_and_module_qualified_handlers",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/resolved_program.rs::resolved_program_component_snapshots_accept_matching_program_and_reject_mismatches",
+    "disposition": "redundant",
+    "reason": "Direct-HIR construction or retired error shape. Source behavior is covered by source_semantics.rs, ir_runtime_tests.rs (linking, arguments, diagnostics, recursion/limits), and specs/ir-conformance recursion results."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_add_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_add_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_subtract_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_subtract_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_multiply_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_multiply_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_divide_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_divide_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_mixed_arithmetic",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_mixed_arithmetic"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_string_concat",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_string_concat"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_string_addition_without_analysis_is_not_concatenation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::analyzed_string_addition_concatenates"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_payload_union_case_construction_applies_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_payload_union_case_construction_applies_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_constant_union_case_shorthand_constructs_a_scalar_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_constant_union_case_shorthand_constructs_a_scalar_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_union_case_inherits_abstract_base_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_union_case_inherits_abstract_base_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_omitted_optional_union_field_is_not_stored",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_omitted_optional_union_field_is_not_stored"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_explicit_empty_optional_union_field_is_not_stored",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_explicit_empty_optional_union_field_is_not_stored"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_fieldless_case_of_a_based_union_keeps_the_record_shape",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_fieldless_case_of_a_based_union_keeps_the_record_shape"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_constant_union_case_remains_distinct_from_the_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_constant_union_case_remains_distinct_from_the_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_union_match_compares_case_discriminator",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_union_match_compares_case_discriminator"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_union_match_selects_a_qualified_constant_case",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_union_match_selects_a_qualified_constant_case"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_function_not_found",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_function_not_found"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_parameter_count_mismatch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_parameter_count_mismatch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_division_by_zero",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_division_by_zero"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_paren_function_execution",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_paren_function_execution"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_nested_paren_function_calls",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_nested_paren_function_calls"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_paren_function_without_return_annotation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_paren_function_without_return_annotation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_constant_case_return",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_constant_case_return"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_constant_case_comparison",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_constant_case_comparison"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_field_access",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_field_access"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_derived_record_argument_satisfies_abstract_ancestor_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_derived_record_argument_satisfies_abstract_ancestor_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_derived_record_return_satisfies_abstract_ancestor_return_type",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_derived_record_return_satisfies_abstract_ancestor_return_type"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_host_supplied_record_defaults_are_applied_during_argument_coercion",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_host_supplied_record_defaults_are_applied_during_argument_coercion"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_host_supplied_record_with_an_absent_optional_field_reads_as_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_host_supplied_record_with_an_absent_optional_field_reads_as_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_host_supplied_record_missing_required_field_is_rejected_at_the_boundary",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_host_supplied_record_missing_required_field_is_rejected_at_the_boundary"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_defaults_instantiation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_defaults_instantiation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_inheritance_applies_inherited_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_inheritance_applies_inherited_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_action_inheritance_applies_inherited_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_action_inheritance_applies_inherited_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_literal_defaults_and_overrides",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_literal_defaults_and_overrides"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_construction_rejects_unknown_fields_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_construction_rejects_unknown_fields_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_strict_record_construction_still_applies_defaults_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_strict_record_construction_still_applies_defaults_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_action_record_literal_uses_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_action_record_literal_uses_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_action_record_defaults_instantiation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_action_record_defaults_instantiation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_abstract_record_instantiation_fails_at_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_abstract_record_instantiation_fails_at_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_nested_record_access",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_nested_record_access"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_return_type_and_collection",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_return_type_and_collection"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_optional_record_field_defaults_to_empty",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_optional_record_field_defaults_to_empty"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_record_all_fields_have_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_record_all_fields_have_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_external_record_argument_evaluates_definition_defaults",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_external_record_argument_evaluates_definition_defaults"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_invokes_paren_defined_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_invokes_paren_defined_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_invokes_element_defined_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_invokes_element_defined_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_paren_call_constructs_record_type_positionally",
+    "disposition": "deferred",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_paren_call_constructs_record_type_positionally; complete-ir-construction-lowering"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_passes_content_to_paren_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_passes_content_to_paren_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_paren_call_invokes_element_defined_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_paren_call_invokes_element_defined_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_constructs_record_via_type_alias",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_constructs_record_via_type_alias"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_content_is_injected_for_element_defined_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_content_is_injected_for_element_defined_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_single_child_coerces_to_scalar_content_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_single_child_coerces_to_scalar_content_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_scalar_value_child_passes_to_scalar_content_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_scalar_value_child_passes_to_scalar_content_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_scalar_value_child_coerces_to_list_content_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_scalar_value_child_coerces_to_list_content_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_multi_children_rejected_for_scalar_content_parameter",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_multi_children_rejected_for_scalar_content_parameter"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_intrinsic_element_named_and_body_content_conflict_is_rejected",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_intrinsic_element_named_and_body_content_conflict_is_rejected"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_braced_child_list_flattens_content_array",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_braced_child_list_flattens_content_array"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_conditional_content_expression_preserves_selected_element",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_conditional_content_expression_preserves_selected_element"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_for_content_expression_flattens_element_results",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_for_content_expression_flattens_element_results"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_multi_value_element_brace_list_returns_array_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_multi_value_element_brace_list_returns_array_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_scalar_brace_return_is_wrapped_for_sequence_annotation_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_scalar_brace_return_is_wrapped_for_sequence_annotation_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_zero_or_more_let_binding_preserves_supplied_sequence_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_zero_or_more_let_binding_preserves_supplied_sequence_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_optional_sequence_record_field_preserves_supplied_sequence_runtime",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_optional_sequence_record_field_preserves_supplied_sequence_runtime"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_content_conflict_is_error_for_function",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_content_conflict_is_error_for_function"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_content_conflict_is_error_for_record",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_content_conflict_is_error_for_record"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_body_is_error_for_record_without_content_field",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_body_is_error_for_record_without_content_field"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_body_populates_record_content_field",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_body_populates_record_content_field"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_element_call_text_body_populates_scalar_content_field",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_element_call_text_body_populates_scalar_content_field"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/simple_functions.rs::test_component_invocation_binds_body_to_declared_content_prop",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/simple_functions.rs::test_component_invocation_binds_body_to_declared_content_prop"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::text_and_a_braced_int_bind_as_one_string",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::text_and_a_braced_int_bind_as_one_string"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::interior_whitespace_between_braced_values_is_kept",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::interior_whitespace_between_braced_values_is_kept"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::surrounding_whitespace_from_layout_is_removed",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::surrounding_whitespace_from_layout_is_removed"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::text_after_a_braced_value_keeps_the_space_before_it",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::text_after_a_braced_value_keeps_the_space_before_it"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::every_stringifiable_primitive_is_rendered_in_its_canonical_form",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::every_stringifiable_primitive_is_rendered_in_its_canonical_form"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_body_of_one_text_run_binds_as_that_text",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_body_of_one_text_run_binds_as_that_text"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_single_braced_string_binds_as_it_always_has",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_single_braced_string_binds_as_it_always_has"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_single_braced_number_binds_as_its_text",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_single_braced_number_binds_as_its_text"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_braced_string_at_either_end_keeps_its_spaces",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_braced_string_at_either_end_keeps_its_spaces"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::line_breaks_between_pieces_read_as_one_space",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::line_breaks_between_pieces_read_as_one_space"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::line_breaks_inside_a_text_run_read_as_one_space",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::line_breaks_inside_a_text_run_read_as_one_space"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_braced_line_break_and_raw_text_are_kept",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_braced_line_break_and_raw_text_are_kept"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_typed_text_body_keeps_its_line_breaks_and_loses_its_indentation",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_typed_text_body_keeps_its_line_breaks_and_loses_its_indentation"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::a_plain_body_still_reads_its_line_breaks_as_layout",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::a_plain_body_still_reads_its_line_breaks_as_layout"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/text_content.rs::an_escape_in_a_typed_text_body_binds_as_the_character_it_escapes",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/text_content.rs::an_escape_in_a_typed_text_body_binds_as_the_character_it_escapes"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::apply_replaces_present_fields_and_keeps_the_rest",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::apply_replaces_present_fields_and_keeps_the_rest"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::apply_with_an_empty_update_returns_an_equal_record",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::apply_with_an_empty_update_returns_an_equal_record"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::merge_lets_the_later_update_win_and_keeps_absence",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::merge_lets_the_later_update_win_and_keeps_absence"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::applying_a_merged_update_equals_applying_both_in_turn",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::applying_a_merged_update_equals_applying_both_in_turn"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::diff_lists_only_differing_fields_with_a_present_empty_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::diff_lists_only_differing_fields_with_a_present_empty_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::diff_of_equal_records_is_an_empty_update",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::diff_of_equal_records_is_an_empty_update"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::diff_compares_nested_records_and_lists_structurally_and_apply_round_trips",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::diff_compares_nested_records_and_lists_structurally_and_apply_round_trips"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::changed_lists_present_fields_in_declaration_order",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::changed_lists_present_fields_in_declaration_order"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::changed_of_a_component_state_update_names_state_fields",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::changed_of_a_component_state_update_names_state_fields"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::changed_and_diff_agree",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::changed_and_diff_agree"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::property_union_cases_evaluate_and_compare",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::property_union_cases_evaluate_and_compare"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::a_bare_case_at_a_property_typed_site_evaluates_as_the_qualified_form",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::a_bare_case_at_a_property_typed_site_evaluates_as_the_qualified_form"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::a_match_over_a_property_union_selects_the_arm",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::a_match_over_a_property_union_selects_the_arm"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_intrinsics.rs::equality_compares_records_and_lists_structurally",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_intrinsics.rs::equality_compares_records_and_lists_structurally"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::counter_counts_across_init_dispatch_dispatch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::counter_counts_across_init_dispatch_dispatch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::initialization_output_names_the_action_each_handler_accepts",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::initialization_output_names_the_action_each_handler_accepts"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::pure_evaluation_output_carries_no_tokens",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::pure_evaluation_output_carries_no_tokens"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::two_invocations_in_one_batch_both_apply",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::two_invocations_in_one_batch_both_apply"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::form_applies_its_update_and_re_emits_saved",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::form_applies_its_update_and_re_emits_saved"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::an_effect_only_batch_carries_state_forward_and_still_renders",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::an_effect_only_batch_carries_state_forward_and_still_renders"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_parent_bound_update_is_an_effect_for_the_host",
+    "disposition": "interpreter-internal",
+    "reason": "Retired host-Value API injects captured handler bodies. IR uses parent-instance tokens; equivalent routing/effect/ordering coverage is in ir_runtime_tests::a_parent_bound_handlers_results_are_effects and ir_instance_tree_tests (child emits, host effects, atomic rollback)."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::host_actions_run_in_order",
+    "disposition": "interpreter-internal",
+    "reason": "Retired host-Value API injects captured handler bodies. IR uses parent-instance tokens; equivalent routing/effect/ordering coverage is in ir_runtime_tests::a_parent_bound_handlers_results_are_effects and ir_instance_tree_tests (child emits, host effects, atomic rollback)."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::an_update_record_is_the_only_way_state_changes",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::an_update_record_is_the_only_way_state_changes"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::an_invocation_with_the_wrong_action_type_names_the_expected_action",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::an_invocation_with_the_wrong_action_type_names_the_expected_action"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_failing_entry_discards_every_earlier_patch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_failing_entry_discards_every_earlier_patch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::an_update_that_fails_validation_aborts_the_batch",
+    "disposition": "redundant",
+    "reason": "Direct-HIR-only or deliberately unchecked invocation of the retired engine. Checked-source expectations are retained in the corresponding semantics module; malformed source/input is checked by native boundary, type-checker and CLI tests."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::update_records_constructed_in_functions_keep_absence",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::update_records_constructed_in_functions_keep_absence"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_loop_variable_that_shadows_a_state_field_keeps_its_captured_value",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_loop_variable_that_shadows_a_state_field_keeps_its_captured_value"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_root_bound_handler_in_the_output_runs_and_its_results_are_effects",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_root_bound_handler_in_the_output_runs_and_its_results_are_effects"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_parent_bound_handler_on_an_external_instance_runs_and_its_results_are_effects",
+    "disposition": "interpreter-internal",
+    "reason": "Retired host-Value API injects captured handler bodies. IR uses parent-instance tokens; equivalent routing/effect/ordering coverage is in ir_runtime_tests::a_parent_bound_handlers_results_are_effects and ir_instance_tree_tests (child emits, host effects, atomic rollback)."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::any_action_or_update_record_from_a_root_bound_handler_is_an_effect",
+    "disposition": "interpreter-internal",
+    "reason": "Retired host-Value API injects captured handler bodies. IR uses parent-instance tokens; equivalent routing/effect/ordering coverage is in ir_runtime_tests::a_parent_bound_handlers_results_are_effects and ir_instance_tree_tests (child emits, host effects, atomic rollback)."
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::the_component_example_counts_and_resets",
+    "disposition": "deferred",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::the_component_example_counts_and_resets; complete-ir-construction-lowering"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_in_a_prop_keeps_only_the_fields_it_carries",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_in_a_prop_keeps_only_the_fields_it_carries"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_in_a_prop_with_an_unknown_field_is_rejected",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_in_a_prop_with_an_unknown_field_is_rejected"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_in_a_prop_with_empty_for_a_required_field_is_rejected",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_in_a_prop_with_empty_for_a_required_field_is_rejected"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_inside_a_prop_array_is_checked_too",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_inside_a_prop_array_is_checked_too"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_inside_an_action_payload_is_checked_too",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_inside_an_action_payload_is_checked_too"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::an_omitted_optional_prop_is_still_in_scope_after_dispatch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::an_omitted_optional_prop_is_still_in_scope_after_dispatch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_in_explicit_state_is_checked_too",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_in_explicit_state_is_checked_too"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_plain_record_nested_in_a_prop_is_checked_too",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_plain_record_nested_in_a_prop_is_checked_too"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_update_record_under_a_component_typed_prop_is_checked_too",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_update_record_under_a_component_typed_prop_is_checked_too"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_host_action_entry_with_no_bound_handler_is_still_checked",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_host_action_entry_with_no_bound_handler_is_still_checked"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/update_records.rs::a_cleared_optional_state_field_reads_as_empty_later_in_the_batch",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/update_records.rs::a_cleared_optional_state_field_reads_as_empty_later_in_the_batch"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/value_constraints.rs::the_interpreter_matches_a_range_pattern",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/value_constraints.rs::the_ir_runtime_matches_a_range_pattern"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/value_constraints.rs::the_interpreter_dispatches_on_ranges_alternatives_and_conjunctions",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/value_constraints.rs::the_ir_runtime_dispatches_on_ranges_alternatives_and_conjunctions"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/value_constraints.rs::a_body_is_not_continued_by_the_next_arm",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/value_constraints.rs::a_body_is_not_continued_by_the_next_arm"
+  },
+  {
+    "original": "crates/nx-interpreter/tests/value_constraints.rs::the_interpreter_reads_a_float32_scrutinees_bounds_at_float32",
+    "disposition": "ported",
+    "reason": "crates/nx-api/tests/semantics/value_constraints.rs::the_ir_runtime_reads_a_float32_scrutinees_bounds_at_float32"
+  }
+]

@@ -234,7 +234,7 @@ to a `float32`. The emitter keeps that true for arithmetic: an `add`, `sub`, `mu
 checked type is `float32` is written as `fadd32`, `fsub32`, `fmul32` or `fdiv32`. A runtime that
 computes the operation on `float64` operands and rounds the result to the nearest `float32` (in
 JavaScript, `Math.fround`) gets exactly the `float32` result, so `v * 3` with `v:float32` holding
-`2.3` is `6.899999618530273` when widened or compared, as it is under the interpreter. A `float32`
+`2.3` is `6.899999618530273` when widened or compared, as it is in native IR execution. A `float32`
 remainder is always exact, so it stays `mod`, and negation needs no rounding. Constants are
 rounded when emitted, and a runtime rounds a number the host supplies at a `float32` site.
 
@@ -425,22 +425,13 @@ one; a value a host supplies is normalized against the site's nominal type, whic
 slot. What neither catches is a host handing a record of the right name and shape to a range-typed
 site, and that is the exposure every record of a shared name has rather than one of ranges.
 
-Erasure also settles what an item's carrier is. NX's `int`, `int32` and `int64` are a distinction the
-checker draws; below it, a backend binds items with whatever numeric types it has. An engine with a
-separate 32-bit integer and a separate float, such as the NX interpreter, can bind a narrow item and
-will refuse a range whose bounds are floats. The Rust IR runtime has a 64-bit integer and a float,
-and computes every integer width as the one integer. JavaScript has one number type, so an `int32` item is an
-`int` — as every `int32` is in that backend, not only a range's — and a range of `float64` whose
-bounds happen to be integral iterates, because `4.0` and `4` are one value.
-
-Of those two, only the float range is out of reach from checked NX, because `range-not-iterable`
-refuses a non-integer range iterable outright; it takes a host value or a hand-built image. The
-carrier is reachable, and it is observable, because the interpreter wraps `int32` arithmetic where a
-JavaScript backend widens: `for i in lo..hi { i * 2 }` over an `int32` range at the top of the range
-yields `-294967296` under the interpreter and `4000000000` under both JavaScript backends and the
-Rust IR runtime. That
-divergence is not the range's — `let a:int32 = 2000000000` with `a + a` divides the backends the
-same way — but a range is one of the places a program meets it.
+Erasure also settles what an item's carrier is. The checker distinguishes integer widths, while
+Rust IR binds every integer width as an i64 and JavaScript uses its number carrier. Native int32
+arithmetic no longer has a separate 32-bit wrap: an int32 range item of 2000000000 multiplied by
+two yields 4000000000 on the existing IR path. This does not establish exact parity beyond the
+shared safe integer range; Rust still wraps at i64 overflow and JavaScript retains its existing
+precision limits. A float range with integral bounds can be accepted from a host or hand-built
+image, while checked source rejects a non-integer iterable with `range-not-iterable`.
 
 ### Debug section
 
@@ -650,7 +641,7 @@ target is the owner's state record. Any other handler in the output,
 one bound at the root or one written in a parent's body and rendered by a child through content, sees
 only what it captured, and everything it returns is an effect for the host.
 
-The lifecycle a runtime implements is the interpreter's. Initialization normalizes the props, sets
+The Rust and TypeScript runtimes implement the same component lifecycle. Initialization normalizes the props, sets
 the handler properties aside (a body never sees `onTapped`), materializes the state, renders the
 body, and assigns every handler in the output a token `h<generation>-<n>`, generation `1`, numbered
 by a walk that visits lists in order and object keys in sorted order. Dispatch takes an ordered batch

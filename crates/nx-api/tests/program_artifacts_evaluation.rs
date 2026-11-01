@@ -1,7 +1,9 @@
+mod support;
 use nx_api::*;
 use nx_diagnostics::{Diagnostic, Severity};
 use nx_value::NxValue;
 use std::{fs, path::Path, sync::Arc};
+use support::{eval_program_artifact, EvalResult};
 use tempfile::TempDir;
 fn workspace_module(identity: &str, source: impl Into<Vec<u8>>) -> NxWorkspaceModule {
     NxWorkspaceModule::from_utf8(identity, source.into()).expect("workspace module")
@@ -658,11 +660,8 @@ fn eval_workspace_artifact_reports_no_root_for_selected_entry() {
     };
 
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code.as_deref() == Some("no-root")
-            && diagnostic
-                .labels
-                .iter()
-                .any(|label| label.file == "entry.nx" && label.span.end_column > 1)
+        diagnostic.code.as_deref() == Some("nx-ir-missing-entrypoint")
+            && diagnostic.labels.is_empty()
     }));
 }
 

@@ -4,14 +4,9 @@ The compiler, tooling services and external API share a program foundation. Depe
 below mean “depends on”; low-level syntax/type/value edges are omitted for clarity.
 
 ```text
-CLI, Node/WASM bindings, C/.NET FFI, graphics preview
-                         |
-                       nx-api
-               /         |          \                 \
-       nx-codegen  nx-language-service  nx-interpreter  nx-ir-runtime
-               \         |          /
-                     nx-program
-
+CLI / bindings / graphics preview -> nx-api
+nx-api -> nx-codegen, nx-language-service, nx-program, nx-ir-runtime
+nx-codegen, nx-language-service -> nx-program
 nx-lsp -> nx-language-service
 nx-ir-runtime -> nx-ir, nx-value
 ```
@@ -27,8 +22,7 @@ nx-ir-runtime -> nx-ir, nx-value
 | `nx-program` | Workspaces, source graphs, libraries and standard libraries, program construction, resolved-program model, tooling diagnostics, schema and visualizer inspection |
 | `nx-codegen` | Resolved-program lowering to executable JavaScript/TypeScript and NX IR |
 | `nx-language-service` | Editor analysis, completions, hover, diagnostics and source inspection |
-| `nx-interpreter` | Existing HIR execution and component lifecycle engine |
-| `nx-api` | External Rust entry point: flat foundation/evaluation exports and `codegen`, `language_service`, `ir_runtime` namespaces |
+| `nx-api` | External Rust entry point: flat foundation/formatting exports and `codegen`, `language_service`, `ir_runtime` namespaces |
 | `nx-ir` | Compiled image format, reader/writer and explainer |
 | `nx-value` | Canonical host values and their JSON/MessagePack encodings |
 | `nx-ir-runtime` | Preparing, linking and executing compiled images; component instance trees |
@@ -38,12 +32,10 @@ nx-ir-runtime -> nx-ir, nx-value
 
 `nx-program` depends on compiler foundations, with no dependency on an execution engine, codegen,
 the language service or `nx-api`. Services depend on that shared foundation. No crate below the
-facade may depend on `nx-api`, even through a test-only dependency. Cross-service and interpreter
+facade may depend on `nx-api`, even through a test-only dependency. Cross-service and IR-runtime
 parity tests therefore live in `nx-api/tests/`; pure construction tests stay in `nx-program`.
 
-The facade exposes the existing services as whole-crate namespaces. Existing source evaluation
-and component functions still execute with the HIR interpreter. Exposing the IR runtime does not
-change those paths. See [nx-api/README.md](nx-api/README.md) for a build/emit/run example.
+The facade exposes the existing services as whole-crate namespaces. Execution uses emitted IR through `nx-api::ir_runtime`.
 
 The LSP server stays directly on `nx-language-service` so building it does not bring in execution
 engines. A host that only executes compiled images uses `nx-ir-runtime` directly and builds no

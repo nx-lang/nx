@@ -1,0 +1,1553 @@
+//! Integration tests for simple function execution (User Story 1)
+//!
+//! These tests verify end-to-end execution of NX functions with basic operations.
+
+use crate::support::source::{IrEvaluator, Value};
+use nx_diagnostics::render_diagnostics_cli;
+use nx_hir::{lower, SourceId};
+use nx_syntax::parse_str;
+use rustc_hash::FxHashMap;
+use smol_str::SmolStr;
+use std::collections::HashMap;
+
+/// Helper function to execute a function and return the result
+fn execute_function(source: &str, function_name: &str, args: Vec<Value>) -> Result<Value, String> {
+    // Parse the source code
+    let parse_result = parse_str(source, "test.nx");
+    if !parse_result.errors.is_empty() {
+        let mut sources = HashMap::new();
+        sources.insert("test.nx".to_string(), source.to_string());
+        let rendered = render_diagnostics_cli(&parse_result.errors, &sources);
+        return Err(rendered);
+    }
+
+    // Lower to HIR
+    let root = parse_result.root().expect("Failed to get root");
+    let module = lower(root, SourceId::new(0));
+
+    // Execute the function
+    let interpreter = IrEvaluator::new(source);
+    interpreter
+        .execute_function(&module, function_name, args)
+        .map_err(|e| format!("Runtime error: {}", e))
+}
+
+// ============================================================================
+// T023: Arithmetic Function Tests
+// ============================================================================
+
+#[test]
+fn test_add_function() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+    "#;
+
+    let result = execute_function(source, "add", vec![Value::Int(5), Value::Int(3)])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::Int(8));
+}
+
+#[test]
+fn test_subtract_function() {
+    let source = r#"
+        let <sub a:int b:int /> = { a - b }
+    "#;
+
+    let result = execute_function(source, "sub", vec![Value::Int(10), Value::Int(3)])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::Int(7));
+}
+
+#[test]
+fn test_multiply_function() {
+    let source = r#"
+        let <mul a:int b:int /> = { a * b }
+    "#;
+
+    let result = execute_function(source, "mul", vec![Value::Int(4), Value::Int(5)])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::Int(20));
+}
+
+#[test]
+fn test_divide_function() {
+    let source = r#"
+        let <div a:int b:int /> = { a / b }
+    "#;
+
+    let result = execute_function(source, "div", vec![Value::Int(15), Value::Int(3)])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::Int(5));
+}
+
+#[test]
+fn test_mixed_arithmetic() {
+    let source = r#"
+        let <calc a:int b:int c:int /> = { a + b * c }
+    "#;
+
+    let result = execute_function(
+        source,
+        "calc",
+        vec![Value::Int(2), Value::Int(3), Value::Int(4)],
+    )
+    .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    // 2 + (3 * 4) = 2 + 12 = 14
+    assert_eq!(result, Value::Int(14));
+}
+
+// ============================================================================
+// T024: String Concatenation Tests
+// ============================================================================
+
+#[test]
+fn test_string_concat() {
+    let source = r#"
+        let <concat a:string b:string /> = { a + b }
+    "#;
+
+    // Analysis decides that this `+` concatenates, so the analyzed module is what runs.
+    let checked = nx_types::check_str(source, "test.nx");
+    assert!(checked.errors().is_empty(), "{:?}", checked.diagnostics);
+    let module = checked.lowered_module.expect("lowered module");
+    let result = IrEvaluator::new(source)
+        .execute_function(
+            &module,
+            "concat",
+            vec![
+                Value::String(SmolStr::new("hello")),
+                Value::String(SmolStr::new(" world")),
+            ],
+        )
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("hello world")));
+}
+
+#[test]
+fn analyzed_string_addition_concatenates() {
+    let result =
+        execute_function("let root() = { \"hello\" + \" world\" }", "root", vec![]).unwrap();
+    assert_eq!(result, Value::String("hello world".into()));
+}
+
+#[test]
+fn test_payload_union_case_construction_applies_defaults() {
+    let source = r#"
+        type LoadState =
+          | idle
+          | failed {
+              message: string
+              retryable: boolean = true
+              code?: int
+            }
+
+        let make(): LoadState = { <LoadState.failed message={"Offline"} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected union case record value");
+    };
+    assert_eq!(type_name.as_str(), "LoadState.failed");
+    assert_eq!(
+        fields.get("message"),
+        Some(&Value::String(SmolStr::new("Offline")))
+    );
+    assert_eq!(fields.get("retryable"), Some(&Value::Boolean(true)));
+    assert_eq!(
+        fields.get("code"),
+        None,
+        "An empty optional field is not stored"
+    );
+}
+
+#[test]
+fn test_constant_union_case_shorthand_constructs_a_scalar_value() {
+    let source = r#"
+        type LoadState = idle | loading
+        let make(): LoadState = { LoadState.idle }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    // The case declares no fields and its union declares no base, so it carries nothing beyond
+    // its own name and is a scalar rather than an empty record.
+    let Value::UnionCase { union, case } = result else {
+        panic!("Expected a constant union case scalar, got {result:?}");
+    };
+    assert_eq!(union.as_str(), "LoadState");
+    assert_eq!(case.as_str(), "idle");
+}
+
+#[test]
+fn test_union_case_inherits_abstract_base_defaults() {
+    let source = r#"
+        abstract type EventBase = {
+          source: string = "ui"
+          correlation?: string
+        }
+        type UiEvent extends EventBase = | clicked { x:int }
+
+        let make(): EventBase = { <UiEvent.clicked x={1} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected inherited union case record value");
+    };
+    assert_eq!(type_name.as_str(), "UiEvent.clicked");
+    assert_eq!(
+        fields.get("source"),
+        Some(&Value::String(SmolStr::new("ui")))
+    );
+    assert_eq!(
+        fields.get("correlation"),
+        None,
+        "An empty optional field is not stored"
+    );
+    assert_eq!(fields.get("x"), Some(&Value::Int(1)));
+}
+
+#[test]
+fn test_omitted_optional_union_field_is_not_stored() {
+    let source = r#"
+        type FlowCompletion = continue | end { message:string }
+        type QuestionFlow = { completion?:FlowCompletion }
+        let make(): QuestionFlow = { <QuestionFlow /> }
+        let read(): FlowCompletion? = { <QuestionFlow />.completion }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected QuestionFlow record value");
+    };
+    assert_eq!(type_name.as_str(), "QuestionFlow");
+    assert_eq!(fields.get("completion"), None);
+
+    let read = execute_function(source, "read", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(read, Value::empty());
+}
+
+#[test]
+fn test_explicit_empty_optional_union_field_is_not_stored() {
+    let source = r#"
+        type FlowCompletion = continue | end { message:string }
+        type QuestionFlow = { completion?:FlowCompletion }
+        let make(): QuestionFlow = { <QuestionFlow completion={} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected QuestionFlow record value");
+    };
+    assert_eq!(type_name.as_str(), "QuestionFlow");
+    assert_eq!(fields.get("completion"), None);
+}
+
+/// A fieldless case of a union that declares a base is **not** constant: it carries the base's
+/// fields at runtime, so it keeps the record representation (design D3).
+#[test]
+fn test_fieldless_case_of_a_based_union_keeps_the_record_shape() {
+    let source = r#"
+        abstract type EventBase = {
+          source: string = "ui"
+        }
+        type UiEvent extends EventBase = clicked { x:int } | closed
+        let make(): UiEvent = { UiEvent.closed }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected a record, got {result:?}");
+    };
+    assert_eq!(type_name.as_str(), "UiEvent.closed");
+    assert_eq!(
+        fields.get("source"),
+        Some(&Value::String(SmolStr::new("ui"))),
+        "the case carries the base's fields and their defaults"
+    );
+}
+
+#[test]
+fn test_constant_union_case_remains_distinct_from_the_empty_value() {
+    let source = r#"
+        type FlowCompletion = continue | end { message:string }
+        let make(): FlowCompletion = { FlowCompletion.continue }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    // A constant case in a mixed union is still a scalar; only a case that carries fields keeps
+    // the record representation.
+    let Value::UnionCase { union, case } = result else {
+        panic!("Expected a constant union case scalar, got {result:?}");
+    };
+    assert_eq!(union.as_str(), "FlowCompletion");
+    assert_eq!(case.as_str(), "continue");
+    assert!(!Value::UnionCase { union, case }.is_empty_value());
+}
+
+#[test]
+fn test_union_match_compares_case_discriminator() {
+    let source = r#"
+        type LoadState = idle | failed { message:string }
+        let view(state: LoadState): string = {
+            if state is {
+                LoadState.idle => "idle"
+                LoadState.failed => state.message
+            }
+        }
+    "#;
+
+    let mut fields = FxHashMap::default();
+    fields.insert(
+        SmolStr::new("message"),
+        Value::String(SmolStr::new("Offline")),
+    );
+    let failed = Value::Record {
+        type_name: nx_hir::Name::new("LoadState.failed"),
+        fields,
+    };
+
+    let result = execute_function(source, "view", vec![failed])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Offline")));
+}
+
+#[test]
+fn test_union_match_selects_a_qualified_constant_case() {
+    let source = r#"
+        type DealStage = draft | pending_review | approved
+        type LoadState = idle | failed { message:string }
+        let stage(s: DealStage): string = {
+            if s is {
+                DealStage.draft => "draft"
+                DealStage.pending_review => "review"
+                else => "approved"
+            }
+        }
+        let load(state: LoadState): string = {
+            if state is {
+                LoadState.idle => "idle"
+                LoadState.failed => state.message
+            }
+        }
+    "#;
+
+    let case = |union: &str, case: &str| Value::UnionCase {
+        union: nx_hir::Name::new(union),
+        case: SmolStr::new(case),
+    };
+    let call = |function: &str, arg: Value| {
+        execute_function(source, function, vec![arg])
+            .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err))
+    };
+
+    // A fieldless case is a constant, so a qualified pattern naming one matches by value.
+    assert_eq!(
+        call("stage", case("DealStage", "draft")),
+        Value::String(SmolStr::new("draft"))
+    );
+    assert_eq!(
+        call("stage", case("DealStage", "pending_review")),
+        Value::String(SmolStr::new("review"))
+    );
+    assert_eq!(
+        call("stage", case("DealStage", "approved")),
+        Value::String(SmolStr::new("approved"))
+    );
+    assert_eq!(
+        call("load", case("LoadState", "idle")),
+        Value::String(SmolStr::new("idle"))
+    );
+}
+
+// ============================================================================
+// Error Handling Tests
+// ============================================================================
+
+#[test]
+fn test_function_not_found() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+    "#;
+
+    let result = execute_function(source, "nonexistent", vec![]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("nx-ir-missing-entrypoint"));
+}
+
+#[test]
+fn test_parameter_count_mismatch() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+    "#;
+
+    let result = execute_function(source, "add", vec![Value::Int(5)]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("argument"));
+}
+
+#[test]
+fn test_division_by_zero() {
+    let source = r#"
+        let <div a:int b:int /> = { a / b }
+    "#;
+
+    let result = execute_function(source, "div", vec![Value::Int(10), Value::Int(0)]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Division by zero"));
+}
+
+// ============================================================================
+// Paren Function Tests
+// ============================================================================
+
+#[test]
+fn test_paren_function_execution() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+    "#;
+
+    let result = execute_function(source, "add", vec![Value::Int(2), Value::Int(6)])
+        .unwrap_or_else(|err| panic!("Paren function execution failed:\n{}", err));
+    assert_eq!(result, Value::Int(8));
+}
+
+#[test]
+fn test_nested_paren_function_calls() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+        let double(value:int): int = { add(value, value) }
+        let compute(n:int): int = { double(add(n, 1)) }
+    "#;
+
+    let result = execute_function(source, "compute", vec![Value::Int(3)])
+        .unwrap_or_else(|err| panic!("Nested paren call failed:\n{}", err));
+    assert_eq!(result, Value::Int(8));
+}
+
+#[test]
+fn test_paren_function_without_return_annotation() {
+    let source = r#"
+        let sum(a:int, b:int) = { a + b }
+        let applyValue(n:int) = { sum(n, 1) }
+    "#;
+
+    let result = execute_function(source, "applyValue", vec![Value::Int(9)])
+        .unwrap_or_else(|err| panic!("Paren function without annotation failed:\n{}", err));
+    assert_eq!(result, Value::Int(10));
+}
+
+// ============================================================================
+// Constant Union Tests
+// ============================================================================
+
+#[test]
+fn test_constant_case_return() {
+    let source = r#"
+        type Direction = north | south | east | west
+        let <north /> = { Direction.north }
+    "#;
+
+    let result = execute_function(source, "north", vec![]).unwrap_or_else(|err| panic!("{}", err));
+    assert_eq!(
+        result,
+        Value::UnionCase {
+            union: nx_hir::Name::new("Direction"),
+            case: SmolStr::new("north")
+        }
+    );
+}
+
+#[test]
+fn test_constant_case_comparison() {
+    let source = r#"
+        type Direction = north | south | east | west
+        let isNorth(value:Direction): boolean = { value == Direction.north }
+    "#;
+
+    let result = execute_function(
+        source,
+        "isNorth",
+        vec![Value::UnionCase {
+            union: nx_hir::Name::new("Direction"),
+            case: SmolStr::new("north"),
+        }],
+    )
+    .unwrap_or_else(|err| panic!("{}", err));
+    assert_eq!(result, Value::Boolean(true));
+}
+
+// ============================================================================
+// Record Support Tests
+// ============================================================================
+
+#[test]
+fn test_record_field_access() {
+    let source = r#"
+        type User = { name: string age: int }
+        let getName(user:User): string = { user.name }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+    record.insert(SmolStr::new("age"), Value::Int(32));
+
+    let result = execute_function(
+        source,
+        "getName",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .unwrap_or_else(|err| {
+        panic!("Record field access failed:\n{}", err);
+    });
+
+    assert_eq!(result, Value::String(SmolStr::new("Ada")));
+}
+
+#[test]
+fn test_derived_record_argument_satisfies_abstract_ancestor_parameter() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: boolean = false
+        }
+
+        let consume(entity:Entity): int = { 1 }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("id"), Value::Int(1));
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+
+    let result = execute_function(
+        source,
+        "consume",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .unwrap_or_else(|err| panic!("derived record argument failed:\n{}", err));
+
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn test_derived_record_return_satisfies_abstract_ancestor_return_type() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: boolean = false
+        }
+
+        let make(): UserBase = { <User id={1} name={"Ada"} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("derived record return failed:\n{}", err));
+
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(fields.get("id"), Some(&Value::Int(1)));
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Ada")))
+            );
+        }
+        other => panic!("Expected derived record return, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_host_supplied_record_defaults_are_applied_during_argument_coercion() {
+    let source = r#"
+        type User = { name: string = "Anon" age: int }
+        let echo(user:User) = { user }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("age"), Value::Int(32));
+
+    let result = execute_function(
+        source,
+        "echo",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .unwrap_or_else(|err| panic!("host-supplied record should be constructed:\n{}", err));
+
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(fields.get("age"), Some(&Value::Int(32)));
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_host_supplied_record_with_an_absent_optional_field_reads_as_empty() {
+    let source = r#"
+        type User = { email?: string }
+        let getEmail(user:User): string? = { user.email }
+    "#;
+
+    let result = execute_function(
+        source,
+        "getEmail",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: FxHashMap::default(),
+        }],
+    )
+    .unwrap_or_else(|err| panic!("Reading an absent optional field failed:\n{}", err));
+
+    assert_eq!(
+        result,
+        Value::empty(),
+        "An optional field a host left out reads as the empty value"
+    );
+}
+
+#[test]
+fn test_host_supplied_record_missing_required_field_is_rejected_at_the_boundary() {
+    let source = r#"
+        type User = { name: string age: int }
+        let noop(user:User): int = { 0 }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+
+    let error = execute_function(
+        source,
+        "noop",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .expect_err("a missing required field is rejected before the body runs");
+    assert!(
+        error.contains("age"),
+        "Expected the missing field named: {error}"
+    );
+}
+
+#[test]
+fn test_record_defaults_instantiation() {
+    let source = r#"
+        type User = { name: string = "Anon" age: int = 30 }
+        let greet(user:User): string = { user.name }
+    "#;
+
+    // Build module
+    let parse_result = parse_str(source, "record-defaults.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = IrEvaluator::new(source);
+    let record = interpreter
+        .instantiate_record_defaults(&module, "User")
+        .expect("instantiate record");
+
+    let result = interpreter
+        .execute_function(&module, "greet", vec![record])
+        .unwrap_or_else(|err| panic!("Execution failed: {}", err));
+
+    assert_eq!(result, Value::String(SmolStr::new("Anon")));
+}
+
+#[test]
+fn test_record_inheritance_applies_inherited_defaults() {
+    let source = r#"
+        abstract type UserBase = {
+          name: string = "Anon"
+          age: int = 18
+        }
+
+        type User extends UserBase = {
+          isAdmin: boolean = false
+        }
+    "#;
+
+    let parse_result = parse_str(source, "record-inheritance-defaults.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = IrEvaluator::new(source);
+    let record = interpreter
+        .instantiate_record_defaults(&module, "User")
+        .expect("instantiate inherited defaults");
+
+    match record {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+            assert_eq!(fields.get("age"), Some(&Value::Int(18)));
+            assert_eq!(fields.get("isAdmin"), Some(&Value::Boolean(false)));
+        }
+        other => panic!(
+            "Expected inherited defaults to produce a record, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_action_inheritance_applies_inherited_defaults() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string = "ui"
+        }
+
+        action SearchSubmitted extends InputAction = {
+          query: string = "search"
+        }
+    "#;
+
+    let parse_result = parse_str(source, "action-inheritance-defaults.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = IrEvaluator::new(source);
+    let action = interpreter
+        .instantiate_record_defaults(&module, "SearchSubmitted")
+        .expect("instantiate inherited action defaults");
+
+    match action {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "SearchSubmitted");
+            assert_eq!(
+                fields.get("source"),
+                Some(&Value::String(SmolStr::new("ui")))
+            );
+        }
+        other => panic!(
+            "Expected inherited defaults to produce an action record, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_record_literal_defaults_and_overrides() {
+    let source = r#"
+        type User = { name: string = "Anon" age: int = 30 }
+        let getName(): string = { <User name="Bob" />.name }
+        let getAge(): int = { <User name="Bob" />.age }
+    "#;
+
+    let result = execute_function(source, "getName", vec![])
+        .unwrap_or_else(|err| panic!("record literal name failed: {}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Bob")));
+
+    let result = execute_function(source, "getAge", vec![])
+        .unwrap_or_else(|err| panic!("record literal age failed: {}", err));
+    assert_eq!(result, Value::Int(30));
+}
+
+#[test]
+fn test_record_construction_rejects_unknown_fields_runtime() {
+    let source = r##"
+        type ChatLinkConfig = { standaloneAppearance: string }
+        let root(): ChatLinkConfig = {
+          <ChatLinkConfig standaloneAppearance={"split"} accentColor={"#3b82f6"} />
+        }
+    "##;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("unknown-record-field"),
+        "Error should mention the unknown record field:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_strict_record_construction_still_applies_defaults_runtime() {
+    let source = r#"
+        type User = { name: string role: string = "member" }
+        let root(): User = { <User name={"Ava"} /> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("record defaults failed: {}", err));
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Ava")))
+            );
+            assert_eq!(
+                fields.get("role"),
+                Some(&Value::String(SmolStr::new("member")))
+            );
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_action_record_literal_uses_defaults() {
+    let source = r#"
+        action SaveRequested = { value: string = "Anon" source?: string }
+        let getValue(): string = { <SaveRequested />.value }
+    "#;
+
+    let result = execute_function(source, "getValue", vec![])
+        .unwrap_or_else(|err| panic!("action record literal failed: {}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Anon")));
+}
+
+#[test]
+fn test_action_record_defaults_instantiation() {
+    let source = r#"
+        action SaveRequested = { value: string = "Anon" source?: string }
+        let getValue(): string = { <SaveRequested />.value }
+    "#;
+
+    let parse_result = parse_str(source, "action-records.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = IrEvaluator::new(source);
+    let action = interpreter
+        .instantiate_record_defaults(&module, "SaveRequested")
+        .expect("instantiate action defaults");
+
+    match action {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "SaveRequested");
+            assert_eq!(
+                fields.get("value"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+        }
+        other => panic!(
+            "Expected action defaults to produce a record, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_abstract_record_instantiation_fails_at_runtime() {
+    let source = r#"
+        abstract type UserBase = {
+          name: string
+        }
+
+        let make(): UserBase = { <UserBase name={"Ada"} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![]);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Cannot instantiate abstract record 'UserBase'"),
+        "Expected abstract instantiation runtime error"
+    );
+}
+
+#[test]
+fn test_nested_record_access() {
+    let source = r#"
+        type Address = { city: string = "SF" }
+        type User = { address: Address }
+        let city(user:User): string = { user.address.city }
+    "#;
+
+    let mut addr = FxHashMap::default();
+    addr.insert(SmolStr::new("city"), Value::String(SmolStr::new("Paris")));
+    let mut user = FxHashMap::default();
+    user.insert(
+        SmolStr::new("address"),
+        Value::Record {
+            type_name: nx_hir::Name::new("Address"),
+            fields: addr,
+        },
+    );
+
+    let result = execute_function(
+        source,
+        "city",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: user,
+        }],
+    )
+    .unwrap_or_else(|err| panic!("Nested record access failed: {}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Paris")));
+}
+
+#[test]
+fn test_record_return_type_and_collection() {
+    let source = r#"
+        type User = { name: string = "Anon" }
+        let make(): User = { <User /> }
+    "#;
+
+    let interpreter = IrEvaluator::new(source);
+    let parse = parse_str(source, "record-return.nx");
+    assert!(parse.errors.is_empty(), "parse errors: {:?}", parse.errors);
+    let module = lower(parse.root().unwrap(), SourceId::new(0));
+
+    let made = interpreter
+        .execute_function(&module, "make", vec![])
+        .unwrap_or_else(|e| panic!("{}", e));
+    match made {
+        Value::Record { fields, type_name } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_optional_record_field_defaults_to_empty() {
+    let source = r#"
+        type User = { email?: string }
+        let getEmail(user:User) = { user.email }
+    "#;
+
+    let interpreter = IrEvaluator::new(source);
+    let parse = parse_str(source, "optional.nx");
+    assert!(parse.errors.is_empty());
+    let module = lower(parse.root().unwrap(), SourceId::new(0));
+
+    // instantiate with defaults (the optional field is left empty)
+    let record = interpreter
+        .instantiate_record_defaults(&module, "User")
+        .unwrap();
+    let result = interpreter
+        .execute_function(&module, "getEmail", vec![record])
+        .unwrap();
+    assert_eq!(result, Value::empty());
+}
+
+#[test]
+fn test_record_all_fields_have_defaults() {
+    let source = r#"
+        type Config = { host: string = "localhost" port: int = 80 }
+        let make(): Config = { <Config /> }
+    "#;
+
+    let interpreter = IrEvaluator::new(source);
+    let parse = parse_str(source, "config.nx");
+    assert!(parse.errors.is_empty());
+    let module = lower(parse.root().unwrap(), SourceId::new(0));
+
+    let result = interpreter
+        .execute_function(&module, "make", vec![])
+        .unwrap();
+    match result {
+        Value::Record { fields, type_name } => {
+            assert_eq!(type_name.as_str(), "Config");
+            assert_eq!(
+                fields.get("host"),
+                Some(&Value::String(SmolStr::new("localhost")))
+            );
+            assert_eq!(fields.get("port"), Some(&Value::Int(80)));
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_external_record_argument_evaluates_definition_defaults() {
+    let source = r#"
+        let defaultTimeout = 30
+        type Config = { timeout:int = { defaultTimeout } }
+        let echo(config:Config) = { config }
+    "#;
+
+    let result = execute_function(
+        source,
+        "echo",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("Config"),
+            fields: FxHashMap::default(),
+        }],
+    )
+    .unwrap_or_else(|err| panic!("External record argument should be constructed:\n{}", err));
+
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "Config");
+            assert_eq!(fields.get("timeout"), Some(&Value::Int(30)));
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+// ============================================================================
+// Element and Paren Call Interop Tests
+// ============================================================================
+
+#[test]
+fn test_element_call_invokes_paren_defined_function() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+        let compute(): int = { <add b=2 a=1 /> }
+    "#;
+
+    let result = execute_function(source, "compute", vec![])
+        .unwrap_or_else(|err| panic!("Element call failed:\n{}", err));
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn test_element_call_invokes_element_defined_function() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+        let compute(): int = { <add a=1 b=2 /> }
+    "#;
+
+    let result = execute_function(source, "compute", vec![])
+        .unwrap_or_else(|err| panic!("Element call failed:\n{}", err));
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+#[ignore = "Pending complete-ir-construction-lowering"]
+fn test_paren_call_constructs_record_type_positionally() {
+    let source = r#"
+        type User = { name:string age:int = 30 }
+        let getName(): string = { User("Bob", 42).name }
+        let getAge(): int = { User("Bob").age }
+    "#;
+
+    let result = execute_function(source, "getName", vec![])
+        .unwrap_or_else(|err| panic!("Record constructor call failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Bob")));
+
+    let result = execute_function(source, "getAge", vec![])
+        .unwrap_or_else(|err| panic!("Record constructor call failed:\n{}", err));
+    assert_eq!(result, Value::Int(30));
+}
+
+#[test]
+fn test_element_call_passes_content_to_paren_function() {
+    let source = r#"
+        let collect(content items:object+): object+ = { items }
+        let root(): object+ = { <collect><div /><span /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with content failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_paren_call_invokes_element_defined_function() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+        let compute(): int = { <add a=1 b=2 /> }
+    "#;
+
+    let result = execute_function(source, "compute", vec![])
+        .unwrap_or_else(|err| panic!("Paren call to element-defined function failed:\n{}", err));
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn test_element_call_constructs_record_via_type_alias() {
+    let source = r#"
+        type User = { name: string age: int = 30 }
+        type Person = User
+        let getName(): string = { <Person name="Bob" />.name }
+        let getAge(): int = { <Person name="Bob" />.age }
+    "#;
+
+    let result = execute_function(source, "getName", vec![])
+        .unwrap_or_else(|err| panic!("Element call record alias failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Bob")));
+
+    let result = execute_function(source, "getAge", vec![])
+        .unwrap_or_else(|err| panic!("Element call record alias failed:\n{}", err));
+    assert_eq!(result, Value::Int(30));
+}
+
+#[test]
+fn test_element_call_content_is_injected_for_element_defined_function() {
+    let source = r#"
+        let <collect content items: object+ />: object+ = { items }
+        let root(): object+ = { <collect><div /><span /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with content failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_element_call_single_child_coerces_to_scalar_content_parameter() {
+    let source = r#"
+        type div = {}
+        let <collect content item: div />: div = { item }
+        let root(): div = { <collect><div /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with scalar content failed:\n{}", err));
+
+    assert_eq!(
+        result,
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        }
+    );
+}
+
+#[test]
+fn test_element_call_scalar_value_child_passes_to_scalar_content_parameter() {
+    let source = r#"
+        let <collect content item: int />: int = { item }
+        let root(): int = { <collect>{1}</collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with scalar value content failed:\n{}", err));
+
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn test_element_call_scalar_value_child_coerces_to_list_content_parameter() {
+    let source = r#"
+        let <collect content items: int+ />: int+ = { items }
+        let root(): int+ = { <collect>{1}</collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]).unwrap_or_else(|err| {
+        panic!(
+            "Element call with scalar value content list failed:\n{}",
+            err
+        )
+    });
+
+    assert_eq!(result, Value::Array(vec![Value::Int(1)]));
+}
+
+#[test]
+fn test_element_call_multi_children_rejected_for_scalar_content_parameter() {
+    let source = r#"
+        type div = {}
+        let <collect content item: div />: div = { item }
+        let root(): div = { <collect><div /><span /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_lowercase().contains("return value")
+            || err.contains("argument")
+            || err.contains("content"),
+        "Error should mention the scalar/list mismatch:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_intrinsic_element_named_and_body_content_conflict_is_rejected() {
+    let source = r#"
+        let root() = <div content="named">body</div>
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("both a 'content' property and element body content"),
+        "Error should mention the intrinsic content conflict:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_element_call_braced_child_list_flattens_content_array() {
+    let source = r#"
+        let <collect content items: object+ />: object+ = { items }
+        let root(): object+ = { <collect>{<div /> <span />}</collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with braced child list failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_element_call_conditional_content_expression_preserves_selected_element() {
+    let source = r#"
+        let <collect content items: object+ />: object+ = { items }
+        let root(flag: boolean): object+ = { <collect>if flag { <A /> } else { <B /> }</collect> }
+    "#;
+
+    let true_result = execute_function(source, "root", vec![Value::Boolean(true)])
+        .unwrap_or_else(|err| panic!("Element call with conditional content failed:\n{}", err));
+    assert_eq!(
+        true_result,
+        Value::Array(vec![Value::Record {
+            type_name: nx_hir::Name::new("A"),
+            fields: FxHashMap::default(),
+        }])
+    );
+
+    let false_result = execute_function(source, "root", vec![Value::Boolean(false)])
+        .unwrap_or_else(|err| panic!("Element call with conditional content failed:\n{}", err));
+    assert_eq!(
+        false_result,
+        Value::Array(vec![Value::Record {
+            type_name: nx_hir::Name::new("B"),
+            fields: FxHashMap::default(),
+        }])
+    );
+}
+
+#[test]
+fn test_element_call_for_content_expression_flattens_element_results() {
+    let source = r#"
+        let <collect content items: object+ />: object+ = { items }
+        let root(items: object+): object+ = { <collect>for item in items { <Row /> }</collect> }
+    "#;
+
+    let items = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let result = execute_function(source, "root", vec![items])
+        .unwrap_or_else(|err| panic!("Element call with for content failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("Row"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("Row"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("Row"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_multi_value_element_brace_list_returns_array_runtime() {
+    let source = r#"
+        let root() = { <div /> <span /> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element-valued brace list failed at runtime:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_scalar_brace_return_is_wrapped_for_sequence_annotation_runtime() {
+    let source = r#"
+        let values(): int+ = { 1 }
+    "#;
+
+    let result = execute_function(source, "values", vec![])
+        .unwrap_or_else(|err| panic!("Scalar-to-sequence return coercion failed:\n{}", err));
+
+    assert_eq!(result, Value::Array(vec![Value::Int(1)]));
+}
+
+#[test]
+fn test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime() {
+    let source = r#"
+        let values(): int = { 1 2 }
+    "#;
+
+    let result = execute_function(source, "values", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_lowercase().contains("return value"),
+        "Error should mention the return value mismatch:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_zero_or_more_let_binding_preserves_supplied_sequence_runtime() {
+    let source = r#"
+        type ChatBrandLink = { label: string = "docs" }
+        let links: ChatBrandLink* = { <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> }
+        let root(): object* = { links }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Zero-or-more let binding failed:\n{}", err));
+
+    let Value::Array(items) = result else {
+        panic!("Expected supplied links to remain a sequence");
+    };
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| matches!(
+        item,
+        Value::Record { type_name, .. } if type_name.as_str() == "ChatBrandLink"
+    )));
+}
+
+#[test]
+fn test_optional_sequence_record_field_preserves_supplied_sequence_runtime() {
+    let source = r#"
+        type ChatBrandLink = { label: string = "docs" }
+        type Brand = { links?: ChatBrandLink+ }
+        let root(): object* = { <Brand links={ <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> } />.links }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Optional-sequence record field failed:\n{}", err));
+
+    let Value::Array(items) = result else {
+        panic!("Expected supplied links to remain a sequence");
+    };
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| matches!(
+        item,
+        Value::Record { type_name, .. } if type_name.as_str() == "ChatBrandLink"
+    )));
+}
+
+#[test]
+fn test_element_call_content_conflict_is_error_for_function() {
+    let source = r#"
+        let collect(content items?: object+): object* = { items }
+        let root(): object* = { <collect items={}><div /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("content"),
+        "Error should mention content:\n{}",
+        err
+    );
+    assert!(err.contains("both"), "Error should mention both:\n{}", err);
+}
+
+#[test]
+fn test_element_call_content_conflict_is_error_for_record() {
+    let source = r#"
+        type Container = { content items?: object+ }
+        type Box = Container
+        let root(): object = { <Box items={}><div /></Box> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("content"),
+        "Error should mention content:\n{}",
+        err
+    );
+    assert!(err.contains("both"), "Error should mention both:\n{}", err);
+}
+
+#[test]
+fn test_element_call_body_is_error_for_record_without_content_field() {
+    let source = r#"
+        type User = { name: string }
+        type Person = User
+        let root(): object = { <Person><div /></Person> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("content"),
+        "Error should mention content:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_element_call_body_populates_record_content_field() {
+    let source = r#"
+        type Container = { content items: object+ }
+        type Box = Container
+        let root(): object+ = { <Box><div /><span /></Box>.items }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Record content injection failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_element_call_text_body_populates_scalar_content_field() {
+    let source = r#"
+        type Label = { content text:string }
+        let root(): string = { <Label>label text</Label>.text }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Record text content injection failed:\n{}", err));
+
+    assert_eq!(result, Value::String(SmolStr::new("label text")));
+}
+
+#[test]
+fn test_component_invocation_binds_body_to_declared_content_prop() {
+    let source = r#"
+        component <Panel title:string content body:object /> = {
+            <section title={title}>{body}</section>
+        }
+        let root() = { <Panel title="Docs"><Badge /></Panel> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Component content invocation failed:\n{}", err));
+
+    let Value::Record { fields, .. } = result else {
+        panic!("descriptor")
+    };
+    assert_eq!(
+        fields["body"],
+        Value::Record {
+            type_name: nx_hir::Name::new("Badge"),
+            fields: FxHashMap::default(),
+        }
+    );
+}

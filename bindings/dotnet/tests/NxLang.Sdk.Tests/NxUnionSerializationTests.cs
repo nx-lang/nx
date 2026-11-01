@@ -72,32 +72,9 @@ internal sealed class LoadStateFailed : LoadState
 
 public class NxUnionSerializationTests
 {
-    [Fact]
-    public void EvaluateJson_PayloadUnionCase_ReturnsTypeMap()
-    {
-        JsonElement result = NxRuntime.EvaluateJson(PayloadUnionSource);
 
-        Assert.Equal(JsonValueKind.Object, result.ValueKind);
-        Assert.Equal("LoadState.failed", result.GetProperty("$type").GetString());
-        Assert.Equal("Offline", result.GetProperty("message").GetString());
-    }
 
-    [Fact]
-    public void EvaluateBytes_PayloadUnionCase_ReturnsMessagePackTypeMap()
-    {
-        byte[] result = NxRuntime.EvaluateBytes(PayloadUnionSource);
-        MessagePackReader reader = new(new ReadOnlySequence<byte>(result));
 
-        Assert.Equal(MessagePackType.Map, reader.NextMessagePackType);
-
-        Dictionary<string, object?> payload =
-            MessagePackSerializer.Deserialize<Dictionary<string, object?>>(
-                result,
-                cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal("LoadState.failed", Assert.IsType<string>(payload["$type"]));
-        Assert.Equal("Offline", Assert.IsType<string>(payload["message"]));
-    }
 
     [Fact]
     public void TypedJsonUnionCase_SerializesAsTypeMap()
@@ -195,44 +172,9 @@ public class NxUnionSerializationTests
         Assert.Equal("Offline", failed.Message);
     }
 
-    [Fact]
-    public void EvaluateTypedUnionCase_DeserializesRuntimeProducedTypeMap()
-    {
-        LoadState state = NxRuntime.Evaluate<LoadState>(PayloadUnionSource);
 
-        LoadStateFailed failed = Assert.IsType<LoadStateFailed>(state);
-        Assert.Equal("Offline", failed.Message);
-    }
 
-    /// <summary>
-    /// A constant case carries the bare authored string on the wire, and it does so whether its
-    /// union is wholly constant or mixes constant cases with payload ones. Those two declarations
-    /// are the same value shape, which is why one declaration form suffices for both.
-    /// </summary>
-    [Fact]
-    public void RawConstantCaseResults_UseTheBareStringWireShape()
-    {
-        JsonElement constantUnionJson = NxRuntime.EvaluateJson(ConstantUnionSource);
-        JsonElement mixedUnionJson = NxRuntime.EvaluateJson(FieldlessUnionSource);
-        byte[] constantUnionBytes = NxRuntime.EvaluateBytes(ConstantUnionSource);
-        byte[] mixedUnionBytes = NxRuntime.EvaluateBytes(FieldlessUnionSource);
 
-        Assert.Equal(JsonValueKind.String, constantUnionJson.ValueKind);
-        Assert.Equal("closed", constantUnionJson.GetString());
-        Assert.Equal(JsonValueKind.String, mixedUnionJson.ValueKind);
-        Assert.Equal("idle", mixedUnionJson.GetString());
-
-        Assert.Equal(
-            "closed",
-            MessagePackSerializer.Deserialize<string>(
-                constantUnionBytes,
-                cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(
-            "idle",
-            MessagePackSerializer.Deserialize<string>(
-                mixedUnionBytes,
-                cancellationToken: TestContext.Current.CancellationToken));
-    }
 
     /// <summary>A mixed union round-trips through JSON in both of its shapes.</summary>
     [Fact]

@@ -1,8 +1,10 @@
 //! The interpreter runs programs with value constraints, through a real build: it reports every
 //! diagnostic the type checker reports and does not check values when the program runs.
 
-use nx_api::{eval_source, EvalResult, ProgramBuildContext};
+mod support;
+use nx_api::ProgramBuildContext;
 use nx_value::NxValue;
+use support::{eval_source, EvalResult};
 
 fn evaluate(source: &str) -> Result<NxValue, Vec<String>> {
     match eval_source(source, "constraints.nx", &ProgramBuildContext::empty()) {

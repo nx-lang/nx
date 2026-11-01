@@ -21,26 +21,21 @@ import {
   type NativeWorkspaceModule
 } from "./native.js";
 import type {
-  NxByteEvaluationOptions,
   NxDeclarationName,
   NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
-  NxEvaluationOptions,
   NxFunctionSchema,
   NxFunctionSchemaOptions,
   NxGeneratedNxIr,
   NxJsonRecord,
   NxJsonSchema,
   NxJsonValue,
-  NxOutputFormat,
-  NxSourceByteEvaluationOptions,
   NxIrEmitOptions,
   NxIrMetadata,
   NxLibraryInput,
   NxParameterSchema,
   NxSourceBuildOptions,
-  NxSourceEvaluationOptions,
   NxSourceInput,
   NxTextSpan,
   NxTypeSchema,
@@ -92,12 +87,10 @@ export type {
   WorkspaceDiagnosticLabel
 } from "@nx-lang/language-protocol";
 export type {
-  NxByteEvaluationOptions,
   NxDeclarationName,
   NxDeclarationRef,
   NxDiagnostic,
   NxDiagnosticLabel,
-  NxEvaluationOptions,
   NxFunctionSchema,
   NxFunctionSchemaOptions,
   NxGeneratedNxIr,
@@ -109,13 +102,10 @@ export type {
   NxJsonValue,
   NxLibraryInput,
   NxLibraryModuleInput,
-  NxOutputFormat,
   NxParameterSchema,
   NxSchemaDirection,
   NxSeverity,
-  NxSourceByteEvaluationOptions,
   NxSourceBuildOptions,
-  NxSourceEvaluationOptions,
   NxSourceInput,
   NxTextSpan,
   NxTypeSchema,
@@ -454,10 +444,6 @@ export class NxProgramArtifact {
    * @throws NxDisposedResourceError when this artifact has already been disposed.
    * @throws NxNativeError when the native binding returns an invalid or unexpected payload.
    */
-  public evaluateJson(options: NxEvaluationOptions = {}): NxJsonValue {
-    assertSupportedRootEntrypoint(options);
-    return parseJson<NxJsonValue>(invokeNative(() => getArtifactNative(this).evaluateJson()));
-  }
 
   /**
    * Evaluates the supported `root()` entrypoint and returns bytes in the requested output format.
@@ -466,10 +452,6 @@ export class NxProgramArtifact {
    * @throws NxDisposedResourceError when this artifact has already been disposed.
    * @throws NxNativeError when the native binding cannot evaluate the artifact.
    */
-  public evaluateBytes(options: NxByteEvaluationOptions = {}): Buffer {
-    assertSupportedRootEntrypoint(options);
-    return invokeNative(() => getArtifactNative(this).evaluateBytes(options.outputFormat ?? "messagePack"));
-  }
 
   /**
    * JSON Schema for the arguments and the result of the function `reference` names, with its
@@ -797,36 +779,12 @@ export function generateNxIrFromSource(
  *
  * @throws NxEvaluationError when build or evaluation reports diagnostics, or when a non-`root` entrypoint is requested.
  */
-export function evaluateJsonFromSource(
-  source: NxSourceInput,
-  options: NxSourceEvaluationOptions = {}
-): NxJsonValue {
-  assertSupportedRootEntrypoint(options);
-  const artifact = NxProgramArtifact.buildSource(source, options);
-  try {
-    return artifact.evaluateJson(options);
-  } finally {
-    artifact.dispose();
-  }
-}
 
 /**
  * Builds a short-lived source artifact, evaluates `root()` to bytes, then disposes the artifact.
  *
  * @throws NxEvaluationError when build or evaluation reports diagnostics, or when a non-`root` entrypoint is requested.
  */
-export function evaluateBytesFromSource(
-  source: NxSourceInput,
-  options: NxSourceByteEvaluationOptions = {}
-): Buffer {
-  assertSupportedRootEntrypoint(options);
-  const artifact = NxProgramArtifact.buildSource(source, options);
-  try {
-    return artifact.evaluateBytes(options);
-  } finally {
-    artifact.dispose();
-  }
-}
 
 function withBuildContext<T>(
   buildContext: NxProgramBuildContext | undefined,
@@ -980,25 +938,6 @@ function evaluationMessage(diagnostics: readonly NxDiagnostic[]): string {
   return first === undefined ? "NX evaluation failed." : first.message;
 }
 
-function assertSupportedRootEntrypoint(options: NxEvaluationOptions): void {
-  const entrypoint = options.entrypoint ?? "root";
-  if (entrypoint === "root") {
-    return;
-  }
-
-  throw new NxEvaluationError(
-    `Named entrypoint evaluation is not supported by the native Node SDK: ${entrypoint}`,
-    [
-      {
-        severity: "error",
-        code: "unsupported-entrypoint",
-        message: `Named entrypoint evaluation is not supported by the current native host API: ${entrypoint}`,
-        labels: [],
-        help: "Expose the entrypoint as root() or add named-entrypoint support to the Rust host API first."
-      }
-    ]
-  );
-}
 
 function parseJson<T>(json: string): T {
   try {

@@ -61,7 +61,7 @@
   "main.nx::presentLifted": [
     1
   ],
-  "main.nx::presentWidened": 1.0,
+  "main.nx::presentWidened": 1,
   "main.nx::root": {
     "$type": "Scores",
     "values": [

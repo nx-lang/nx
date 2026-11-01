@@ -4,9 +4,7 @@ description: 'Unstable standalone graphics authoring, direct Skia rendering and 
 ---
 
 `@nx/graphics` is unstable: declarations may change incompatibly in any NX release. The
-`graphics-core-v4` profile targets the Rust and TypeScript IR runtimes. The legacy HIR interpreter
-will not be updated for graphics; `nxlang run` and SDK APIs that still use it are not graphics
-acceptance paths until the separate interpreter-retirement change lands. Use the preview below
+`graphics-core-v4` profile targets the Rust and TypeScript IR runtimes. The CLI compiles source to IR and executes the Rust runtime. Use the preview below
 or emit/link IR directly. The TypeScript runtime evaluates authoring helpers; direct Skia painting
 is provided by the optional Rust adapter.
 

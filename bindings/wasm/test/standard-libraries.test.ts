@@ -1,3 +1,4 @@
+import { formatIrResult } from "./execution-support.js";
 import { callFunction, evaluateFunction, linkNxIrProgram, prepareNxIrModule } from "@nx-lang/ir-runtime";
 import {
   NxLanguageSnapshot as NodeLanguageSnapshot,
@@ -63,7 +64,7 @@ describe("standard libraries", () => {
   it("evaluates standard math in Rust/WASM and links the emitted math image", () => {
     const artifact = host.buildProgramArtifact('import "@nx/math" as math\nlet root():float64 = { math.sin(math.pi / 2.0) + math.round(-3.5) }', { fileName: "main.nx" });
     try {
-      expect(artifact.evaluateNx().text).toBe("-2.0");
+      expect(formatIrResult(artifact, { type: "float64" }).text).toBe("-2.0");
       const images = artifact.generateNxIr({ modules: [] });
       const modules = new Map(images.map(image => [image.identity, prepareNxIrModule(image.bytes)]));
       const linked = linkNxIrProgram(modules.get("main.nx")!, { resolve: identity => modules.get(identity) });
@@ -74,7 +75,7 @@ describe("standard libraries", () => {
   it("resolves a single source's import with no registry or build context", () => {
     const artifact = host.buildProgramArtifact(source);
     try {
-      expect(artifact.evaluateNx().text).toBe('<Agent instructions="Be brief." name="support" />');
+      expect(formatIrResult(artifact).text).toBe('<Agent instructions="Be brief." name="support" />');
     } finally {
       artifact.dispose();
     }

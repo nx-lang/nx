@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 13
+#define NX_FFI_ABI_VERSION 14
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -27,18 +27,6 @@ enum NxEvalStatus
 };
 #ifndef __cplusplus
 typedef uint32_t NxEvalStatus;
-#endif // __cplusplus
-
-enum NxOutputFormat
-#ifdef __cplusplus
-  : uint32_t
-#endif // __cplusplus
- {
-  NxOutputFormat_MessagePack = 0,
-  NxOutputFormat_Json = 1,
-};
-#ifndef __cplusplus
-typedef uint32_t NxOutputFormat;
 #endif // __cplusplus
 
 typedef struct NxLibraryRegistryHandle NxLibraryRegistryHandle;
@@ -79,16 +67,30 @@ extern "C" {
 
 NX_FFI_EXPORT uint32_t nx_ffi_abi_version(void);
 
+/**
+ * Releases a buffer this library wrote.
+ *
+ * # Safety
+ *
+ * `buffer` must be a buffer one of this library's entry points wrote and has not yet released, or
+ * a null buffer. It must not be used again afterwards.
+ */
 NX_FFI_EXPORT void nx_free_buffer(struct NxBuffer buffer);
 
-NX_FFI_EXPORT
-NxEvalStatus nx_eval_source(const uint8_t *source_ptr,
-                            size_t source_len,
-                            const uint8_t *file_name_ptr,
-                            size_t file_name_len,
-                            uint32_t output_format,
-                            struct NxBuffer *out_buffer);
-
+/**
+ * # Safety
+ *
+ * `build_context_ptr` must be a build context this library returned and has not yet freed.
+ *
+ * `source_ptr`/`source_len` and `file_name_ptr`/`file_name_len` must each describe one readable
+ * region of that many bytes.
+ *
+ * `out_handle` must point to a writable slot; a handle written to it is released with
+ * [`nx_free_program_artifact`].
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_build_program_artifact(const struct NxProgramBuildContextHandle *build_context_ptr,
                                        const uint8_t *source_ptr,
@@ -98,6 +100,18 @@ NxEvalStatus nx_build_program_artifact(const struct NxProgramBuildContextHandle 
                                        struct NxProgramArtifactHandle **out_handle,
                                        struct NxBuffer *out_buffer);
 
+/**
+ * # Safety
+ *
+ * `build_context_ptr` must be a build context this library returned and has not yet freed.
+ *
+ * `modules_ptr` must point to `module_count` readable `NxWorkspaceModule` values, and each one's
+ * own pointer/length pairs must describe readable regions; `implicit_imports_ptr` must likewise
+ * point to `implicit_import_count` readable `NxUtf8Slice` values.
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_validate_workspace(const struct NxProgramBuildContextHandle *build_context_ptr,
                                    const struct NxWorkspaceModule *modules_ptr,
@@ -106,6 +120,23 @@ NxEvalStatus nx_validate_workspace(const struct NxProgramBuildContextHandle *bui
                                    size_t implicit_import_count,
                                    struct NxBuffer *out_buffer);
 
+/**
+ * # Safety
+ *
+ * `build_context_ptr` must be a build context this library returned and has not yet freed.
+ *
+ * `modules_ptr` must point to `module_count` readable `NxWorkspaceModule` values, and each one's
+ * own pointer/length pairs must describe readable regions; `implicit_imports_ptr` must likewise
+ * point to `implicit_import_count` readable `NxUtf8Slice` values.
+ *
+ * `entry_identity_ptr`/`entry_identity_len` must describe one readable region of that many bytes.
+ *
+ * `out_handle` must point to a writable slot; a handle written to it is released with
+ * [`nx_free_program_artifact`].
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_build_workspace_program_artifact(const struct NxProgramBuildContextHandle *build_context_ptr,
                                                  const struct NxWorkspaceModule *modules_ptr,
@@ -117,29 +148,79 @@ NxEvalStatus nx_build_workspace_program_artifact(const struct NxProgramBuildCont
                                                  struct NxProgramArtifactHandle **out_handle,
                                                  struct NxBuffer *out_buffer);
 
+/**
+ * # Safety
+ *
+ * `out_handle` must point to a writable slot; a handle written to it is released with
+ * [`nx_free_library_registry`].
+ */
 NX_FFI_EXPORT NxEvalStatus nx_create_library_registry(struct NxLibraryRegistryHandle **out_handle);
 
+/**
+ * # Safety
+ *
+ * `handle` must be a registry this library returned and has not yet freed, or null. It must not
+ * be used again afterwards.
+ */
 NX_FFI_EXPORT void nx_free_library_registry(struct NxLibraryRegistryHandle *handle);
 
+/**
+ * # Safety
+ *
+ * `registry_ptr` must be a registry this library returned and has not yet freed.
+ *
+ * `root_path_ptr`/`root_path_len` must describe one readable region of that many bytes.
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_load_library_into_registry(const struct NxLibraryRegistryHandle *registry_ptr,
                                            const uint8_t *root_path_ptr,
                                            size_t root_path_len,
                                            struct NxBuffer *out_buffer);
 
+/**
+ * # Safety
+ *
+ * `registry_ptr` must be a registry this library returned and has not yet freed; it must outlive
+ * the build context.
+ *
+ * `out_handle` must point to a writable slot; a handle written to it is released with
+ * [`nx_free_program_build_context`].
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_create_program_build_context(const struct NxLibraryRegistryHandle *registry_ptr,
                                              struct NxProgramBuildContextHandle **out_handle);
 
+/**
+ * # Safety
+ *
+ * `handle` must be a build context this library returned and has not yet freed, or null. It must
+ * not be used again afterwards.
+ */
 NX_FFI_EXPORT void nx_free_program_build_context(struct NxProgramBuildContextHandle *handle);
 
+/**
+ * # Safety
+ *
+ * `handle` must be a program artifact this library returned and has not yet freed, or null. It
+ * must not be used again afterwards.
+ */
 NX_FFI_EXPORT void nx_free_program_artifact(struct NxProgramArtifactHandle *handle);
 
-NX_FFI_EXPORT
-NxEvalStatus nx_eval_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
-                                      uint32_t output_format,
-                                      struct NxBuffer *out_buffer);
-
+/**
+ * # Safety
+ *
+ * `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+ *
+ * `logical_module_name_ptr`/`logical_module_name_len` and
+ * `runtime_import_specifier_ptr`/`runtime_import_specifier_len` must each describe one readable
+ * region of that many bytes.
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_codegen_js_program_module(const struct NxProgramArtifactHandle *program_artifact_ptr,
                                           const uint8_t *logical_module_name_ptr,
@@ -155,6 +236,13 @@ NxEvalStatus nx_codegen_js_program_module(const struct NxProgramArtifactHandle *
  * the JSON diagnostics with [`NxEvalStatus::Error`] when the image is malformed, truncated or of
  * a schema version this build does not read. The image is validated before it is read, so no
  * input traps.
+ *
+ * # Safety
+ *
+ * `image_ptr`/`image_len` must describe one readable region of that many bytes.
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
  */
 NX_FFI_EXPORT
 NxEvalStatus nx_ir_explain(const uint8_t *image_ptr,
@@ -173,58 +261,21 @@ NxEvalStatus nx_ir_explain(const uint8_t *image_ptr,
  * `[{ identity, metadata, offset, length }]`, zero padding to four bytes, then the images at the
  * offsets the header gives, measured from the start of the payload. On error the payload is the
  * JSON diagnostics.
+ *
+ * # Safety
+ *
+ * `program_artifact_ptr` must be a program artifact this library returned and has not yet freed.
+ *
+ * `options_ptr`/`options_len` must describe one readable region of that many bytes.
+ *
+ * `out_buffer` must point to a writable `NxBuffer` the caller owns; the payload written to it
+ * is released with [`nx_free_buffer`].
  */
 NX_FFI_EXPORT
 NxEvalStatus nx_codegen_nx_ir(const struct NxProgramArtifactHandle *program_artifact_ptr,
                               const uint8_t *options_ptr,
                               size_t options_len,
                               struct NxBuffer *out_buffer);
-
-NX_FFI_EXPORT
-NxEvalStatus nx_component_init_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
-                                                const uint8_t *component_name_ptr,
-                                                size_t component_name_len,
-                                                const uint8_t *props_ptr,
-                                                size_t props_len,
-                                                uint32_t output_format,
-                                                struct NxBuffer *out_buffer);
-
-/**
- * Evaluates a component from a program artifact using MessagePack props/state inputs.
- *
- * Successful output is the rendered value directly in the selected format, without lifecycle
- * state snapshot, effects, or wrapper fields.
- */
-NX_FFI_EXPORT
-NxEvalStatus nx_component_evaluate_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
-                                                    const uint8_t *component_name_ptr,
-                                                    size_t component_name_len,
-                                                    const uint8_t *props_ptr,
-                                                    size_t props_len,
-                                                    const uint8_t *state_ptr,
-                                                    size_t state_len,
-                                                    uint32_t output_format,
-                                                    struct NxBuffer *out_buffer);
-
-/**
- * Dispatches a MessagePack batch against a component snapshot from a program artifact.
- *
- * Each batch entry is either an action record the component emits, which runs the handler its
- * parent bound, or an `ActionHandlerInvocation` record `{ token, action }` that runs a handler
- * from the snapshot's rendered output, identified by the `token` its `ActionHandler` record
- * carried. The whole batch succeeds or fails together.
- *
- * Successful output carries `rendered` (the body re-rendered against the final state, with fresh
- * handler tokens), `effects`, and `state_snapshot` in the selected format.
- */
-NX_FFI_EXPORT
-NxEvalStatus nx_component_dispatch_actions_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
-                                                            const uint8_t *state_snapshot_ptr,
-                                                            size_t state_snapshot_len,
-                                                            const uint8_t *actions_ptr,
-                                                            size_t actions_len,
-                                                            uint32_t output_format,
-                                                            struct NxBuffer *out_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

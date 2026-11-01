@@ -902,3 +902,98 @@ mod tests {
         }
     }
 }
+
+/// A function result retaining the runtime's case and function identities for tooling.
+/// The canonical host encoding is available without exposing captures or mutable runtime state.
+#[derive(Debug, Clone)]
+pub struct FunctionValue {
+    pub(crate) value: Value,
+    pub(crate) canonical: NxValue,
+}
+
+impl FunctionValue {
+    /// The ordinary host encoding, including the entry result's occurrence normalization.
+    pub fn canonical(&self) -> &NxValue {
+        &self.canonical
+    }
+    /// A read-only view of the computed value, before canonical encoding erases case identity.
+    pub fn view(&self) -> ValueView<'_> {
+        ValueView(&self.value)
+    }
+}
+
+/// A borrowed runtime value. Handler bodies and captures are never exposed.
+#[derive(Clone, Copy)]
+pub struct ValueView<'a>(&'a Value);
+
+/// The observable kind of a runtime value.
+pub enum ValueKind<'a> {
+    Boolean(bool),
+    Int(i64),
+    Float(f64),
+    String(&'a str),
+    Sequence(ValueItems<'a>),
+    Record {
+        type_name: Option<&'a str>,
+        fields: ValueFields<'a>,
+    },
+    Case {
+        union: &'a str,
+        case: &'a str,
+    },
+    Function {
+        module: &'a str,
+        name: &'a str,
+    },
+    ActionHandler {
+        action: &'a str,
+    },
+}
+
+/// Read-only sequence iteration.
+pub struct ValueItems<'a>(std::slice::Iter<'a, Value>);
+impl<'a> Iterator for ValueItems<'a> {
+    type Item = ValueView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ValueView)
+    }
+}
+
+/// Read-only record iteration.
+pub struct ValueFields<'a>(std::slice::Iter<'a, (Arc<str>, Value)>);
+impl<'a> Iterator for ValueFields<'a> {
+    type Item = (&'a str, ValueView<'a>);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|(name, value)| (&**name, ValueView(value)))
+    }
+}
+
+impl<'a> ValueView<'a> {
+    /// Inspects this value without exposing runtime implementation details.
+    pub fn kind(self) -> ValueKind<'a> {
+        match self.0 {
+            Value::Bool(v) => ValueKind::Boolean(*v),
+            Value::Int(v) => ValueKind::Int(*v),
+            Value::Float(v) => ValueKind::Float(*v),
+            Value::Str(v) => ValueKind::String(v),
+            Value::Seq(v) => ValueKind::Sequence(ValueItems(v.iter())),
+            Value::Record(v) => ValueKind::Record {
+                type_name: v.type_name.as_deref(),
+                fields: ValueFields(v.fields.iter()),
+            },
+            Value::Case(v) => ValueKind::Case {
+                union: &v.union,
+                case: &v.case,
+            },
+            Value::Function(v) => ValueKind::Function {
+                module: &v.module,
+                name: &v.name,
+            },
+            Value::Handler(v) => ValueKind::ActionHandler {
+                action: &v.action_name,
+            },
+        }
+    }
+}

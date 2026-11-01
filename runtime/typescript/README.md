@@ -734,7 +734,7 @@ reports for the request.
 | --- | --- |
 | `src/index.ts` | The whole runtime |
 | `test/runtime.test.ts` | Preparation, linking and boundary tests over images written by the test |
-| `test/corpus.test.mjs` | Evaluates every image of `specs/ir-conformance` against the interpreter's results, drives every lifecycle it names, and refuses every truncation and cell overwrite of them |
+| `test/corpus.test.mjs` | Evaluates every image of `specs/ir-conformance` against the Rust IR runtime's results, drives every lifecycle it names, and refuses every truncation and cell overwrite of them |
 | `test/emitted-ir.test.mjs` | Compiles NX through the CLI and runs the emitted IR, comparing with the native evaluator |
 | `test/cost-runner.mjs` | This runtime's side of the cost validation: run by the harness in `crates/nx-codegen/tests/cost_differential.rs` over generated cases, not by `pnpm test` |
 | `bench/core.mjs` | The steps the performance harness times; runs in any JavaScript engine |

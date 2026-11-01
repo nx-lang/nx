@@ -18,7 +18,7 @@ The system SHALL support compiler-owned runtime-provided standard function decla
 - **THEN** its authored body SHALL execute without being replaced by the standard implementation
 
 ### Requirement: Runtime-provided standard function bodies are bounded and diagnostic
-Rust and TypeScript IR execution SHALL evaluate recognized standard math bodies with shared arity/type/domain semantics and origin-aware diagnostics. Each body operation SHALL cost one operation in addition to existing argument and call/body costs, SHALL perform bounded numerical work, and SHALL respect host evaluation budgets. The supported legacy interpreter SHALL retain parity until retired through its own change.
+Rust and TypeScript IR execution SHALL evaluate recognized standard math bodies with shared arity/type/domain semantics and origin-aware diagnostics. Each body operation SHALL cost one operation in addition to existing argument and call/body costs, SHALL perform bounded numerical work, and SHALL respect host evaluation budgets.
 
 #### Scenario: Evaluation budget applies
 - **WHEN** a program repeatedly invokes imported math under an insufficient operation budget

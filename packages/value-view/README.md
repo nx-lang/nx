@@ -5,7 +5,7 @@ prints, highlighted with the grammar the NX editors use, folding where it spans 
 explaining each part on hover. It has no framework dependency and keeps its markup and styles in a
 shadow root, so it drops into a plain page, a React app, a docs site or a VS Code webview alike.
 
-The value it shows is the annotated text `NxProgramArtifact.evaluateNx()` returns in
+The value it shows is the annotated text `NxProgramArtifact.formatValue(value)` returns in
 [`@nx-lang/sdk-wasm`](../../bindings/wasm/README.md): `{ text, nodes }`, where each node says what one
 part of the text is (a record, a property, a sequence, a case, a scalar) with its type and, when
 the program declares it, where.
@@ -17,6 +17,7 @@ the program declares it, where.
 
 <script type="module">
   import "@nx-lang/value-view";
+  import { evaluateFunction, prepareNxIrProgram } from "@nx-lang/ir-runtime";
   import { createNxHost, compileNxModule } from "@nx-lang/sdk-wasm";
   // With a bundler such as Vite; otherwise, wherever the page serves the package's `nx.wasm`.
   import nxModuleUrl from "@nx-lang/sdk-wasm/nx.wasm?url";
@@ -25,7 +26,7 @@ the program declares it, where.
   const artifact = host.buildProgramArtifact(`type User = { id:string name:string }
 <User id="1" name="Ada" />`);
   try {
-    document.getElementById("output").value = artifact.evaluateNx();
+    document.getElementById("output").value = artifact.formatValue(evaluateFunction(prepareNxIrProgram(artifact.generateNxIr()[0].bytes), "root"));
   } finally {
     artifact.dispose();
   }

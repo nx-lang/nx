@@ -2,62 +2,43 @@
 //! empty value, an empty optional field is an omitted key, an entry call's empty standalone `T?`
 //! result and a cleared update-record field encode as `null`.
 
-use nx_api::{eval_source, from_nx_value, to_nx_value, EvalResult, ProgramBuildContext};
-use nx_hir::LoweredModule;
-use nx_interpreter::{Interpreter, Value};
-use nx_program::ResolvedProgram;
+mod support;
+use nx_api::ProgramBuildContext;
+use nx_value::NxValue as Value;
 use nx_value::NxValue;
-use std::sync::Arc;
-
+use support::{eval_source, EvalResult};
 struct Runtime {
-    module: Arc<LoweredModule>,
-    interpreter: Interpreter,
+    program: nx_api::ir_runtime::Program,
 }
-
 impl Runtime {
     fn new(source: &str) -> Self {
-        let result = nx_types::check_str(source, "boundary.nx");
-        assert!(
-            result.errors().is_empty(),
-            "Expected source to pass analysis, got {:?}",
-            result
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.message().to_string())
-                .collect::<Vec<_>>()
-        );
-        let module = result.lowered_module.expect("lowered module");
-        let interpreter = Interpreter::from_resolved_program(ResolvedProgram::single_root_module(
-            source.len() as u64,
+        let artifact = nx_api::load_program_artifact_from_source(
+            source,
             "boundary.nx",
-            module.clone(),
-        ));
+            &ProgramBuildContext::empty(),
+        )
+        .unwrap();
         Self {
-            module,
-            interpreter,
+            program: support::link(&artifact, "boundary.nx").unwrap(),
         }
     }
-
-    fn call(&self, function: &str, args: Vec<Value>) -> Value {
-        self.interpreter
-            .execute_function(self.module.as_ref(), function, args)
-            .unwrap_or_else(|error| panic!("{function} failed: {error}"))
+    fn call(&self, name: &str, args: Vec<Value>) -> Value {
+        self.program
+            .evaluate_function(name, &args, &Default::default())
+            .unwrap()
     }
-
-    fn call_err(&self, function: &str, args: Vec<Value>) -> String {
-        self.interpreter
-            .execute_function(self.module.as_ref(), function, args)
-            .expect_err("expected a runtime error")
+    fn call_err(&self, name: &str, args: Vec<Value>) -> String {
+        self.program
+            .evaluate_function(name, &args, &Default::default())
+            .unwrap_err()
             .to_string()
     }
 }
-
 fn json(value: &Value) -> String {
-    to_nx_value(value).to_json_string().expect("JSON")
+    value.to_json_string().unwrap()
 }
-
 fn decode(json: &str) -> Value {
-    from_nx_value(&NxValue::from_json_str(json).expect("valid JSON")).expect("a decodable value")
+    NxValue::from_json_str(json).unwrap()
 }
 
 const BOOK: &str =
@@ -78,12 +59,12 @@ fn a_host_null_an_empty_array_and_a_missing_key_all_decode_to_the_empty_value() 
         let decoded = decode(source);
         assert_eq!(
             runtime.call("same", vec![decoded.clone(), b.clone()]),
-            Value::Boolean(true),
+            Value::Bool(true),
             "{source}"
         );
         assert_eq!(
             runtime.call("has", vec![decoded]),
-            Value::Boolean(false),
+            Value::Bool(false),
             "{source}"
         );
     }
@@ -131,7 +112,7 @@ fn a_host_array_at_an_optional_field_is_normalized_at_the_boundary() {
     let decoded =
         decode(r#"{"$type":"Book","title":"A","author":[{"$type":"Person","name":"X"}]}"#);
     let a = runtime.call("a", vec![]);
-    assert_eq!(runtime.call("same", vec![decoded, a]), Value::Boolean(true));
+    assert_eq!(runtime.call("same", vec![decoded, a]), Value::Bool(true));
 
     let error = runtime.call_err(
         "title",
@@ -195,8 +176,8 @@ fn every_source_of_emptiness_encodes_as_an_empty_array() {
     let runtime = Runtime::new(
         "let f(c:boolean): int? = { if c { 1 } }\nlet g(): int? = {}\nlet h(ns?:int+): int* = { for n in ns {} }",
     );
-    assert_eq!(json(&runtime.call("f", vec![Value::Boolean(false)])), "[]");
-    assert_eq!(json(&runtime.call("g", vec![])), "[]");
+    assert_eq!(json(&runtime.call("f", vec![Value::Bool(false)])), "null");
+    assert_eq!(json(&runtime.call("g", vec![])), "null");
     assert_eq!(
         json(&runtime.call("h", vec![Value::Array(vec![Value::Int(1)])])),
         "[]"
@@ -227,5 +208,5 @@ fn a_host_update_record_with_a_null_field_clears_it() {
     let patch = decode(r#"{"$type":"User.Update","email":null}"#);
     let patched = runtime.call("patched", vec![user, patch]);
     assert_eq!(json(&patched), r#"{"$type":"User","name":"Ada"}"#);
-    assert_eq!(runtime.call("has", vec![patched]), Value::Boolean(false));
+    assert_eq!(runtime.call("has", vec![patched]), Value::Bool(false));
 }

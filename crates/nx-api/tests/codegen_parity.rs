@@ -9,11 +9,10 @@ mod ir_corpus_tests;
 mod ir_image_tests;
 #[path = "codegen/ir_instance_tree_tests.rs"]
 mod ir_instance_tree_tests;
-#[path = "codegen/ir_runtime_sources.rs"]
-mod ir_runtime_sources;
 #[path = "codegen/ir_runtime_tests.rs"]
 mod ir_runtime_tests;
 #[path = "codegen/math_tests.rs"]
 mod math_tests;
+mod support;
 #[path = "codegen/tests.rs"]
 mod tests;

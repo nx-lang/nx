@@ -267,7 +267,7 @@ a type parameter SHALL treat that field as `object`.
 
 #### Scenario: Evaluation agrees across backends
 - **WHEN** a program constructs a generic record, reads one of its fields, and applies an update to it
-- **THEN** the interpreter, the generated executable code and the TypeScript IR runtime SHALL produce the same value
+- **THEN** the Rust IR runtime, the generated executable code and the TypeScript IR runtime SHALL produce the same value
 
 ### Requirement: A field can be typed by a type parameter's property union
 A generic record's field type SHALL accept `P.Property`, where `P` is one of the record's type
@@ -301,4 +301,3 @@ parameter.
 #### Scenario: Only a record's own type parameter
 - **WHEN** a file contains `component <List TItem:type key:TItem.Property /> = { <Panel /> }`
 - **THEN** analysis SHALL reject `TItem.Property` because a component's type parameter has no property union
-

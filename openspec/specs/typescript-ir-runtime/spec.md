@@ -74,7 +74,7 @@ SHALL see the empty array.
 - **WHEN** a prepared IR program contains a root function that calls an imported library function
 - **AND** a caller evaluates the root function
 - **THEN** the runtime SHALL resolve the call through the module-qualified IR reference
-- **AND** it SHALL return the same value as native interpreter evaluation for the same program
+- **AND** it SHALL return the same value as Rust IR runtime evaluation for the same program
 
 #### Scenario: Match expression evaluates through IR
 - **WHEN** a prepared IR function uses a match-style `if is` expression over a union value
@@ -138,10 +138,9 @@ and one whose handler answers another emit or component SHALL fail with a type-m
 - **AND** a descriptor for it is constructed with exactly one child
 - **THEN** the content property SHALL be that child itself rather than an array
 
-#### Scenario: List content binding matches the Rust interpreter
+#### Scenario: List content binding matches the Rust IR runtime
 - **WHEN** the same NX program binds a single child to a `+`, `*`, exactly-one or optional content property
-- **THEN** the value the TypeScript runtime produces for that property SHALL match the value the
-  Rust interpreter produces for it
+- **THEN** the value the TypeScript runtime produces for that property SHALL match the value the Rust IR runtime produces for it
 
 #### Scenario: A descriptor's handler property is carried, not rejected
 - **WHEN** a prepared IR function returns `<Button label="Add" onTapped=<Log /> />` for
@@ -415,7 +414,7 @@ IR emitted from successfully analyzed source, runtime evaluation SHALL NOT fail 
 values at `+`- or `*`-typed fields, or record discriminators that were valid in native evaluation.
 
 A single value at a `+`- or `*`-typed field SHALL normalize to a one-element array. This is the
-language's own lift — the interpreter evaluates `xs={3.0}` and `xs={ <Item /> }` to one-element
+language's own lift — the Rust IR runtime evaluates `xs={3.0}` and `xs={ <Item /> }` to one-element
 sequences, and the IR records such a value at its own type rather than as a sequence, leaving the
 lift to normalization.
 
@@ -473,12 +472,11 @@ SHALL continue to be accepted.
 - **WHEN** a program declares `type Ints = int+` and binds `xs={3}` to a prop typed `Ints`, or binds
   one child to a content property typed through an alias of a `+` or `*` type
 - **THEN** the property SHALL hold an array of one
-- **AND** it SHALL equal the value the Rust interpreter produces for the same program
+- **AND** it SHALL equal the value the Rust IR runtime produces for the same program
 
-#### Scenario: Single-value list coercion matches the Rust interpreter
+#### Scenario: Single-value list coercion matches the Rust IR runtime
 - **WHEN** the same NX program binds a single value to a `+`- or `*`-typed property
-- **THEN** the value the TypeScript runtime produces for that property SHALL match the value the
-  Rust interpreter produces for it
+- **THEN** the value the TypeScript runtime produces for that property SHALL match the value the Rust IR runtime produces for it
 
 #### Scenario: A constructed record binds to a record-typed property
 - **WHEN** a prepared IR program constructs a record value and binds it to a property whose declared
@@ -491,10 +489,9 @@ SHALL continue to be accepted.
 - **AND** a descriptor omits that property
 - **THEN** the property SHALL hold the constructed default
 
-#### Scenario: Record field normalization matches the Rust interpreter
+#### Scenario: Record field normalization matches the Rust IR runtime
 - **WHEN** the same NX program binds a constructed record to a record-typed property
-- **THEN** the value the TypeScript runtime produces for that property SHALL match the value the
-  Rust interpreter produces for it
+- **THEN** the value the TypeScript runtime produces for that property SHALL match the value the Rust IR runtime produces for it
 
 #### Scenario: Public boundary validation still rejects malformed host input
 - **WHEN** a host supplies JSON with an unknown field, a missing required field, `null` at an exactly-one field, or an invalid union discriminator
@@ -585,33 +582,6 @@ and compute them numerically.
 - **WHEN** a prepared program evaluates `n < x` emitted from `n:int` holding `2` and `x:float64`
   holding `2.5`
 - **THEN** the result SHALL be `true`
-
-### Requirement: TypeScript IR runtime behavior is validated against existing NX semantics
-The implementation SHALL include automated tests that emit NX IR from source or program artifacts,
-execute the IR through the TypeScript runtime, and compare results against native interpreter
-evaluation for the supported non-reactive subset. Component tests SHALL cover descriptor
-construction, initialization, explicit state evaluation, state patch validation, conditional
-content based on state, lone-child content binding at each occurrence, and dispatch.
-
-#### Scenario: Function parity test compares interpreter and IR runtime
-- **WHEN** a supported NX program uses primitives, arithmetic, conditionals, match expressions,
-  sequences, optional values and the presence operators, loops, records, unions, enums, member
-  access, and function calls
-- **THEN** automated tests SHALL verify that TypeScript IR runtime output matches native
-  interpreter output for the same program
-
-#### Scenario: Component parity test compares interpreter and IR runtime
-- **WHEN** a supported NX component uses props, state defaults, conditional content, child
-  component descriptors, and explicit state evaluation
-- **THEN** automated tests SHALL verify that TypeScript IR runtime rendered output matches native
-  interpreter rendered output for the same props and state
-
-#### Scenario: Dispatch parity test compares interpreter and IR runtime
-- **WHEN** a component binds handlers that patch its state, emit to its parent, and return effects
-- **AND** the same batches of handler invocations and emitted actions are dispatched through both
-  runtimes
-- **THEN** automated tests SHALL verify that the rendered output, including tokens, and the
-  ordered effects match between the TypeScript runtime and the native interpreter
 
 ### Requirement: TypeScript runtime normalizes update records as patches
 When the TypeScript runtime normalizes a value whose declared type is an update record — from an
@@ -937,9 +907,9 @@ implement `occurrence-v1` SHALL refuse a module that lists it by name.
 - **WHEN** a prepared program evaluates `let f(b:Book): string = { if b.author is { {} => "anonymous" else => b.author.name } }` with a `Book` whose `author` is absent
 - **THEN** the result SHALL be `"anonymous"`
 
-#### Scenario: Operator results match the Rust interpreter
+#### Scenario: Operator results match the Rust IR runtime
 - **WHEN** the same NX program uses `x?`, `x?.m`, `x ?? y` and a `{}` pattern
-- **THEN** the values the TypeScript runtime produces SHALL match the values the Rust interpreter produces for the same inputs
+- **THEN** the values the TypeScript runtime produces SHALL match the values the Rust IR runtime produces for the same inputs
 
 #### Scenario: An operator node without the feature is malformed
 - **WHEN** a hand-built schema-`5` image contains a `coalesce` node and does not list `occurrence-v1`
@@ -1696,3 +1666,30 @@ runtime already rounds one, so the result agrees with the Rust runtime.
 - **WHEN** a host calls `let f(x: float32 where <= 0.1) = { x }` with `x` bound to `0.1`
 - **THEN** the call SHALL succeed in both runtimes
 
+### Requirement: TypeScript IR runtime behavior is validated against the native runtime
+The implementation SHALL include automated tests that emit NX IR from source or program artifacts,
+execute the IR through the TypeScript runtime, and compare results against native evaluation of
+the same source, which the Rust IR runtime performs, for the supported non-reactive subset.
+Component tests SHALL cover descriptor construction, initialization, explicit state evaluation,
+state patch validation, conditional content based on state, lone-child content binding at each
+occurrence, and dispatch.
+
+#### Scenario: Function parity test compares the two IR runtimes
+- **WHEN** a supported NX program uses primitives, arithmetic, conditionals, match expressions,
+  sequences, optional values and the presence operators, loops, records, unions, enums, member
+  access, and function calls
+- **THEN** automated tests SHALL verify that TypeScript IR runtime output matches native output for
+  the same program
+
+#### Scenario: Component parity test compares the two IR runtimes
+- **WHEN** a supported NX component uses props, state defaults, conditional content, child
+  component descriptors, and explicit state evaluation
+- **THEN** automated tests SHALL verify that TypeScript IR runtime rendered output matches native
+  rendered output for the same props and state
+
+#### Scenario: Dispatch parity test compares the two IR runtimes
+- **WHEN** a component binds handlers that patch its state, emit to its parent, and return effects
+- **AND** the same batches of handler invocations and emitted actions are dispatched through both
+  runtimes
+- **THEN** automated tests SHALL verify that the rendered output, including tokens, and the
+  ordered effects match between the TypeScript runtime and the native runtime

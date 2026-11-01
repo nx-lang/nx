@@ -60,6 +60,7 @@ pub use program::{LinkOptions, Program, NX_PRELUDE_MODULE_IDENTITY};
 pub use text::float32_text;
 pub use tree::{HostEffect, InstanceTree};
 pub use usage::Usage;
+pub use value::{FunctionValue, ValueFields, ValueItems, ValueKind, ValueView};
 
 /// The README's examples, compiled as doc tests.
 #[cfg(doctest)]

@@ -1,3 +1,4 @@
+import { evaluateIr, evaluateSource } from "./execution-support.js";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +12,6 @@ import {
   NxProgramBuildContext,
   NxWorkspace,
   buildProgramArtifactFromSource,
-  evaluateBytesFromSource,
-  evaluateJsonFromSource,
   explainNxIr,
   generateNxIrFromSource
 } from "../src/index.js";
@@ -88,7 +87,7 @@ describe("@nx-lang/sdk-node", () => {
   it("evaluates standard math through Rust and emits its capability-gated image", () => {
     const artifact = NxProgramArtifact.buildSource('import "@nx/math" as math\nlet root() = { math.sin(math.pi / 2.0) + math.round(-3.5) }', { fileName: "main.nx" });
     try {
-      expect(artifact.evaluateJson()).toBe(-2);
+      expect(evaluateIr(artifact)).toBe(-2);
       const images = artifact.generateNxIr({ modules: [] });
       expect(images.find(image => image.identity === "@nx/math/math.nx")?.metadata.requiredFeatures).toContain("standard-math-v1");
     } finally { artifact.dispose(); }
@@ -139,7 +138,7 @@ let root(): int = { answer }`
         implicitImports: ["drawnui.nx"]
       });
       try {
-        expect(artifact.evaluateJson()).toMatchObject({ $type: "SkiaLabel", Text: "hi" });
+        expect(evaluateIr(artifact)).toMatchObject({ $type: "SkiaLabel", Text: "hi" });
       } finally {
         artifact.dispose();
       }
@@ -180,34 +179,7 @@ let root(): int = { answer }`
     }
   });
 
-  it("builds source and workspace artifacts and evaluates JSON and bytes", () => {
-    const { registry, buildContext } = createContext();
-    const workspace = validWorkspace();
 
-    try {
-      const sourceArtifact = buildProgramArtifactFromSource("let root() = { \"source\" }", {
-        buildContext
-      });
-      const workspaceArtifact = NxProgramArtifact.buildWorkspace(workspace, {
-        buildContext,
-        entryIdentity: "app/main.nx"
-      });
-
-      try {
-        expect(sourceArtifact.evaluateJson()).toBe("source");
-        expect(workspaceArtifact.evaluateJson()).toBe(42);
-        expect(Buffer.isBuffer(workspaceArtifact.evaluateBytes())).toBe(true);
-        expect(workspaceArtifact.evaluateBytes({ outputFormat: "json" }).toString("utf8")).toBe("42");
-      } finally {
-        sourceArtifact.dispose();
-        workspaceArtifact.dispose();
-      }
-    } finally {
-      workspace.dispose();
-      buildContext.dispose();
-      registry.dispose();
-    }
-  });
 
   it("uses supplied build contexts and keeps artifacts usable after context disposal", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "nx-sdk-node-"));
@@ -226,7 +198,7 @@ let root(): int = { answer() }`;
     const workspace = new NxWorkspace([{ identity: "app/main.nx", source }]);
 
     try {
-      expect(evaluateJsonFromSource(source, { buildContext, fileName })).toBe(42);
+      expect(evaluateSource(source, { buildContext, fileName })).toBe(42);
 
       const artifact = NxProgramArtifact.buildWorkspace(workspace, {
         buildContext,
@@ -236,7 +208,7 @@ let root(): int = { answer() }`;
       registry.dispose();
 
       try {
-        expect(artifact.evaluateJson()).toBe(42);
+        expect(evaluateIr(artifact)).toBe(42);
       } finally {
         artifact.dispose();
       }
@@ -287,7 +259,7 @@ let root(): int = { answer() }`;
         implicitImports
       });
       try {
-        expect(artifact.evaluateJson()).toMatchObject({ $type: "ChatLinkConfig", title: "Hi" });
+        expect(evaluateIr(artifact)).toMatchObject({ $type: "ChatLinkConfig", title: "Hi" });
         const images = artifact.generateNxIr({ modules: [] });
         expect(images.map((image) => image.identity)).toContain("libraries/question-flow/Step.nx");
       } finally {
@@ -411,7 +383,7 @@ let root() = { "ready" }`
       });
 
       try {
-        expect(artifact.evaluateJson()).toBe("ready");
+        expect(evaluateIr(artifact)).toBe("ready");
         // Every module of the program, each as its own artifact.
         const artifacts = artifact.generateNxIr({ modules: [] });
         const byIdentity = new Map(artifacts.map((entry) => [entry.identity, explainedLines(entry.bytes)]));
@@ -481,7 +453,7 @@ let root(): QuestionFlow+ = { omitted() explicit() }`
       });
 
       try {
-        const value = artifact.evaluateJson() as readonly NxJsonRecord[];
+        const value = evaluateIr(artifact) as readonly NxJsonRecord[];
         // An empty optional field is an omitted key, whether it was omitted or written `{}`.
         expect(value).toHaveLength(2);
         for (const flow of value) {
@@ -517,7 +489,7 @@ export type Book = { title:string author?:Person tags:string+ extras?:string+ }
     // Omitted and written-empty optional fields are both omitted keys; a lone child at a `+` or
     // `?:T+` field is a one-element array.
     expect(
-      evaluateJsonFromSource(`${declarations}let root() = {
+      evaluateSource(`${declarations}let root() = {
   <Book title="A" tags={"x"} />
   <Book title="B" author={<Person name="Ada" />} tags={"x" "y"} extras={"z"} />
   <Book title="C" author={} tags={"x"} extras={} />
@@ -529,16 +501,16 @@ export type Book = { title:string author?:Person tags:string+ extras?:string+ }
     ]);
 
     // An entry call's empty standalone `?` result is the host's `null`; an empty `*` stays `[]`.
-    expect(evaluateJsonFromSource("let root(): int? = { if false { 1 } }")).toBeNull();
-    expect(evaluateJsonFromSource(`${declarations}let root(): string? = { <Book title="A" tags={"x"} />.author?.name }`)).toBeNull();
-    expect(evaluateJsonFromSource("let root(): int* = { if false { 1 } }")).toEqual([]);
+    expect(evaluateSource("let root(): int? = { if false { 1 } }")).toBeNull();
+    expect(evaluateSource(`${declarations}let root(): string? = { <Book title="A" tags={"x"} />.author?.name }`)).toBeNull();
+    expect(evaluateSource("let root(): int* = { if false { 1 } }")).toEqual([]);
 
     // An update record is the one place `null` appears: a present `null` clears the field.
-    expect(evaluateJsonFromSource(`${declarations}let root() = <Person.Update nick={} />`)).toEqual({
+    expect(evaluateSource(`${declarations}let root() = <Person.Update nick={} />`)).toEqual({
       $type: "Person.Update",
       nick: null
     });
-    expect(evaluateJsonFromSource(`${declarations}let root() = <Person.Update name="Bo" />`)).toEqual({
+    expect(evaluateSource(`${declarations}let root() = <Person.Update name="Bo" />`)).toEqual({
       $type: "Person.Update",
       name: "Bo"
     });
@@ -638,26 +610,18 @@ let root(compact:boolean) = { <Notice if compact { density="tight" } else { dens
   });
 
   it("exposes source convenience evaluation and diagnostic failures", () => {
-    expect(evaluateJsonFromSource("let root() = { 42 }")).toBe(42);
-    expect(evaluateBytesFromSource("let root() = { 42 }", { outputFormat: "json" }).toString("utf8")).toBe("42");
+    expect(evaluateSource("let root() = { 42 }")).toBe(42);
 
-    expect(() => evaluateJsonFromSource("let helper() = { 42 }")).toThrowError(NxEvaluationError);
-    expect(() => evaluateJsonFromSource("let root(): int = { \"oops\" }")).toThrowError(NxEvaluationError);
+    expect(() => evaluateSource("let helper() = { 42 }")).toThrowError(/entrypoint/);
+    expect(() => evaluateSource("let root(): int = { \"oops\" }")).toThrowError(NxEvaluationError);
   });
 
-  it("does not fall back to JavaScript-side named entrypoint lookup", () => {
-    const artifact = NxProgramArtifact.buildSource("let helper() = { 42 }\nlet root() = { 1 }");
-    try {
-      expect(() => artifact.evaluateJson({ entrypoint: "helper" })).toThrowError(NxEvaluationError);
-    } finally {
-      artifact.dispose();
-    }
-  });
+
 
   it("reaches a standard library with nothing loaded, as the README's example does", async () => {
     // A single source needs no registry or build context.
     expect(
-      evaluateJsonFromSource('import "@nx/agent"\nlet root() = { <Agent name="support">Be brief.</Agent> }')
+      evaluateSource('import "@nx/agent"\nlet root() = { <Agent name="support">Be brief.</Agent> }')
     ).toEqual({ $type: "Agent", name: "support", instructions: "Be brief." });
 
     const registry = new NxLibraryRegistry();
@@ -708,7 +672,7 @@ let root(compact:boolean) = { <Notice if compact { density="tight" } else { dens
     const artifact = NxProgramArtifact.buildSource("let root() = { 42 }");
     artifact.dispose();
 
-    expect(() => artifact.evaluateJson()).toThrowError(NxDisposedResourceError);
+    expect(() => evaluateIr(artifact)).toThrowError(NxDisposedResourceError);
   });
 });
 

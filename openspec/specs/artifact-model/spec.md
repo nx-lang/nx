@@ -49,15 +49,13 @@ MUST NOT replace those file-scoped artifacts with one merged lowered module.
 ### Requirement: Program artifacts contain the resolved executable world
 The system SHALL represent a fully resolved executable program as a `ProgramArtifact`. A
 `ProgramArtifact` SHALL preserve the root module set, resolved `LibraryArtifact` dependencies,
-whole-program diagnostics and fingerprint metadata, and an embedded `ResolvedProgram` used by the
-interpreter.
+whole-program diagnostics and fingerprint metadata, and an embedded `ResolvedProgram` from which NX IR is emitted.
 
 #### Scenario: Program artifact combines root modules and resolved libraries
 - **WHEN** a host builds a program from one root source file that imports `../ui`
 - **THEN** the resulting `ProgramArtifact` SHALL preserve the root file as a `ModuleArtifact`
 - **AND** the resulting `ProgramArtifact` SHALL preserve the imported library as a `LibraryArtifact`
-- **AND** the resulting `ProgramArtifact` SHALL include a `ResolvedProgram` for interpreter entry
-  point lookup
+- **AND** the resulting `ProgramArtifact` SHALL include a `ResolvedProgram` for IR compilation and entry point lookup
 
 #### Scenario: Program artifact preserves whole-program diagnostics
 - **WHEN** whole-program resolution finds a duplicate export or import ambiguity across resolved
@@ -145,7 +143,7 @@ underlying registry through that build context.
 - **THEN** the two program artifacts SHALL preserve different fingerprint metadata
 
 ### Requirement: Runtime module IDs are assigned only when building a program artifact
-The interpreter-visible runtime module IDs for NX execution SHALL be assigned only when assembling
+The runtime module IDs used for NX compilation SHALL be assigned only when assembling
 the `ResolvedProgram` inside one `ProgramArtifact`. Loaded `LibraryArtifact` snapshots and the
 `LibraryRegistry` SHALL NOT persist or expose program runtime module IDs.
 

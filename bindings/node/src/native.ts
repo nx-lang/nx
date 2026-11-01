@@ -60,8 +60,6 @@ export interface NativeGeneratedNxIr {
 export interface NativeNxProgramArtifact {
   readonly entryIdentity: string;
   generateNxIr(options?: string): NativeGeneratedNxIr[];
-  evaluateJson(): string;
-  evaluateBytes(outputFormat?: string): Buffer;
   functionSchema(request: string): string;
   typeSchema(request: string): string;
   dispose(): void;

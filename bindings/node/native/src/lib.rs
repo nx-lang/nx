@@ -6,24 +6,17 @@ use nx_api::language_service::{
     WorkspaceSnapshot,
 };
 use nx_api::{
-    build_workspace_program_artifact, eval_program_artifact, load_program_artifact_from_source,
+    build_workspace_program_artifact, load_program_artifact_from_source,
     program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
-    EvalResult, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
-    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, SchemaQueryError,
+    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
+    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, SchemaQueryError,
 };
 use nx_ir::explain_nx_ir_image;
-use nx_value::NxValue;
 use serde::Serialize;
 
 const EVALUATION_ERROR_PREFIX: &str = "NX_EVALUATION:";
 const NATIVE_ERROR_PREFIX: &str = "NX_NATIVE:";
 const DISPOSED_ERROR_PREFIX: &str = "NX_DISPOSED:";
-
-#[derive(Clone, Copy)]
-enum OutputFormat {
-    MessagePack,
-    Json,
-}
 
 /// One emitted NX IR artifact: its binary image, plus its metadata serialized as JSON.
 #[napi(object)]
@@ -478,23 +471,6 @@ impl NativeNxProgramArtifact {
             .collect()
     }
 
-    #[napi]
-    pub fn evaluate_json(&self) -> Result<String> {
-        match eval_program_artifact(self.program()?) {
-            EvalResult::Ok(value) => value_json(&value),
-            EvalResult::Err(diagnostics) => Err(evaluation_error(diagnostics)),
-        }
-    }
-
-    #[napi]
-    pub fn evaluate_bytes(&self, output_format: Option<String>) -> Result<Buffer> {
-        let output_format = parse_output_format(output_format)?;
-        match eval_program_artifact(self.program()?) {
-            EvalResult::Ok(value) => value_bytes(&value, output_format).map(Buffer::from),
-            EvalResult::Err(diagnostics) => Err(evaluation_error(diagnostics)),
-        }
-    }
-
     /// Answers with the schema of a function, from `{ reference: { module?, name }, options?: {
     /// hostSuppliedTypes } }` JSON, as JSON text: the same text the wasm module answers with.
     #[napi]
@@ -544,32 +520,6 @@ fn source_input_to_string(source: Either<String, Buffer>) -> Result<String> {
                 "NX source bytes must be valid UTF-8.",
             )
         }),
-    }
-}
-
-fn parse_output_format(output_format: Option<String>) -> Result<OutputFormat> {
-    match output_format.as_deref().unwrap_or("messagePack") {
-        "messagePack" | "messagepack" | "msgpack" => Ok(OutputFormat::MessagePack),
-        "json" => Ok(OutputFormat::Json),
-        other => Err(input_error_message(
-            "output-format",
-            format!("Unsupported output format '{other}'. Use 'messagePack' or 'json'."),
-        )),
-    }
-}
-
-fn value_json(value: &NxValue) -> Result<String> {
-    value
-        .to_json_string()
-        .map_err(|error| native_error(format!("Failed to serialize NX JSON value: {error}")))
-}
-
-fn value_bytes(value: &NxValue, output_format: OutputFormat) -> Result<Vec<u8>> {
-    match output_format {
-        OutputFormat::MessagePack => value.to_msgpack_vec().map_err(|error| {
-            native_error(format!("Failed to serialize NX MessagePack value: {error}"))
-        }),
-        OutputFormat::Json => value_json(value).map(String::into_bytes),
     }
 }
 
