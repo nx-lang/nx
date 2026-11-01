@@ -15,20 +15,20 @@ mod graphics;
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
 
-use nx_api::{
-    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
-    eval_program_artifact_nx_text_with_limits, format_program_artifact_value,
-    load_program_artifact_from_source, program_artifact_function_schema_json,
-    program_artifact_type_schema_json, validate_workspace, FormatValueError, LibraryRegistry,
-    NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule,
-    ProgramArtifact, ProgramBuildContext, ResourceLimits, SchemaQueryError,
-};
-use nx_codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
-use nx_ir::explain_nx_ir_image;
-use nx_language_service::{
+use nx_api::codegen::{emit_nx_ir, write_nx_ir_bundle, NxIrEmitOptions};
+use nx_api::language_service::{
     DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
     WorkspaceSnapshot,
 };
+use nx_api::{
+    build_workspace_program_artifact, eval_program_artifact_nx_text_with_limits,
+    format_program_artifact_value, load_program_artifact_from_source,
+    program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
+    FormatValueError, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
+    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, ResourceLimits,
+    SchemaQueryError,
+};
+use nx_ir::explain_nx_ir_image;
 use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
@@ -904,7 +904,10 @@ fn program_diagnostics(program: &ProgramArtifact) -> Operation {
     result_json(&program_diagnostics_to_api(program, &program.diagnostics))
 }
 
-fn codegen_error(error: nx_codegen::CodegenError, program: &ProgramArtifact) -> OperationError {
+fn codegen_error(
+    error: nx_api::codegen::CodegenError,
+    program: &ProgramArtifact,
+) -> OperationError {
     evaluation_error(program_diagnostics_to_api(program, &error.diagnostics))
 }
 
@@ -916,11 +919,7 @@ fn program_diagnostics_to_api(
     let fallback_source = program
         .source_text(&program.entry_identity)
         .unwrap_or_default();
-    let sources = program
-        .source_entries()
-        .into_iter()
-        .map(|entry| (entry.identity, entry.source));
-    diagnostics_to_api_with_source_entries(diagnostics, fallback_source, sources)
+    nx_api::program_diagnostics_to_api(program, diagnostics, fallback_source)
 }
 
 fn workspace_input_error(message: String) -> OperationError {
@@ -999,7 +998,7 @@ unsafe fn release(ptr: *mut u8, len: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_codegen::read_nx_ir_bundle;
+    use nx_api::codegen::read_nx_ir_bundle;
     use nx_ir::NxIrImage;
 
     /// Runs an operation the way the loader does: JSON in through `nx_wasm_alloc`, a result record

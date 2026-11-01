@@ -7,14 +7,16 @@ use crate::model::{
     CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
 };
 use crate::options::CodegenError;
-use nx_api::{LibraryArtifact, ProgramArtifact};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
 use nx_hir::{
     ast, EffectiveField, ExprId, Item, LocalDefinitionId, LoweredModule, Name, Param,
     PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind,
     PreparedModule, PreparedNamespace, PropertyEntry, RecordField,
 };
-use nx_interpreter::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
+use nx_program::{
+    LibraryArtifact, ProgramArtifact, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
+    RuntimeModuleId,
+};
 use nx_types::{ModuleArtifact, Primitive, Type, TypeEnvironment};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -101,7 +103,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         entrypoints,
         component_entrypoints,
         source_entries,
-        boundary_subtype_modules: nx_api::program_artifact_boundary_subtype_modules(artifact),
+        boundary_subtype_modules: nx_program::program_artifact_boundary_subtype_modules(artifact),
     })
 }
 
@@ -2710,7 +2712,7 @@ fn build_union_case_for_member(
     let Some(reference) = resolve_visible_reference(artifact, module_id, &base_name) else {
         return UnionCaseLookup::Missing;
     };
-    if reference.kind != nx_interpreter::ResolvedItemKind::Union {
+    if reference.kind != nx_program::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
     build_union_case_from_reference(artifact, prepared_cache, reference, member, diagnostics)
@@ -2788,7 +2790,7 @@ fn build_union_case_for_tag(
     let Some(reference) = resolve_visible_reference(artifact, module_id, union_name) else {
         return UnionCaseLookup::Missing;
     };
-    if reference.kind != nx_interpreter::ResolvedItemKind::Union {
+    if reference.kind != nx_program::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
     build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
@@ -2815,7 +2817,7 @@ fn build_union_case_from_origin(
         target_module.id,
         definition_id,
         union_name,
-        nx_interpreter::ResolvedItemKind::Union,
+        nx_program::ResolvedItemKind::Union,
     );
     build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
 }
@@ -2933,7 +2935,7 @@ fn record_literal_shape(
     } else {
         reference
     };
-    if reference.kind != nx_interpreter::ResolvedItemKind::Record {
+    if reference.kind != nx_program::ResolvedItemKind::Record {
         return Some(RecordLiteralShape::unresolved(record_name));
     }
 
@@ -3507,7 +3509,7 @@ fn reference_from_resolved_module(
     module_id: RuntimeModuleId,
     definition_id: LocalDefinitionId,
     fallback_name: &str,
-    kind: nx_interpreter::ResolvedItemKind,
+    kind: nx_program::ResolvedItemKind,
 ) -> CodegenReference {
     let name = artifact
         .resolved_program
@@ -3596,13 +3598,13 @@ fn component_resolution_diagnostic(
         .build()
 }
 
-fn resolved_item_kind(item: &Item) -> nx_interpreter::ResolvedItemKind {
+fn resolved_item_kind(item: &Item) -> nx_program::ResolvedItemKind {
     match item {
-        Item::Function(_) => nx_interpreter::ResolvedItemKind::Function,
-        Item::Value(_) => nx_interpreter::ResolvedItemKind::Value,
-        Item::Component(_) => nx_interpreter::ResolvedItemKind::Component,
-        Item::TypeAlias(_) => nx_interpreter::ResolvedItemKind::TypeAlias,
-        Item::Union(_) => nx_interpreter::ResolvedItemKind::Union,
-        Item::Record(_) => nx_interpreter::ResolvedItemKind::Record,
+        Item::Function(_) => nx_program::ResolvedItemKind::Function,
+        Item::Value(_) => nx_program::ResolvedItemKind::Value,
+        Item::Component(_) => nx_program::ResolvedItemKind::Component,
+        Item::TypeAlias(_) => nx_program::ResolvedItemKind::TypeAlias,
+        Item::Union(_) => nx_program::ResolvedItemKind::Union,
+        Item::Record(_) => nx_program::ResolvedItemKind::Record,
     }
 }

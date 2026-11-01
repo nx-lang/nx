@@ -6,11 +6,6 @@
 
 use crate::ir::NxIrEmitOptions;
 use crate::{build_nx_ir_artifacts, emit_nx_ir};
-use nx_api::{
-    build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
-    NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
-    ProgramBuildContext,
-};
 use nx_ir::{
     explain_nx_ir, explain_nx_ir_image, kinds, write_nx_ir_image, ExplainError, NxIrArtifact,
     NxIrImage, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
@@ -18,6 +13,11 @@ use nx_ir::{
     NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
     NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+};
+use nx_program::{
+    build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
+    NxLibraryModule, NxLibrarySource, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
+    ProgramBuildContext,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -2583,7 +2583,7 @@ fn a_program_that_uses_the_agent_library_links_it_and_copies_nothing() {
         .skip(1)
         .find(|entry| entry.identity == AGENT_MODULE)
         .expect("the module table lists the agent library");
-    let version = nx_api::standard_library_entry("@nx/agent")
+    let version = nx_program::standard_library_entry("@nx/agent")
         .expect("the agent library")
         .version();
     assert_eq!(library.version, version);
@@ -2611,7 +2611,7 @@ fn the_library_image_is_emitted_when_named_and_with_every_module() {
     let library = &every[AGENT_MODULE];
     assert_eq!(
         library.modules[0].version,
-        nx_api::standard_library_entry("@nx/agent")
+        nx_program::standard_library_entry("@nx/agent")
             .expect("the agent library")
             .version(),
         "the library image records its own version"
@@ -3023,9 +3023,9 @@ fn in_memory_and_directory_loads_of_the_same_sources_emit_the_same_ir() {
     .expect("module")])
     .expect("workspace");
     let directory_diagnostics =
-        nx_api::validate_workspace(&broken, &implicitly_importing(&directory_registry));
+        nx_program::validate_workspace(&broken, &implicitly_importing(&directory_registry));
     let memory_diagnostics =
-        nx_api::validate_workspace(&broken, &implicitly_importing(&memory_registry));
+        nx_program::validate_workspace(&broken, &implicitly_importing(&memory_registry));
     assert!(!memory_diagnostics.is_empty());
     assert_eq!(directory_diagnostics, memory_diagnostics);
 }

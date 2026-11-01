@@ -1,10 +1,10 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use nx_api::codegen::read_nx_ir_bundle;
 use nx_api::{
     load_program_artifact_from_source, ComponentDispatchResult, ComponentInitResult, NxDiagnostic,
     ProgramBuildContext,
 };
-use nx_codegen::read_nx_ir_bundle;
 use nx_ffi::{
     nx_build_program_artifact, nx_build_workspace_program_artifact, nx_codegen_js_program_module,
     nx_codegen_nx_ir, nx_component_dispatch_actions_program_artifact,

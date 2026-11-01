@@ -8,7 +8,6 @@
 mod context;
 mod error;
 mod interpreter;
-mod resolved_program;
 mod value;
 
 pub mod eval;
@@ -18,10 +17,6 @@ pub use error::{RuntimeError, RuntimeErrorKind};
 pub use interpreter::{
     ComponentDispatchResult, ComponentEvaluateResult, ComponentInitResult, Interpreter,
     HANDLER_INVOCATION_TYPE_NAME,
-};
-pub use resolved_program::{
-    ModuleQualifiedExprRef, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule,
-    ResolvedModuleSource, ResolvedProgram, RuntimeModuleId,
 };
 pub use value::Value;
 

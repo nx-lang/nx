@@ -23,10 +23,10 @@ use crate::{
     DocumentVersion, EditorRange, LineIndex, ModuleAnalysis, NxIdentity, SnapshotError,
     WorkspaceDeclarations, WorkspaceSnapshot,
 };
-use nx_api::{VisualizerAttribute, VisualizerChoice};
 use nx_hir::{
     ast::Expr, Doc, ExprId, FunctionForm, Item, LocalDefinitionId, RecordField, RecordKind,
 };
+use nx_program::{VisualizerAttribute, VisualizerChoice};
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};

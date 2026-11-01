@@ -13,7 +13,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 nx-api = { path = "../nx-api" }
-nx-codegen = { path = "../nx-codegen" }
 nx-ir = { workspace = true }
 nx-value = { workspace = true }
 rmp-serde.workspace = true
@@ -22,9 +21,6 @@ serde.workspace = true
 base64 = "0.22"
 
 [dev-dependencies]
-nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
-nx-syntax = { path = "../nx-syntax" }
-nx-types = { path = "../nx-types" }
 nx-value = { workspace = true }
 tempfile = "3"

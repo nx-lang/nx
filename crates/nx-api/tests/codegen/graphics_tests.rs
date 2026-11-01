@@ -1,5 +1,5 @@
-use crate::{build_nx_ir_artifacts, NxIrEmitOptions};
 use nx_api::{build_program_artifact_from_source, ProgramBuildContext};
+use nx_codegen::{build_nx_ir_artifacts, NxIrEmitOptions};
 use nx_ir_runtime::RuntimeOptions;
 
 #[test]
@@ -12,7 +12,7 @@ let root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
             .unwrap();
     let images = build_nx_ir_artifacts(
-        &crate::build_codegen_program(&artifact).unwrap(),
+        &nx_codegen::build_codegen_program(&artifact).unwrap(),
         &NxIrEmitOptions {
             modules: Some(vec![]),
             debug: true,
@@ -60,7 +60,7 @@ let root() = <g.Drawing viewBox=<g.Rect x=0 y=0 width=100 height=100/>>
 #[test]
 fn graphics_helpers_evaluate_as_primitives_on_rust_ir() {
     let program =
-        crate::ir_runtime_tests::program(include_str!("../../../examples/graphics/runtime.nx"));
+        crate::ir_runtime_tests::program(include_str!("../../../../examples/graphics/runtime.nx"));
     let value = |name| {
         serde_json::to_value(
             program
@@ -387,7 +387,7 @@ fn color_literal_links_without_color_operation_module() {
     let artifact =
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
             .unwrap();
-    let images = crate::emit_nx_ir(
+    let images = nx_codegen::emit_nx_ir(
         &artifact,
         &NxIrEmitOptions {
             modules: Some(vec![]),
@@ -431,7 +431,7 @@ fn color_literal_links_without_color_operation_module() {
 #[test]
 fn graphics_gradients_evaluate_as_ordinary_reusable_paints() {
     let program =
-        crate::ir_runtime_tests::program(include_str!("../../../examples/graphics/runtime.nx"));
+        crate::ir_runtime_tests::program(include_str!("../../../../examples/graphics/runtime.nx"));
     let value = serde_json::to_value(
         program
             .evaluate_function("gradientShape", &[], &RuntimeOptions::default())
@@ -446,7 +446,7 @@ fn graphics_gradients_evaluate_as_ordinary_reusable_paints() {
 #[test]
 fn graphics_gradients_cover_every_paint_location_on_ir() {
     let program =
-        crate::ir_runtime_tests::program(include_str!("../../../examples/graphics/runtime.nx"));
+        crate::ir_runtime_tests::program(include_str!("../../../../examples/graphics/runtime.nx"));
     let value = |name| {
         serde_json::to_value(
             program
@@ -476,7 +476,7 @@ fn geometry_images_are_standalone_versioned_and_required_for_linking() {
         let artifact =
             build_program_artifact_from_source(&source, "main.nx", &ProgramBuildContext::empty())
                 .unwrap();
-        let images = crate::emit_nx_ir(
+        let images = nx_codegen::emit_nx_ir(
             &artifact,
             &NxIrEmitOptions {
                 modules: Some(vec![]),

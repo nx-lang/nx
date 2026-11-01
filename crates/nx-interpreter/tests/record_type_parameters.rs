@@ -5,7 +5,8 @@
 //! instantiations with equal fields are equal values.
 
 use nx_hir::{LoweredModule, Name};
-use nx_interpreter::{Interpreter, ResolvedProgram, Value};
+use nx_interpreter::{Interpreter, Value};
+use nx_program::ResolvedProgram;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use std::sync::Arc;

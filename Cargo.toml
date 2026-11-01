@@ -8,6 +8,7 @@ members = [
     "crates/nx-value",
     "crates/nx-ir",
     "crates/nx-ir-runtime",
+    "crates/nx-program",
     "crates/nx-api",
     "crates/nx-graphics-skia",
     "crates/nx-graphics",

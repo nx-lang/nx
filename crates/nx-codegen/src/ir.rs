@@ -16,11 +16,9 @@ use crate::model::{
     CodegenSourceEntry, CodegenStatement, CodegenTypeRef,
 };
 use crate::options::CodegenError;
-use nx_api::ProgramArtifact;
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::ast::{BinOp, IntervalEnd, Literal, UnOp};
 use nx_hir::UpdateIntrinsic;
-use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
@@ -30,6 +28,7 @@ use nx_ir::{
     NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
+use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -1050,15 +1049,14 @@ impl<'a> ModuleEmitter<'a> {
     fn span(&self, span: TextSpan) -> [i64; 2] {
         if self.span_module == self.module.id
             && !(span.is_empty()
-                && nx_api::standard_library_for_module(&module_identity(self.module)).is_some_and(
-                    |library| {
+                && nx_program::standard_library_for_module(&module_identity(self.module))
+                    .is_some_and(|library| {
                         library.modules.iter().any(|module| {
                             !module.runtime_functions.is_empty()
                                 && format!("{}/{}", library.root, module.identity)
                                     == module_identity(self.module)
                         })
-                    },
-                ))
+                    }))
         {
             [u32::from(span.start()) as i64, u32::from(span.end()) as i64]
         } else {

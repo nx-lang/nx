@@ -3,14 +3,13 @@
 
 use crate::artifacts::{build_standard_library, StandardLibrary};
 use crate::{
-    build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
-    standard_libraries, standard_library, standard_library_entry, standard_library_for_module,
-    validate_workspace, EvalResult, LibraryRegistry, NxDiagnostic, NxLibraryModule,
-    NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
-    ProgramBuildContext, StandardLibraryModule, StandardLibraryStability,
+    build_program_artifact_from_source, build_workspace_program_artifact, standard_libraries,
+    standard_library, standard_library_entry, standard_library_for_module, validate_workspace,
+    LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace,
+    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, StandardLibraryModule,
+    StandardLibraryStability,
 };
 use nx_hir::{InterfaceItemKind, Visibility};
-use nx_value::NxValue;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -121,17 +120,6 @@ fn library_roots(artifact: &ProgramArtifact) -> Vec<String> {
         .collect()
 }
 
-fn root_record(artifact: &ProgramArtifact) -> (String, Vec<(String, NxValue)>) {
-    match eval_program_artifact(artifact) {
-        EvalResult::Ok(NxValue::Record {
-            type_name: Some(name),
-            properties,
-        }) => (name, properties.into_iter().collect()),
-        EvalResult::Ok(value) => panic!("expected a record, got {value:?}"),
-        EvalResult::Err(diagnostics) => panic!("evaluation failed: {diagnostics:?}"),
-    }
-}
-
 // --- The mechanism ---------------------------------------------------------------------------
 
 #[test]
@@ -201,29 +189,6 @@ fn a_standard_library_is_analyzed_once_and_is_free_of_diagnostics() {
             .expect("the program links the agent library");
         assert!(Arc::ptr_eq(linked, first));
     }
-}
-
-#[test]
-fn a_single_source_imports_a_standard_library_with_an_empty_context() {
-    let artifact = build_program_artifact_from_source(
-        "import \"@nx/agent\"\nlet root() = { <Agent name=\"support\">Be brief.</Agent> }",
-        "main.nx",
-        &ProgramBuildContext::empty(),
-    )
-    .expect("program artifact");
-    assert!(
-        artifact.diagnostics.is_empty(),
-        "{:#?}",
-        artifact.diagnostics
-    );
-
-    let (type_name, properties) = root_record(&artifact);
-    assert_eq!(type_name, "Agent");
-    assert!(properties.contains(&(
-        "instructions".to_string(),
-        NxValue::String("Be brief.".to_string())
-    )));
-    assert!(library_roots(&artifact).contains(&AGENT_ROOT.to_string()));
 }
 
 #[test]
@@ -309,26 +274,6 @@ fn every_import_form_names_the_library() {
         ),
         &["Document"],
     );
-}
-
-#[test]
-fn a_context_limited_to_one_host_root_still_sees_standard_libraries() {
-    let registry = LibraryRegistry::new();
-    registry
-        .load_library_from_sources(&host_library())
-        .unwrap_or_else(|diagnostics| panic!("host library: {diagnostics:?}"));
-    let context = registry
-        .build_context_with_visible_roots([HOST_ROOT])
-        .expect("visible roots");
-
-    let artifact = build(
-        &[(
-            "main.nx",
-            "import \"@nx/agent\"\nlet root() = { <Agent name=\"support\">Be brief.</Agent> }",
-        )],
-        &context,
-    );
-    assert_eq!(root_record(&artifact).0, "Agent");
 }
 
 #[test]
@@ -468,35 +413,6 @@ fn a_relative_path_into_the_reserved_root_is_refused_not_resolved() {
 }
 
 #[test]
-fn a_standard_library_can_be_an_implicit_import() {
-    let context = ProgramBuildContext::empty().with_implicit_imports([AGENT_ROOT]);
-    let artifact = build(
-        &[
-            (
-                "app/main.nx",
-                "import \"./tools.nx\"\nlet root() = { <Agent name=\"support\" tools={tools}>Be brief.</Agent> }",
-            ),
-            (
-                "app/tools.nx",
-                "export let tools: Tool+ = { <WebSearchTool /> }",
-            ),
-        ],
-        &context,
-    );
-    assert!(library_roots(&artifact).contains(&AGENT_ROOT.to_string()));
-
-    // A module that writes the very import it would be given is not importing it twice.
-    let artifact = build(
-        &[(
-            "main.nx",
-            "import \"@nx/agent\"\nlet root() = { <Agent name=\"support\">Be brief.</Agent> }",
-        )],
-        &context,
-    );
-    assert_eq!(root_record(&artifact).0, "Agent");
-}
-
-#[test]
 fn an_implicit_import_of_an_unknown_standard_library_is_refused() {
     let context = ProgramBuildContext::empty().with_implicit_imports(["@nx/nope"]);
     let diagnostics = errors(&[("main.nx", "let root() = 1")], &context);
@@ -558,29 +474,6 @@ fn the_reserved_root_refuses_workspace_modules_and_host_libraries() {
         has_code(&diagnostics, "library-root-reserved"),
         "{diagnostics:#?}"
     );
-}
-
-#[test]
-fn a_program_reaches_a_standard_library_through_a_host_library() {
-    let registry = LibraryRegistry::new();
-    registry
-        .load_library_from_sources(&host_library())
-        .unwrap_or_else(|diagnostics| panic!("host library: {diagnostics:?}"));
-
-    let artifact = build(
-        &[(
-            "main.nx",
-            &format!(
-                "import \"./{HOST_ROOT}\"\nlet root() = {{ <AssistantConfig enabled=true /> }}"
-            ),
-        )],
-        &registry.build_context(),
-    );
-    assert_eq!(
-        library_roots(&artifact),
-        [nx_hir::PRELUDE_MODULE_IDENTITY, AGENT_ROOT, HOST_ROOT]
-    );
-    assert_eq!(root_record(&artifact).0, "AssistantConfig");
 }
 
 #[test]
@@ -914,71 +807,6 @@ fn the_reference_page_quotes_the_library_and_the_worked_example_exactly() {
         Some(SUPPORT_AGENT),
         "update the worked example on the reference page"
     );
-}
-
-#[test]
-fn math_standard_library_signatures_identity_and_imports() {
-    let math = standard_library_entry("@nx/math").unwrap();
-    assert_eq!(math.stability, StandardLibraryStability::Unstable);
-    assert!(
-        math.artifact().diagnostics.is_empty(),
-        "{:?}",
-        math.artifact().diagnostics
-    );
-    assert!(Arc::ptr_eq(
-        math.artifact(),
-        standard_library("@nx/math").unwrap()
-    ));
-    let source = "import { sin, pi } from \"@nx/math\"\nlet root() = { sin(pi / 2.0) }";
-    let artifact =
-        build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
-            .unwrap();
-    match eval_program_artifact(&artifact) {
-        EvalResult::Ok(value) => assert_eq!(value, NxValue::Float(1.0)),
-        EvalResult::Err(e) => panic!("{e:?}"),
-    }
-    for op in nx_value::math::MathOp::ALL {
-        let schema = crate::program_artifact_function_schema(
-            &artifact,
-            &crate::DeclarationRef::in_module("@nx/math/math.nx", op.name()),
-            &crate::FunctionSchemaOptions::default(),
-        )
-        .unwrap();
-        let value = serde_json::to_value(schema.input_schema.unwrap()).unwrap();
-        for param in op.params() {
-            assert_eq!(value["properties"][param]["type"], "number");
-        }
-        assert_eq!(
-            serde_json::to_value(schema.output_schema.unwrap()).unwrap()["type"],
-            "number"
-        );
-        assert!(op.descriptor("@nx/math/math.nx").contains(op.name()));
-    }
-    let pi = math.artifact().exports.get("pi").unwrap();
-    assert_eq!(pi.module_file, "@nx/math/math.nx");
-    assert!(library_roots(&artifact).contains(&"@nx/math".to_string()));
-    let plain = build_program_artifact_from_source(
-        "let root() = { 1 }",
-        "main.nx",
-        &ProgramBuildContext::empty(),
-    )
-    .unwrap();
-    assert!(!library_roots(&plain).contains(&"@nx/math".to_string()));
-    assert!(!errors(
-        &[("main.nx", "let root() = { sin(1.0) }")],
-        &ProgramBuildContext::empty()
-    )
-    .is_empty());
-    // A host cannot supply any reserved root, including the trusted math identity.
-    assert!(LibraryRegistry::new()
-        .load_library_from_sources(&NxLibrarySource::new(
-            "@nx/math",
-            vec![NxLibraryModule::new(
-                "math.nx",
-                "export let sin(x:float64):float64 = { 0.0 }"
-            )]
-        ))
-        .is_err());
 }
 
 #[test]

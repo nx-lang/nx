@@ -2,12 +2,11 @@
 //! with it.
 
 use crate::{
-    build_workspace_program_artifact, eval_program_artifact, standard_library, validate_workspace,
-    EvalResult, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
-    NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    build_workspace_program_artifact, standard_library, validate_workspace, LibraryRegistry,
+    NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity, NxWorkspace, NxWorkspaceModule,
+    ProgramArtifact, ProgramBuildContext,
 };
 use nx_hir::{InterfaceItemKind, Visibility};
-use nx_value::NxValue;
 
 const VISUALIZER_ROOT: &str = "@nx/visualizer";
 
@@ -674,34 +673,6 @@ fn library_artifact(source: &str) -> ProgramArtifact {
         &ui_registry().build_context(),
     )
     .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"))
-}
-
-#[test]
-fn a_props_record_of_an_imported_component_is_available_through_the_import() {
-    let artifact = library_artifact(&format!(
-        "import {{ Card }} from \"./{UI_ROOT}\"
-let root(): Card.Props = {{ <Card.Props label=\"Q\" title=\"Hi\" /> }}
-let key(): Card.Props.Property = {{ Card.Props.Property.label }}"
-    ));
-    assert!(
-        artifact.diagnostics.is_empty(),
-        "{:#?}",
-        artifact.diagnostics
-    );
-    match eval_program_artifact(&artifact) {
-        EvalResult::Ok(NxValue::Record {
-            type_name,
-            properties,
-        }) => {
-            assert_eq!(type_name.as_deref(), Some("Card.Props"));
-            assert_eq!(
-                properties.get("label"),
-                Some(&NxValue::String("Q".to_string()))
-            );
-        }
-        EvalResult::Ok(value) => panic!("expected a Card.Props record, got {value:?}"),
-        EvalResult::Err(diagnostics) => panic!("evaluation failed: {diagnostics:?}"),
-    }
 }
 
 #[test]

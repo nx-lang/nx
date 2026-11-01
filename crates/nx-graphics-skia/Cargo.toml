@@ -13,13 +13,11 @@ sha2 = "0.10"
 serde_json.workspace = true
 serde.workspace = true
 nx-api = { path = "../nx-api", optional = true }
-nx-codegen = { path = "../nx-codegen", optional = true }
-nx-ir-runtime = { path = "../nx-ir-runtime", optional = true }
 
 [features]
 default = []
 native = ["dep:skia-safe"]
-preview = ["native", "dep:nx-api", "dep:nx-codegen", "dep:nx-ir-runtime"]
+preview = ["native", "dep:nx-api"]
 
 [[bin]]
 name = "nx-graphics-preview"

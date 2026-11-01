@@ -1,4 +1,3 @@
-use crate::artifacts::{ProgramArtifact, ProgramBuildContext};
 use crate::eval::{
     build_source_program_artifact, program_artifact_error_diagnostics, program_root_source,
     runtime_error_diagnostics,
@@ -6,6 +5,7 @@ use crate::eval::{
 use crate::value::{from_nx_value, to_nx_value};
 use crate::{NxDiagnostic, NxSeverity};
 use nx_interpreter::{Interpreter, HANDLER_INVOCATION_TYPE_NAME};
+use nx_program::{ProgramArtifact, ProgramBuildContext};
 use nx_value::NxValue;
 use serde::{Deserialize, Serialize};
 
@@ -389,12 +389,12 @@ fn lookup_contains_component(lookup: ComponentLookup<'_>, type_name: &str) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifacts::{
+    use crate::{NxWorkspace, NxWorkspaceModule};
+    use nx_hir::{ast::Expr, Item, LoweredModule};
+    use nx_program::{
         build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
         ProgramBuildContext,
     };
-    use crate::{NxWorkspace, NxWorkspaceModule};
-    use nx_hir::{ast::Expr, Item, LoweredModule};
     use std::collections::BTreeMap;
     use std::fs;
     use std::sync::Arc;

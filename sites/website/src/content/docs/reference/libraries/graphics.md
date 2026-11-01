@@ -240,7 +240,7 @@ configuration. Native Skia remains the PNG/export reference.
 
 ```sh
 cargo test -p nx-graphics
-cargo test -p nx-codegen graphics_
+cargo test -p nx-api --test codegen_parity graphics_
 cargo test -p nx-graphics-skia --features native
 pnpm --dir runtime/typescript build
 node runtime/typescript/test/graphics.test.mjs

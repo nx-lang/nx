@@ -14,7 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 nx-api = { path = "../nx-api" }
-nx-codegen = { path = "../nx-codegen" }
 nx-ir = { workspace = true }
 nx-syntax = { path = "../nx-syntax" }
 nx-hir = { path = "../nx-hir" }

@@ -1,8 +1,8 @@
 //! Executable TypeScript and JavaScript generation for resolved NX programs.
 //!
-//! This crate consumes [`nx_api::ProgramArtifact`] values. It does not parse source text or
+//! This crate consumes [`nx_program::ProgramArtifact`] values. It does not parse source text or
 //! rediscover imports during emission; all executable generation starts from the resolved,
-//! type-checked program model preserved by `nx-api`.
+//! type-checked program model preserved by `nx-program`.
 
 // The builders and emitters thread a wide, consistent context — the program, the module, the
 // declaration, the emit options, the export policy and the output buffer — through one function
@@ -32,8 +32,8 @@ pub use model::{
     CodegenActionHandler, CodegenComponent, CodegenComponentDescriptor, CodegenComponentEmit,
     CodegenComponentField, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
     CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenMatchArm, CodegenModule,
-    CodegenModuleProvenance, CodegenProgram, CodegenReference, CodegenSourceEntry, CodegenTypeRef,
-    CodegenUnsupportedConstruct,
+    CodegenModuleProvenance, CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference,
+    CodegenSourceEntry, CodegenTypeRef, CodegenUnsupportedConstruct,
 };
 pub use options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenOutputFormat, CodegenTarget,
@@ -45,25 +45,6 @@ pub use options::{
 pub use runtime::{javascript_runtime_abi, javascript_runtime_helper_source};
 
 #[cfg(test)]
-mod ir_corpus_tests;
-#[cfg(test)]
-mod ir_image_tests;
-#[cfg(test)]
-mod ir_instance_tree_tests;
-#[cfg(test)]
-mod ir_runtime_sources;
-#[cfg(test)]
-mod ir_runtime_tests;
-#[cfg(test)]
 mod ir_tests;
 #[cfg(test)]
 mod prelude_image_tests;
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod color_transport_tests;
-#[cfg(test)]
-mod graphics_tests;
-#[cfg(test)]
-mod math_tests;

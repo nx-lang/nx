@@ -1,6 +1,9 @@
-use crate::model::{CodegenProperty, CodegenRecordField};
-use crate::runtime::runtime_helper_source;
-use crate::{
+use nx_api::{
+    build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
+    EvalResult, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+};
+use nx_api::{ResolvedItemKind, RuntimeModuleId};
+use nx_codegen::{
     build_codegen_program, emit_codegen_program, emit_js_program_module, emit_program,
     javascript_runtime_helper_source, CodegenDeclaration, CodegenDeclarationKind,
     CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenModule,
@@ -8,13 +11,9 @@ use crate::{
     CodegenTypeRef, JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
     DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_JS_RUNTIME_ABI,
 };
-use nx_api::{
-    build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
-    EvalResult, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
-};
+use nx_codegen::{CodegenProperty, CodegenRecordField};
 use nx_diagnostics::{Severity, TextSpan};
 use nx_hir::{ast, LocalDefinitionId};
-use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::Type;
 use serde_json::Value;
 use std::fs;
@@ -3303,4 +3302,12 @@ fn generated_javascript_checks_a_value_constraint() {
         );
     }
     assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+fn runtime_helper_source(target: CodegenTarget) -> String {
+    generated_file(
+        &artifact_from_source(""),
+        target,
+        &format!("nx-runtime.{}", target.extension()),
+    )
 }

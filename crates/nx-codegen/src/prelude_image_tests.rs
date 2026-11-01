@@ -14,8 +14,8 @@
 
 use crate::ir::NxIrEmitOptions;
 use crate::{build_codegen_program, build_nx_ir_artifacts};
-use nx_api::{build_program_artifact_from_source, ProgramBuildContext};
 use nx_ir::{explain_nx_ir_image, write_nx_ir_image, NxIrArtifact};
+use nx_program::{build_program_artifact_from_source, ProgramBuildContext};
 use std::fs;
 use std::path::PathBuf;
 

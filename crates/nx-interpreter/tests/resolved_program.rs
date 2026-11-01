@@ -1,7 +1,8 @@
 use nx_hir::{lower_source_module, LoweredModule, Name};
-use nx_interpreter::{
-    Interpreter, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
-    ResolvedProgram, RuntimeErrorKind, RuntimeModuleId, Value,
+use nx_interpreter::{Interpreter, RuntimeErrorKind, Value};
+use nx_program::{
+    ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
+    ResolvedProgram, RuntimeModuleId,
 };
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;

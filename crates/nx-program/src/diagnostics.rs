@@ -58,7 +58,7 @@ pub struct NxTextSpan {
 /// secondary labels provide additional context (e.g. "this was expected because...").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NxDiagnosticLabel {
-    /// The file name originally passed to [`eval_source`](crate::eval_source).
+    /// The file name submitted when building the program.
     pub file: String,
     /// The text span indicating the location in the source.
     pub span: NxTextSpan,
@@ -198,12 +198,19 @@ pub(crate) fn text_range_to_span(range: TextRange, source: &str, index: &LineInd
     }
 }
 
-pub(crate) struct LineIndex {
+/// Cached line starts for converting source ranges to tooling spans.
+pub struct LineIndex {
     line_starts: Vec<usize>,
 }
 
 impl LineIndex {
-    pub(crate) fn new(text: &str) -> Self {
+    /// Converts a UTF-8 byte range in the indexed source into a tooling span.
+    pub fn span(&self, source: &str, range: TextRange) -> NxTextSpan {
+        text_range_to_span(range, source, self)
+    }
+
+    /// Indexes the line starts of the given source.
+    pub fn new(text: &str) -> Self {
         let mut line_starts = vec![0usize];
         for (idx, ch) in text.char_indices() {
             if ch == '\n' {
@@ -235,6 +242,15 @@ impl LineIndex {
             ),
         )
     }
+}
+
+/// Converts diagnostics using the artifact's preserved sources without copying source text.
+pub fn program_diagnostics_to_api(
+    program: &crate::ProgramArtifact,
+    diagnostics: &[Diagnostic],
+    fallback_source: &str,
+) -> Vec<NxDiagnostic> {
+    diagnostics_to_api_with_sources(diagnostics, fallback_source, &program.source_map)
 }
 
 #[cfg(test)]

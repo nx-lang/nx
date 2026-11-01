@@ -5,7 +5,7 @@ use smol_str::SmolStr;
 use std::fmt;
 use text_size::TextRange;
 
-use crate::RuntimeModuleId;
+use nx_program::RuntimeModuleId;
 
 /// Runtime error kinds that can occur during interpretation
 ///

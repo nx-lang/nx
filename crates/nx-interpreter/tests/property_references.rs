@@ -3,7 +3,8 @@
 //! update, and the rendered output carries the case. Its wire form is covered in `nx-api`.
 
 use nx_hir::{LoweredModule, Name};
-use nx_interpreter::{Interpreter, ResolvedProgram, Value, HANDLER_INVOCATION_TYPE_NAME};
+use nx_interpreter::{Interpreter, Value, HANDLER_INVOCATION_TYPE_NAME};
+use nx_program::ResolvedProgram;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use std::sync::Arc;

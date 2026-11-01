@@ -14,11 +14,11 @@
 
 #![allow(dead_code)]
 
-use nx_api::{build_program_artifact_from_source, ProgramBuildContext};
 use nx_codegen::{emit_nx_ir, NxIrEmitOptions};
 use nx_ir_runtime::{
     ComponentInit, LinkOptions, NxIrRuntimeError, PreparedModule, Program, RuntimeOptions, Usage,
 };
+use nx_program::{build_program_artifact_from_source, ProgramBuildContext};
 use nx_value::NxValue;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;

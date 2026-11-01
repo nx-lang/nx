@@ -18,13 +18,13 @@ pub use source_tree::{
     SourceTreeVisualizers, SourceVisualizer,
 };
 
-use nx_api::{
-    analyze_workspace_modules, validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity,
-    NxWorkspace, NxWorkspaceInputError, NxWorkspaceModule, ProgramBuildContext,
-};
 use nx_hir::{
     ast::TypeRef, Doc, Item, LocalDefinitionId, LoweredModule, PreparedBinding, PreparedNamespace,
     RecordKind,
+};
+use nx_program::{
+    analyze_workspace_modules, validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity,
+    NxWorkspace, NxWorkspaceInputError, NxWorkspaceModule, ProgramBuildContext,
 };
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
 use nx_types::{ModuleArtifact, TypeEnvironment};
@@ -383,7 +383,7 @@ impl WorkspaceSnapshot {
                     message,
                     labels: vec![NxDiagnosticLabel {
                         file: identity.to_string(),
-                        span: nx_api::NxTextSpan {
+                        span: nx_program::NxTextSpan {
                             start_byte: start as i32,
                             end_byte: end as i32,
                             start_line: from.line as i32 + 1,
@@ -460,7 +460,7 @@ impl WorkspaceSnapshot {
                     message: message.to_string(),
                     labels: vec![NxDiagnosticLabel {
                         file: document.identity.to_string(),
-                        span: nx_api::NxTextSpan {
+                        span: nx_program::NxTextSpan {
                             start_byte: start as i32,
                             end_byte: end as i32,
                             start_line: from.line as i32 + 1,
@@ -1307,7 +1307,7 @@ impl WorkspaceSnapshot {
         // it, written or implicit (a synthesized implicit import is among the module's imports),
         // or a visible library that depends on it. No build context is needed for either.
         let visible_libraries = self.build_context.visible_libraries();
-        let standard_libraries = nx_api::standard_libraries()
+        let standard_libraries = nx_program::standard_libraries()
             .iter()
             .filter(|standard| {
                 modules.iter().any(|module| {
@@ -1342,7 +1342,7 @@ impl WorkspaceSnapshot {
         // holds, so a library name resolves the way a peer module's name does.
         // The prelude is one of the program's libraries, so its declarations are indexed like a
         // library's: the bindings above already name them, and this is what those origins point at.
-        for library in std::iter::once(Arc::clone(nx_api::prelude_library()))
+        for library in std::iter::once(Arc::clone(nx_program::prelude_library()))
             .chain(standard_libraries)
             .chain(visible_libraries)
         {
@@ -3269,7 +3269,7 @@ impl<'a> LineIndex<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_api::NxTextSpan;
+    use nx_program::NxTextSpan;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -3838,8 +3838,8 @@ component <SearchBox placeholder:string /> = {
     /// carries one. Decides D1's fallback branch of `add-web-editor-packages`.
     #[test]
     fn measure_library_modules_reaching_workspace_analysis() {
-        use nx_api::LibraryRegistry;
         use nx_hir::PreparedBindingTarget;
+        use nx_program::LibraryRegistry;
 
         let temp = TempDir::new().expect("temp dir");
         let ui_dir = temp.path().join("ui");
@@ -3913,7 +3913,7 @@ component <SearchBox placeholder:string /> = {
     /// <para>The directory has to outlive nothing — the registry keeps what it loaded — but it
     /// is returned so a test that wants to compare against the compiler can build against the
     /// same registry.</para>
-    fn ui_library() -> (TempDir, nx_api::LibraryRegistry) {
+    fn ui_library() -> (TempDir, nx_program::LibraryRegistry) {
         let temp = TempDir::new().expect("temp dir");
         let ui_dir = temp.path().join("ui");
         std::fs::create_dir_all(&ui_dir).expect("ui dir");
@@ -3925,7 +3925,7 @@ component <SearchBox placeholder:string /> = {
             ),
         )
         .expect("ui file");
-        let registry = nx_api::LibraryRegistry::new();
+        let registry = nx_program::LibraryRegistry::new();
         registry
             .load_library_from_directory(&ui_dir)
             .expect("library loads");
@@ -5859,7 +5859,7 @@ component <SearchBox placeholder:string /> = {
             ),
         )
         .expect("ui file");
-        let registry = nx_api::LibraryRegistry::new();
+        let registry = nx_program::LibraryRegistry::new();
         registry
             .load_library_from_directory(&ui_dir)
             .expect("library loads");

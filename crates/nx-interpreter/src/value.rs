@@ -1,7 +1,7 @@
 //! Runtime value representation for the NX interpreter.
 
-use crate::RuntimeModuleId;
 use nx_hir::Name;
+use nx_program::RuntimeModuleId;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 

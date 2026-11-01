@@ -2,8 +2,13 @@
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use nx_api::codegen::{
+    emit_js_program_module, emit_nx_ir, write_nx_ir_bundle, GeneratedJsProgramModule,
+    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
+    JsProgramModuleOptions, NxIrEmitOptions,
+};
 use nx_api::{
-    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
+    build_workspace_program_artifact,
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
     eval_program_artifact as api_eval_program_artifact, eval_source,
     evaluate_component_program_artifact as api_evaluate_component_program_artifact,
@@ -12,11 +17,6 @@ use nx_api::{
     ComponentDispatchResult, ComponentEvaluateEvalResult, ComponentInitEvalResult,
     ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
-};
-use nx_codegen::{
-    emit_js_program_module, emit_nx_ir, write_nx_ir_bundle, GeneratedJsProgramModule,
-    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
-    JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_ir::explain_nx_ir_image;
 use nx_value::NxValue;
@@ -1179,14 +1179,10 @@ pub unsafe extern "C" fn nx_codegen_nx_ir(
                     let fallback_source = program_artifact
                         .source_text(&program_artifact.entry_identity)
                         .unwrap_or_default();
-                    let sources = program_artifact
-                        .source_entries()
-                        .into_iter()
-                        .map(|entry| (entry.identity, entry.source));
-                    let diagnostics = diagnostics_to_api_with_source_entries(
+                    let diagnostics = nx_api::program_diagnostics_to_api(
+                        program_artifact,
                         &error.diagnostics,
                         fallback_source,
-                        sources,
                     );
                     Ok((
                         NxEvalStatus::Error,

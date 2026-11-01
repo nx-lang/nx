@@ -1,18 +1,17 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use nx_api::codegen::{emit_nx_ir, NxIrEmitOptions};
+use nx_api::language_service::{
+    DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
+    WorkspaceSnapshot,
+};
 use nx_api::{
-    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
-    eval_program_artifact, load_program_artifact_from_source,
+    build_workspace_program_artifact, eval_program_artifact, load_program_artifact_from_source,
     program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
     EvalResult, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
     NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, SchemaQueryError,
 };
-use nx_codegen::{emit_nx_ir, NxIrEmitOptions};
 use nx_ir::explain_nx_ir_image;
-use nx_language_service::{
-    DocumentInput, DocumentUri, SnapshotError, SourceEdit, SourceTreeOptions, TextPosition,
-    WorkspaceSnapshot,
-};
 use nx_value::NxValue;
 use serde::Serialize;
 
@@ -611,16 +610,12 @@ fn evaluation_error(diagnostics: Vec<NxDiagnostic>) -> Error {
     )
 }
 
-fn codegen_error(error: nx_codegen::CodegenError, program: &ProgramArtifact) -> Error {
+fn codegen_error(error: nx_api::codegen::CodegenError, program: &ProgramArtifact) -> Error {
     let fallback_source = program
         .source_text(&program.entry_identity)
         .unwrap_or_default();
-    let sources = program
-        .source_entries()
-        .into_iter()
-        .map(|entry| (entry.identity, entry.source));
     let diagnostics =
-        diagnostics_to_api_with_source_entries(&error.diagnostics, fallback_source, sources);
+        nx_api::program_diagnostics_to_api(program, &error.diagnostics, fallback_source);
     evaluation_error(diagnostics)
 }
 
