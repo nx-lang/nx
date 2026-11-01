@@ -7,8 +7,8 @@ This is an implementation-agent proposal review, not an independent implementati
 Changes made during review:
 
 - Record construction is a deliberate source-language restriction, diagnosed in shared analysis;
-  it is no longer an emitter feature or a runtime error. Guidance uses resolved declarations and
-  preserves source identity, with a safe fallback when a complete rewrite cannot be suggested.
+  it is no longer an emitter feature or a runtime error. Callee classification uses resolved declarations and
+  preserves source identity; guidance is a short element example without generated rewrites.
 - Ordinary functions, factories and the existing named interface for first-class function values
   are explicitly outside the restriction. No broad call-style redesign is bundled into this work.
 - Conditional lowering retains the established path-sensitive rules: same-name bindings in
@@ -30,10 +30,18 @@ Artifact consistency pass:
 - Added a six-test migration table so replacement versus re-enabling is explicit.
 - Made cross-target conditional coverage, missing required properties and static checking of
   inactive branches explicit in executable-generation scenarios.
-- Added source-analysis scenarios for safe fallback guidance, callable-name resolution and valid
+- Added source-analysis scenarios for simple guidance, callable-name resolution and valid
   type references; tightening constructors does not ban record type names in other contexts.
 - Main specs remain unchanged until implementation and sync; the removal delta explicitly closes
   the previous temporary exception. No implementation task is marked complete.
 
 Validation: `openspec validate complete-ir-construction-lowering --strict` passes. No compiler,
 runtime, tests or main specifications were changed during this proposal revision.
+
+Diagnostic simplification:
+
+- Keep semantic record recognition, a stable code and the offending source span.
+- Give one short message directing users to named element syntax, such as `<User ... />`.
+- Remove argument-to-field mapping, default-aware suggestions, source-expression reconstruction,
+  automatic rewrites and the corresponding special-case tests from the implementation scope.
+- Conditional-property design, requirements and tasks are unchanged by this simplification.

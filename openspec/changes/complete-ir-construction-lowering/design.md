@@ -25,13 +25,13 @@ imported, qualified or type-aliased names resolving to a named record. Resolve t
 do not infer constructor status from capitalization or the result type. Existing function and
 lexical-shadowing rules remain authoritative.
 
-Use the callee/call span and retain the caller's file identity. Explain that records use named
-element construction. For a simple unambiguous case, show `<User name="Bob" age=42 />`; for
-`User("Bob")`, show `<User name="Bob" />`, leaving the default to normal construction. Use resolved
-semantic field metadata for guidance, including inherited fields; if a complete rewrite cannot be
-shown safely (invalid arity, type arguments or unavailable source text), provide accurate generic
-guidance rather than dropping arguments or inventing field bindings. An automatic code action is
-not required. Do not cascade into misleading missing-function or runtime diagnostics.
+Use the callee/call span and retain the caller's file identity. A short message is sufficient:
+"Records require element syntax with named properties, such as `<User ... />`."
+The example is illustrative syntax, not a complete replacement expression. Use the resolved record
+name when readily available; the message must not require enumerating fields, mapping positional
+arguments, extracting argument source text, or synthesizing a rewrite/code action. The diagnostic
+is the same whether arguments are supplied, omitted or invalid. Do not cascade into misleading
+missing-function or runtime diagnostics.
 
 Checker-backed tooling, CLI and all codegen paths must share this rejection. Named construction,
 including imported, inherited, generic and defaulted records, must continue to work. An explicit
@@ -92,7 +92,8 @@ removing useful migration guidance or promising future positional support.
 ## Risks / Trade-offs
 
 - Positional convenience is lost; explicit factory functions retain opt-in positional interfaces.
-- Diagnostic suggestions must respect semantic resolution and never guess an unsafe rewrite.
+- Callee classification must respect semantic resolution; keep the message simple and avoid
+  introducing field-mapping or rewrite machinery for an uncommon mistake.
 - Conditional presence/content may need an IR extension; settle/version it before runtime edits.
 - Eager branches, duplicated evaluation, premature defaults or exponential expansion can change
   behavior or cost; cover failing inactive branches, ordering, nesting and image/code growth.

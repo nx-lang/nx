@@ -1,7 +1,7 @@
 ## 1. Shared rejection of positional record construction
 
-- [ ] 1.1 Add `record-construction-requires-element` in shared source analysis with the offending call span, caller file identity and useful named-element guidance; reject zero-argument calls as well as supplied positional arguments.
-- [ ] 1.2 Cover imported/qualified/type-aliased record targets and inherited/generic records; verify safe suggestions or generic guidance for invalid arity/type arguments without secondary missing-function errors.
+- [ ] 1.1 Add `record-construction-requires-element` in shared source analysis with the offending call span, caller file identity and a short named-element example without field mapping or generated rewrites; reject zero-argument calls as well as supplied positional arguments.
+- [ ] 1.2 Cover semantic recognition of imported/qualified/type-aliased record targets; verify the same simple diagnostic for empty and nonempty calls without secondary missing-function errors. No per-field, default-aware or invalid-arity rewrite tests are needed.
 - [ ] 1.3 Replace the ignored positional success test with active rejection and equivalent markup/default tests; verify ordinary factory functions and existing first-class-function/shadowing rules remain unchanged.
 - [ ] 1.4 Verify the diagnostic reaches checker-backed language services, CLI and codegen consumers before emission/execution; preserve positive imported, inherited and defaulted markup cases.
 

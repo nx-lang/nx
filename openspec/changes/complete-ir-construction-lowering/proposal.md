@@ -8,7 +8,7 @@ records instead of introducing an implicit positional constructor based on field
 ## What Changes
 
 - **BREAKING:** Reject parenthesized construction of named records during shared source analysis,
-  with a stable diagnostic, a source span and helpful element-syntax guidance.
+  with a stable diagnostic, a source span and a short named-element example; no generated rewrite.
 - Keep `<User name="Bob" age=42 />` and omitted-field defaults; do not change ordinary functions,
   factory functions returning records, or first-class function invocation rules.
 - Compile simple conditional, condition-list and match-style property fragments with lazy active
