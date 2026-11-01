@@ -155,7 +155,7 @@ read one with `nxlang ir explain`, or read its `.txt` sibling.
 To regenerate the expected files after an intended change to the emitter or a program:
 
 ```bash
-NX_UPDATE_CORPUS=1 cargo test -p nx-codegen --lib ir_corpus
+NX_UPDATE_CORPUS=1 cargo test -p nx-api --test codegen_parity ir_corpus
 ```
 
 then review the diff of the `.txt` files before committing it. A count that changed shows in the

@@ -105,7 +105,7 @@ dropped just before the interpreter would receive it:
   `Primitive::numeric_promotion`, so binary nodes already carry the correctly
   promoted integer type.
 - Every `ModuleArtifact` carries that environment (`crates/nx-types/src/check.rs`).
-- `build_resolved_program` (`crates/nx-api/src/artifacts.rs`) walks
+- `build_resolved_program` (`crates/nx-program/src/artifacts.rs`) walks
   `&[ModuleArtifact]`, keeps `artifact.lowered_module`, and discards
   `artifact.type_env` — the field directly beside it.
 
@@ -1357,7 +1357,7 @@ limitation, for behavior that is specified to become an error anyway. The differ
 into the `rust-ir-runtime` spec as its one exception to "the same value and the same code as the
 TypeScript runtime", into `docs/nx-ir-format.md`, and pinned by
 `integers_past_the_float_safe_range_compute_as_wrapping_int64` in
-`crates/nx-codegen/src/ir_runtime_tests.rs`.
+`crates/nx-api/tests/codegen/ir_runtime_tests.rs`.
 
 **Why it might matter.** None of the three behaviors is the specified one, and two of them are
 silent: a wrapped product and a rounded product are both wrong numbers that look like results. A
@@ -1703,7 +1703,7 @@ and the package reports it as `evaluation-failed`. The program is wrong either w
 
 Three tests compile `type Unfit = { n:int label:string = { n } }` (or `Req`) to show it: the
 argument tests of `runtime/typescript/test/emitted-ir.test.mjs` and of
-`crates/nx-codegen/src/ir_runtime_tests.rs`, and one of `packages/agent/test/execute.test.ts`.
+`crates/nx-api/tests/codegen/ir_runtime_tests.rs`, and one of `packages/agent/test/execute.test.ts`.
 They stop compiling when the checker rejects the default. Drop those assertions then. The
 runtimes do not depend on them: the `Stepper` cases of the same two test files and of the
 conformance program `argument-diagnostics` (`fieldDefault`, `parameterDefault`) have a default

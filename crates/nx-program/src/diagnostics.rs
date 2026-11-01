@@ -244,6 +244,15 @@ impl LineIndex {
     }
 }
 
+/// Converts diagnostics using the artifact's preserved sources without copying source text.
+pub fn program_diagnostics_to_api(
+    program: &crate::ProgramArtifact,
+    diagnostics: &[Diagnostic],
+    fallback_source: &str,
+) -> Vec<NxDiagnostic> {
+    diagnostics_to_api_with_sources(diagnostics, fallback_source, &program.source_map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,9 +13,10 @@ use nx_hir::{
     PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind,
     PreparedModule, PreparedNamespace, PropertyEntry, RecordField,
 };
-use nx_program::{LibraryArtifact, ProgramArtifact};
-use nx_program::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
-
+use nx_program::{
+    LibraryArtifact, ProgramArtifact, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
+    RuntimeModuleId,
+};
 use nx_types::{ModuleArtifact, Primitive, Type, TypeEnvironment};
 use rustc_hash::{FxHashMap, FxHashSet};
 

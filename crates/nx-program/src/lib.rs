@@ -33,7 +33,8 @@ pub use artifacts::{
     StandardLibraryStability,
 };
 pub use diagnostics::{
-    diagnostics_to_api_with_source_entries, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan,
+    diagnostics_to_api, diagnostics_to_api_with_source_entries, program_diagnostics_to_api,
+    LineIndex, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan,
 };
 pub use program_visualizers::{
     duplicate_program_visualizers, duplicate_visualizer_diagnostics, program_modules,
@@ -51,10 +52,6 @@ pub use schema::{
 pub use workspace::{
     NxWorkspace, NxWorkspaceDirectoryError, NxWorkspaceInputError, NxWorkspaceModule,
 };
-
-pub use diagnostics::diagnostics_to_api;
-
-pub use diagnostics::LineIndex;
 
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]

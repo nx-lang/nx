@@ -4,12 +4,10 @@ use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
 use nx_hir::{Item, LoweredModule, Name};
 use nx_interpreter::{Interpreter, ResourceLimits, RuntimeError, Value};
-use nx_program::RuntimeModuleId;
 use nx_program::{
-    build_library_artifact_from_directory, build_program_artifact_from_source, LibraryArtifact,
-    ProgramArtifact, ProgramBuildContext,
+    build_library_artifact_from_directory, build_program_artifact_from_source, diagnostics_to_api,
+    LibraryArtifact, ProgramArtifact, ProgramBuildContext, RuntimeModuleId,
 };
-use nx_program::{diagnostics_to_api, diagnostics_to_api_with_source_entries};
 use nx_types::Type;
 use nx_value::NxValue;
 use std::fs;
@@ -93,14 +91,7 @@ pub(crate) fn program_artifact_error_diagnostics(
     fallback_source: &str,
 ) -> Option<Vec<NxDiagnostic>> {
     has_error_diagnostics(&program.diagnostics).then(|| {
-        diagnostics_to_api_with_source_entries(
-            &program.diagnostics,
-            fallback_source,
-            program
-                .source_entries()
-                .into_iter()
-                .map(|entry| (entry.identity, entry.source)),
-        )
+        nx_program::program_diagnostics_to_api(program, &program.diagnostics, fallback_source)
     })
 }
 
@@ -442,7 +433,7 @@ pub fn eval_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_program::{build_program_artifact_from_source, LibraryRegistry};
+    use nx_program::LibraryRegistry;
     use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;

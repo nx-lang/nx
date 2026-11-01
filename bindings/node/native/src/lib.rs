@@ -6,8 +6,7 @@ use nx_api::language_service::{
     WorkspaceSnapshot,
 };
 use nx_api::{
-    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
-    eval_program_artifact, load_program_artifact_from_source,
+    build_workspace_program_artifact, eval_program_artifact, load_program_artifact_from_source,
     program_artifact_function_schema_json, program_artifact_type_schema_json, validate_workspace,
     EvalResult, LibraryRegistry, NxDiagnostic, NxLibraryModule, NxLibrarySource, NxSeverity,
     NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext, SchemaQueryError,
@@ -615,12 +614,8 @@ fn codegen_error(error: nx_api::codegen::CodegenError, program: &ProgramArtifact
     let fallback_source = program
         .source_text(&program.entry_identity)
         .unwrap_or_default();
-    let sources = program
-        .source_entries()
-        .into_iter()
-        .map(|entry| (entry.identity, entry.source));
     let diagnostics =
-        diagnostics_to_api_with_source_entries(&error.diagnostics, fallback_source, sources);
+        nx_api::program_diagnostics_to_api(program, &error.diagnostics, fallback_source);
     evaluation_error(diagnostics)
 }
 

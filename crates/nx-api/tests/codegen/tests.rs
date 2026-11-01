@@ -1,5 +1,3 @@
-use nx_codegen::{CodegenProperty, CodegenRecordField};
-
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
     EvalResult, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
@@ -13,9 +11,9 @@ use nx_codegen::{
     CodegenTypeRef, JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
     DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_JS_RUNTIME_ABI,
 };
+use nx_codegen::{CodegenProperty, CodegenRecordField};
 use nx_diagnostics::{Severity, TextSpan};
 use nx_hir::{ast, LocalDefinitionId};
-
 use nx_types::Type;
 use serde_json::Value;
 use std::fs;

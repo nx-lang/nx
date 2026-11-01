@@ -56,7 +56,27 @@ pub use nx_interpreter::ResourceLimits;
 pub use nx_text::{format_nx_text, NxValueNode, NxValueRole, NxValueText};
 pub use value::{entry_result_to_nx_value, from_nx_value, to_nx_value, FromNxValueError};
 
-pub use nx_program::*;
+pub use nx_program::{
+    analyze_workspace_modules, build_library_artifact_from_directory,
+    build_program_artifact_from_source, build_workspace_program_artifact,
+    diagnostics_to_api_with_source_entries, duplicate_program_visualizers,
+    duplicate_visualizer_diagnostics, prelude_library, program_artifact_boundary_subtype_modules,
+    program_artifact_function_schema, program_artifact_function_schema_json,
+    program_artifact_type_schema, program_artifact_type_schema_json, program_diagnostics_to_api,
+    program_modules, program_visualizers, read_visualizer_value, standard_libraries,
+    standard_library, standard_library_entry, standard_library_for_module,
+    unknown_standard_library_message, validate_workspace, ConstructedDeclaration, DeclarationName,
+    DeclarationRef, FunctionSchema, FunctionSchemaOptions, LibraryArtifact, LibraryExport,
+    LibraryRegistry, ModuleQualifiedExprRef, ModuleQualifiedItemRef, NxDiagnostic,
+    NxDiagnosticLabel, NxLibraryModule, NxLibrarySource, NxSeverity, NxTextSpan, NxWorkspace,
+    NxWorkspaceDirectoryError, NxWorkspaceInputError, NxWorkspaceModule, ParameterSchema,
+    ProgramArtifact, ProgramBuildContext, ProgramModule, ProgramSourceEntry, ProgramVisualizer,
+    ResolvedItemKind, ResolvedModule, ResolvedModuleSource, ResolvedProgram, RuntimeModuleId,
+    SchemaDirection, SchemaQueryError, SchemaRequest, SchemaValue, StandardLibrary,
+    StandardLibraryModule, StandardLibraryStability, TypeSchema, TypeSchemaOptions,
+    VisualizerAttribute, VisualizerChild, VisualizerChoice, VisualizerValue, JSON_SCHEMA_DIALECT,
+    SCHEMA_AMBIGUOUS_DISCRIMINATOR, SCHEMA_INEXPRESSIBLE_TYPE, SCHEMA_UNKNOWN_DECLARATION,
+};
 
 /// Code generation for resolved programs.
 pub use nx_codegen as codegen;

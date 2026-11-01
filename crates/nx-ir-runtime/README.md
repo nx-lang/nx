@@ -817,8 +817,8 @@ every corpus image, and every cell of one image overwritten), the preparation an
 tests, and `tests/allocation.rs`, which counts the bytes a refused concatenation allocates to show
 that the budget is charged before a string is built, and the bytes refused input allocates to show
 that it is measured before it is copied. The tests that compile NX source, including
-the differential run against the interpreter, need the compiler and live in `nx-codegen`
-(`cargo test -p nx-codegen ir_runtime`), as do the instance tree's, one for each scenario of its
-specification (`cargo test -p nx-codegen ir_instance_tree`). So do the cost tests, which run generated host values
+the differential run against the interpreter, need the compiler and live in `nx-api/tests/codegen`
+(`cargo test -p nx-api --test codegen_parity ir_runtime`), as do the instance tree's, one for each scenario of its
+specification (`cargo test -p nx-api --test codegen_parity ir_instance_tree`). The cost tests remain in `nx-codegen`; they run generated host values
 through this runtime and the TypeScript one and hold this runtime's allocations to its counts
 (`cargo test -p nx-codegen --test cost_differential` and `--test cost_allocation`).

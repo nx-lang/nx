@@ -16,9 +16,7 @@ use crate::runtime::runtime_helper_source;
 use nx_diagnostics::{Diagnostic, Label};
 use nx_hir::ast::{BinOp, Literal, Occurrence, TypeRef, UnOp};
 use nx_hir::{is_update_record_name, UpdateIntrinsic};
-use nx_program::ProgramArtifact;
-use nx_program::{ResolvedItemKind, RuntimeModuleId};
-
+use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};

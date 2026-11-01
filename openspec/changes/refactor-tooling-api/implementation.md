@@ -13,7 +13,7 @@ were originally under `/tmp/nx-refactor-validation/`; post-reboot reruns are und
 | `pnpm --dir bindings/node test` | 38 pass | 38 pass |
 | `pnpm --dir bindings/wasm test` | 135 pass, including typecheck and debug-trap build | 135 pass; same checks |
 | `pnpm --dir sites/playground test` | 156 pass; 26 examples match | 156 pass; 26 examples match |
-| `bindings/wasm/dist/nx.wasm` (`wasm32-wasip1`, `wasm-release`) | 4,544,663 bytes | 4,584,637 bytes (+39,974; +0.88%) |
+| `bindings/wasm/dist/nx.wasm` (`wasm32-wasip1`, `wasm-release`) | 4,544,663 bytes | 4,582,516 bytes (+37,853; +0.83%) |
 
 ## Test relocation
 
@@ -80,7 +80,7 @@ The migrated JavaScript/TypeScript tests obtain the emitted runtime helper from 
 instead of a private module. `CodegenProperty` and `CodegenRecordField` gain public re-exports;
 they are already public data types in codegen's public model fields. No expectation changes.
 
-Before: 1811 `#[test]` cases across the four affected crates. After extraction: 1812 across those crates plus `nx-program`; the only new Rust test is the facade composition test. No test names or cases were lost.
+Counting `#[test]` immediately followed by a function declaration (rather than every raw attribute occurrence): before, 1811 cases across the four affected crates. After extraction: 1812 across those crates plus `nx-program`; the only new Rust test is the facade composition test. No test names or cases were lost.
 
 ## Adapter dependencies
 
@@ -97,11 +97,11 @@ Before: 1811 `#[test]` cases across the four affected crates. After extraction: 
 
 - Published runtime package verification passes: the standalone host builds only `nx-ir`,
   `nx-ir-runtime` and `nx-value` among the NX crates.
-- `pnpm run check:crate-layering` passes, including ten checks of the actual graph and locally
+- `pnpm run check:crate-layering` passes, including thirteen checks of the actual graph and locally
   injected metadata edges for normal, dev, build and target-specific forbidden dependencies.
 - `cargo check -p nx-ir-runtime --target wasm32-unknown-emscripten` passes. The WASI SDK and all
   native workspace targets build; native preview tests, build, Clippy and the preview smoke check also pass.
-- WASM grows by 0.88% with the facade's newly reachable IR runtime dependency. This is small;
+- WASM grows by 0.83% with the facade's newly reachable IR runtime dependency. This is small;
   unused runtime code is stripped by the linker. No feature gates are needed.
 - Source evaluation, CLI `run`, component lifecycle, NX text and value conversion still use
   the HIR interpreter; no engine switch, execution cache, CLI IR execution or interpreter removal.
@@ -109,3 +109,12 @@ Before: 1811 `#[test]` cases across the four affected crates. After extraction: 
 Full workspace build, tests and Clippy with warnings denied pass. Native graphics/preview tests,
 build, Clippy and the preview smoke check pass. Formatting, dependency checks and strict OpenSpec
 validation pass. No changed golden, snapshot or diagnostic expectations were needed.
+
+The refactor is committed as one coherent extraction/composition change so every new cross-crate
+import resolves at the commit boundary; review fixes are a separate commit. Production artifact
+construction and the resolved model were compared directly with the baseline and are unchanged
+apart from imports. The raw attribute count is 1822 → 1823; both counting methods retain all cases.
+
+Independent Claude CLI review completed in a separate reviewer session. All seven findings
+(RF1–RF7) were fixed and verified by the same session over two verification passes. Final
+workspace tests/Clippy and Node/WASM/.NET adapter suites pass after the fixes.

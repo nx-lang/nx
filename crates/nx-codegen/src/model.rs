@@ -1,7 +1,6 @@
 use nx_diagnostics::TextSpan;
 use nx_hir::{ast, ast::Occurrence, ElementId, ExprId, LocalDefinitionId, Name, UpdateIntrinsic};
 use nx_program::{ModuleQualifiedItemRef, ResolvedItemKind, RuntimeModuleId};
-
 use nx_types::Type;
 use std::path::PathBuf;
 

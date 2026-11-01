@@ -8,7 +8,7 @@ use nx_api::codegen::{
     JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_api::{
-    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
+    build_workspace_program_artifact,
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
     eval_program_artifact as api_eval_program_artifact, eval_source,
     evaluate_component_program_artifact as api_evaluate_component_program_artifact,
@@ -1179,14 +1179,10 @@ pub unsafe extern "C" fn nx_codegen_nx_ir(
                     let fallback_source = program_artifact
                         .source_text(&program_artifact.entry_identity)
                         .unwrap_or_default();
-                    let sources = program_artifact
-                        .source_entries()
-                        .into_iter()
-                        .map(|entry| (entry.identity, entry.source));
-                    let diagnostics = diagnostics_to_api_with_source_entries(
+                    let diagnostics = nx_api::program_diagnostics_to_api(
+                        program_artifact,
                         &error.diagnostics,
                         fallback_source,
-                        sources,
                     );
                     Ok((
                         NxEvalStatus::Error,

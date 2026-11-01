@@ -152,24 +152,24 @@ section. `nxlang ir explain ./generated-ir/main.nxir` renders an image as readab
 table index resolved. The image layout is documented in
 [docs/nx-ir-format.md](docs/nx-ir-format.md).
 
-Rust hosts that cache executable programs can use `nx_codegen::emit_js_program_module` instead of the
+Rust hosts that cache executable programs can use `nx_api::codegen::emit_js_program_module` instead of the
 CLI file layout. That API returns a single host-neutral JavaScript ESM source string plus
 structured metadata, including the logical module name, runtime import specifier, expected
 `NX_JS_RUNTIME_ABI`, program fingerprint, exported function entrypoints, and component/schema
 exports:
 
 Deploy program modules with the JavaScript runtime helper emitted by the same compiler release
-(`nx_codegen::javascript_runtime_helper_source`). Upgrade them together: `NX_JS_RUNTIME_ABI`
+(`nx_api::codegen::javascript_runtime_helper_source`). Upgrade them together: `NX_JS_RUNTIME_ABI`
 identifies the calling contract, not the set of helper exports available in every older runtime.
 For example, generated math calls require the `nxStandardMath` export, which older runtime helper
 bundles do not provide. The `files` layout includes its matching helper automatically.
 
 ```rust
-let options = nx_codegen::JsProgramModuleOptions {
+let options = nx_api::codegen::JsProgramModuleOptions {
     logical_module_name: "app/main".to_string(),
     runtime_import_specifier: "nx:runtime".to_string(),
 };
-let generated = nx_codegen::emit_js_program_module(&artifact, &options)?;
+let generated = nx_api::codegen::emit_js_program_module(&artifact, &options)?;
 database.put_program_module(
     generated.program_fingerprint,
     &generated.runtime_abi,
@@ -179,8 +179,8 @@ database.put_program_module(
 
 The cached program module imports shared NX helpers from the configured runtime specifier and does
 not include a generated `nx-runtime.js` file. Hosts can obtain the standalone JavaScript runtime
-source with `nx_codegen::javascript_runtime_helper_source()` and compare
-`nx_codegen::javascript_runtime_abi()` with the generated module metadata before loading it.
+source with `nx_api::codegen::javascript_runtime_helper_source()` and compare
+`nx_api::codegen::javascript_runtime_abi()` with the generated module metadata before loading it.
 Cloudflare Worker exports, Dynamic Worker manifests, Rivet actors, database cache records,
 auth/logging policy, resource limits, and isolate host wrappers are intentionally supplied outside
 `nx-codegen`.

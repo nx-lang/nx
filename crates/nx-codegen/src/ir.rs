@@ -19,9 +19,6 @@ use crate::options::CodegenError;
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::ast::{BinOp, IntervalEnd, Literal, UnOp};
 use nx_hir::UpdateIntrinsic;
-use nx_program::ProgramArtifact;
-use nx_program::{ResolvedItemKind, RuntimeModuleId};
-
 use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
@@ -31,6 +28,7 @@ use nx_ir::{
     NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
+use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};

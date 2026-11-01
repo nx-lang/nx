@@ -21,9 +21,10 @@ export function layeringViolations(metadata) {
   for (const pkg of metadata.packages) {
     for (const dependency of pkg.dependencies) {
       const upward = belowFacade.has(pkg.name) && dependency.name === "nx-api";
+      const foundationBoundary = pkg.name === "nx-program" && ["nx-interpreter", "nx-codegen", "nx-language-service"].includes(dependency.name);
       const runtimeBoundary = (pkg.name === "nx-program" && dependency.name === "nx-ir-runtime")
         || (pkg.name === "nx-ir-runtime" && dependency.name === "nx-program");
-      if (upward || runtimeBoundary) {
+      if (upward || foundationBoundary || runtimeBoundary) {
         errors.push(`${pkg.name} -> ${dependency.name} (${dependency.kind ?? "normal"} dependency${
           dependency.target ? `, target ${dependency.target}` : ""})`);
       }
