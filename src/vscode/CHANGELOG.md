@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.10.0
+
+### Libraries and previews
+- Add unstable `@nx/math` with float64 functions and pi/tau constants, and `@nx/geometry`
+  for shared geometry types and operations.
+- Add unstable `@nx/graphics` with shape helpers, text, gradients, clipping and opacity,
+  browser Canvas previews and optional native Skia rendering.
+- Add shared color types, hex color literals and editor tooling.
+- The playground routes supported values to Preview through library visualizer metadata;
+  Output and Preview share TypeScript IR evaluation and source selection.
+
+### Compiler and SDK changes
+- **Breaking.** Retire the HIR interpreter and its source evaluation and opaque component snapshot
+  APIs across the SDKs. Compile to NX IR and use the IR runtime for execution. `nxlang run`
+  continues to run source through IR.
+- Refactor tooling APIs around a shared program foundation. Upgrade compiler, bindings and runtime
+  together; the native FFI ABI is now 14.
+- **Breaking.** Named records require element construction, such as `<User name="Bob" age=42 />`.
+  Positional construction such as `User("Bob", 42)` is rejected with a diagnostic and example.
+- Conditional properties, including condition lists and matches, now compile through Rust and
+  TypeScript IR and generated JavaScript, preserving active-branch evaluation, defaults and
+  authored property order. Images using this support require `conditional-properties-v1`.
+- Math images require `standard-math-v1`; use a matching compiler and runtime.
+
 ## 0.9.0
 
 ### Editing in Visual (unstable)
