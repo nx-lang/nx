@@ -240,3 +240,21 @@ would be more precise. This is wording only and not a finding.
 93 passed. No builds were launched for this verification.
 
 **Result:** RF11 verified; Node CI test fix approved; no findings reopened and no new findings. RF1–RF10 unchanged.
+
+## CI Documentation Follow-up Review (2026-11-01): `types.md` Constructing Records example
+
+**Scope:** `git diff HEAD -- sites/website/src/content/docs/reference/syntax/types.md` only.
+
+**Assessment:** Approved.
+- The original `let ada = user("Ada", 42)` was invalid NX. `ValueDefinition` takes an `RhsExpression`
+  (`nx-grammar.md:251-252, 407-412`), which allows only an element, a literal, a signed number, a contextual name or a
+  braced expression. A call is none of those, so the code-block compiler was right to reject it.
+- `let ada = { user("Ada", 42) }` follows the documented form and matches the existing site examples
+  `let total = { add(2, 3) * 4 }`, `let a = { clamp(150) }` and `let result = { entityName(user) }`.
+- The rest of the snippet was already valid: `let bob = <User name="Bob" />` is an element right-hand side, and the
+  factory body `= <User name={name} age={age} />` is an element.
+- The example still shows named construction with an omitted default and an explicit positional factory, which is the
+  archived intent, and the paragraph after it is unchanged and accurate.
+- The added blank lines between top-level declarations follow the style guide's one-blank-line rule.
+
+No new findings. RF1–RF11 are unchanged. Website and code-block compilation checks are running separately.

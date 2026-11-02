@@ -74,3 +74,8 @@ using the record-call diagnostic in Node.
 - .NET formatting verification for the changed file and `git diff --check`: passed.
 - Independent Claude CLI follow-up review approved both SDK updates and verified RF11's additional
   error-path coverage. No open findings remain.
+
+The website code-block check also caught an unbraced top-level factory call in the new record
+example. Corrected it to `let ada = { user("Ada", 42) }` and applied declaration spacing. All 13
+website tests and 252 NX blocks in 33 files pass. Claude independently approved the documentation
+fix with no new findings.

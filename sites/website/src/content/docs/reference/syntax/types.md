@@ -1018,9 +1018,12 @@ Construct records with element syntax and named properties. Omitted properties k
 
 ```nx
 type User = { name: string age: int = 30 }
+
 let bob = <User name="Bob" />
+
 let user(name: string, age: int = 30): User = <User name={name} age={age} />
-let ada = user("Ada", 42)
+
+let ada = { user("Ada", 42) }
 ```
 
 `User("Bob", 42)` is rejected with `record-construction-requires-element`. Define a factory such as
