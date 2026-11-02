@@ -801,6 +801,41 @@ export class NxViewerElement extends ElementBase {
     return result;
   }
 
+  /**
+   * A compact element's line ends with whole properties: those past the pane's edge are hidden, and
+   * the line counts them after the last one shown, with any already waiting in its rows.
+   */
+  #fitCompactLines(): void {
+    for (const inline of this.#body.querySelectorAll<HTMLElement>(".compact-inline")) {
+      if (inline.scrollWidth <= inline.clientWidth + 1) {
+        continue;
+      }
+      const parts = [...inline.querySelectorAll<HTMLElement>(":scope > .line-property")];
+      let more = inline.nextElementSibling?.classList.contains("compact-more") ? (inline.nextElementSibling as HTMLElement) : undefined;
+      const waiting = more === undefined ? 0 : Number(/\d+/.exec(more.textContent ?? "")?.[0] ?? 0);
+      if (more === undefined) {
+        more = this.ownerDocument.createElement("span");
+        more.className = "compact-more";
+        inline.after(more);
+      }
+      let hidden = 0;
+      more.textContent = `+${waiting + 1} more`;
+      while (parts.length > 1 && inline.scrollWidth > inline.clientWidth) {
+        const part = parts.pop()!;
+        part.style.display = "none";
+        const gap = part.previousElementSibling;
+        if (gap instanceof HTMLElement && gap.classList.contains("line-gap")) {
+          gap.style.display = "none";
+        }
+        hidden += 1;
+        more.textContent = `+${waiting + hidden} more`;
+      }
+      if (hidden === 0) {
+        more.textContent = waiting === 0 ? "" : `+${waiting} more`;
+      }
+    }
+  }
+
   #toggleDetails(key: string, action: "details" | "pin"): void {
     if (!this.finishEditing()) { return; }
     const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, this.#selection);
@@ -1176,6 +1211,7 @@ export class NxViewerElement extends ElementBase {
         found.forEach((key) => wrapped.add(key));
         draw(wrapped);
       }
+      this.#fitCompactLines();
     } finally {
       this.#body.style.minHeight = "";
     }

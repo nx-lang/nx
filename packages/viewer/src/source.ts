@@ -42,6 +42,10 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
   return offsets;
 }
 
+/** Lucide's pin, drawn at the text's size. */
+const PIN_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+
 /** What the reading draws with, beyond the text and its colors. */
 export interface SourceLayout {
   readonly compact?: boolean | undefined;
@@ -632,7 +636,10 @@ export function renderSource(
   };
 
   /** Whether an attribute of a group reads on its header, after the name: its properties fit there. */
-  const inHeader = (element: number, attribute: number): boolean => !compactAt(element) && !isWrapped(element) && inlineValue(attribute);
+  const inHeader = (element: number, attribute: number): boolean =>
+    compactAt(element)
+      ? layout.details?.has(tree.nodes[element]!.key) !== true && inlineValue(attribute)
+      : !isWrapped(element) && inlineValue(attribute);
 
   /**
    * Whether an element reads as a line: each property's value fits on a line, it holds no element
@@ -898,40 +905,28 @@ export function renderSource(
     details.id = `details-${at}`;
     details.hidden = !showDetails;
     const headerTitle = compact ? titleOf(at) : undefined;
+    // Compact, the header is one line: the title, then the properties that fit after it, cut at
+    // the pane's edge. Selected or pinned, the properties move to rows under the header instead.
+    const inline = document.createElement("span");
+    inline.className = "compact-inline";
     if (compact) {
+      head.append(inline);
       if (headerTitle !== undefined) {
         const title = marked(headerTitle, "span", "compact-title");
         writeValue(title, headerTitle);
-        head.append(title);
-      } else {
-        const count = document.createElement("span");
-        count.className = "compact-title";
-        count.textContent = counted(shownOf(at).length, "property", "properties");
-        head.append(count);
+        inline.append(title);
       }
-      for (const action of ["details", "pin"] as const) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = `compact-control compact-${action}`;
-        button.dataset["detailsKey"] = node.key;
-        button.dataset["detailsAction"] = action;
-        const pinned = layout.pinned?.includes(node.key) === true;
-        button.textContent = action === "details" ? "Details" : pinned ? "Pinned" : "Pin";
-        button.setAttribute("aria-label", action === "details" ? `${showDetails ? "Hide" : "Show"} properties of ${node.name}` : `${pinned ? "Unpin" : "Pin"} properties of ${node.name}`);
-        if (action === "details") {
-          button.setAttribute("aria-expanded", String(showDetails));
-          button.setAttribute("aria-controls", details.id);
-        } else {
-          button.setAttribute("aria-pressed", String(pinned));
-        }
-        head.append(button);
-      }
-      if (showDetails) {
-        const status = document.createElement("span");
-        status.className = "compact-status";
-        status.textContent = layout.pinned?.includes(node.key) ? "Pinned" : layout.opened?.includes(node.key) ? "Kept open" : "Following selection";
-        details.append(status);
-      }
+      const pinned = layout.pinned?.includes(node.key) === true;
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = pinned ? "compact-control compact-pin pinned" : "compact-control compact-pin";
+      pin.dataset["detailsKey"] = node.key;
+      pin.dataset["detailsAction"] = "pin";
+      pin.title = pinned ? "Unpin: close these properties when another element is selected" : "Pin: keep these properties open";
+      pin.setAttribute("aria-label", `${pinned ? "Unpin" : "Pin"} properties of ${node.name}`);
+      pin.setAttribute("aria-pressed", String(pinned));
+      pin.innerHTML = PIN_ICON;
+      head.append(pin);
       sheet.append(details);
       if (hasContent && folded) {
         const region = document.createElement("span");
@@ -952,15 +947,15 @@ export function renderSource(
       if (child === plan?.attribute) {
         continue;
       }
+      if (compact && child === headerTitle) {
+        continue;
+      }
       if (childNode.role === "attribute" && !isContent(child) && inHeader(at, child)) {
         // On the header, after the name, as a one-line element shows it.
         const gap = document.createElement("span");
         gap.className = "line-gap";
         gap.textContent = "  ";
-        head.append(gap, namedPart(child));
-        continue;
-      }
-      if (compact && child === headerTitle) {
+        (compact ? inline : head).append(gap, namedPart(child));
         continue;
       }
       if ((folded && !compact) || (compact && ((isContent(child) && folded) || (!isContent(child) && childNode.role === "attribute" && !showDetails)))) {
@@ -1015,7 +1010,14 @@ export function renderSource(
       const gap = document.createElement("span");
       gap.className = "line-gap";
       gap.textContent = "  ";
-      head.append(gap, idChip(plan));
+      (compact ? inline : head).append(gap, idChip(plan));
+    }
+    if (compact && !showDetails && hiddenRows > 0) {
+      // Properties too long for a line wait in the rows, and the line says how many.
+      const more = document.createElement("span");
+      more.className = "compact-more";
+      more.textContent = inline.querySelector(".line-property") === null ? counted(hiddenRows, "property", "properties") : `+${hiddenRows} more`;
+      inline.after(more);
     }
     if (folded && !compact) {
       const parts = hiddenTitle !== undefined
