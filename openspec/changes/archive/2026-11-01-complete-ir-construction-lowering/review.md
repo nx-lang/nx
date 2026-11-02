@@ -171,3 +171,72 @@ goldens. No tests were run; validation is being rebuilt separately.
 - The TypeScript rerun log covers the runtime and emitted-IR suites, not `corpus.test.mjs`. Before archive, run the
   TypeScript corpus suite once more against the RF10-regenerated `conditional-properties` goldens (e.g. `npm test` in
   `runtime/typescript`), unless the earlier full run already used them.
+
+## CI Follow-up Review (2026-11-01): .NET `GenerateNxIr` conditional-property test
+
+**Scope:** `git diff HEAD -- bindings/dotnet/tests/NxLang.Sdk.Tests/NxEndToEndTests.cs` only. The PR 70 failure was
+in `GenerateNxIr_WithIrDiagnostics_ThrowsEvaluationException`, which expected conditional-property emission to be
+unsupported.
+
+**Assessment:** The replacement test, `GenerateNxIr_WithConditionalProperties_CarriesSelectedBindings`, is correct
+and matches the archived behavior:
+- It keeps the same source.
+- It requires successful emission, because `GenerateNxIr()` would throw on an error status.
+- It asserts that `conditional-properties-v1` is in `Metadata.RequiredFeatures`.
+- In the explained image, it asserts the lazy spread `...=if compact then` and both binding bags,
+  `<$bindings density="tight" />` and `<$bindings density="normal" />`.
+
+These strings match the explainer's format in the committed stripped corpus text (`...=if active then`; parameter
+names survive stripping). They also match the sibling FFI test `ffi_codegen_nx_ir_supports_conditional_property_fragments`
+and the archived requirement that spreads are feature-gated. The old success-path intent is not weakened.
+Non-blocking: the sibling action-handler test pins features exactly with `Assert.Equal`, which would also catch a
+spurious extra feature. `Assert.Contains` is acceptable here.
+
+### ✅ Verified - RF11 The replaced test was the .NET SDK's only coverage of `GenerateNxIr`'s error branch
+- **Severity:** Low
+- **Evidence:** `NxProgramArtifact.GenerateNxIr(NxIrEmitOptions)`
+  (`bindings/dotnet/src/NxLang.Sdk/NxProgramArtifact.cs:283-301`) maps `NxEvalStatus.Error` to
+  `NxRuntime.CreateEvaluationExceptionFromJson`. The deleted test was the only .NET test that reached that branch
+  through `GenerateNxIr`. The other `NxEvaluationException` tests cover build, workspace and `ExplainNxIr` failures. A
+  regression in how IR-emission diagnostics are marshalled to .NET would now go unnoticed. The error branch is still
+  reachable deterministically: asking for a module the program does not contain reports `nx-ir-unknown-module`
+  (`crates/nx-codegen/src/ir.rs:248-253`, covered in Rust by `ir_tests.rs:465`).
+- **Recommendation:** Keep the new success test and add a small .NET test. For example:
+  `Assert.Throws<NxEvaluationException>(() => artifact.GenerateNxIr(new NxIrEmitOptions { Modules = ["missing.nx"] }))`
+  asserting a diagnostic with code `nx-ir-unknown-module`. No implementation change is needed.
+- **Fix:** Added a .NET unknown-module emission test asserting NxEvaluationException and nx-ir-unknown-module, preserving the GenerateNxIr error path. The Node SDK also covers that emission error path separately from record-call source labels.
+- **Verification:** `GenerateNxIr_WithUnknownModule_ThrowsEvaluationException` builds a valid program and calls `GenerateNxIr(new NxIrEmitOptions { Modules = ["missing.nx"] })`. That call reaches the native `nx_codegen_nx_ir` error status, which goes through `CreateEvaluationExceptionFromJson`. The test asserts `NxEvaluationException` with a diagnostic whose code is `nx-ir-unknown-module` and whose message names `missing.nx`, matching `crates/nx-codegen/src/ir.rs:248-253`. The success test is unchanged. `/tmp/nx-ci-fix-dotnet2.log` shows 93 passed, 0 failed, 0 skipped.
+
+**Verdict:** The CI fix is approved as a correct update of an obsolete expectation. RF11 is a small coverage
+follow-up and does not block the fix. Previously verified findings RF1–RF10 are unchanged.
+
+## CI Follow-up Verification (2026-11-01 19:25): Node SDK tests
+
+**Scope:** `git diff HEAD -- bindings/node/test/sdk-node.test.ts`, plus RF11. Only tests changed; there is no
+production diff.
+
+**Assessment:** Approved. The removed case, "preserves source labels for IR generation diagnostics", expected
+conditional-property emission to fail with `codegen-unsupported-construct`. That expectation is now obsolete, and the
+three replacement tests keep the coverage it provided:
+- **"generates and executes conditional property bindings"** is positive coverage. It asserts that
+  `requiredFeatures` contains `conditional-properties-v1`. It asserts the explained `...=if compact then` spread
+  and both `$bindings` bags, all using the explainer format seen in the corpus. It also runs both branches through
+  the IR runtime (`evaluateSource` → `evaluateIr`) against handwritten values: Notice descriptors `tight` and
+  `normal`, the same shape as the corpus `card` result.
+- **"preserves diagnostics for unknown IR module selection"** keeps `NxProgramArtifact.generateNxIr`'s own error path.
+  `{ modules: ["missing.nx"] }` is forwarded as an emit option, and the test asserts `NxEvaluationError` with code
+  `nx-ir-unknown-module` and a message naming `missing.nx`. The artifact is disposed in `finally`.
+- **"preserves source labels when IR generation rejects record calls"** keeps the source-label assertions: file
+  `input.nx`, a primary label, and now the exact span `Notice("tight")`, which is stronger than the old
+  non-empty-span check. Since the change, no IR-emission diagnostic that carries a source label is reachable from
+  source, so moving the label check to a source-analysis diagnostic surfaced through `generateNxIrFromSource` is the
+  right replacement. Both phases share the same `invokeNative` error conversion.
+
+Non-blocking: the third test's name says "IR generation rejects", but the rejection happens while
+`generateNxIrFromSource` builds the source artifact, before emission. "rejects record calls before IR generation"
+would be more precise. This is wording only and not a finding.
+
+**Evidence:** `/tmp/nx-ci-fix-node.log` shows 2 test files and 37 tests passed. `/tmp/nx-ci-fix-dotnet2.log` shows
+93 passed. No builds were launched for this verification.
+
+**Result:** RF11 verified; Node CI test fix approved; no findings reopened and no new findings. RF1–RF10 unchanged.

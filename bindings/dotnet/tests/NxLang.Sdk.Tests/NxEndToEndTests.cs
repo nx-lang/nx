@@ -185,21 +185,35 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void GenerateNxIr_WithIrDiagnostics_ThrowsEvaluationException()
+    public void GenerateNxIr_WithConditionalProperties_CarriesSelectedBindings()
     {
-        // A conditional property fragment is a construct NX IR has no node for.
         using NxProgramArtifact artifact = NxProgramArtifact.Build(
             """
             external component <Notice density:string />
             let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }
             """);
 
+        NxGeneratedNxIr ir = artifact.GenerateNxIr();
+
+        Assert.Contains("conditional-properties-v1", ir.Metadata.RequiredFeatures);
+        string text = NxRuntime.ExplainNxIr(ir.Bytes);
+        Assert.Contains("...=if compact then", text, StringComparison.Ordinal);
+        Assert.Contains("<$bindings density=\"tight\" />", text, StringComparison.Ordinal);
+        Assert.Contains("<$bindings density=\"normal\" />", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerateNxIr_WithUnknownModule_ThrowsEvaluationException()
+    {
+        using NxProgramArtifact artifact = NxProgramArtifact.Build("let root() = { 42 }");
+
         NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
-            () => artifact.GenerateNxIr());
+            () => artifact.GenerateNxIr(new NxIrEmitOptions { Modules = ["missing.nx"] }));
 
         Assert.Contains(
             exception.Diagnostics,
-            diagnostic => diagnostic.Code == "codegen-unsupported-construct");
+            diagnostic => diagnostic.Code == "nx-ir-unknown-module"
+                && diagnostic.Message.Contains("missing.nx", StringComparison.Ordinal));
     }
 
     [Fact]

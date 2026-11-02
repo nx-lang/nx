@@ -61,3 +61,16 @@ fixture regeneration. The TypeScript run includes `corpus.test.mjs` against the 
 Claude independently verified RF1–RF3 and RF5–RF10, resolved RF4 as an unreachable source scenario,
 and reported no reopened or new findings. All 13 implementation tasks are complete. All five capability deltas were synced to the main specs
 and the change was archived on November 1, 2026. Strict validation passed for all 95 main specs.
+
+## CI follow-up validation
+
+PR CI exposed obsolete negative tests in the .NET and Node SDKs that still expected conditional
+properties to be unsupported. Replaced those with positive feature/branch coverage. Kept IR-emission
+error conversion coverage using an unknown-module selection, and retained exact source-label checks
+using the record-call diagnostic in Node.
+
+- .NET SDK suite: 93 passed, 0 failed, 0 skipped (Release managed build with the current Debug native library).
+- Node SDK suite: 38 passed across 2 files after rebuilding the release native binding.
+- .NET formatting verification for the changed file and `git diff --check`: passed.
+- Independent Claude CLI follow-up review approved both SDK updates and verified RF11's additional
+  error-path coverage. No open findings remain.
