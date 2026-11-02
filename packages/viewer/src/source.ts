@@ -8,6 +8,7 @@
  */
 import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
 
+import { isComposition } from "./compact.js";
 import { isElementFunction, VALUE_ROLES } from "./card.js";
 import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
 
@@ -43,6 +44,10 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
 
 /** What the reading draws with, beyond the text and its colors. */
 export interface SourceLayout {
+  readonly compact?: boolean | undefined;
+  readonly details?: ReadonlySet<string> | undefined;
+  readonly opened?: readonly string[] | undefined;
+  readonly pinned?: readonly string[] | undefined;
   /**
    * The keys of the elements whose properties do not fit on one line in the pane, which give each
    * property a row. The element measures which those are, from the reading drawn without them.
@@ -579,7 +584,12 @@ export function renderSource(
    * the header is cut rather than wrapped, folded, or when that property is an element, which a row
    * lets fit on its own line.
    */
+  const compactAt = (at: number): boolean => layout.compact === true && isComposition(index, at);
+
   const markFit = (element: HTMLElement, at: number): void => {
+    if (compactAt(at)) {
+      return;
+    }
     const elementValue = (attribute: number): boolean => childrenOf(attribute).some((value) => tree.nodes[value]!.role === "element");
     const group = element.classList.contains("sheet");
     const least = group && (layout.folded?.has(tree.nodes[at]!.key) === true || shownOf(at).some(elementValue)) ? 1 : 2;
@@ -599,7 +609,7 @@ export function renderSource(
   const shapeOf = (at: number): "group" | "line" | "written" => {
     let shape = shapes.get(at);
     if (shape === undefined) {
-      shape = lineable(at) ? "line" : sheetable(at) ? "group" : "written";
+      shape = compactAt(at) ? (sheetable(at) ? "group" : "written") : lineable(at) ? "line" : sheetable(at) ? "group" : "written";
       shapes.set(at, shape);
     }
     return shape;
@@ -622,7 +632,7 @@ export function renderSource(
   };
 
   /** Whether an attribute of a group reads on its header, after the name: its properties fit there. */
-  const inHeader = (element: number, attribute: number): boolean => !isWrapped(element) && inlineValue(attribute);
+  const inHeader = (element: number, attribute: number): boolean => !compactAt(element) && !isWrapped(element) && inlineValue(attribute);
 
   /**
    * Whether an element reads as a line: each property's value fits on a line, it holds no element
@@ -795,7 +805,10 @@ export function renderSource(
    * where the unit starts, so it moves nothing.
    */
   const foldToggle = (key: string, folded: boolean): HTMLElement => {
-    const toggle = document.createElement("span");
+    const toggle = document.createElement(layout.compact ? "button" : "span");
+    if (layout.compact) {
+      toggle.setAttribute("type", "button");
+    }
     toggle.className = folded ? "fold folded" : "fold";
     if (layout.turning?.key === key) {
       toggle.classList.add(layout.turning.wasFolded ? "was-folded" : "was-open");
@@ -848,11 +861,22 @@ export function renderSource(
     const plan = idPlans.get(at);
     const folded = layout.folded?.has(node.key) === true;
     const sheet = marked(at, "span", folded ? "sheet folded" : "sheet");
+    const compact = compactAt(at);
+    const showDetails = !compact || layout.details?.has(node.key) === true;
+    const hasContent = childrenOf(at).some((child) => isContent(child) && childrenOf(child).length > 0);
+    if (compact) { sheet.classList.add("compact-sheet"); }
     markFit(sheet, at);
     sheet.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
     const head = document.createElement("span");
     head.className = "sheet-head";
-    head.append(foldToggle(node.key, folded));
+    if (!compact || hasContent) {
+      const toggle = foldToggle(node.key, folded);
+      if (compact) {
+        toggle.setAttribute("aria-label", `${folded ? "Expand" : "Collapse"} children of ${node.name}`);
+        toggle.setAttribute("aria-controls", `children-${at}`);
+      }
+      head.append(toggle);
+    }
     const marker = elementIcon(at);
     if (marker !== undefined) {
       head.append(marker);
@@ -869,6 +893,53 @@ export function renderSource(
       plan.written = true;
     }
     sheet.append(head);
+    const details = document.createElement("span");
+    details.className = "compact-properties";
+    details.id = `details-${at}`;
+    details.hidden = !showDetails;
+    const headerTitle = compact ? titleOf(at) : undefined;
+    if (compact) {
+      if (headerTitle !== undefined) {
+        const title = marked(headerTitle, "span", "compact-title");
+        writeValue(title, headerTitle);
+        head.append(title);
+      } else {
+        const count = document.createElement("span");
+        count.className = "compact-title";
+        count.textContent = counted(shownOf(at).length, "property", "properties");
+        head.append(count);
+      }
+      for (const action of ["details", "pin"] as const) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `compact-control compact-${action}`;
+        button.dataset["detailsKey"] = node.key;
+        button.dataset["detailsAction"] = action;
+        const pinned = layout.pinned?.includes(node.key) === true;
+        button.textContent = action === "details" ? "Details" : pinned ? "Pinned" : "Pin";
+        button.setAttribute("aria-label", action === "details" ? `${showDetails ? "Hide" : "Show"} properties of ${node.name}` : `${pinned ? "Unpin" : "Pin"} properties of ${node.name}`);
+        if (action === "details") {
+          button.setAttribute("aria-expanded", String(showDetails));
+          button.setAttribute("aria-controls", details.id);
+        } else {
+          button.setAttribute("aria-pressed", String(pinned));
+        }
+        head.append(button);
+      }
+      if (showDetails) {
+        const status = document.createElement("span");
+        status.className = "compact-status";
+        status.textContent = layout.pinned?.includes(node.key) ? "Pinned" : layout.opened?.includes(node.key) ? "Kept open" : "Following selection";
+        details.append(status);
+      }
+      sheet.append(details);
+      if (hasContent && folded) {
+        const region = document.createElement("span");
+        region.id = `children-${at}`;
+        region.hidden = true;
+        sheet.append(region);
+      }
+    }
     // Folded, the group keeps its header and says what it hides: its title's value when its
     // visualizer names one, and otherwise how many properties and children it holds.
     let hiddenRows = 0;
@@ -889,7 +960,10 @@ export function renderSource(
         head.append(gap, namedPart(child));
         continue;
       }
-      if (folded) {
+      if (compact && child === headerTitle) {
+        continue;
+      }
+      if ((folded && !compact) || (compact && ((isContent(child) && folded) || (!isContent(child) && childNode.role === "attribute" && !showDetails)))) {
         if (childNode.role === "attribute" && isContent(child)) {
           hiddenChildren += childCount(childrenOf(child));
         } else if (childNode.role === "attribute") {
@@ -913,7 +987,7 @@ export function renderSource(
         const cell = document.createElement("span");
         cell.className = "sheet-value";
         row.append(name, cell);
-        sheet.append(row);
+        (compact ? details : sheet).append(row);
         // A value of several lines reads under its name, indented, and not in the value column.
         if (spansLines(child)) {
           const below = document.createElement("span");
@@ -925,6 +999,7 @@ export function renderSource(
         }
       } else if (childNode.role === "attribute") {
         const held = marked(child, "span", "sheet-held");
+        if (compact) { held.id = `children-${at}`; }
         writeItems(held, childrenOf(child));
         sheet.append(held);
       } else {
@@ -942,7 +1017,7 @@ export function renderSource(
       gap.textContent = "  ";
       head.append(gap, idChip(plan));
     }
-    if (folded) {
+    if (folded && !compact) {
       const parts = hiddenTitle !== undefined
         ? [hiddenTitle]
         : [

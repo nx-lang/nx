@@ -87,9 +87,57 @@ declare module "react" {
 
 ## Properties and attributes
 
+### Compact authoring view
+
+The playground enables `compact` for its NX Visual view. Other hosts can opt in:
+
+```ts
+import { NX_DETAILS_EVENT, type NxDetailsDetail } from "@nx-lang/viewer";
+
+viewer.compact = true;
+viewer.detailsState = { opened: [], pinned: [] };
+viewer.addEventListener(NX_DETAILS_EVENT, (event) => {
+  const { state, selection } = (event as CustomEvent<NxDetailsDetail>).detail;
+  // Keep these alongside folds when switching between Visual and Source.
+  rememberDetails(state, selection);
+});
+```
+
+Compact composition rows keep their identity at different widths. Their chevron folds content
+children; **Details** opens properties independently. Selection opens temporary details, which close
+when selection moves to another element. Explicitly opened details stay open as **Kept open**.
+**Pin** keeps details open for comparison and labels them **Pinned**. Unpinning removes that reason
+alone: a selected or explicitly opened element stays open. Closing Details removes both the pin
+and explicit opening, and suppresses automatic opening until selection leaves that element.
+
+`detailsState` contains `opened` and `pinned` key arrays and an optional `suppressed` selected-owner
+key. Assigning `undefined` clears choices. Assigning state does not echo an event. Reader changes and
+source-update reconciliation emit `nx-details` (`NX_DETAILS_EVENT`) with `{ state, selection }`;
+`NxDetailsState` and `NxDetailsDetail` are exported types. The host should restore state before
+selection and reset it when opening a different document. These are view choices, separate from
+source edits, undo, and share data. Invalid drafts stay visible when an action tries to hide them.
+Hosts should call `finishEditing()` before hiding Visual; it commits a valid editor and returns false
+when an invalid draft must remain visible.
+
+Pins follow known viewer item moves; source changes retain unambiguous item identities and clear
+ambiguous choices. Temporary absence of a tree retains state. A deleted pin is not resurrected by
+undo. Nested records used as property values keep their existing readers. Expressions remain source
+expressions; the compact view does not run or require a preview.
+
+`collapseAll()` and `expandAll()` affect outline folds, leaving detail choices and pins intact.
+Native buttons support Tab, Enter, and Space; outline arrow navigation still operates child folds.
+Inspection controls remain available with `editable = false`.
+
+With every outline fold expanded and every element's details explicitly opened, the compact reading
+also renders every source-tree node exactly once. Without `compact`, the existing reading is unchanged.
+
+### Property reference
+
 | Name        | Kind                   | Meaning                                                                      |
 | ----------- | ---------------------- | ---------------------------------------------------------------------------- |
 | `tree`      | property               | The `SourceTree` to show                                                     |
+| `compact`   | property               | Compact composition rows; false by default                                  |
+| `detailsState` | property            | Opened/pinned keys and optional suppressed owner; undefined clears choices   |
 | `text`      | property               | The document's text, which the tree's byte ranges index                      |
 | `colors`    | property               | The text's colors, as ranges over `text`, from the host's highlighter        |
 | `icons`     | property               | Draws an icon by its Lucide name, for each element that starts a line of its own; no icons without it |

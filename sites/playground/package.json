@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --no-warnings --experimental-transform-types --test --test-force-exit \"worker/*.test.mjs\" \"headers.test.mjs\" \"src/**/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
     "check-examples": "node --no-warnings --experimental-transform-types scripts/check-examples.mjs",
+    "test:compact-browser": "node scripts/check-compact-browser.mjs",
     "test:graphics-browser": "node scripts/check-graphics-browser.mjs"
   },
   "dependencies": {

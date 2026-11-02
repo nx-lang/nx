@@ -384,6 +384,9 @@ code {
   color: #ffffff;
 }
 
+.reading-slot { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.reading-slot[hidden] { display: none; }
+
 .reading {
   flex: 1;
   min-width: 0;

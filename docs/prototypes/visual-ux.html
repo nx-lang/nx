@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NX · Visual interaction prototype</title>
+  <style>
+    :root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; color: #dddfe9; background: #13151b; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, select, input { font: inherit; }
+    button, select { color: inherit; background: #252833; border: 1px solid #3a3e4d; border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+    button:hover { background: #343848; }
+    button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid #b8a4ff; outline-offset: 2px; }
+    header { min-height: 66px; padding: 14px 24px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #303440; }
+    .brand { font-size: 20px; font-weight: 750; color: #c3b3ff; }
+    .badge { font-size: 11px; color: #c3b3ff; border: 1px solid #63568c; border-radius: 4px; padding: 1px 6px; letter-spacing: .06em; text-transform: uppercase; }
+    header p { margin: 0; color: #a4a9ba; }
+    header select { margin-left: auto; }
+    main { display: grid; grid-template-columns: minmax(360px, 44%) minmax(0, 1fr); height: calc(100dvh - 115px); }
+    .panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .structure { border-right: 1px solid #303440; background: #191c24; }
+    .toolbar { min-height: 53px; display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid #303440; }
+    .toolbar strong { margin-right: auto; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #b7bdcd; }
+    .toolbar button { font-size: 12px; padding: 3px 8px; background: transparent; }
+    .tree { padding: 14px 12px 48px; overflow: auto; flex: 1; scrollbar-gutter: stable; }
+    .row { display: flex; align-items: center; gap: 5px; height: 38px; border: 1px solid transparent; border-radius: 6px; padding: 0 6px; }
+    .row:hover { background: #242935; }
+    .row.selected { background: #302b47; border-color: #7562aa; }
+    .children { margin-left: 16px; padding-left: 10px; border-left: 1px solid #383c49; }
+    .node + .node { margin-top: 2px; }
+    .row button { border: 0; background: transparent; padding: 2px 4px; }
+    .disclosure, .spacer { width: 22px; flex-shrink: 0; text-align: center; color: #8f98ac; }
+    .identity { min-width: 65px; display: flex; align-items: center; gap: 8px; text-align: left; flex: 1; }
+    .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .icon { color: #b4a0f1; font-size: 18px; width: 18px; flex-shrink: 0; text-align: center; }
+    .summary { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 38%; color: #969eb1; font-size: 12px; pointer-events: none; }
+    .row .details-toggle { font: 11px system-ui; padding: 3px 6px; color: #aeb6c9; border: 1px solid #3d4454; border-radius: 4px; flex-shrink: 0; }
+    .row .details-toggle[aria-expanded="true"] { color: #d5c7ff; background: #413657; border-color: #78639f; }
+    .row .pin { width: 44px; color: #969eb1; font-size: 11px; }
+    .row .pin[aria-pressed="true"] { color: #e8cc8b; background: #493e2b; }
+    .details { margin: 5px 0 12px 34px; padding: 12px 14px; border: 1px solid #363c4d; border-radius: 8px; background: #1f2430; }
+    .details-title { color: #aab3c8; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    .details-title span { color: #c8b8f5; text-transform: none; letter-spacing: 0; }
+    .field { display: grid; grid-template-columns: 95px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 35px; }
+    .field label { color: #a8b1c5; font-size: 12px; }
+    .field input { min-width: 0; width: 100%; color: #eff0f7; background: #171b24; border: 1px solid #434b60; border-radius: 4px; padding: 4px 7px; }
+    .field input[type="color"] { width: 42px; height: 28px; padding: 2px; }
+    .field code { font-size: 12px; color: #d1bcff; overflow-wrap: anywhere; }
+    .stage { min-height: 0; overflow: auto; flex: 1; display: grid; place-items: center; padding: 36px; background: radial-gradient(ellipse at center, #252937 0%, #151820 75%); }
+    svg { width: 100%; max-width: 820px; max-height: 100%; overflow: visible; border: 1px solid #42485c; box-shadow: 0 18px 65px #0005; }
+    svg [data-node] { cursor: pointer; }
+    svg [data-node]:hover { filter: brightness(1.12); }
+    .selection-box { fill: #a999ff12; stroke: #bba5ff; stroke-width: 1.3; pointer-events: none; }
+    .handle { fill: #f0eaff; stroke: #9272e0; stroke-width: 1; pointer-events: none; }
+    .preview-info { display: flex; gap: 12px; align-items: center; min-height: 45px; padding: 8px 20px; border-top: 1px solid #303440; color: #b4bdcf; font-size: 12px; }
+    .preview-info span:last-child { margin-left: auto; color: #8893a8; }
+    footer { min-height: 49px; border-top: 1px solid #303440; padding: 12px 24px; color: #9ea8bb; font-size: 12px; }
+    footer strong { color: #c9baf6; }
+    @media (max-width: 850px) {
+      main { grid-template-columns: minmax(330px, 1fr) minmax(280px, 1fr); }
+      header p, .summary { display: none; }
+      .stage { padding: 18px; }
+      header { padding: 12px; }
+    }
+    @media (max-width: 640px) {
+      main { display: flex; flex-direction: column; height: auto; }
+      .tree { max-height: 60dvh; }
+      .stage { min-height: 320px; }
+      .structure { border-right: 0; }
+      header { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">NX</span><span class="badge">UI prototype</span>
+    <p>Structure stays visible. Details open where you work.</p>
+    <select id="example" aria-label="Example document">
+      <option value="drawing">Gradient drawing · 6 elements</option>
+      <option value="large">Card collection · 18 cards</option>
+    </select>
+    <button id="reset">Reset</button>
+  </header>
+  <main>
+    <section class="panel structure" aria-label="Visual document">
+      <div class="toolbar"><strong>Visual</strong><button id="expand">Expand children</button><button id="collapse">Collapse children</button></div>
+      <div class="tree" id="tree" aria-label="Element outline"></div>
+    </section>
+    <section class="panel" aria-label="Rendered preview">
+      <div class="toolbar"><strong>Preview</strong><span style="color:#929db2;font-size:12px">Click an element to inspect</span></div>
+      <div class="stage" id="stage"></div>
+      <div class="preview-info"><span id="selection-label">No element selected</span><span id="counts"></span></div>
+    </section>
+  </main>
+  <footer><strong>Try it:</strong> Select Star → pin its details → select Circle. Use the chevron for children and Details for properties. Sample edits stay in this page.</footer>
+  <div id="announcement" role="status" aria-live="polite" style="position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden"></div>
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+    const field = (label, value, type = 'number') => ({ label, value, type });
+    const node = (id, name, icon, summary, fields, children = []) => ({ id, name, icon, summary, fields, children });
+    function drawing() {
+      return node('drawing', 'Drawing', '▦', '320 × 260', [field('Width', 320), field('Height', 260), field('Background', '#0f172a', 'color')], [
+        node('rectangle', 'Rectangle', '▭', '320 × 150 · Gradient', [field('Width', 320), field('Height', 150), field('Fill', 'sunset()', 'expression')]),
+        node('circle', 'Circle', '○', 'Radial gradient', [field('Center X', 245), field('Center Y', 50), field('Radius', 32), field('Fill', 'Radial gradient · 2 stops', 'expression')]),
+        node('star', 'Star', '☆', '5 points · White stroke', [field('Center X', 60), field('Center Y', 70), field('Outer radius', 35), field('Inner radius', 17), field('Points', 5), field('Fill', 'sunset()', 'expression'), field('Stroke', '#ffffff', 'color'), field('Stroke width', 2)]),
+        node('text', 'Text', 'T', '“Gradient paints”', [field('Text', 'Gradient paints', 'text'), field('X', 15), field('Y', 140), field('Font size', 18), field('Color', '#ffffff', 'color')]),
+        node('area', 'Path', '⌁', 'Gradient fill', [field('Data', 'M20 225 L70 200 L120 210 L170 170 L220 185 L300 160 L300 240 L20 240 Z', 'text'), field('Fill', 'chartFade()', 'expression')]),
+        node('line', 'Path', '⌁', 'Blue stroke', [field('Data', 'M20 225 L70 200 L120 210 L170 170 L220 185 L300 160', 'text'), field('Stroke', '#38bdf8', 'color'), field('Stroke width', 2)])
+      ]);
+    }
+    function collection() {
+      const colors = ['#b5a1ff', '#f0acbe', '#82d8cb'];
+      return node('collection', 'Card collection', '▦', '3 sections · 18 cards', [field('Gap', 12, 'expression'), field('Background', '#111827', 'color')], colors.map((color, group) =>
+        node(`section-${group}`, ['Featured', 'Recent', 'Saved'][group], '▤', '6 cards', [field('Columns', 3, 'expression'), field('Accent', color, 'color')], Array.from({ length: 6 }, (_, index) =>
+          node(`card-${group}-${index}`, `Card ${group * 6 + index + 1}`, '▭', ['Design systems', 'Color studies', 'Typography', 'Motion', 'Components', 'Explorations'][index], [field('Title', ['Design systems', 'Color studies', 'Typography', 'Motion', 'Components', 'Explorations'][index], 'text'), field('Height', 52), field('Corner radius', 6), field('Fill', color, 'color')])
+        ))
+      ));
+    }
+    let root, nodes, parents, selected;
+    const expanded = new Set(), opened = new Set(), closed = new Set(), pinned = new Set();
+    function load() {
+      root = $('example').value === 'large' ? collection() : drawing();
+      nodes = new Map(); parents = new Map(); selected = undefined;
+      for (const set of [expanded, opened, closed, pinned]) { set.clear(); }
+      function index(item, parent) {
+        nodes.set(item.id, item);
+        if (parent) { parents.set(item.id, parent.id); }
+        if (item.children.length) { expanded.add(item.id); }
+        item.children.forEach((child) => index(child, item));
+      }
+      index(root); render();
+    }
+    const detailsOpen = (id) => pinned.has(id) || opened.has(id) || (selected === id && !closed.has(id));
+    function renderNode(item) {
+      const isOpen = detailsOpen(item.id), isPinned = pinned.has(item.id);
+      const title = escape(item.name);
+      return `<div class="node" data-id="${item.id}">
+        <div class="row ${selected === item.id ? 'selected' : ''}">
+          ${item.children.length ? `<button class="disclosure" data-action="children" aria-label="${expanded.has(item.id) ? 'Collapse' : 'Expand'} children of ${title}" aria-expanded="${expanded.has(item.id)}">${expanded.has(item.id) ? '▾' : '▸'}</button>` : '<span class="spacer"></span>'}
+          <button class="identity" data-action="select" aria-pressed="${selected === item.id}" aria-label="Select ${title}"><span class="icon" aria-hidden="true">${item.icon}</span><span class="name">${title}</span></button>
+          <span class="summary">${escape(item.summary)}</span>
+          <button class="details-toggle" data-action="details" aria-expanded="${isOpen}" aria-controls="details-${item.id}" aria-label="${isOpen ? 'Hide' : 'Show'} properties of ${title}">Details</button>
+          <button class="pin" data-action="pin" aria-pressed="${isPinned}" aria-label="${isPinned ? 'Unpin' : 'Pin'} properties of ${title}" title="${isPinned ? 'Unpin' : 'Pin'} properties">${isPinned ? 'Pinned' : 'Pin'}</button>
+        </div>
+        <div class="details" id="details-${item.id}" ${isOpen ? '' : 'hidden'}>
+          ${isOpen ? `<div class="details-title">${title} properties<span>${isPinned ? 'Pinned' : opened.has(item.id) ? 'Kept open' : 'Following selection'}</span></div>${item.fields.map((prop, index) => `<div class="field"><label for="field-${item.id}-${index}">${escape(prop.label)}</label>${prop.type === 'expression' ? `<code>${escape(prop.value)}</code>` : `<input id="field-${item.id}-${index}" data-field="${index}" type="${prop.type}" value="${escape(prop.value)}" ${prop.type === 'number' ? 'step="any"' : ''}>`}</div>`).join('')}` : ''}
+        </div>
+        ${expanded.has(item.id) && item.children.length ? `<div class="children">${item.children.map(renderNode).join('')}</div>` : ''}
+      </div>`;
+    }
+    const values = (id) => nodes.get(id).fields.map((prop) => prop.value);
+    const target = (id) => `data-node="${id}" tabindex="0" role="button" aria-label="Select ${escape(nodes.get(id).name)}" aria-pressed="${selected === id}"`;
+    function starPoints(cx, cy, outer, inner, count) {
+      count = Math.max(3, Math.min(24, Math.round(count)));
+      return Array.from({ length: count * 2 }, (_, index) => {
+        const angle = index * Math.PI / count - Math.PI / 2, radius = index % 2 ? inner : outer;
+        return `${cx + Math.cos(angle) * radius},${cy + Math.sin(angle) * radius}`;
+      }).join(' ');
+    }
+    function preview() {
+      let content, bounds = new Map();
+      if (root.id === 'drawing') {
+        const [w, h, bg] = values('drawing'), rect = values('rectangle'), circle = values('circle'), star = values('star'), text = values('text');
+        const viewWidth = Math.max(1, w), viewHeight = Math.max(1, h);
+        bounds = new Map([
+          ['drawing', [0, 0, viewWidth, viewHeight]], ['rectangle', [0, 0, Math.max(0, rect[0]), Math.max(0, rect[1])]],
+          ['circle', [circle[0] - circle[2], circle[1] - circle[2], circle[2] * 2, circle[2] * 2]],
+          ['star', [star[0] - star[2], star[1] - star[2], star[2] * 2, star[2] * 2]],
+          ['text', [text[1], text[2] - text[3], String(text[0]).length * text[3] * .52, text[3] * 1.2]],
+          ['area', [20, 160, 280, 80]], ['line', [20, 160, 280, 65]]
+        ]);
+        content = `<svg viewBox="0 0 ${viewWidth} ${viewHeight}" aria-label="Gradient drawing preview">
+          <defs><linearGradient id="sunset"><stop stop-color="#31215e"/><stop offset=".65" stop-color="#7c32ef"/><stop offset="1" stop-color="#e563a0"/></linearGradient><radialGradient id="glow" cx="42%" cy="38%"><stop stop-color="#fff7ed"/><stop offset="1" stop-color="#fdba7400"/></radialGradient><linearGradient id="fade" x2="0" y2="1"><stop stop-color="#38bdf8" stop-opacity=".65"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></linearGradient></defs>
+          <rect ${target('drawing')} width="${viewWidth}" height="${viewHeight}" fill="${bg}"/>
+          <rect ${target('rectangle')} width="${Math.max(0, rect[0])}" height="${Math.max(0, rect[1])}" fill="url(#sunset)"/>
+          <circle ${target('circle')} cx="${circle[0]}" cy="${circle[1]}" r="${Math.max(0, circle[2])}" fill="url(#glow)"/>
+          <polygon ${target('star')} points="${starPoints(...star.slice(0, 5))}" fill="url(#sunset)" stroke="${star[6]}" stroke-width="${Math.max(0, star[7])}"/>
+          <text ${target('text')} x="${text[1]}" y="${text[2]}" fill="${text[4]}" font-size="${Math.max(1, text[3])}">${escape(text[0])}</text>
+          <path ${target('area')} d="${escape(values('area')[0])}" fill="url(#fade)"/>
+          <path ${target('line')} d="${escape(values('line')[0])}" fill="none" stroke="${values('line')[1]}" stroke-width="${Math.max(0, values('line')[2])}"/>`;
+      } else {
+        const bg = values('collection')[1];
+        content = `<svg viewBox="0 0 480 480" aria-label="Card collection preview"><rect ${target('collection')} width="480" height="480" fill="${bg}"/>`;
+        bounds.set('collection', [0, 0, 480, 480]);
+        root.children.forEach((group, section) => {
+          const y = 14 + section * 155;
+          bounds.set(group.id, [12, y, 456, 145]);
+          content += `<g ${target(group.id)}><rect x="12" y="${y}" width="456" height="145" rx="8" fill="#1e293b"/><text x="24" y="${y + 23}" fill="${values(group.id)[1]}" font-size="12">${escape(group.name)}</text></g>`;
+          group.children.forEach((card, index) => {
+            const [title, height, radius, fill] = values(card.id), x = 24 + index % 3 * 146, cy = y + 35 + Math.floor(index / 3) * 51;
+            const renderedHeight = Math.max(8, Math.min(150, height * .8));
+            bounds.set(card.id, [x, cy, 136, renderedHeight]);
+            content += `<g ${target(card.id)}><rect x="${x}" y="${cy}" width="136" height="${renderedHeight}" rx="${Math.max(0, radius)}" fill="${fill}"/><text x="${x + 9}" y="${cy + 23}" fill="#181c2b" font-size="9">${escape(title)}</text></g>`;
+          });
+        });
+      }
+      const box = bounds.get(selected);
+      if (box) {
+        const [x, y, w, h] = box;
+        content += `<rect class="selection-box" x="${x}" y="${y}" width="${w}" height="${h}"/>`;
+        for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
+          content += `<rect class="handle" x="${cx - 1.5}" y="${cy - 1.5}" width="3" height="3"/>`;
+        }
+      }
+      $('stage').innerHTML = content + '</svg>';
+    }
+    function render(focus) {
+      const scroll = $('tree').scrollTop;
+      $('tree').innerHTML = renderNode(root);
+      $('tree').scrollTop = scroll;
+      preview();
+      $('selection-label').textContent = selected ? `${nodes.get(selected).name} · ${selected}` : 'Select an element in Visual or Preview';
+      $('counts').textContent = `${[...nodes.keys()].filter(detailsOpen).length} details open · ${pinned.size} pinned`;
+      if (focus) { document.querySelector(focus)?.focus({ preventScroll: true }); }
+    }
+    function select(id, reveal = false) {
+      if (selected !== id) { closed.clear(); }
+      selected = id;
+      if (reveal) {
+        for (let parent = parents.get(id); parent; parent = parents.get(parent)) { expanded.add(parent); }
+      }
+      render(`[data-id="${id}"] > .row [data-action="select"]`);
+      if (reveal) { document.querySelector(`[data-id="${id}"] > .row`).scrollIntoView({ block: 'nearest' }); }
+      $('announcement').textContent = `${nodes.get(id).name} selected`;
+    }
+    $('tree').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-action]');
+      if (!button) { return; }
+      const id = button.closest('.node').dataset.id, action = button.dataset.action;
+      if (action === 'select') { select(id); return; }
+      if (action === 'children') {
+        if (expanded.has(id)) {
+          expanded.delete(id);
+          for (let parent = parents.get(selected); parent; parent = parents.get(parent)) {
+            if (parent === id) { selected = id; break; }
+          }
+        } else { expanded.add(id); }
+      } else if (action === 'details') {
+        if (detailsOpen(id)) { opened.delete(id); pinned.delete(id); closed.add(id); }
+        else { opened.add(id); closed.delete(id); }
+      } else if (action === 'pin') {
+        if (pinned.has(id)) { pinned.delete(id); }
+        else { pinned.add(id); closed.delete(id); }
+      }
+      render(`[data-id="${id}"] > .row [data-action="${action}"]`);
+    });
+    $('tree').addEventListener('change', (event) => {
+      const input = event.target.closest('input[data-field]');
+      if (!input) { return; }
+      const item = nodes.get(input.closest('.node').dataset.id), prop = item.fields[Number(input.dataset.field)];
+      if (prop.type === 'number' && (!input.value.trim() || !Number.isFinite(input.valueAsNumber))) { input.value = prop.value; return; }
+      prop.value = prop.type === 'number' ? input.valueAsNumber : input.value;
+      if (item.id === 'text') { item.summary = `“${values('text')[0]}”`; }
+      preview();
+      const summary = input.closest('.node').querySelector(':scope > .row .summary');
+      summary.textContent = item.summary;
+    });
+    $('stage').addEventListener('click', (event) => {
+      const shape = event.target.closest('[data-node]');
+      if (shape) { select(shape.dataset.node, true); }
+    });
+    $('stage').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        const shape = event.target.closest('[data-node]');
+        if (shape) { event.preventDefault(); select(shape.dataset.node, true); }
+      }
+    });
+    $('example').addEventListener('change', load);
+    $('reset').addEventListener('click', load);
+    $('expand').addEventListener('click', () => { nodes.forEach((item) => { if (item.children.length) { expanded.add(item.id); } }); render(); });
+    $('collapse').addEventListener('click', () => { expanded.clear(); if (selected) { selected = root.id; } render(); });
+    load();
+  </script>
+</body>
+</html>

@@ -10,6 +10,7 @@
  */
 import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
+import { changeDetails, compositionOwner, detailsOpen, emptyDetails, isComposition, mapDetails, reconcileDetails, sameDetails, type NxDetailsState } from "./compact.js";
 import { cardOf, propertyCardOf, type Card } from "./card.js";
 import {
   editOf,
@@ -44,6 +45,13 @@ import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.
 import { defaultFolded, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
+
+export type { NxDetailsState } from "./compact.js";
+export const NX_DETAILS_EVENT = "nx-details";
+export interface NxDetailsDetail {
+  readonly state: NxDetailsState;
+  readonly selection: string | undefined;
+}
 
 export { nodeAtSpan } from "./tree.js";
 export { keyAtRange, keyOfChange, rangeOfKey, spanOfChanges } from "./selection.js";
@@ -126,7 +134,7 @@ export interface NxSelectDetail {
 export type NxViewerMarkdown = (markdown: string) => Node;
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable", "compact", "detailsState"] as const;
 
 /** How many unwritten properties a selected element lists before a filter field leads them. */
 const MORE_FILTER_PAST = 12;
@@ -375,6 +383,10 @@ function keyOf(element: Element): string | undefined {
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
 
+  #compact = false;
+  #detailsState: NxDetailsState = emptyDetails();
+  #lastIndex: TreeIndex | undefined;
+  #refreshingDetails = false;
   #tree: SourceTree | undefined;
   #text = "";
   #colors: readonly NxViewerColor[] = [];
@@ -500,6 +512,13 @@ export class NxViewerElement extends ElementBase {
   /** Cancels a popover when the pointer goes down anywhere outside it. */
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
+    if (this.#compact && session !== undefined && !event.composedPath().includes(session.field ?? this.#popover) && !event.composedPath().includes(this.#tools)) {
+      if (!this.finishEditing()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
     this.#closedOnPress = undefined;
     // Stepper clicks made with the field closed are committed by a press anywhere but the tools, as
     // on the host's Undo, which then takes back the whole change.
@@ -518,7 +537,7 @@ export class NxViewerElement extends ElementBase {
     }
     // A press on the tools is theirs: a case's chevron closes its popover itself.
     const path = event.composedPath();
-    if (session !== undefined && session.field === undefined && !path.includes(this.#popover) && !path.includes(this.#tools)) {
+    if (session !== undefined && !session.closed && session.field === undefined && !path.includes(this.#popover) && !path.includes(this.#tools)) {
       this.#closeElsewhere(session);
       // A press on the value whose popover was open closes it, as a dropdown's does; the click
       // that follows does not open it again.
@@ -728,6 +747,78 @@ export class NxViewerElement extends ElementBase {
     this.#dropSession();
   }
 
+  /** Use compact composition rows with independently disclosed properties. */
+  get compact(): boolean { return this.#compact; }
+  set compact(value: boolean) {
+    if (this.#compact !== Boolean(value)) {
+      this.#compact = Boolean(value);
+      this.#render();
+    }
+  }
+
+  get detailsState(): NxDetailsState {
+    return { opened: [...this.#detailsState.opened], pinned: [...this.#detailsState.pinned], suppressed: this.#detailsState.suppressed };
+  }
+  set detailsState(value: NxDetailsState | undefined) {
+    const next = mapDetails(value ?? emptyDetails(), (key) => key);
+    if (!sameDetails(next, this.#detailsState)) {
+      this.#detailsState = next;
+      this.#render();
+    }
+  }
+
+  /** Settle an editor before a host hides Visual; false keeps an invalid draft visible. */
+  finishEditing(): boolean {
+    const session = this.#session;
+    if (session?.field !== undefined) {
+      return this.#finishField(session, "key");
+    }
+    if (session !== undefined) {
+      if (session.target.kind === "color" && this.#problemOf(session.target, this.#draftOf(session) ?? "") !== undefined) {
+        this.#validate(session, true);
+        return false;
+      }
+      this.#closeElsewhere(session);
+    }
+    this.#settleLive();
+    return true;
+  }
+
+  #reportDetails(): void {
+    const detail: NxDetailsDetail = { state: this.detailsState, selection: this.#selection };
+    this.dispatchEvent(new CustomEvent(NX_DETAILS_EVENT, { detail, bubbles: true, composed: true }));
+  }
+
+  #openDetailsKeys(): Set<string> {
+    const index = this.#index;
+    const result = new Set<string>();
+    if (index !== undefined) {
+      const owner = compositionOwner(index, this.#selection);
+      for (const node of index.tree.nodes) {
+        if (detailsOpen(this.#detailsState, node.key, owner)) { result.add(node.key); }
+      }
+    }
+    return result;
+  }
+
+  #toggleDetails(key: string, action: "details" | "pin"): void {
+    if (!this.finishEditing()) { return; }
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, this.#selection);
+    this.#detailsState = changeDetails(this.#detailsState, key, action, owner);
+    if (action === "details" && !detailsOpen(this.#detailsState, key, owner) && owner === key && this.#selection !== key) {
+      this.#selectNode(key, true, false);
+    }
+    const header = this.#rendered.get(key)?.querySelector<HTMLElement>(":scope > .sheet-head");
+    const top = header?.getBoundingClientRect().top;
+    this.#render();
+    const drawn = this.#rendered.get(key)?.querySelector<HTMLElement>(":scope > .sheet-head");
+    const after = drawn?.getBoundingClientRect().top;
+    if (top !== undefined && after !== undefined) { this.#scroller()?.scrollBy?.({ top: after - top }); }
+    drawn?.querySelector<HTMLElement>(`.compact-${action}`)?.focus({ preventScroll: true });
+    this.#announcer.textContent = `${action === "pin" ? "Pin" : "Properties"} changed for ${drawn?.querySelector(".sheet-kind")?.textContent ?? "element"}`;
+    this.#reportDetails();
+  }
+
   /** The source tree to show, as the language service's `sourceTree` query answers it. */
   get tree(): SourceTree | undefined {
     return this.#tree;
@@ -764,11 +855,28 @@ export class NxViewerElement extends ElementBase {
             : `${following.list}[${following.position}]`;
       this.#selection = undefined;
     }
+    const beforeDetails = this.#detailsState;
+    if (tree !== undefined && this.#compact) {
+      const next = indexTree(tree, this.#text);
+      if (follows) {
+        this.#detailsState = mapDetails(this.#detailsState, (key) => mappedKey(key, following.list, following.map, following.sequence));
+      } else if (this.#lastIndex !== undefined) {
+        this.#detailsState = reconcileDetails(this.#lastIndex, next, this.#detailsState);
+      }
+      this.#detailsState = mapDetails(this.#detailsState, (key) => {
+        const at = next.byKey.get(key);
+        return at !== undefined && isComposition(next, at) ? key : undefined;
+      });
+      this.#lastIndex = next;
+    }
     this.#tree = tree;
     // A new tree says what each edit made of the source, or that it made nothing.
     this.#pending.clear();
     this.#removed.clear();
     this.#render();
+    if (!sameDetails(beforeDetails, this.#detailsState)) {
+      this.#reportDetails();
+    }
     if (follows) {
       this.#select(selected, true);
       if (foldsMoved) {
@@ -859,6 +967,9 @@ export class NxViewerElement extends ElementBase {
 
   /** Folds everything that can fold. */
   collapseAll(): void {
+    if (this.#compact && !this.finishEditing()) {
+      return;
+    }
     // What can fold inside a folded unit is not drawn, so it is found with everything unfolded.
     this.#chosenFolded = new Set();
     this.#render();
@@ -1044,7 +1155,7 @@ export class NxViewerElement extends ElementBase {
     const targets = editTargets(index);
     const draw = (wrapped?: ReadonlySet<string>): void => {
       this.#body.replaceChildren(
-        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning })
+        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, compact: this.#compact, details: this.#openDetailsKeys(), opened: this.#detailsState.opened, pinned: this.#detailsState.pinned })
       );
     };
     try {
@@ -1217,6 +1328,7 @@ export class NxViewerElement extends ElementBase {
    * Alt+click does in a design tool's layers.
    */
   #toggleFold(key: string, deep: boolean): void {
+    if (this.#compact && !this.finishEditing()) { return; }
     const folded = new Set(this.#folded);
     const folding = !folded.has(key);
     this.#turning = { key, wasFolded: !folding };
@@ -1224,6 +1336,7 @@ export class NxViewerElement extends ElementBase {
     // is scrolled back by however far its line moved.
     const toggleOf = (): HTMLElement | undefined =>
       [...this.#body.querySelectorAll<HTMLElement>(".fold")].find((toggle) => toggle.dataset["foldKey"] === key);
+    const hadFocus = this.shadowRoot?.activeElement === toggleOf();
     const before = toggleOf()?.getBoundingClientRect().top;
     if (folding && deep) {
       // What can fold inside a folded unit is not drawn, so it is found with the unit opened all
@@ -1248,6 +1361,7 @@ export class NxViewerElement extends ElementBase {
       }
     }
     this.#setFolded(folded);
+    if (hadFocus) { toggleOf()?.focus({ preventScroll: true }); }
     const after = toggleOf()?.getBoundingClientRect().top;
     if (before !== undefined && after !== undefined && after !== before) {
       this.#scroller()?.scrollBy({ top: after - before, behavior: "instant" as ScrollBehavior });
@@ -1422,7 +1536,8 @@ export class NxViewerElement extends ElementBase {
     }
     if (next !== undefined) {
       this.#select(keyOf(next), true);
-      next.scrollIntoView?.({ block: "nearest" });
+      const current = keyOf(next);
+      if (current !== undefined) { this.#rendered.get(current)?.scrollIntoView?.({ block: "nearest" }); }
     }
   }
 
@@ -1444,7 +1559,39 @@ export class NxViewerElement extends ElementBase {
     if (this.#menuKey !== undefined && this.#menuKey !== key) {
       this.#closeMenu(false);
     }
+    let detailsChanged = false;
+    if (this.#compact && reveal && !this.#refreshingDetails && this.#index !== undefined) {
+      const before = this.#openDetailsKeys();
+      const oldOwner = compositionOwner(this.#index, this.#selection);
+      const owner = compositionOwner(this.#index, key);
+      const priorState = this.#detailsState;
+      if (oldOwner !== owner || (key !== this.#selection && key !== owner && key !== undefined && !this.#rendered.has(key))) {
+        this.#detailsState = { ...this.#detailsState, suppressed: undefined };
+      }
+      const old = this.#selection;
+      this.#selection = key;
+      const after = this.#openDetailsKeys();
+      this.#selection = old;
+      if (before.size !== after.size || [...before].some((value) => !after.has(value))) {
+        if (!this.finishEditing()) {
+          this.#detailsState = priorState;
+          return;
+        }
+        const drawn = key === undefined ? undefined : this.#rendered.get(key);
+        const anchor = drawn?.matches(".sheet") ? drawn.querySelector<HTMLElement>(":scope > .sheet-head") : drawn;
+        const top = anchor?.getBoundingClientRect().top;
+        this.#selection = key;
+        this.#refreshingDetails = true;
+        try { this.#render(); } finally { this.#refreshingDetails = false; }
+        const nextDrawn = key === undefined ? undefined : this.#rendered.get(key);
+        const nextAnchor = nextDrawn?.matches(".sheet") ? nextDrawn.querySelector<HTMLElement>(":scope > .sheet-head") : nextDrawn;
+        const nextTop = nextAnchor?.getBoundingClientRect().top;
+        if (top !== undefined && nextTop !== undefined) { this.#scroller()?.scrollBy?.({ top: nextTop - top }); }
+      }
+      detailsChanged = !sameDetails(priorState, this.#detailsState);
+    }
     this.#selectNode(key, fire, reveal);
+    if (detailsChanged) { this.#reportDetails(); }
     this.#drawMore();
     this.#fitPropertyMark();
     // A selected property shows its value's tools, and only it.
@@ -1488,7 +1635,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     // A node folded away is unfolded to, so what is selected can be seen.
-    const hiding = reveal ? [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded)) : [];
+    const hiding = reveal ? [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded) && !(this.#compact && compositionOwner(index, key) === folded)) : [];
     if (hiding.length > 0) {
       this.#selection = key;
       const folded = new Set(this.#folded);
@@ -1815,7 +1962,9 @@ export class NxViewerElement extends ElementBase {
     // the list stays.
     const property = this.#propertyOf(key);
     const listing = this.#moreOpen !== undefined && property !== undefined && this.#isInside(property, this.#moreOpen);
-    if (select && caret === undefined && property !== undefined && property !== this.#selection && !listing) {
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, property);
+    const comparing = this.#compact && owner !== undefined && this.#detailsState.pinned.includes(owner) && compositionOwner(this.#index!, this.#selection) !== owner;
+    if (select && caret === undefined && property !== undefined && property !== this.#selection && !listing && !comparing) {
       this.#select(property, true, false);
     }
     this.#closeCard();
@@ -1952,7 +2101,7 @@ export class NxViewerElement extends ElementBase {
     });
     field.addEventListener("blur", () => {
       if (!session.closed) {
-        this.#finishField(session, "blur");
+        this.#finishField(session, this.#compact ? "key" : "blur");
       }
     });
     this.#validate(session);
@@ -3625,7 +3774,10 @@ export class NxViewerElement extends ElementBase {
     const index = this.#index;
     const at = key === undefined ? undefined : index?.byKey.get(key);
     const element = key === undefined ? undefined : this.#rendered.get(key);
-    if (!this.#editable || index === undefined || at === undefined || element === undefined || !element.matches(".sheet:not(.folded), .line-element, .tag-line")) {
+    if (!this.#editable || index === undefined || at === undefined || element === undefined || !element.matches(".compact-sheet, .sheet:not(.folded), .line-element, .tag-line")) {
+      return;
+    }
+    if (element.classList.contains("compact-sheet") && !this.#openDetailsKeys().has(key!)) {
       return;
     }
     const unwritten = unwrittenProperties(index, at);
@@ -3674,8 +3826,9 @@ export class NxViewerElement extends ElementBase {
       row.dataset["moreOf"] = key;
     }
     if (element.matches(".sheet")) {
-      const written = [...element.children].filter((child) => child.matches(".sheet-row:not(.more), .sheet-head"));
-      written[written.length - 1]!.after(...rows);
+      const container = element.querySelector<HTMLElement>(":scope > .compact-properties") ?? element;
+      const written = [...container.children].filter((child) => child.matches(".sheet-row:not(.more), .sheet-head"));
+      if (written.length) { written[written.length - 1]!.after(...rows); } else { container.append(...rows); }
       this.#moreDrawn = rows;
     } else {
       // A line lists them under it, as a group would.
@@ -4042,7 +4195,7 @@ export class NxViewerElement extends ElementBase {
 
   #onPointerDown(event: PointerEvent): void {
     this.#pressedAt = { x: event.clientX, y: event.clientY };
-    if (!this.#editable || event.button !== 0) {
+    if ((event.target as Element).closest("button") !== null || !this.#editable || event.button !== 0) {
       return;
     }
     // A press on an item's handle drags the item once it moves; a click there selects it. A touch
@@ -4127,6 +4280,11 @@ export class NxViewerElement extends ElementBase {
 
   #onClick(event: MouseEvent): void {
     const target = event.target as Element;
+    const details = target.closest<HTMLElement>("[data-details-action]");
+    if (details !== null) {
+      this.#toggleDetails(details.dataset["detailsKey"]!, details.dataset["detailsAction"] as "details" | "pin");
+      return;
+    }
     const toggle = (target.closest?.(".fold-run-head")?.querySelector(".fold") ?? target.closest?.(".fold")) as
       | HTMLElement
       | null
@@ -4233,6 +4391,7 @@ export class NxViewerElement extends ElementBase {
     if (!this.#body.contains(target)) {
       return;
     }
+    if (target.closest("button") !== null) { return; }
     // The host's undo and redo, pressed in the reading, see stepper clicks still settling committed.
     if (this.#session === undefined && this.#live !== undefined && (event.ctrlKey || event.metaKey) && /^[zy]$/i.test(event.key)) {
       this.#settleLive();
