@@ -21,7 +21,7 @@ component Greeting @5:1-11:2
   body =
     <Stack>
       <Label Text=("Hello " concat name) />
-      <Label FontSize=(count add 20) Text="!" />
+      <Label Text="!" FontSize=(count add 20) />
     </Stack>
 
 value texts @12:1-12:24 =

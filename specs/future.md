@@ -2345,3 +2345,10 @@ the file's header), and how the images an entry imports are found. A caller-supp
 (`--ir-module <identity>=<path>`) avoids searching the filesystem by an untrusted identity; a
 missing module is then a link diagnostic. The corpus tests and hosts prepare images through the
 runtime API, so nothing needs this yet.
+
+## Record construction
+
+Named records require element syntax (`<User name="Bob" />`). Implicit positional record
+constructors are intentionally unsupported; explicitly declared factories can provide that
+interface. Conditional property fragments execute through the IR runtimes. Broader rules for
+function call styles and first-class calling conventions remain a separate design topic.

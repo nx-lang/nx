@@ -588,25 +588,52 @@ export type Book = { title:string author?:Person tags:string+ extras?:string+ }
     expect(() => explainNxIr(Buffer.from("{}"))).toThrowError(/not an NX IR image/);
   });
 
-  it("preserves source labels for IR generation diagnostics", () => {
-    // A conditional property fragment is a construct NX IR has no node for.
-    const error = captureEvaluationError(() => {
-      generateNxIrFromSource(`external component <Notice density:string />
-let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }`);
+  it("generates and executes conditional property bindings", () => {
+    const source = `external component <Notice density:string />
+let notice(compact:boolean) = <Notice if compact { density="tight" } else { density="normal" } />
+let root() = <results compact={notice(true)} normal={notice(false)} />`;
+    const generated = generateNxIrFromSource(source);
+    expect(generated.metadata.requiredFeatures).toContain("conditional-properties-v1");
+    const text = explainNxIr(generated.bytes);
+    expect(text).toContain("...=if compact then");
+    expect(text).toContain('<$bindings density="tight" />');
+    expect(text).toContain('<$bindings density="normal" />');
+    expect(evaluateSource(source)).toEqual({
+      $type: "results",
+      compact: { $type: "Notice", density: "tight" },
+      normal: { $type: "Notice", density: "normal" }
     });
-    const diagnostic = error.diagnostics.find((item) => item.code === "codegen-unsupported-construct");
+  });
+
+  it("preserves diagnostics for unknown IR module selection", () => {
+    const artifact = buildProgramArtifactFromSource("let root() = { 42 }");
+    try {
+      const error = captureEvaluationError(() => artifact.generateNxIr({ modules: ["missing.nx"] }));
+      expect(error.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "nx-ir-unknown-module", message: expect.stringContaining("missing.nx") })
+      ]));
+    } finally {
+      artifact.dispose();
+    }
+  });
+
+  it("preserves source labels when IR generation rejects record calls", () => {
+    const source = `type Notice = { density:string }
+let root() = { Notice("tight") }`;
+    const error = captureEvaluationError(() => generateNxIrFromSource(source));
+    const diagnostic = error.diagnostics.find((item) => item.code === "record-construction-requires-element");
     if (diagnostic === undefined) {
-      throw new Error("Expected codegen unsupported diagnostic.");
+      throw new Error("Expected record construction diagnostic.");
     }
 
     const label = diagnostic.labels[0];
     if (label === undefined) {
-      throw new Error("Expected codegen diagnostic to include a source label.");
+      throw new Error("Expected diagnostic to include a source label.");
     }
 
     expect(label.file).toBe("input.nx");
     expect(label.primary).toBe(true);
-    expect(label.span.endByte).toBeGreaterThan(label.span.startByte);
+    expect(source.slice(label.span.startByte, label.span.endByte)).toBe('Notice("tight")');
   });
 
   it("exposes source convenience evaluation and diagnostic failures", () => {

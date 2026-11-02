@@ -1619,7 +1619,7 @@ fn a_written_empty_value_is_an_empty_array_node() {
         "type Book = { title:string author?:string tags?:string+ }\n\
          let root() = <Book title=\"C\" author={} tags={} />",
     );
-    assert_line(&text, "  <Book author={} tags={} title=\"C\" />");
+    assert_line(&text, "  <Book title=\"C\" author={} tags={} />");
     assert!(!text.contains("null"), "{text}");
 }
 
@@ -2351,7 +2351,7 @@ fn a_call_of_a_function_typed_binding_is_a_named_call() {
     );
     let model = entry_artifact(&artifact);
     let text = explain(&model);
-    assert_contains(&text, "<Row Index=1 Item=\"a\" />");
+    assert_contains(&text, "<Row Item=\"a\" Index=1 />");
     let named_calls = model
         .nodes
         .iter()
@@ -2446,7 +2446,7 @@ fn a_range_expression_links_against_the_prelude() {
     let text = explain_nx_ir(&entry).expect("explain");
     assert_contains(
         &text,
-        "<@nx/prelude.nx:Range end=5 endInclusive=false start=1 />",
+        "<@nx/prelude.nx:Range start=1 end=5 endInclusive=false />",
     );
     assert!(
         !text.contains("record Range"),
@@ -2693,7 +2693,7 @@ fn a_range_loop_is_a_for_range_node() {
     let text = explain_nx_ir(&entry).expect("explain");
     assert_contains(
         &text,
-        "for i, n in <@nx/prelude.nx:Range end=4 endInclusive=false start=0 /> yield",
+        "for i, n in <@nx/prelude.nx:Range start=0 end=4 endInclusive=false /> yield",
     );
     assert!(
         entry.nodes.iter().any(|node| {

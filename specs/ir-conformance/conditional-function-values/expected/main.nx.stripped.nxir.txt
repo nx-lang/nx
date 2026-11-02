@@ -1,0 +1,18 @@
+module main.nx fingerprint 220326359251585240
+requires conditional-properties-v1 function-values-v1
+entrypoints functions [greet invoke root] components []
+
+function greet(name: string): string =
+  name
+
+function invoke(f: <function name:string />: string): string =
+  <f
+    ...=if true then
+      <$bindings name="Ada" />
+    else
+      <$bindings name="Bob" />
+  >
+  </f>
+
+function root(): string =
+  invoke(greet)

@@ -1249,7 +1249,6 @@ mod tests {
     #[test]
     fn emission_and_unlocated_runtime_errors_keep_codes_and_entry_context() {
         for (source, code) in [
-            ("<button if true { label=\"Save\" } else { label=\"No\" } />", "codegen-unsupported-construct"),
             ("let a(n:int32): int32 = { n + n } let root() = { a(2000000000) }", "nx-ir-boundary-type"),
             ("let down(n:int): int = { if n == 0 { 0 } else { down(n - 1) } } let root() = { down(120) }", "nx-ir-resource-limit"),
         ] {
@@ -1258,6 +1257,25 @@ mod tests {
             assert!(text.contains("error") && text.contains(code) && text.contains("main.nx"), "{text}");
             assert!(!text.contains("<unknown>") && !text.contains(" : "), "{text}");
         }
+    }
+
+    #[test]
+    fn source_run_executes_conditional_properties() {
+        let artifact = build_program_artifact_from_source(
+            "<button if true { label=\"Save\" } else { label=\"No\" } />",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .unwrap();
+        assert!(execute_program(&artifact).is_ok());
+        let rejected = build_program_artifact_from_source(
+            "type User = { age:int = 30 }\nlet root() = { User() }",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .unwrap();
+        let error = execute_program(&rejected).unwrap_err();
+        assert!(error.contains("record-construction-requires-element"));
     }
 
     #[test]

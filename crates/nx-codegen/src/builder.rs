@@ -2026,6 +2026,7 @@ fn build_expression(
             let mut mapped_properties = Vec::with_capacity(properties.len());
             for property in properties {
                 mapped_properties.push(CodegenProperty {
+                    spread: false,
                     name: property.name.as_str().to_string(),
                     value: build_expression(
                         artifact,
@@ -2243,6 +2244,282 @@ fn build_action_handler(
     })
 }
 
+/// Build each conditional as a lazy expression returning an intrinsic binding bag. The outer
+/// property list spreads that bag at the fragment's authored position.
+#[allow(clippy::too_many_arguments)]
+fn build_property_entries(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    entries: &[PropertyEntry],
+    element: &nx_hir::Element,
+    prepared_cache: &mut PreparedModuleCache,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenProperty>> {
+    let mut properties = Vec::new();
+    for entry in entries {
+        if let PropertyEntry::Value(property) = entry {
+            let value = if matches!(
+                lowered_module.expr(property.value),
+                ast::Expr::ActionHandler { .. }
+            ) {
+                let Some(component) =
+                    resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str())
+                        .filter(|reference| reference.kind == ResolvedItemKind::Component)
+                else {
+                    diagnostics.push(missing_semantic_data_diagnostic(
+                        resolved_module,
+                        &format!("handler component '{}'", element.tag.as_str()),
+                        property.span,
+                    ));
+                    return None;
+                };
+                build_action_handler(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    property.value,
+                    component,
+                    scope,
+                    diagnostics,
+                )?
+            } else {
+                build_expression(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    property.value,
+                    scope,
+                    diagnostics,
+                )?
+            };
+            properties.push(CodegenProperty {
+                spread: false,
+                name: property.key.as_str().to_string(),
+                value,
+                span: property.span,
+            });
+
+            continue;
+        }
+        let span = entry.span();
+        let mut expression = |expr| {
+            build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                expr,
+                scope,
+                diagnostics,
+            )
+        };
+        // Build guards before recursively building their bodies; the model still evaluates them
+        // lazily at runtime. Source analysis has already checked every branch and its narrowing.
+        let kind = match entry {
+            PropertyEntry::If {
+                condition,
+                then_entries,
+                else_entries,
+                ..
+            } => {
+                let condition = expression(*condition)?;
+                let then_branch = build_binding_bag(
+                    artifact,
+                    resolved_module,
+                    lowered_module,
+                    type_env,
+                    then_entries,
+                    element,
+                    prepared_cache,
+                    scope,
+                    diagnostics,
+                    span,
+                )?;
+                let else_branch = build_binding_bag(
+                    artifact,
+                    resolved_module,
+                    lowered_module,
+                    type_env,
+                    else_entries,
+                    element,
+                    prepared_cache,
+                    scope,
+                    diagnostics,
+                    span,
+                )?;
+                CodegenExpressionKind::If {
+                    condition: Box::new(condition),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Some(Box::new(else_branch)),
+                }
+            }
+            PropertyEntry::ConditionList {
+                arms, else_entries, ..
+            } => {
+                let mut tail = build_binding_bag(
+                    artifact,
+                    resolved_module,
+                    lowered_module,
+                    type_env,
+                    else_entries,
+                    element,
+                    prepared_cache,
+                    scope,
+                    diagnostics,
+                    span,
+                )?;
+                for arm in arms.iter().rev() {
+                    let condition = build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        arm.condition,
+                        scope,
+                        diagnostics,
+                    )?;
+                    let body = build_binding_bag(
+                        artifact,
+                        resolved_module,
+                        lowered_module,
+                        type_env,
+                        &arm.entries,
+                        element,
+                        prepared_cache,
+                        scope,
+                        diagnostics,
+                        arm.span,
+                    )?;
+                    tail = CodegenExpression {
+                        expr_id: 0,
+                        span,
+                        ty: None,
+                        kind: CodegenExpressionKind::If {
+                            condition: Box::new(condition),
+                            then_branch: Box::new(body),
+                            else_branch: Some(Box::new(tail)),
+                        },
+                    };
+                }
+                tail.kind
+            }
+            PropertyEntry::Match {
+                scrutinee,
+                arms,
+                else_entries,
+                ..
+            } => {
+                let scrutinee = expression(*scrutinee)?;
+                let mut mapped_arms = Vec::new();
+                for arm in arms {
+                    let mut patterns = Vec::new();
+                    for pattern in &arm.patterns {
+                        patterns.push(build_expression(
+                            artifact,
+                            resolved_module,
+                            prepared_cache,
+                            lowered_module,
+                            type_env,
+                            *pattern,
+                            scope,
+                            diagnostics,
+                        )?);
+                    }
+                    let body = build_binding_bag(
+                        artifact,
+                        resolved_module,
+                        lowered_module,
+                        type_env,
+                        &arm.entries,
+                        element,
+                        prepared_cache,
+                        scope,
+                        diagnostics,
+                        arm.span,
+                    )?;
+                    mapped_arms.push(CodegenMatchArm { patterns, body });
+                }
+                let otherwise = build_binding_bag(
+                    artifact,
+                    resolved_module,
+                    lowered_module,
+                    type_env,
+                    else_entries,
+                    element,
+                    prepared_cache,
+                    scope,
+                    diagnostics,
+                    span,
+                )?;
+                CodegenExpressionKind::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms: mapped_arms,
+                    else_branch: Some(Box::new(otherwise)),
+                }
+            }
+            PropertyEntry::Value(_) => unreachable!(),
+        };
+        properties.push(CodegenProperty {
+            spread: true,
+            name: String::new(),
+            span,
+            value: CodegenExpression {
+                expr_id: 0,
+                span,
+                ty: None,
+                kind,
+            },
+        });
+    }
+    Some(properties)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_binding_bag(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    entries: &[PropertyEntry],
+    element: &nx_hir::Element,
+    prepared_cache: &mut PreparedModuleCache,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+    span: TextSpan,
+) -> Option<CodegenExpression> {
+    let properties = build_property_entries(
+        artifact,
+        resolved_module,
+        lowered_module,
+        type_env,
+        entries,
+        element,
+        prepared_cache,
+        scope,
+        diagnostics,
+    )?;
+    Some(CodegenExpression {
+        expr_id: 0,
+        span,
+        ty: None,
+        kind: CodegenExpressionKind::Element(CodegenElement {
+            element_id: 0,
+            tag: "$bindings".into(),
+            properties,
+            content: Vec::new(),
+        }),
+    })
+}
+
 fn build_element_expression(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
@@ -2255,67 +2532,17 @@ fn build_element_expression(
 ) -> Option<CodegenExpressionKind> {
     let element = lowered_module.element(element_id);
     let mut mapped = CodegenElement::from_id(element_id, &element.tag);
-    for entry in element.property_entries() {
-        match entry {
-            PropertyEntry::Value(property) => {
-                let value = if matches!(
-                    lowered_module.expr(property.value),
-                    ast::Expr::ActionHandler { .. }
-                ) {
-                    let Some(component) = resolve_visible_reference(
-                        artifact,
-                        resolved_module.id,
-                        element.tag.as_str(),
-                    )
-                    .filter(|reference| reference.kind == ResolvedItemKind::Component) else {
-                        diagnostics.push(missing_semantic_data_diagnostic(
-                            resolved_module,
-                            &format!("handler component '{}'", element.tag.as_str()),
-                            property.span,
-                        ));
-                        return None;
-                    };
-                    build_action_handler(
-                        artifact,
-                        resolved_module,
-                        prepared_cache,
-                        lowered_module,
-                        type_env,
-                        property.value,
-                        component,
-                        scope,
-                        diagnostics,
-                    )?
-                } else {
-                    build_expression(
-                        artifact,
-                        resolved_module,
-                        prepared_cache,
-                        lowered_module,
-                        type_env,
-                        property.value,
-                        scope,
-                        diagnostics,
-                    )?
-                };
-                mapped.properties.push(CodegenProperty {
-                    name: property.key.as_str().to_string(),
-                    value,
-                    span: property.span,
-                });
-            }
-            PropertyEntry::If { span, .. }
-            | PropertyEntry::ConditionList { span, .. }
-            | PropertyEntry::Match { span, .. } => {
-                diagnostics.push(unsupported_diagnostic(
-                    resolved_module,
-                    *span,
-                    "conditional element property fragments are not supported by executable codegen yet",
-                ));
-                return None;
-            }
-        }
-    }
+    mapped.properties = build_property_entries(
+        artifact,
+        resolved_module,
+        lowered_module,
+        type_env,
+        element.property_entries(),
+        element,
+        prepared_cache,
+        scope,
+        diagnostics,
+    )?;
     for content in &element.content {
         mapped.content.push(build_expression(
             artifact,
@@ -2327,21 +2554,6 @@ fn build_element_expression(
             scope,
             diagnostics,
         )?);
-    }
-    if !mapped.content.is_empty()
-        && mapped
-            .properties
-            .iter()
-            .any(|property| property.name == "content")
-        && resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str()).is_none()
-    {
-        diagnostics.push(
-            Diagnostic::error("intrinsic-content-conflict")
-                .with_message("an intrinsic element cannot have both a 'content' property and element body content")
-                .with_label(nx_diagnostics::Label::primary(resolved_module.prepared_module_identity(), element.span))
-                .build(),
-        );
-        return None;
     }
     // A tag that analysis resolved to a function-typed value in scope is a call of that value by
     // name, ahead of any declaration the name might also reach. Body content binds under the
@@ -2377,6 +2589,7 @@ fn build_element_expression(
                 return None;
             };
             args.push(CodegenProperty {
+                spread: false,
                 name: content_param.as_str().to_string(),
                 value: content_expression(mapped.content, element.span),
                 span: element.span,
@@ -2396,9 +2609,6 @@ fn build_element_expression(
         });
     }
 
-    mapped
-        .properties
-        .sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     match build_union_case_for_tag(
         artifact,
         resolved_module.id,
@@ -2506,6 +2716,36 @@ fn build_function_element_call(
     content: Vec<CodegenExpression>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenExpressionKind> {
+    if properties.iter().any(|property| property.spread) {
+        let params = function_params_from_reference(
+            artifact,
+            resolved_module,
+            &function_reference,
+            diagnostics,
+        )?;
+        let mut args = properties;
+        if !content.is_empty() {
+            let (name, _, _) = params.iter().find(|(_, content, _)| *content)?;
+            args.push(CodegenProperty {
+                spread: false,
+                name: name.clone(),
+                span: element_span,
+                value: content_expression(content, element_span),
+            });
+        }
+        return Some(CodegenExpressionKind::NamedCall {
+            callee: Box::new(CodegenExpression {
+                expr_id: 0,
+                span: element_span,
+                ty: None,
+                kind: CodegenExpressionKind::Identifier {
+                    name: function_reference.name.clone(),
+                    reference: Some(function_reference),
+                },
+            }),
+            args,
+        });
+    }
     let params = function_params_from_reference(
         artifact,
         resolved_module,

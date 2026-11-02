@@ -73,11 +73,18 @@ When a float64-typed conditional or presence join selects an integer arm, the ex
 can remain an integer: JSON and NX at an `object` site print `1` rather than the old `1.0`. The
 numeric value is unchanged. Corpus conversion/occurrence goldens explicitly record this difference.
 
-## Temporary source limitations
+## Record construction and conditional properties
 
-Conditional property fragments and positional record constructors are deferred to
-`complete-ir-construction-lowering`. For now use ordinary properties whose values are conditional,
-and markup record construction, such as `<User name="Bob" age=42 />`, respectively. Their original
-success assertions remain as ignored source-to-IR regression tests naming the follow-up change;
-run them explicitly while implementing it and remove the ignores as they pass. Existing ignored
-parser tests remain separately labeled.
+Records use named element construction: `<User name="Bob" age=42 />`. Parenthesized calls such as
+`User("Bob", 42)` are rejected during source analysis with `record-construction-requires-element`.
+An explicit factory can provide a positional interface:
+
+```nx
+type User = { name: string age: int = 30 }
+let user(name: string, age: int = 30): User = <User name={name} age={age} />
+```
+
+Simple, condition-list and match property fragments now execute through IR. Their five retained
+conditional/example regression tests are active, and the positional success test has been replaced
+with rejection and named-construction coverage. Archived retirement inventories retain the original
+expectations as historical records. Unrelated ignored parser tests remain separately labeled.

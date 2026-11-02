@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "main.nx::content#false": 10,
+    "main.nx::content#true": 12,
+    "main.nx::numeric#0": 11,
+    "main.nx::numeric#2": 11,
+    "main.nx::omitted#false": 9,
+    "main.nx::omitted#true": 9,
+    "main.nx::patch#false": 6,
+    "main.nx::patch#true": 8,
+    "main.nx::root": 79,
+    "main.nx::sequenceComponent": 9
+  }
+}

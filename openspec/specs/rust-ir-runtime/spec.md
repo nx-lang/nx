@@ -831,18 +831,6 @@ component lifecycle.
 - **THEN** the expected value SHALL be stated in the test
 - **AND** SHALL NOT be computed by evaluating the program another way
 
-### Requirement: Retirement preserves pending construction regression expectations
-Interpreter retirement MAY precede executable support for conditional property fragments and
-positional record constructors. The source tests for these two gaps SHALL retain their intended
-successful results as ignored regressions naming `complete-ir-construction-lowering`. No other
-unexpected discrepancy SHALL be accepted under this exception. Temporary CLI limitations SHALL be
-documented until the follow-up enables those tests.
-
-#### Scenario: A deferred source behavior keeps its intended result
-- **WHEN** a retained test exercises either approved construction gap
-- **THEN** it SHALL be ignored with the follow-up change named in its reason
-- **AND** its assertions SHALL describe successful evaluation, not the current failure
-
 ### Requirement: Component descriptors are recursively validated at typed sites
 When a component-typed value has no discriminator or names the expected component declaration,
 its props SHALL be recursively normalized against that declaration at host and program-internal
@@ -858,3 +846,13 @@ SHALL remain unchanged. Both runtimes SHALL charge the same operations for equiv
 #### Scenario: A nested host update record is invalid
 - **WHEN** a host component-typed prop names the expected declaration and contains an update record with an unknown field or an invalid required-field clear
 - **THEN** both runtimes SHALL reject it with a boundary diagnostic
+
+### Requirement: Rust evaluates selected property spreads
+The runtime SHALL prepare `conditional-properties-v1` modules and evaluate property entries in
+order, spreading only selected binding bags before content/default normalization. It SHALL reject
+reserved spread entries without the required feature and unsupported features by name.
+
+#### Scenario: Selected binding bags preserve presence
+- **WHEN** a selected bag omits a field or explicitly supplies an empty value
+- **THEN** omission SHALL remain distinct from the supplied empty value until normalization
+- **AND** an inactive branch SHALL not evaluate its value expressions

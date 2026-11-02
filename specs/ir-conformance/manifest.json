@@ -4,6 +4,7 @@
       "add": [
         "argument-diagnostics",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -71,11 +72,13 @@
         "question-flow"
       ],
       "gt": [
+        "conditional-properties",
         "expressions",
         "question-flow"
       ],
       "idiv": [
         "argument-diagnostics",
+        "conditional-properties",
         "conversions",
         "expressions"
       ],
@@ -139,6 +142,7 @@
         "agent-library",
         "argument-diagnostics",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -164,6 +168,7 @@
     "declarations": {
       "component": [
         "components",
+        "conditional-properties",
         "constraints",
         "evaluation-cost",
         "function-values",
@@ -183,6 +188,8 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -212,6 +219,7 @@
         "agent-tool-context",
         "argument-diagnostics",
         "color-library",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -231,6 +239,7 @@
         "two-module"
       ],
       "typeAlias": [
+        "conditional-properties",
         "constraints",
         "function-references",
         "function-values",
@@ -242,6 +251,7 @@
         "agent-library",
         "agent-tool-context",
         "color-library",
+        "conditional-properties",
         "constraints",
         "evaluation-cost",
         "expressions",
@@ -256,6 +266,7 @@
         "agent-library",
         "color-library",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -372,6 +383,7 @@
         "agent-tool-context",
         "color-library",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -391,6 +403,7 @@
         "agent-library",
         "argument-diagnostics",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -412,6 +425,8 @@
         "two-module"
       ],
       "bool": [
+        "conditional-function-values",
+        "conditional-properties",
         "conversions",
         "evaluation-cost",
         "expressions",
@@ -425,6 +440,8 @@
       "call": [
         "argument-diagnostics",
         "color-library",
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -446,6 +463,7 @@
         "two-module"
       ],
       "check": [
+        "conditional-properties",
         "constraints",
         "geometry-library"
       ],
@@ -457,6 +475,7 @@
       ],
       "component": [
         "components",
+        "conditional-properties",
         "constraints",
         "evaluation-cost",
         "function-values",
@@ -471,6 +490,8 @@
         "two-module"
       ],
       "element": [
+        "conditional-function-values",
+        "conditional-properties",
         "evaluation-cost",
         "expressions",
         "handlers"
@@ -493,6 +514,8 @@
         "ranges"
       ],
       "if": [
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "expressions",
@@ -501,6 +524,7 @@
         "question-flow"
       ],
       "ifIs": [
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -508,6 +532,7 @@
         "occurrence-patterns"
       ],
       "interval": [
+        "conditional-properties",
         "constraints"
       ],
       "intrinsic": [
@@ -520,6 +545,7 @@
       "member": [
         "agent-tool-context",
         "argument-diagnostics",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -539,6 +565,8 @@
       ],
       "namedCall": [
         "argument-diagnostics",
+        "conditional-function-values",
+        "conditional-properties",
         "evaluation-cost",
         "function-values",
         "held-records"
@@ -548,6 +576,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -578,6 +607,7 @@
         "agent-library",
         "agent-tool-context",
         "color-library",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -602,6 +632,8 @@
         "agent-tool-context",
         "color-library",
         "components",
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -631,6 +663,8 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -665,6 +699,8 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -699,6 +735,7 @@
       "unionCase": [
         "agent-library",
         "color-library",
+        "conditional-properties",
         "constraints",
         "evaluation-cost",
         "expressions",
@@ -716,11 +753,13 @@
         "function-references"
       ],
       "constrained": [
+        "conditional-properties",
         "constraints",
         "geometry-library"
       ],
       "function": [
         "argument-diagnostics",
+        "conditional-function-values",
         "evaluation-cost",
         "function-references",
         "function-values",
@@ -732,6 +771,7 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "conditional-properties",
         "constraints",
         "evaluation-cost",
         "expressions",
@@ -758,6 +798,8 @@
         "argument-diagnostics",
         "color-library",
         "components",
+        "conditional-function-values",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -787,6 +829,7 @@
         "agent-tool-context",
         "argument-diagnostics",
         "components",
+        "conditional-properties",
         "constraints",
         "conversions",
         "evaluation-cost",
@@ -823,6 +866,8 @@
     "argument-diagnostics",
     "color-library",
     "components",
+    "conditional-function-values",
+    "conditional-properties",
     "constraints",
     "conversions",
     "evaluation-cost",

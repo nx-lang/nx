@@ -2775,6 +2775,19 @@ test("a component's props, state and actions outside their constraints are refus
   assertEqual(update.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.argument]), [["nx-ir-constraint", undefined]]);
 });
 
+test("conditional property spreads require their feature", () => {
+  const b = new ArtifactBuilder("properties.nx");
+  const value = b.string("chosen");
+  const bag = b.node([nodeKinds.element, 0, b.str("$bindings"), ...b.list([b.property("value", value)]), 0]);
+  const root = b.node([nodeKinds.element, 1, b.str("box"), ...b.list([b.property("$spread", bag)]), 0]);
+  b.fn("root", root);
+  const missing = tryPrepareNxIrModule(b.build());
+  assertEqual(missing.ok, false);
+  if (!missing.ok) assertEqual(missing.diagnostics.some((diagnostic) => diagnostic.message.includes("conditional-properties-v1")), true);
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: ["conditional-properties-v1"] }));
+  assertEqual(evaluateFunction(program, "root"), { $type: "box", value: "chosen" });
+});
+
 let failures = 0;
 for (const [name, run] of tests) {
   try {

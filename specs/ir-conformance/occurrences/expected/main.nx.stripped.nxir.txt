@@ -22,13 +22,13 @@ function ada() =
   <Person name="Ada" />
 
 function withAuthor() =
-  <Book author=ada() tags=["x", "y"] title="A" />
+  <Book title="A" author=ada() tags=["x", "y"] />
 
 function withoutAuthor() =
   <Book title="B" />
 
 function writtenEmpty() =
-  <Book author={} tags={} title="C" />
+  <Book title="C" author={} tags={} />
 
 function hasAuthor(b: Book): boolean =
   b.author?

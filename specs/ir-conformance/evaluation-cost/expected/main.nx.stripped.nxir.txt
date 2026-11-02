@@ -79,7 +79,7 @@ function Count(content items: int+): int =
   3
 
 function repeated(o: object, n: int) =
-  for i in <@nx/prelude.nx:Range end=n endInclusive=false start=0 /> yield
+  for i in <@nx/prelude.nx:Range start=0 end=n endInclusive=false /> yield
     o
 
 function patterns() =
@@ -99,14 +99,14 @@ function forItems() =
     (n add 1)
 
 function forRange() =
-  for i in <@nx/prelude.nx:Range end=5 endInclusive=false start=0 /> yield
+  for i in <@nx/prelude.nx:Range start=0 end=5 endInclusive=false /> yield
     (i mul i)
 
 function content() =
   <list>
     <item />
     <item />
-    for i in <@nx/prelude.nx:Range end=3 endInclusive=false start=0 /> yield
+    for i in <@nx/prelude.nx:Range start=0 end=3 endInclusive=false /> yield
       <item index=i />
   </list>
 

@@ -1,0 +1,17 @@
+{
+  "main.nx::orderComponent#first-error": {
+    "code": "nx-ir-division-by-zero"
+  },
+  "main.nx::orderFunction#first-error": {
+    "code": "nx-ir-division-by-zero"
+  },
+  "main.nx::orderIntrinsic#first-error": {
+    "code": "nx-ir-division-by-zero"
+  },
+  "main.nx::orderRecord#first-error": {
+    "code": "nx-ir-division-by-zero"
+  },
+  "main.nx::orderUnion#first-error": {
+    "code": "nx-ir-division-by-zero"
+  }
+}

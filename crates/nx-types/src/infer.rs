@@ -815,6 +815,24 @@ impl<'a> InferenceContext<'a> {
                 if let Some(intrinsic) = self.intrinsic_callee(*func) {
                     self.infer_intrinsic_call(intrinsic, args, *span)
                 } else {
+                    // Only a resolved type target is a record constructor. Value bindings and
+                    // declared functions retain their existing invocation rules.
+                    if let Some(name) = self.flattened_expr_name(*func) {
+                        let root = Name::new(name.as_str().split('.').next().unwrap());
+                        if self.env.lookup(&root).is_none()
+                            && self.resolve_record_definition(&name).is_some()
+                        {
+                            self.error(
+                                "record-construction-requires-element",
+                                format!("Records require element syntax with named properties, such as `<{name} ... />`."),
+                                *span,
+                            );
+                            for arg in args {
+                                self.infer_expr(*arg);
+                            }
+                            return Type::Error;
+                        }
+                    }
                     let func_ty = self.infer_expr(*func);
 
                     // A function reference value cannot be called at all: its parameters are not
@@ -2440,25 +2458,8 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
-                    if let ast::Expr::NumericPattern {
-                        pattern: numeric,
-                        span: pattern_span,
-                    } = self.module.raw_module().expr(*pattern)
-                    {
-                        let (numeric, pattern_span) = (numeric.clone(), *pattern_span);
-                        // A lone `finite` remains a contextual union-case name. Its numeric
-                        // meaning applies only when the scrutinee is not a union.
-                        if !(union_ty.is_some()
-                            && matches!(numeric.terms.as_slice(), [ast::PatternTerm::Finite]))
-                        {
-                            return self.infer_numeric_pattern(
-                                *pattern,
-                                &numeric,
-                                &scrutinee_ty,
-                                union_ty.is_some(),
-                                pattern_span,
-                            );
-                        }
+                    if let Some(ty) = self.infer_numeric_match_pattern(*pattern, &scrutinee_ty) {
+                        return ty;
                     }
                     let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
@@ -2648,6 +2649,27 @@ impl<'a> InferenceContext<'a> {
             }
         };
         ty
+    }
+
+    /// Numeric pattern typing is shared by value matches and property-fragment matches.
+    fn infer_numeric_match_pattern(
+        &mut self,
+        pattern: ExprId,
+        scrutinee_ty: &Type,
+    ) -> Option<Type> {
+        let ast::Expr::NumericPattern {
+            pattern: numeric,
+            span,
+        } = self.module.raw_module().expr(pattern)
+        else {
+            return None;
+        };
+        let is_union = matches!(scrutinee_ty.item(), Type::Union(_));
+        if is_union && matches!(numeric.terms.as_slice(), [ast::PatternTerm::Finite]) {
+            return None;
+        }
+        let (numeric, span) = (numeric.clone(), *span);
+        Some(self.infer_numeric_pattern(pattern, &numeric, scrutinee_ty, is_union, span))
     }
 
     fn infer_match_pattern(&mut self, pattern: ExprId, scrutinee_ty: &Type) -> Type {
@@ -4151,6 +4173,18 @@ impl<'a> InferenceContext<'a> {
         // reported here as it is on every resolved path: the absent tag is the only thing left
         // unchecked.
         self.report_duplicate_property_paths(&property_paths, &element.tag);
+        if !element.content.is_empty()
+            && property_paths.iter().any(|path| {
+                path.properties
+                    .iter()
+                    .any(|property| property.key.as_str() == "content")
+            })
+        {
+            self.error("intrinsic-content-conflict",
+                "an intrinsic element cannot have both a 'content' property and element body content".to_string(),
+                span);
+        }
+
         for content in &element.content {
             self.infer_expr(*content);
         }
@@ -6304,6 +6338,9 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
+                    if let Some(ty) = self.infer_numeric_match_pattern(*pattern, &scrutinee_ty) {
+                        return ty;
+                    }
                     let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
                         &scrutinee_ty,
@@ -6321,6 +6358,19 @@ impl<'a> InferenceContext<'a> {
             let mut narrowings = present_narrowings;
             if let (Some(path), Some(case_ty)) = (scrutinee_path.as_ref(), narrowed_case) {
                 narrowings.push((path.clone(), Type::UnionCase(case_ty)));
+            }
+            if let (Some(path), [pattern], [pattern_ty]) = (
+                scrutinee_path.as_ref(),
+                arm.patterns.as_slice(),
+                pattern_tys.as_slice(),
+            ) {
+                if matches!(
+                    self.module.raw_module().expr(*pattern),
+                    ast::Expr::NumericPattern { .. }
+                ) && pattern_ty.constraint().is_some()
+                {
+                    narrowings.push((path.clone(), pattern_ty.clone()));
+                }
             }
             let depth = self.push_narrowings(narrowings);
             paths.extend(self.property_paths_for_entries(&arm.entries));

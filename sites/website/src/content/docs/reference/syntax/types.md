@@ -1011,3 +1011,20 @@ result is `<function ... />: object*`.
 - Language Tour: [Types](/language-tour/types)
 - Reference: [Sequences & Object Duality](/reference/concepts/sequences-and-objects)
 - Grammar: [nx-grammar.md – Types](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#types)
+
+## Constructing Records
+
+Construct records with element syntax and named properties. Omitted properties keep their defaults:
+
+```nx
+type User = { name: string age: int = 30 }
+
+let bob = <User name="Bob" />
+
+let user(name: string, age: int = 30): User = <User name={name} age={age} />
+
+let ada = { user("Ada", 42) }
+```
+
+`User("Bob", 42)` is rejected with `record-construction-requires-element`. Define a factory such as
+`user` when a positional interface is useful. Imports and type aliases follow the same rule.

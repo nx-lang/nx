@@ -1,0 +1,216 @@
+module main.nx fingerprint 5307305340544657319
+requires conditional-properties-v1 update-records-v1 function-values-v1 constraints-v1
+entrypoints functions [greet root omitted content numeric patch zero bad orderTarget orderIntrinsic orderRecord orderUnion orderComponent orderFunction sequenceComponent] components [Card OrderCard SequenceCard]
+
+record User
+  name: string = "Default"
+  note: string?
+
+union State
+  case ready constant
+  case failed
+    message: string required
+
+union Result
+  case ok
+    value: int required
+
+component Card external
+  props
+    title: string required
+
+function greet(name: string = "Default"): string =
+  name
+
+value state: State =
+  <State.failed message="offline" />
+
+function root(): object =
+  <results
+    intrinsic=<button before=1 after=2
+      ...=if true then
+        <$bindings label="Save" />
+      else
+        <$bindings label=(1 idiv 0) />
+      ...=if true then
+        <$bindings tone="first" />
+      else
+        if true then
+          <$bindings tone=(1 idiv 0) />
+        else
+          <$bindings />
+    >
+    </button>
+    record=<User
+      ...=if false then
+        <$bindings name="ignored" />
+      else
+        <$bindings />
+      ...=if true then
+        <$bindings note={} />
+      else
+        <$bindings />
+    >
+    </User>
+    union=<Result.ok
+      ...=if true then
+        <$bindings value=7 />
+      else
+        <$bindings value=(1 idiv 0) />
+    >
+    </Result.ok>
+    card=<Card
+      ...=if true then
+        <$bindings title="Hello" />
+      else
+        <$bindings title="Other" />
+    >
+    </Card>
+    greeting=<greet
+      ...=if false then
+        <$bindings name="ignored" />
+      else
+        <$bindings />
+    >
+    </greet>
+    nested=<notice
+      ...=if true then
+        <$bindings
+          ...=if state is
+            State.failed =>
+              <$bindings label=state.message />
+            else =>
+              <$bindings label="ready" />
+        >
+        </$bindings>
+      else
+        <$bindings />
+    >
+    </notice>
+  >
+  </results>
+
+function omitted(active: boolean) =
+  <User
+    ...=if active then
+      <$bindings name="Selected" />
+    else
+      <$bindings />
+  >
+  </User>
+
+function content(active: boolean): object =
+  <box
+    ...=if active then
+      <$bindings tone="warm" />
+    else
+      <$bindings />
+  >
+    <child />
+  </box>
+
+function numeric(n: int): object =
+  <box
+    ...=if n is
+      >= 2 =>
+        <$bindings value="large" />
+      else =>
+        <$bindings value="small" />
+  >
+  </box>
+
+function patch(active: boolean) =
+  <User.Update
+    ...=if active then
+      <$bindings note={} />
+    else
+      <$bindings />
+  >
+  </User.Update>
+
+alias Positive
+
+record OrderData
+  z: int required
+  a: int = 0
+
+union OrderChoice
+  case item
+    z: int required
+    a: int = 0
+
+component OrderCard external
+  props
+    z: int required
+    a: int = 0
+
+function zero(): int =
+  (1 idiv 0)
+
+function bad(n: int): int where >= 1 =
+  (check result: n as int where >= 1)
+
+function orderTarget(z: int, a: int = 0): int =
+  (z add a)
+
+function orderIntrinsic(): object =
+  <box z=zero()
+    ...=if (bad(0) gt 0) then
+      <$bindings a=1 />
+    else
+      <$bindings />
+  >
+  </box>
+
+function orderRecord(): OrderData =
+  <OrderData z=zero()
+    ...=if (bad(0) gt 0) then
+      <$bindings a=1 />
+    else
+      <$bindings />
+  >
+  </OrderData>
+
+function orderUnion(): OrderChoice =
+  <OrderChoice.item z=zero()
+    ...=if (bad(0) gt 0) then
+      <$bindings a=1 />
+    else
+      <$bindings />
+  >
+  </OrderChoice.item>
+
+function orderComponent() =
+  <OrderCard z=zero()
+    ...=if (bad(0) gt 0) then
+      <$bindings a=1 />
+    else
+      <$bindings />
+  >
+  </OrderCard>
+
+function orderFunction(): int =
+  <orderTarget z=zero()
+    ...=if (bad(0) gt 0) then
+      <$bindings a=1 />
+    else
+      <$bindings />
+  >
+  </orderTarget>
+
+component SequenceCard external
+  props
+    values: int+ required
+
+function sequenceComponent() =
+  <SequenceCard
+    ...=if true then
+      <$bindings values=1 />
+    else
+      <$bindings values=[2, 3] />
+  >
+  </SequenceCard>
+
+record User.Update update of User
+  name: string
+  note: string?

@@ -41,7 +41,7 @@ component Holder state Holder.State @14:1-23:2
     count: int = 0
   body =
     <Stack>
-      <Panel count=count item=held />
+      <Panel item=held count=count />
       <Button label="Count"
         onTapped=handler Button.Tapped action@3:Button.Tapped owner Holder =>
           <Holder.State.Update count=(count add 1) />

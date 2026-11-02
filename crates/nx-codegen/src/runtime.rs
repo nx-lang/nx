@@ -135,6 +135,20 @@ export function nxOptionalSchema(item: NxSchema): NxSchema {
   return { optional: item };
 }
 
+/** The fields selected by a compiler-owned conditional property fragment. */
+export function nxBindings(value: any): Record<string, any> {
+  const { $type, ...bindings } = value;
+  return bindings;
+}
+
+/** A union payload pattern tests the tag, while other patterns compare their value. */
+export function nxPatternMatches(value: any, pattern: any): boolean {
+  if (pattern != null && !Array.isArray(pattern) && typeof pattern === "object" && "$type" in pattern) {
+    return value != null && value.$type === pattern.$type;
+  }
+  return nxValuesEqual(value, pattern);
+}
+
 /**
  * The empty value is the empty sequence. A host may also send `null`, and a record carries no key
  * for an empty optional field, so a missing key reads as `undefined`; all three are the one empty.
@@ -291,7 +305,7 @@ export function nxElement(
   tag: string,
   properties: Record<string, NxValue>,
   content: readonly NxValue[] = [],
-): NxValue {
+): Record<string, NxValue> {
   const output: Record<string, NxValue> = { ...properties };
   if (content.length === 1) {
     output.content = content[0];
@@ -804,6 +818,18 @@ export function nxNonEmptyArraySchema(element) {
 
 export function nxOptionalSchema(item) {
   return { optional: item };
+}
+
+export function nxBindings(value) {
+  const { $type, ...bindings } = value;
+  return bindings;
+}
+
+export function nxPatternMatches(value, pattern) {
+  if (pattern != null && !Array.isArray(pattern) && typeof pattern === "object" && "$type" in pattern) {
+    return value != null && value.$type === pattern.$type;
+  }
+  return nxValuesEqual(value, pattern);
 }
 
 /**

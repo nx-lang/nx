@@ -31,7 +31,7 @@ union Fit
 alias Person
 
 function ada() =
-  <User email="ada@example.com" name="Ada" />
+  <User name="Ada" email="ada@example.com" />
 
 function home() =
   <Address city="Paris">

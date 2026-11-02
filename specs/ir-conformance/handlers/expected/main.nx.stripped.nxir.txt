@@ -73,17 +73,17 @@ component Tens state Tens.State
     count: int = 0
   body =
     <Card count=count
-      header=<Button label="Header"
-        onTapped=handler Button.Tapped action@1:Button.Tapped owner Tens =>
-          <Tens.State.Update count=(count add 100) />
-      >
-      </Button>
       items=for count in tens yield
         <Button label="Ten"
-          onTapped=handler Button.Tapped action@3:Button.Tapped owner Tens =>
+          onTapped=handler Button.Tapped action@2:Button.Tapped owner Tens =>
             <Tens.State.Update count=(count add 1) />
         >
         </Button>
+      header=<Button label="Header"
+        onTapped=handler Button.Tapped action@3:Button.Tapped owner Tens =>
+          <Tens.State.Update count=(count add 100) />
+      >
+      </Button>
     >
     </Card>
 

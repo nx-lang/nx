@@ -11,7 +11,7 @@ record Book @4:1-4:51
   author: Person?
 
 function withAuthor() @6:1-6:69 =
-  <Book author=<Person name="Ada" /> title="A" />
+  <Book title="A" author=<Person name="Ada" /> />
 
 function withoutAuthor() @7:1-7:41 =
   <Book title="B" />

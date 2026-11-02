@@ -11,7 +11,7 @@ record Book
   author: Person?
 
 function withAuthor() =
-  <Book author=<Person name="Ada" /> title="A" />
+  <Book title="A" author=<Person name="Ada" /> />
 
 function withoutAuthor() =
   <Book title="B" />

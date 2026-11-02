@@ -1,0 +1,7 @@
+let greet(name: string): string = { name }
+
+let invoke(f: <function name: string />: string): string = {
+  <f if true { name="Ada" } else { name="Bob" } />
+}
+
+let root(): string = { invoke(greet) }

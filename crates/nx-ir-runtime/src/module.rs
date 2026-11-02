@@ -18,7 +18,8 @@ use nx_ir::{
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 11] = [
+const KNOWN_FEATURES: [&str; 12] = [
+    nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
     "standard-color-v1",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
@@ -378,7 +379,7 @@ fn text_type(name: &str) -> Option<TextType> {
     })
 }
 
-pub(crate) type Properties = Box<[(Arc<str>, u32)]>;
+pub(crate) type Properties = Box<[(Option<Arc<str>>, u32)]>;
 
 #[derive(Debug)]
 pub(crate) struct Arm {
@@ -714,7 +715,11 @@ impl<'a> Decoder<'a> {
 
     fn properties(&self, reader: &mut Reader<'_>) -> std::result::Result<Properties, Malformed> {
         Ok(reader
-            .list(|reader| Ok((self.string(reader.next()?)?, reader.next()?)))?
+            .list(|reader| {
+                let name = self.string(reader.next()?)?;
+                let name = (name.as_ref() != "$spread").then_some(name);
+                Ok((name, reader.next()?))
+            })?
             .into_boxed_slice())
     }
 
@@ -1484,6 +1489,30 @@ fn check_nodes(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
             continue;
         };
         let kind = entry.get(0).map(i64::from).unwrap_or(node::NULL);
+        let properties_at = match kind {
+            node::RECORD | node::COMPONENT | node::ELEMENT => Some(3),
+            node::UNION_CASE => Some(4),
+            node::NAMED_CALL => Some(2),
+            _ => None,
+        };
+        if let Some(at) = properties_at {
+            let count = entry.get(at).unwrap_or(0) as usize;
+            if entry
+                .iter()
+                .skip(at.saturating_add(1))
+                .step_by(2)
+                .take(count)
+                .any(|name| image.string(name) == Some("$spread"))
+                && !image.required_features().any(|feature| {
+                    feature == nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1
+                })
+            {
+                diagnostics.push(malformed(
+                    "property spread requires feature 'conditional-properties-v1'",
+                ));
+            }
+        }
+
         if kind == node::TEXT {
             let name = entry
                 .get(2)

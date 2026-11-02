@@ -437,9 +437,9 @@ fn ffi_codegen_nx_ir_returns_a_bundle_of_images_and_metadata() {
     assert_eq!(diagnostics[0].code.as_deref(), Some("nx-ir-malformed"));
 }
 
-/// A conditional property fragment is a construct NX IR has no node for.
+/// Conditional property fragments emit the shared versioned representation.
 #[test]
-fn ffi_codegen_nx_ir_returns_json_diagnostics_for_ir_errors() {
+fn ffi_codegen_nx_ir_supports_conditional_property_fragments() {
     let build_context = create_empty_build_context();
     let (program, build_status, build_bytes) = build_program_artifact_handle(
         build_context,
@@ -455,17 +455,15 @@ let root(compact:boolean) = { <Notice if compact { density="tight" } else { dens
     assert!(build_bytes.is_empty());
     assert!(!program.is_null());
 
-    let (status, json) = codegen_nx_ir(program);
+    let (status, bundle) = codegen_nx_ir(program);
     unsafe { nx_free_program_artifact(program) };
-
-    assert!(matches!(status, NxEvalStatus::Error));
-    let diagnostics: Vec<NxDiagnostic> = serde_json::from_slice(&json).unwrap();
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code.as_deref() == Some("codegen-unsupported-construct")),
-        "{diagnostics:?}"
-    );
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let artifacts = read_nx_ir_bundle(&bundle).expect("IR bundle");
+    assert!(artifacts[0]
+        .metadata
+        .required_features
+        .iter()
+        .any(|feature| feature == "conditional-properties-v1"));
 }
 
 /// An action handler is an IR node, so the source the JavaScript target refuses below emits an
