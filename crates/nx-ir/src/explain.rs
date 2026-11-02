@@ -879,7 +879,9 @@ impl<'a> Explainer<'a> {
         let mut trailing = Vec::new();
         for property in properties {
             let property = self.list(property, "property")?;
-            let key = self.string(self.int_operand(property, 0, "property")?)?;
+            let key_index = self.int_operand(property, 0, "property")?;
+            let key = self.string(key_index)?;
+            let key = if key == "$spread" { "..." } else { key };
             let value = self.node(self.int_operand(property, 1, "property")?)?;
             if value.len() == 1 {
                 let _ = write!(head, " {key}={}", value[0]);

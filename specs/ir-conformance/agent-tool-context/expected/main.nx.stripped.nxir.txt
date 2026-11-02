@@ -14,6 +14,6 @@ function seatCount(teamSize: int, cap?: int): int =
   teamSize
 
 function root(): @nx/agent/agent.nx:Agent =
-  <@nx/agent/agent.nx:Agent model="any-model-name-at-all" name="support" tools=[<@nx/agent/agent.nx:FunctionTool function=whoAmI />, <@nx/agent/agent.nx:FunctionTool function=callIdOf />, <@nx/agent/agent.nx:FunctionTool function=seatCount />]>
+  <@nx/agent/agent.nx:Agent name="support" model="any-model-name-at-all" tools=[<@nx/agent/agent.nx:FunctionTool function=whoAmI />, <@nx/agent/agent.nx:FunctionTool function=callIdOf />, <@nx/agent/agent.nx:FunctionTool function=seatCount />]>
     "Be brief."
   </@nx/agent/agent.nx:Agent>

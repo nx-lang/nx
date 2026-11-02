@@ -744,3 +744,25 @@ fn the_agent_library_image_is_the_same_from_either_corpus_program() {
         image(&corpus_program("agent-tool-context"), AGENT_MODULE)
     );
 }
+
+#[test]
+fn conditional_property_spreads_require_their_feature() {
+    let corpus = corpus_program("conditional-properties");
+    let bytes = image(&corpus, "main.nx");
+    assert!(artifact(&bytes)
+        .required_features
+        .iter()
+        .any(|feature| feature == "conditional-properties-v1"));
+    PreparedModule::prepare(bytes.clone()).expect("supported feature prepares");
+    let missing = rewritten(&bytes, |artifact| {
+        artifact
+            .required_features
+            .retain(|feature| feature != "conditional-properties-v1");
+    });
+    let error = error_of(PreparedModule::prepare(missing));
+    assert!(
+        error.to_string().contains("conditional-properties-v1"),
+        "{error}"
+    );
+    assert!(codes(&error).iter().all(|code| *code == "nx-ir-malformed"));
+}

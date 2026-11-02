@@ -6,9 +6,9 @@ value title @3:1-3:26 =
   "Conformance"
 
 function root() @4:1-10:16 =
-  <drawnui.nx:SkiaLayout Spacing=8 Type="Column">
-    <drawnui.nx:SkiaLabel FontSize=24 Text=title />
+  <drawnui.nx:SkiaLayout Type="Column" Spacing=8>
+    <drawnui.nx:SkiaLabel Text=title FontSize=24 />
     <drawnui.nx:SkiaLabel Text="A snippet links by name to a catalog the runtime already holds." />
     <drawnui.nx:SkiaButton Text="Run" />
-    <drawnui.nx:SkiaButton Enabled=false Text="Share" />
+    <drawnui.nx:SkiaButton Text="Share" Enabled=false />
   </drawnui.nx:SkiaLayout>

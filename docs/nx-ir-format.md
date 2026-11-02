@@ -149,7 +149,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
 | 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<State.Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
-| 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, sorted by name like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
+| 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, in source order like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
 | 22 | forRange | `[22, slot, str, slot?, str?, node, node]` | A `for` whose iterable evaluates to a `Range` record, with the layout of a `for`. The body runs once per integer from the range's `start` upward, stopping before `end` or after it when `endInclusive` is true, with the item bound to that integer and the index, when present, to its position from zero. An empty or reversed range runs the body no times. Yields the list of body values. Requires `ranges-v1`. |
 | 23 | exists | `[23, node]` | `x?`: `true` when the operand holds at least one item, `false` when it is the empty value. Requires `occurrence-v1`. |
 | 24 | optionalMember | `[24, node, str]` | `x?.m`: the named member of the base when the base holds a value, and the empty value when the base is empty. Requires `occurrence-v1`. |
@@ -165,7 +165,14 @@ type has a *type* kind but no node kind: a function reaches an expression by nam
 `reference`. There is no node for a `null` value and none for a conditional operator: absence is
 the empty value, an empty `array`, and the presence operators are the three nodes above.
 
-Property lists are sorted by property name. Content lists are in source order.
+Property lists and content lists preserve source order. With required feature
+`conditional-properties-v1`, a property entry `[string-index("$spread"), node]` spreads the fields of the intrinsic
+binding bag produced by `node`. The string operand remains valid for older readers. A bag is an ordinary intrinsic
+element whose `$type` is compiler-owned; its tag is discarded during spreading. Lazy `if` and
+`ifIs` nodes select bags, so inactive property expressions do not run. Empty bags contribute no
+keys; explicitly empty fields retain their presence until normal target normalization. Entries are
+evaluated once in order, then content, then defaults. Nested bags remain linear in emitted size.
+Readers reject spread entries without the feature; older runtimes refuse the feature by name.
 
 #### Binary operators
 
@@ -500,7 +507,8 @@ swept cell by cell.
 ## Required features
 
 A module lists a feature only when it uses the construct that needs one, so most modules list none.
-A module that declares a derived update record lists `update-records-v1`; one that declares a
+A module whose property list contains a `$spread` entry lists `conditional-properties-v1`;
+one that declares a derived update record lists `update-records-v1`; one that declares a
 derived property union lists `property-unions-v1`; one that calls an update intrinsic lists
 `update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`; one whose type
 table holds a function type, whose node table references a function anywhere but as a `call`'s
@@ -1094,7 +1102,7 @@ tracked in `openspec/changes/investigate-cost-time-report-findings`.
 
 Equivalent `ProgramArtifact` inputs emitted with the same options produce byte-identical images.
 Declarations are in source order; entrypoints in declaration order; a node's children precede it
-and sibling lists keep source order; properties are sorted by name; strings, types and constants
+and sibling lists keep source order; properties keep source order; strings, types and constants
 are in first-use order, the module section's strings last; referenced modules are in first-use
 order; sections are in kind order. The same bytes come out of the wasm SDK, the Node SDK, the .NET
 SDK and the CLI, which share one emitter, and the parity tests compare them.

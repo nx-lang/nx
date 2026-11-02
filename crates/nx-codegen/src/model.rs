@@ -521,6 +521,8 @@ pub enum CodegenStatement {
 /// Record or element property in source order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodegenProperty {
+    /// Spread the binding bag produced by `value`; `name` is unused.
+    pub spread: bool,
     pub name: String,
     pub value: CodegenExpression,
     pub span: TextSpan,

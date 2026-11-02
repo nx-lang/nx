@@ -330,6 +330,11 @@ fn module_fingerprint(program: &CodegenProgram, module: &CodegenModule) -> u64 {
 /// The features a runtime must support to run `module`.
 fn required_features(module: &CodegenModule) -> Vec<String> {
     let mut features: Vec<String> = Vec::new();
+    if module.declarations.iter().any(|declaration| declaration_contains(declaration, |expression| {
+        matches!(&expression.kind, CodegenExpressionKind::Element(element) if element.tag == "$bindings")
+    })) {
+        features.push(nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1.to_string());
+    }
     if module.declarations.iter().any(|d| {
         declaration_contains(d, |e| {
             matches!(e.kind, CodegenExpressionKind::StandardColor { .. })
@@ -518,7 +523,10 @@ fn visit_expressions(items: &[CodegenExpression], visit: &mut dyn FnMut(&Codegen
     }
 }
 
-fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&CodegenExpression)) {
+pub(crate) fn visit_expression(
+    expression: &CodegenExpression,
+    visit: &mut dyn FnMut(&CodegenExpression),
+) {
     visit(expression);
     match &expression.kind {
         CodegenExpressionKind::Literal(_)
@@ -1287,15 +1295,17 @@ impl<'a> ModuleEmitter<'a> {
         IrItem::ints(items)
     }
 
-    /// Emits properties sorted by name, each as `[name, value]`.
+    /// Emits properties in authored order; `[$spread, value]` spreads a lazy binding bag.
     fn properties(&mut self, properties: &[CodegenProperty]) -> IrItem {
-        let mut sorted = properties.iter().collect::<Vec<_>>();
-        sorted.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
-        let items = sorted
-            .into_iter()
+        let items = properties
+            .iter()
             .map(|property| {
                 let value = self.expression(&property.value);
-                let name = self.string(&property.name);
+                let name = self.string(if property.spread {
+                    "$spread"
+                } else {
+                    &property.name
+                });
                 IrItem::ints([name, value])
             })
             .collect::<Vec<_>>();

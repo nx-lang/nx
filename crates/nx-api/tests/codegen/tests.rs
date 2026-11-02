@@ -76,11 +76,23 @@ fn execute_generated_javascript_artifact_script(
     artifact: &ProgramArtifact,
     script_body: &str,
 ) -> String {
+    execute_generated_javascript_with_transform(artifact, script_body, |source| source.to_string())
+}
+
+fn execute_generated_javascript_with_transform(
+    artifact: &ProgramArtifact,
+    script_body: &str,
+    transform: impl Fn(&str) -> String,
+) -> String {
     let output = emit_program(artifact, &CodegenOptions::javascript()).expect("js output");
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
     for file in output.files {
-        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
+        fs::write(
+            dir.path().join(file.relative_path),
+            transform(&file.content),
+        )
+        .expect("generated file");
     }
 
     let index_url = format!("file://{}", dir.path().join("index.js").display());
@@ -892,6 +904,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                                 int_field_with_default("__nx_prop_0", 3),
                             ],
                             properties: vec![CodegenProperty {
+                                spread: false,
                                 name: "explicit".to_string(),
                                 value: int_expression(4, 4),
                                 span: TextSpan::default(),
@@ -3217,9 +3230,7 @@ fn generated_typescript_for_function_reference_sites_type_checks() {
 }
 
 #[test]
-fn a_record_with_a_property_list_condition_fails_before_emission() {
-    // Codegen does not bind conditional properties yet, so it refuses the record rather than
-    // emit it without them.
+fn a_record_with_a_property_list_condition_keeps_the_active_binding() {
     let artifact = artifact_from_source(
         r#"
 type Theme = { accent:string muted?:string }
@@ -3227,13 +3238,10 @@ let flag = true
 let root() = { <Theme accent="c" if flag { muted="d" } /> }
 "#,
     );
-    let error = emit_program(&artifact, &CodegenOptions::javascript()).expect_err("codegen error");
-
-    assert!(error.diagnostics.iter().any(|diagnostic| diagnostic.code()
-        == Some("codegen-unsupported-construct")
-        && diagnostic
-            .message()
-            .contains("conditional element property fragments")));
+    assert_json_values_eq(
+        &execute_generated_javascript_artifact_root(&artifact, ""),
+        r#"{"$type":"Theme","accent":"c","muted":"d"}"#,
+    );
 }
 
 #[test]
@@ -3311,4 +3319,235 @@ fn runtime_helper_source(target: CodegenTarget) -> String {
         target,
         &format!("nx-runtime.{}", target.extension()),
     )
+}
+
+#[test]
+fn conditional_properties_preserve_values_across_executable_backends() {
+    let source = r#"
+        type User = { name:string = "Default" note?:string }
+        type State = ready | failed { message:string }
+        type Result = | ok { value:int }
+        external component <Card title:string things:int+ />
+        let greet(name:string = "Default"): string = { name }
+        let state:State = <State.failed message="offline" />
+        let root(): object = {
+            <results
+                intrinsic=<button before=1 if true { label="Save" } else { label={1 / 0} }
+                    if { true => tone="first" true => tone={1 / 0} } after=2 />
+                record=<User if false { name="ignored" } if true { note={} } />
+                union=<Result.ok if true { value=7 } else { value={1 / 0} } />
+                card=<Card if true { title="Hello" things=1 } else { title="Other" things=2 } />
+                greeting={<greet if false { name="ignored" } />}
+                nested=<notice if true { if state is {
+                    State.failed => label={state.message}
+                    else => label="ready"
+                } } />
+            />
+        }
+    "#;
+    let expected = serde_json::json!({
+        "$type":"results",
+        "intrinsic":{"$type":"button","before":1,"label":"Save","tone":"first","after":2},
+        "record":{"$type":"User","name":"Default"},
+        "union":{"$type":"Result.ok","value":7},
+        "card":{"$type":"Card","title":"Hello","things":[1]},
+        "greeting":"Default",
+        "nested":{"$type":"notice","label":"offline"}
+    });
+    let artifact = artifact_from_source(source);
+    assert_json_values_eq(
+        &interpreter_json_artifact_root(&artifact),
+        &expected.to_string(),
+    );
+    assert_json_values_eq(
+        &execute_generated_javascript_artifact_root(&artifact, ""),
+        &expected.to_string(),
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+#[test]
+fn conditional_property_images_and_source_grow_linearly() {
+    fn sizes(count: usize, shape: &str) -> (usize, usize) {
+        let entries = match shape {
+            "nested" => (0..count).fold(String::new(), |nested, index| {
+                format!("if true {{ p{index}=1 {nested} }} else {{ p{index}=2 }}")
+            }),
+            "condition-list" => (0..count)
+                .map(|index| format!("if {{ true => p{index}=1 else => p{index}=2 }}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            _ => (0..count)
+                .map(|index| format!("if true {{ p{index}=1 }} else {{ p{index}=2 }}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        let artifact = artifact_from_source(&format!("let root() = <box {entries} />"));
+        let output =
+            nx_codegen::emit_nx_ir(&artifact, &nx_codegen::NxIrEmitOptions::default()).expect("ir");
+        let image_size = output.iter().map(|file| file.bytes.len()).sum();
+        let source_size = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js").len();
+        (image_size, source_size)
+    }
+    for shape in ["independent", "nested", "condition-list"] {
+        let small = sizes(4, shape);
+        let medium = sizes(8, shape);
+        let large = sizes(12, shape);
+        // Compare equal-sized increments so fixed module overhead cannot mask expansion.
+        // A few bytes of tolerance allow decimal indices and offsets to gain a digit.
+        assert!(
+            large.0 - medium.0 <= medium.0 - small.0 + 64,
+            "{shape} IR growth is not linear: {small:?}, {medium:?}, {large:?}"
+        );
+        assert!(
+            large.1 - medium.1 <= medium.1 - small.1 + 64,
+            "{shape} source growth is not linear: {small:?}, {medium:?}, {large:?}"
+        );
+    }
+}
+
+#[test]
+fn record_call_diagnostics_use_semantic_targets_and_caller_locations() {
+    for target in ["User", "Alias", "Model.User"] {
+        for arguments in ["", "1"] {
+            let source = format!("import {{ User, User as Model.User }} from \"./model.nx\"\ntype Alias = User\nlet root() = {{ {target}({arguments}) }}");
+            let workspace = NxWorkspace::new(vec![
+                NxWorkspaceModule::from_source("main.nx", source.as_str()).unwrap(),
+                NxWorkspaceModule::from_source("model.nx", "abstract type Base = { age:int = 30 }\nexport type User extends Base = { name:string = \"Bob\" }").unwrap(),
+            ]).unwrap();
+            let errors = build_workspace_program_artifact(
+                &workspace,
+                "main.nx",
+                &ProgramBuildContext::empty(),
+            )
+            .expect_err("record call rejected");
+            assert_eq!(errors.len(), 1, "{target}: {errors:?}");
+            assert_eq!(
+                errors[0].code.as_deref(),
+                Some("record-construction-requires-element")
+            );
+            assert_eq!(errors[0].labels[0].file, "main.nx");
+            assert_eq!(
+                &source[errors[0].labels[0].span.start_byte as usize
+                    ..errors[0].labels[0].span.end_byte as usize],
+                format!("{target}({arguments})")
+            );
+        }
+    }
+}
+
+#[test]
+fn conditional_properties_evaluate_once_in_authored_order_for_each_target() {
+    let source = r#"
+        type Data = { z:int a:int y:int }
+        type Choice = | item { z:int a:int y:int }
+        external component <Card z:int a:int y:int />
+        let mark(n:int): int = { n }
+        let guard(n:int): boolean = { mark(n) > 0 }
+        let target(z:int, a:int, y:int): int = { z + a + y }
+        let makeIntrinsic(): object = <box z={mark(1)} if guard(2) { a={mark(3)} } else { a=0 } y={mark(4)} />
+        let makeRecord(): Data = <Data z={mark(1)} if guard(2) { a={mark(3)} } else { a=0 } y={mark(4)} />
+        let makeUnion(): Choice = <Choice.item z={mark(1)} if guard(2) { a={mark(3)} } else { a=0 } y={mark(4)} />
+        let makeComponent() = <Card z={mark(1)} if guard(2) { a={mark(3)} } else { a=0 } y={mark(4)} />
+        let makeFunction(): int = <target z={mark(1)} if guard(2) { a={mark(3)} } else { a=0 } y={mark(4)} />
+        let makeUpdate() = <Data.Update z={mark(1)} if guard(2) { a={mark(3)} } else { a=0 } y={mark(4)} />
+        let makeDirectUpdate() = <Data.Update z={mark(1)} a={mark(2)} y={mark(3)} />
+        let root() = { 0 }
+    "#;
+    let artifact = artifact_from_source(source);
+    let output = execute_generated_javascript_with_transform(
+        &artifact,
+        r#"
+const events = [];
+for (const name of ["makeIntrinsic", "makeRecord", "makeUnion", "makeComponent", "makeFunction", "makeUpdate", "makeDirectUpdate"]) {
+  globalThis.__nx_events = [];
+  m[name]();
+  events.push(globalThis.__nx_events);
+}
+console.log(JSON.stringify(events));
+"#,
+        |source| {
+            source.replace(
+                "export function mark(n) {",
+                "export function mark(n) { globalThis.__nx_events.push(n);",
+            )
+        },
+    );
+    assert_json_values_eq(
+        &output,
+        "[[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3,4],[1,2,3]]",
+    );
+}
+
+#[test]
+fn conditional_record_defaults_read_selected_previous_fields_and_preserve_user_names() {
+    let source = r#"
+        type Pair = { a:int = 2 b:int = { a + 1 } }
+        let make(__nx_input:int, __nx_match:int): Pair = {
+            <Pair if __nx_match > 0 { a={__nx_input} } />
+        }
+        let root() = { make(7, 1) }
+    "#;
+    let artifact = artifact_from_source(source);
+    let expected = r#"{"$type":"Pair","a":7,"b":8}"#;
+    assert_json_values_eq(&interpreter_json_artifact_root(&artifact), expected);
+    assert_json_values_eq(
+        &execute_generated_javascript_artifact_root(&artifact, ""),
+        expected,
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+#[test]
+fn conditional_properties_preserve_updates_numeric_matches_and_content() {
+    let declarations = r#"
+        type User = { note?: string }
+        let patch(active: boolean) = <User.Update if active { note={} } />
+        let numeric(n: int): object = <box if n is { > 1 => value="large" else => value="small" } />
+        let content(active: boolean): object = <box if active { tone="warm" }><child /></box>
+    "#;
+    let cases = [
+        (
+            "patch(true)",
+            serde_json::json!({ "$type": "User.Update", "note": null }),
+        ),
+        (
+            "patch(false)",
+            serde_json::json!({ "$type": "User.Update" }),
+        ),
+        (
+            "numeric(0)",
+            serde_json::json!({ "$type": "box", "value": "small" }),
+        ),
+        (
+            "numeric(2)",
+            serde_json::json!({ "$type": "box", "value": "large" }),
+        ),
+        (
+            "content(true)",
+            serde_json::json!({
+                "$type": "box", "tone": "warm", "content": { "$type": "child" }
+            }),
+        ),
+        (
+            "content(false)",
+            serde_json::json!({
+                "$type": "box", "content": { "$type": "child" }
+            }),
+        ),
+    ];
+    for (call, expected) in cases {
+        let artifact = artifact_from_source(&format!(
+            "{declarations}\nlet root(): object = {{ {call} }}"
+        ));
+        assert_json_values_eq(
+            &interpreter_json_artifact_root(&artifact),
+            &expected.to_string(),
+        );
+        assert_json_values_eq(
+            &execute_generated_javascript_artifact_root(&artifact, ""),
+            &expected.to_string(),
+        );
+        assert_generated_typescript_artifact_type_checks(&artifact);
+    }
 }

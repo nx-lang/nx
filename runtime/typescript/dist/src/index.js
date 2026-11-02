@@ -13,6 +13,7 @@ export const NX_IR_SCHEMA_VERSION = 6;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 import { nxStandardColor, nxStandardColorNames, nxStandardColorArities } from "./color.js";
 import { nxStandardMath, nxStandardMathNames, nxStandardMathArities } from "./math.js";
+export const NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1 = "conditional-properties-v1";
 export const NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1 = "standard-math-v1";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -35,6 +36,7 @@ export const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
 export const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
 const knownFeatures = new Set([
     "standard-color-v1",
+    NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
     NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
@@ -852,7 +854,7 @@ const NODES = ["node"];
 const OPT_NODES = ["optNode"];
 const STRS = ["str"];
 const REFS = ["ref"];
-const PROPERTY = ["str", "node"];
+const PROPERTY = ["propertyName", "node"];
 const FIELD = ["str", "type", "optNode", "int"];
 const PARAM = ["str", "type", "int"];
 const DECLARED_PARAM = ["str", "type", "optNode", "int"];
@@ -1138,6 +1140,12 @@ class TableReader {
                 return (textTypes.includes(name) ||
                     this.#fail(`${what} names '${name}', which is not a primitive type with a text form.`));
             }
+            case "propertyName":
+                if (!inRange("string", cell, this.#image.stringCount))
+                    return false;
+                return this.#image.string(cell) !== "$spread"
+                    || this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1)
+                    || this.#fail(`${what} property spread requires feature 'conditional-properties-v1'.`);
             case "optStr":
                 return cell === NX_IR_NONE || inRange("string", cell, this.#image.stringCount);
             case "type":
@@ -2805,7 +2813,20 @@ function propertiesAt(context, entry, at) {
     const properties = {};
     let position = at + 1;
     for (let index = 0; index < count; index += 1) {
-        properties[image.string(entry[position])] = evalNode(entry[position + 1], context);
+        const key = entry[position];
+        const value = evalNode(entry[position + 1], context);
+        if (image.string(key) === "$spread") {
+            if (typeof value !== "object" || value === null || Array.isArray(value)) {
+                fail("nx-ir-type", "Expected a property binding bag.");
+            }
+            for (const [name, binding] of Object.entries(value)) {
+                if (name !== "$type")
+                    properties[name] = binding;
+            }
+        }
+        else {
+            properties[image.string(key)] = value;
+        }
         position += 2;
     }
     return { properties, next: position };

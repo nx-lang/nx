@@ -100,7 +100,6 @@ fn test_if_with_an_explicit_empty_else() {
 }
 
 #[test]
-#[ignore = "Pending complete-ir-construction-lowering"]
 fn test_property_fragment_on_a_declared_record_is_kept() {
     let source = r#"
         type Theme = { accent:string muted?:string }
@@ -118,7 +117,6 @@ fn test_property_fragment_on_a_declared_record_is_kept() {
 }
 
 #[test]
-#[ignore = "Pending complete-ir-construction-lowering"]
 fn test_property_fragment_simple_conditional_selects_then_and_else() {
     let source = r#"
         let view(enabled:boolean) = {
@@ -148,7 +146,6 @@ fn test_property_fragment_simple_conditional_selects_then_and_else() {
 }
 
 #[test]
-#[ignore = "Pending complete-ir-construction-lowering"]
 fn test_property_fragment_condition_list_selects_first_matching_arm_and_else() {
     let source = r#"
         let view(isError:boolean, isWarning:boolean) = {
@@ -180,7 +177,6 @@ fn test_property_fragment_condition_list_selects_first_matching_arm_and_else() {
 }
 
 #[test]
-#[ignore = "Pending complete-ir-construction-lowering"]
 fn test_property_fragment_match_selects_matching_arm() {
     let source = r#"
         type LoadState = idle | failed { message:string }

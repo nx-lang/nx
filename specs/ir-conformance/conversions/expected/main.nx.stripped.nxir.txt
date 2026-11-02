@@ -183,7 +183,7 @@ function joinedFloat32Product() =
   scaledJoin(2.299999952316284)
 
 function widened() =
-  <Box opacity=count ratios=[count, 2.5] width=count />
+  <Box width=count ratios=[count, 2.5] opacity=count />
 
 function root() =
   total()

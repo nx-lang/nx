@@ -105,6 +105,10 @@ declaration or expression. A short, simple body can stay on one line.
 Use one field per line for a record with several fields or field documentation. A small record
 can stay on one line. Do not add commas between record fields.
 
+Construct records using element syntax and named properties, such as `<User name="Bob" age=42 />`.
+Parenthesized record construction is rejected. Use an explicitly declared factory when you want
+positional arguments.
+
 When a function signature or call exceeds the line-length target, put each parameter or argument
 on its own line, indented by 2 spaces. Keep separating commas, omit the trailing comma, and align
 the closing parenthesis with the start of the declaration or call. Keep the return annotation

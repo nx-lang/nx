@@ -19,26 +19,26 @@ value muted @14:1-14:22 =
   "#94A3B8"
 
 value metrics @15:1-20:2 =
-  [<Metric healthy=true name="Latency" share=0.42 unit="ms" value=42.5 />, <Metric healthy=true name="Errors" share=0.08 unit="%" value=0.8 />, <Metric healthy=false name="Saturation" share=0.91 unit="%" value=91.0 />, <Metric healthy=true name="Throughput" share=0.64 unit="rps" value=1280.0 />]
+  [<Metric name="Latency" value=42.5 unit="ms" share=0.42 healthy=true />, <Metric name="Errors" value=0.8 unit="%" share=0.08 healthy=true />, <Metric name="Saturation" value=91.0 unit="%" share=0.91 healthy=false />, <Metric name="Throughput" value=1280.0 unit="rps" share=0.64 healthy=true />]
 
 value regions @21:1-21:49 =
   ["eu-west", "us-east", "ap-south"]
 
 function root() @23:1-118:12 =
-  <catalog.nx:Layout BackgroundColor="#0B1220" Kind=catalog.nx:LayoutKind.Vertical Padding=<catalog.nx:Insets Bottom=16.0 Left=24.0 Right=24.0 Top=16.0 /> Spacing=16.0>
-    <catalog.nx:Row AlignsBaselines=true Spacing=12.0 VerticalAlign=catalog.nx:Align.Center>
-      <catalog.nx:Icon Name="pulse" OverlayColor=accent Size=28.0 />
-      <catalog.nx:Label FontSize=24.0 IsHeading=true Text=title TextColor="#F8FAFC" Weight=catalog.nx:FontWeight.Bold />
-      <catalog.nx:Shape HorizontalFill=1.0 Kind=catalog.nx:ShapeKind.Rectangle Opacity=0.0 />
-      <catalog.nx:Search Keyboard=catalog.nx:KeyboardKind.Text MaxLength=64 Placeholder="Filter services" Return=catalog.nx:ReturnKey.Find Width=220.0 />
-      <catalog.nx:Button Corners=<catalog.nx:Corners BottomLeft=8.0 BottomRight=8.0 TopLeft=8.0 TopRight=8.0 /> IsPrimary=true Text="Refresh" Touch=catalog.nx:TouchEffect.Ripple />
-      <catalog.nx:Avatar Height=32.0 Initials="NX" Ring=<catalog.nx:Edge Color=accent Width=2.0 /> Width=32.0 />
+  <catalog.nx:Layout Kind=catalog.nx:LayoutKind.Vertical Spacing=16.0 BackgroundColor="#0B1220" Padding=<catalog.nx:Insets Left=24.0 Top=16.0 Right=24.0 Bottom=16.0 />>
+    <catalog.nx:Row Spacing=12.0 VerticalAlign=catalog.nx:Align.Center AlignsBaselines=true>
+      <catalog.nx:Icon Name="pulse" Size=28.0 OverlayColor=accent />
+      <catalog.nx:Label Text=title FontSize=24.0 Weight=catalog.nx:FontWeight.Bold TextColor="#F8FAFC" IsHeading=true />
+      <catalog.nx:Shape Kind=catalog.nx:ShapeKind.Rectangle HorizontalFill=1.0 Opacity=0.0 />
+      <catalog.nx:Search Placeholder="Filter services" Keyboard=catalog.nx:KeyboardKind.Text Return=catalog.nx:ReturnKey.Find MaxLength=64 Width=220.0 />
+      <catalog.nx:Button Text="Refresh" IsPrimary=true Touch=catalog.nx:TouchEffect.Ripple Corners=<catalog.nx:Corners TopLeft=8.0 TopRight=8.0 BottomRight=8.0 BottomLeft=8.0 /> />
+      <catalog.nx:Avatar Initials="NX" Width=32.0 Height=32.0 Ring=<catalog.nx:Edge Color=accent Width=2.0 /> />
     </catalog.nx:Row>
-    <catalog.nx:Scroll Bars=catalog.nx:BarVisibility.Auto Bounces=false Mode=catalog.nx:ScrollMode.Vertical VerticalFill=1.0>
+    <catalog.nx:Scroll Mode=catalog.nx:ScrollMode.Vertical Bars=catalog.nx:BarVisibility.Auto Bounces=false VerticalFill=1.0>
       <catalog.nx:Column Spacing=20.0>
-        <catalog.nx:Grid ColumnSpacing=16.0 Columns="*,*" MaxColumns=2 RowSpacing=16.0>
+        <catalog.nx:Grid Columns="*,*" ColumnSpacing=16.0 RowSpacing=16.0 MaxColumns=2>
           for metric, index in metrics yield
-            <catalog.nx:Frame Corners=<catalog.nx:Corners BottomLeft=14.0 BottomRight=14.0 TopLeft=14.0 TopRight=14.0 /> FillColor="#111A2E" HasShadow=true Kind=catalog.nx:ShapeKind.Rectangle Shadow=<catalog.nx:Shadow Blur=12.0 Color="#00000066" Y=4.0 />
+            <catalog.nx:Frame Kind=catalog.nx:ShapeKind.Rectangle FillColor="#111A2E" HasShadow=true Corners=<catalog.nx:Corners TopLeft=14.0 TopRight=14.0 BottomRight=14.0 BottomLeft=14.0 /> Shadow=<catalog.nx:Shadow Color="#00000066" Y=4.0 Blur=12.0 />
               Border=<catalog.nx:Edge
                 Color=if metric.healthy then
                   "#1E293B"
@@ -47,76 +47,76 @@ function root() @23:1-118:12 =
               >
               </catalog.nx:Edge>
             >
-              <catalog.nx:Column Padding=<catalog.nx:Insets Bottom=14.0 Left=16.0 Right=16.0 Top=14.0 /> Spacing=6.0>
+              <catalog.nx:Column Spacing=6.0 Padding=<catalog.nx:Insets Left=16.0 Top=14.0 Right=16.0 Bottom=14.0 />>
                 <catalog.nx:Row Spacing=8.0>
-                  <catalog.nx:Label Case=catalog.nx:TextCase.Upper FontSize=13.0 LetterSpacing=0.6 Text=metric.name TextColor=muted />
+                  <catalog.nx:Label Text=metric.name FontSize=13.0 TextColor=muted Case=catalog.nx:TextCase.Upper LetterSpacing=0.6 />
                   if metric.healthy then
-                    <catalog.nx:Icon Name="check" OverlayColor="#22C55E" Size=14.0 />
+                    <catalog.nx:Icon Name="check" Size=14.0 OverlayColor="#22C55E" />
                   else
-                    <catalog.nx:Icon Name="alert" OverlayColor="#EF4444" Size=14.0 />
+                    <catalog.nx:Icon Name="alert" Size=14.0 OverlayColor="#EF4444" />
                 </catalog.nx:Row>
-                <catalog.nx:Row AlignsBaselines=true Spacing=4.0>
-                  <catalog.nx:Label FontSize=34.0 Text=("" concat text<float64>(metric.value)) TextColor="#FFFFFF" Weight=catalog.nx:FontWeight.SemiBold />
-                  <catalog.nx:Label FontSize=14.0 Text=metric.unit TextColor=muted />
+                <catalog.nx:Row Spacing=4.0 AlignsBaselines=true>
+                  <catalog.nx:Label Text=("" concat text<float64>(metric.value)) FontSize=34.0 Weight=catalog.nx:FontWeight.SemiBold TextColor="#FFFFFF" />
+                  <catalog.nx:Label Text=metric.unit FontSize=14.0 TextColor=muted />
                 </catalog.nx:Row>
-                <catalog.nx:Progress ActiveColor=accent Indicator=catalog.nx:IndicatorKind.Bar TrackColor="#1E293B" TrackHeight=6.0 Value=metric.share />
-                <catalog.nx:Label FontSize=11.0 HorizontalTextAlign=catalog.nx:TextAlign.End Text=("#" concat text<int>(index)) TextColor="#475569" />
+                <catalog.nx:Progress Value=metric.share Indicator=catalog.nx:IndicatorKind.Bar TrackHeight=6.0 ActiveColor=accent TrackColor="#1E293B" />
+                <catalog.nx:Label Text=("#" concat text<int>(index)) FontSize=11.0 TextColor="#475569" HorizontalTextAlign=catalog.nx:TextAlign.End />
               </catalog.nx:Column>
             </catalog.nx:Frame>
         </catalog.nx:Grid>
-        <catalog.nx:Frame Corners=<catalog.nx:Corners BottomLeft=14.0 BottomRight=14.0 TopLeft=14.0 TopRight=14.0 /> Fill=<catalog.nx:Gradient Angle=135.0 Colors=["#1D4ED8", "#7C3AED"] Kind=catalog.nx:GradientKind.Linear Stops=[0.0, 1.0] /> Kind=catalog.nx:ShapeKind.Rectangle>
-          <catalog.nx:Row Padding=<catalog.nx:Insets Bottom=16.0 Left=20.0 Right=20.0 Top=16.0 /> Spacing=16.0 VerticalAlign=catalog.nx:Align.Center>
-            <catalog.nx:Animation Height=48.0 IsPlaying=true Repeat=3 Source="deploy.json" Speed=1.5 Width=48.0 />
-            <catalog.nx:Column HorizontalFill=1.0 Spacing=2.0>
-              <catalog.nx:Label FontSize=16.0 Text="Deploy in progress" TextColor="#FFFFFF" Weight=catalog.nx:FontWeight.Medium />
-              <catalog.nx:RichText AllowsLinks=false Markup="Rolling out <b>v0.6.0</b> to three regions." TextColor="#DBEAFE" />
+        <catalog.nx:Frame Kind=catalog.nx:ShapeKind.Rectangle Fill=<catalog.nx:Gradient Kind=catalog.nx:GradientKind.Linear Angle=135.0 Colors=["#1D4ED8", "#7C3AED"] Stops=[0.0, 1.0] /> Corners=<catalog.nx:Corners TopLeft=14.0 TopRight=14.0 BottomRight=14.0 BottomLeft=14.0 />>
+          <catalog.nx:Row Spacing=16.0 Padding=<catalog.nx:Insets Left=20.0 Top=16.0 Right=20.0 Bottom=16.0 /> VerticalAlign=catalog.nx:Align.Center>
+            <catalog.nx:Animation Source="deploy.json" IsPlaying=true Repeat=3 Speed=1.5 Width=48.0 Height=48.0 />
+            <catalog.nx:Column Spacing=2.0 HorizontalFill=1.0>
+              <catalog.nx:Label Text="Deploy in progress" FontSize=16.0 Weight=catalog.nx:FontWeight.Medium TextColor="#FFFFFF" />
+              <catalog.nx:RichText Markup="Rolling out <b>v0.6.0</b> to three regions." AllowsLinks=false TextColor="#DBEAFE" />
             </catalog.nx:Column>
-            <catalog.nx:Spinner Color="#FFFFFF" Indicator=catalog.nx:IndicatorKind.Ring Size=20.0 />
-            <catalog.nx:Link IsUnderlined=true OpensExternally=true Text="Details" Url="https://example.com/deploys/42" />
+            <catalog.nx:Spinner Indicator=catalog.nx:IndicatorKind.Ring Size=20.0 Color="#FFFFFF" />
+            <catalog.nx:Link Text="Details" Url="https://example.com/deploys/42" OpensExternally=true IsUnderlined=true />
           </catalog.nx:Row>
         </catalog.nx:Frame>
-        <catalog.nx:Label Case=catalog.nx:TextCase.Upper FontSize=13.0 Text="Regions" TextColor=muted />
-        <catalog.nx:Wrap LineSpacing=8.0 Spacing=8.0>
+        <catalog.nx:Label Text="Regions" FontSize=13.0 TextColor=muted Case=catalog.nx:TextCase.Upper />
+        <catalog.nx:Wrap Spacing=8.0 LineSpacing=8.0>
           for region in regions yield
-            <catalog.nx:Button BackgroundColor="#111A2E" IconName="globe" Text=region Touch=catalog.nx:TouchEffect.Highlight />
+            <catalog.nx:Button Text=region IconName="globe" Touch=catalog.nx:TouchEffect.Highlight BackgroundColor="#111A2E" />
         </catalog.nx:Wrap>
-        <catalog.nx:Curve Cap=catalog.nx:StrokeCap.Round Data="M0 40 L40 12 L80 28 L120 4" Join=catalog.nx:StrokeJoin.Round Kind=catalog.nx:ShapeKind.Outline Points=[<catalog.nx:Point X=0.0 Y=40.0 />, <catalog.nx:Point X=40.0 Y=12.0 />, <catalog.nx:Point X=80.0 Y=28.0 />, <catalog.nx:Point X=120.0 Y=4.0 />] StrokeColor=accent StrokeWidth=2.0 ViewportHeight=44.0 ViewportWidth=120.0 />
-        <catalog.nx:Line DashPattern="4 4" StrokeColor="#1E293B" StrokeWidth=1.0 X1=0.0 X2=320.0 Y1=0.0 Y2=0.0 />
+        <catalog.nx:Curve Kind=catalog.nx:ShapeKind.Outline Data="M0 40 L40 12 L80 28 L120 4" StrokeColor=accent StrokeWidth=2.0 Cap=catalog.nx:StrokeCap.Round Join=catalog.nx:StrokeJoin.Round ViewportWidth=120.0 ViewportHeight=44.0 Points=[<catalog.nx:Point X=0.0 Y=40.0 />, <catalog.nx:Point X=40.0 Y=12.0 />, <catalog.nx:Point X=80.0 Y=28.0 />, <catalog.nx:Point X=120.0 Y=4.0 />] />
+        <catalog.nx:Line X1=0.0 Y1=0.0 X2=320.0 Y2=0.0 StrokeColor="#1E293B" StrokeWidth=1.0 DashPattern="4 4" />
         <catalog.nx:Stack Spacing=10.0>
           <catalog.nx:Row Spacing=12.0 VerticalAlign=catalog.nx:Align.Center>
-            <catalog.nx:Label FontSize=15.0 HorizontalFill=1.0 Text="Alerts" TextColor="#E2E8F0" />
+            <catalog.nx:Label Text="Alerts" FontSize=15.0 TextColor="#E2E8F0" HorizontalFill=1.0 />
             <catalog.nx:Switch IsOn=true OnColor=accent />
           </catalog.nx:Row>
           <catalog.nx:Row Spacing=12.0 VerticalAlign=catalog.nx:Align.Center>
-            <catalog.nx:Label FontSize=15.0 HorizontalFill=1.0 Text="Weekly digest" TextColor="#E2E8F0" />
-            <catalog.nx:Checkbox BoxSize=18.0 CheckColor=accent />
+            <catalog.nx:Label Text="Weekly digest" FontSize=15.0 TextColor="#E2E8F0" HorizontalFill=1.0 />
+            <catalog.nx:Checkbox CheckColor=accent BoxSize=18.0 />
           </catalog.nx:Row>
           <catalog.nx:Row Spacing=12.0 VerticalAlign=catalog.nx:Align.Center>
-            <catalog.nx:Label FontSize=15.0 Text="Sampling" TextColor="#E2E8F0" />
-            <catalog.nx:Slider ActiveColor=accent HorizontalFill=1.0 Kind=catalog.nx:SliderKind.Single Step=0.05 Value=0.25 />
-            <catalog.nx:Stepper Maximum=10.0 Minimum=1.0 Step=1.0 Value=5.0 />
+            <catalog.nx:Label Text="Sampling" FontSize=15.0 TextColor="#E2E8F0" />
+            <catalog.nx:Slider Kind=catalog.nx:SliderKind.Single Value=0.25 Step=0.05 HorizontalFill=1.0 ActiveColor=accent />
+            <catalog.nx:Stepper Value=5.0 Minimum=1.0 Maximum=10.0 Step=1.0 />
           </catalog.nx:Row>
-          <catalog.nx:Entry Keyboard=catalog.nx:KeyboardKind.Url Placeholder="Webhook URL" Return=catalog.nx:ReturnKey.Done ShowsClearButton=true />
-          <catalog.nx:Editor AutoGrows=true IsSpellChecked=true MinLinesShown=3 Placeholder="Notes for the on-call" />
+          <catalog.nx:Entry Placeholder="Webhook URL" Keyboard=catalog.nx:KeyboardKind.Url Return=catalog.nx:ReturnKey.Done ShowsClearButton=true />
+          <catalog.nx:Editor Placeholder="Notes for the on-call" MinLinesShown=3 AutoGrows=true IsSpellChecked=true />
         </catalog.nx:Stack>
-        <catalog.nx:Carousel IsLooping=true PeekAmount=24.0 SelectedIndex=0 Snap=catalog.nx:SnapMode.Center>
-          <catalog.nx:Image AltText="Europe" Fit=catalog.nx:ImageFit.Cover Quality=catalog.nx:ImageQuality.High Source="eu.png" />
-          <catalog.nx:Image AltText="Americas" Fit=catalog.nx:ImageFit.Cover Quality=catalog.nx:ImageQuality.High Source="us.png" />
+        <catalog.nx:Carousel SelectedIndex=0 PeekAmount=24.0 Snap=catalog.nx:SnapMode.Center IsLooping=true>
+          <catalog.nx:Image Source="eu.png" AltText="Europe" Fit=catalog.nx:ImageFit.Cover Quality=catalog.nx:ImageQuality.High />
+          <catalog.nx:Image Source="us.png" AltText="Americas" Fit=catalog.nx:ImageFit.Cover Quality=catalog.nx:ImageQuality.High />
           <catalog.nx:Svg Markup="<svg viewBox='0 0 8 8'><circle r='4' cx='4' cy='4' /></svg>" UsesIntrinsicSize=true />
         </catalog.nx:Carousel>
-        <catalog.nx:List HeaderText="Recent events" ItemSpacing=4.0 Mode=catalog.nx:ScrollMode.Vertical>
-          <catalog.nx:Label FontSize=13.0 MaxLines=1 Text="12:04 deploy started" TextColor=muted Trim=catalog.nx:TextTrim.Ellipsis />
-          <catalog.nx:Label FontSize=13.0 MaxLines=1 Text="12:01 alert resolved" TextColor=muted Trim=catalog.nx:TextTrim.Ellipsis />
+        <catalog.nx:List ItemSpacing=4.0 HeaderText="Recent events" Mode=catalog.nx:ScrollMode.Vertical>
+          <catalog.nx:Label Text="12:04 deploy started" FontSize=13.0 TextColor=muted Trim=catalog.nx:TextTrim.Ellipsis MaxLines=1 />
+          <catalog.nx:Label Text="12:01 alert resolved" FontSize=13.0 TextColor=muted Trim=catalog.nx:TextTrim.Ellipsis MaxLines=1 />
         </catalog.nx:List>
       </catalog.nx:Column>
     </catalog.nx:Scroll>
-    <catalog.nx:Drawer DimAmount=0.4 Edge=catalog.nx:DrawerEdge.Right IsModal=true IsOpen=false Transition=catalog.nx:TransitionKind.Slide>
-      <catalog.nx:Label FontSize=18.0 Text="Filters" Weight=catalog.nx:FontWeight.Bold />
+    <catalog.nx:Drawer Edge=catalog.nx:DrawerEdge.Right IsOpen=false IsModal=true DimAmount=0.4 Transition=catalog.nx:TransitionKind.Slide>
+      <catalog.nx:Label Text="Filters" FontSize=18.0 Weight=catalog.nx:FontWeight.Bold />
     </catalog.nx:Drawer>
-    <catalog.nx:Popup Anchor=<catalog.nx:Point X=12.0 Y=48.0 /> ArrowSize=8.0 IsOpen=false>
+    <catalog.nx:Popup IsOpen=false Anchor=<catalog.nx:Point X=12.0 Y=48.0 /> ArrowSize=8.0>
       <catalog.nx:Label Text="Copied" />
     </catalog.nx:Popup>
-    <catalog.nx:Sheet Detents=[0.25, 0.6, 1.0] IsOpen=false ShowsGrabber=true>
+    <catalog.nx:Sheet IsOpen=false Detents=[0.25, 0.6, 1.0] ShowsGrabber=true>
       <catalog.nx:Label Text="Share this view" />
     </catalog.nx:Sheet>
   </catalog.nx:Layout>

@@ -1080,12 +1080,11 @@ fn test_element_call_invokes_element_defined_function() {
 }
 
 #[test]
-#[ignore = "Pending complete-ir-construction-lowering"]
-fn test_paren_call_constructs_record_type_positionally() {
+fn test_element_constructs_record_with_defaults() {
     let source = r#"
         type User = { name:string age:int = 30 }
-        let getName(): string = { User("Bob", 42).name }
-        let getAge(): int = { User("Bob").age }
+        let getName(): string = { <User name="Bob" age=42 />.name }
+        let getAge(): int = { <User name="Bob" />.age }
     "#;
 
     let result = execute_function(source, "getName", vec![])
@@ -1550,4 +1549,17 @@ fn test_component_invocation_binds_body_to_declared_content_prop() {
             fields: FxHashMap::default(),
         }
     );
+}
+
+#[test]
+fn test_paren_record_construction_requires_element() {
+    for call in ["User()", "User(1)", "User(1, 2, 3)"] {
+        let source = format!("type User = {{ age:int = 30 }}\nlet root() = {{ {call} }}");
+        let error = execute_function(&source, "root", vec![]).expect_err("record call rejected");
+        assert!(
+            error.contains("record-construction-requires-element"),
+            "{error}"
+        );
+        assert!(error.contains("<User ... />"), "{error}");
+    }
 }

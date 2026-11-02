@@ -2311,3 +2311,102 @@ fn test_a_property_mismatch_under_conditions_is_reported_once_per_element() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn inactive_property_branches_are_statically_checked() {
+    for source in [
+        "let root() = <box if false { value={missing} } />",
+        "type User = { age:int = 30 }\nlet root() = <User if false { age=\"wrong\" } />",
+    ] {
+        let checked = check_str(source, "inactive-properties.nx");
+        assert!(!checked.is_ok(), "inactive branches must still be checked");
+    }
+}
+
+#[test]
+fn record_calls_resolve_types_without_reclassifying_factories_or_values() {
+    for call in ["User()", "Alias(1)", "User(1, 2)"] {
+        let checked = check_str(
+            &format!(
+                "type User = {{ age:int = 30 }}\ntype Alias = User\nlet root() = {{ {call} }}"
+            ),
+            "record-call.nx",
+        );
+        assert_eq!(checked.errors().len(), 1, "{:?}", checked.errors());
+        assert_eq!(
+            checked.errors()[0].code(),
+            Some("record-construction-requires-element")
+        );
+    }
+    let accepted = check_str("type User = { age:int = 30 }\nlet make(age:int): User = <User age={age} />\nlet root() = { make(42) }", "factory.nx");
+    assert!(accepted.is_ok(), "{:?}", accepted.errors());
+}
+
+#[test]
+fn generic_record_calls_and_shadowing_keep_their_semantic_classification() {
+    let rejected = check_str(
+        "type Box = { T:type value:T }\nlet root() = { Box(42) }",
+        "generic-call.nx",
+    );
+    assert_eq!(rejected.errors().len(), 1, "{:?}", rejected.errors());
+    assert_eq!(
+        rejected.errors()[0].code(),
+        Some("record-construction-requires-element")
+    );
+    let accepted = check_str(
+        "type Box = { T:type value:T }\nlet root() = <Box T=int value=42 />",
+        "generic-element.nx",
+    );
+    assert!(accepted.is_ok(), "{:?}", accepted.errors());
+    let shadowed = check_str(
+        "type User = { value:int }\nlet f(User: <function value:int />: int): int = { User(1) }",
+        "shadowed.nx",
+    );
+    assert!(
+        shadowed
+            .errors()
+            .iter()
+            .any(|error| error.code() == Some("positional-call-of-function-value")),
+        "{:?}",
+        shadowed.errors()
+    );
+    assert!(!shadowed
+        .errors()
+        .iter()
+        .any(|error| error.code() == Some("record-construction-requires-element")));
+}
+
+#[test]
+fn intrinsic_content_cannot_conflict_with_body_content() {
+    for source in [
+        "let root() = <box if true { content=1 }><child /></box>",
+        "let root() = <box content=1><child /></box>",
+    ] {
+        let checked = check_str(source, "content-conflict.nx");
+        assert!(
+            checked
+                .errors()
+                .iter()
+                .any(|error| error.code() == Some("intrinsic-content-conflict")),
+            "{:?}",
+            checked.errors()
+        );
+    }
+}
+
+#[test]
+fn defaulted_required_properties_reject_explicit_empty_conditional_bindings() {
+    let checked = check_str(
+        r#"type Defaults = { tags: string+ = { "a" } }
+        let root() = <Defaults if true { tags={} } />"#,
+        "defaulted-required-empty.nx",
+    );
+    assert!(
+        checked
+            .errors()
+            .iter()
+            .any(|error| error.code() == Some("record-field-type-mismatch")),
+        "a default does not make an explicit empty binding valid: {:?}",
+        checked.errors()
+    );
+}

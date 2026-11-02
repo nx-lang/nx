@@ -26,6 +26,8 @@ None.
 
 ### Modified Capabilities
 
+- `nx-ir-format`: Version property spreads with `conditional-properties-v1` within schema 6.
+- `typescript-ir-runtime`: Prepare and evaluate ordered conditional property spreads.
 - `source-analysis-pipeline`: Reject positional record construction consistently before codegen.
 - `executable-code-generation`: Execute conditional properties through all supported backends.
 - `rust-ir-runtime`: Close the temporary retirement exception with conditional success and an
@@ -35,6 +37,9 @@ None.
 
 Shared checker/diagnostics, compiler lowering, conformance tests and documentation. Runtime/image
 changes are conditional on the selected representation and must be specified before implementation.
-No source-evaluation API or HIR evaluator returns. Existing source using `User("Bob", 42)` must use
+All emitted property lists preserve authored evaluation order, including lists without conditional
+fragments. Canonical images for unchanged sources therefore change bytes when their authored property
+order differs from the previous name-sorted order; existing readers already evaluate entries in order,
+so this requires no schema or ABI change. No source-evaluation API or HIR evaluator returns. Existing source using `User("Bob", 42)` must use
 `<User name="Bob" age=42 />` or an explicitly declared factory function. Broader restrictions on
 parentheses versus element calls for functions are a separate language-design decision.

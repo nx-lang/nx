@@ -102,3 +102,20 @@ removing useful migration guidance or promising future positional support.
 
 Implement shared rejection and conditional lowering, activate/replace the six tests as described,
 run checker/tooling and cross-backend suites, then sync specs and remove temporary-limit wording.
+
+## Selected representation
+
+Use `conditional-properties-v1`, a versioned extension within schema 6. A property list entry
+`[string-index("$spread"), node]` spreads the fields of the intrinsic element value produced by `node`; ordinary entries
+remain `[string, node]`. Spread nodes are ordinary lazy `if`/`match` expressions whose branches
+construct compiler-owned intrinsic binding bags. Nested fragments recursively spread bags. Empty
+bags mean absence; a present field whose value is empty remains present until target normalization.
+Evaluate entries in authored order once, then body content, then existing target defaults and
+normalization. Records, union payloads, components and named calls use the same property reader.
+Declared functions with fragments use named calls, preserving their declaration's defaults.
+Generated JavaScript materializes the same ordered bags before target construction. Binding bags
+never escape as user values. No Cartesian construction expansion is needed.
+
+Checker audit: `property_paths_for_entries` currently forms a Cartesian product for path-sensitive
+validation. This implementation does not change that analysis or enumerate those paths again during
+lowering. Size tests isolate emitted growth; they do not claim linear checker complexity.

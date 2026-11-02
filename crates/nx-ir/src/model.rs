@@ -463,3 +463,6 @@ impl NxIrArtifact {
             .map(String::as_str)
     }
 }
+
+/// Property lists may lazily spread an intrinsic binding bag.
+pub const NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1: &str = "conditional-properties-v1";

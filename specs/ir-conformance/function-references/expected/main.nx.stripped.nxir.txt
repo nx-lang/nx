@@ -53,7 +53,7 @@ function defaulted() =
   <Tool fn=double />
 
 function full() =
-  <Tool build=otherArgs fallback=names fn=Row />
+  <Tool fn=Row fallback=names build=otherArgs />
 
 function wrapped() =
   wrap(greet)
@@ -77,4 +77,4 @@ function typed() =
   sameTyped(double, double)
 
 function root() =
-  <Tool build=makeArgs fn=pass(greet) />
+  <Tool fn=pass(greet) build=makeArgs />

@@ -3473,6 +3473,23 @@ mod tests {
     }
 
     #[test]
+    fn record_call_diagnostics_reach_the_editor() {
+        let snapshot = snapshot_for(
+            "nx://tenant/form.nx",
+            "type User = { age:int = 30 }\nlet root() = { User() }",
+            1,
+        );
+        let documents = snapshot.diagnostics().expect("diagnostics");
+        let diagnostics = &documents[0].diagnostics;
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(
+            diagnostics[0].code.as_deref(),
+            Some("record-construction-requires-element")
+        );
+        assert!(diagnostics[0].message.contains("<User ... />"));
+    }
+
+    #[test]
     fn diagnostics_clear_when_document_becomes_valid() {
         let invalid = snapshot_for("nx://tenant/form.nx", "let count: string = 1", 1);
         let invalid_diagnostics = invalid.diagnostics().expect("invalid diagnostics");

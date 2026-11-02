@@ -1,0 +1,115 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "root"
+    },
+    {
+      "module": "main.nx",
+      "function": "omitted",
+      "case": "true",
+      "arguments": [
+        true
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "omitted",
+      "case": "false",
+      "arguments": [
+        false
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "content",
+      "case": "true",
+      "arguments": [
+        true
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "content",
+      "case": "false",
+      "arguments": [
+        false
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "patch",
+      "case": "true",
+      "arguments": [
+        true
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "patch",
+      "case": "false",
+      "arguments": [
+        false
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "numeric",
+      "case": "0",
+      "arguments": [
+        0
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "numeric",
+      "case": "2",
+      "arguments": [
+        2
+      ]
+    },
+    {
+      "module": "main.nx",
+      "function": "orderIntrinsic",
+      "case": "first-error",
+      "arguments": [],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "orderRecord",
+      "case": "first-error",
+      "arguments": [],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "orderUnion",
+      "case": "first-error",
+      "arguments": [],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "orderComponent",
+      "case": "first-error",
+      "arguments": [],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "orderFunction",
+      "case": "first-error",
+      "arguments": [],
+      "fails": true
+    },
+    {
+      "module": "main.nx",
+      "function": "sequenceComponent"
+    }
+  ]
+}

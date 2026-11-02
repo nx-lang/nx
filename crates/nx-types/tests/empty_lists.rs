@@ -239,22 +239,23 @@ fn braced_values_are_accepted_in_every_argument_position() {
     ));
 }
 
-/// Record-constructor arguments are not type checked at all, so this pins the gap rather than the
-/// empty value.
-///
-/// <para>`Row({})` at a `string+` field is accepted — but so is every one of the neighbours below,
-/// including a `string` at an `int` field and two arguments to a one-field record. Asserting only
-/// the first would be vacuous: it would stay green under an implementation that rejected the empty
-/// value everywhere. The gap is pre-existing and out of scope here; the empty value at an argument
-/// position is covered against real functions by `braced_values_are_accepted_in_every_argument_position`
-/// and `empty_value_at_an_exactly_one_parameter_reports_only_the_mismatch`. When record-constructor
-/// arguments do get checked, this test is expected to fail and should become the real assertions.</para>
+/// Record calls reject every argument shape with element-syntax guidance. An empty argument must
+/// not add a secondary inference diagnostic to the constructor error.
 #[test]
-fn record_constructor_arguments_are_unchecked_including_the_empty_value() {
-    assert_clean("type Row = { cells:string+ }\nlet value = {Row({})}");
-    assert_clean("type Row = { n:int }\nlet value = {Row({})}");
-    assert_clean("type Row = { n:int }\nlet value = {Row(\"x\")}");
-    assert_clean("type Row = { n:int }\nlet value = {Row(1, 2)}");
+fn record_constructor_arguments_require_element_syntax_including_the_empty_value() {
+    for source in [
+        "type Row = { cells:string+ }\nlet value = {Row({})}",
+        "type Row = { n:int }\nlet value = {Row({})}",
+        "type Row = { n:int }\nlet value = {Row(\"x\")}",
+        "type Row = { n:int }\nlet value = {Row(1, 2)}",
+    ] {
+        let messages = errors(source);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(
+            messages[0].contains("Records require element syntax"),
+            "{messages:?}"
+        );
+    }
 }
 
 /// A parameter that admits no zero reports the mismatch, and only the mismatch.

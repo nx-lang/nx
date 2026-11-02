@@ -1,0 +1,62 @@
+type User = { name: string = "Default" note?: string }
+
+type State = ready | failed { message: string }
+
+type Result = | ok { value: int }
+
+external component <Card title: string />
+
+let greet(name: string = "Default"): string = { name }
+
+let state: State = <State.failed message="offline" />
+
+let root(): object = {
+  <results
+    intrinsic=<button before=1 if true { label="Save" } else { label={1 / 0} }
+      if { true => tone="first" true => tone={1 / 0} } after=2 />
+    record=<User if false { name="ignored" } if true { note={} } />
+    union=<Result.ok if true { value=7 } else { value={1 / 0} } />
+    card=<Card if true { title="Hello" } else { title="Other" } />
+    greeting={<greet if false { name="ignored" } />}
+    nested=<notice if true { if state is {
+      State.failed => label={state.message}
+      else => label="ready"
+    } } />
+  />
+}
+
+let omitted(active: boolean) = <User if active { name="Selected" } />
+
+let content(active: boolean): object = <box if active { tone="warm" }><child /></box>
+
+let numeric(n: int): object = <box if n is { > 1 => value="large" else => value="small" } />
+
+let patch(active: boolean) = <User.Update if active { note={} } />
+
+type Positive = int where > 0
+
+type OrderData = { z: int a: int = 0 }
+
+type OrderChoice = | item { z: int a: int = 0 }
+
+external component <OrderCard z: int a: int = 0 />
+
+let zero(): int = { 1 / 0 }
+
+let bad(n: int): Positive = { n }
+
+let orderTarget(z: int, a: int = 0): int = { z + a }
+
+let orderIntrinsic(): object = <box z={zero()} if bad(0) > 0 { a=1 } />
+
+let orderRecord(): OrderData = <OrderData z={zero()} if bad(0) > 0 { a=1 } />
+
+let orderUnion(): OrderChoice = <OrderChoice.item z={zero()} if bad(0) > 0 { a=1 } />
+
+let orderComponent() = <OrderCard z={zero()} if bad(0) > 0 { a=1 } />
+
+let orderFunction(): int = <orderTarget z={zero()} if bad(0) > 0 { a=1 } />
+
+external component <SequenceCard values: int+ />
+
+let sequenceComponent() = <SequenceCard if true { values=1 } else { values={2 3} } />

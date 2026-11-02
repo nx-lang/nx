@@ -15,7 +15,7 @@ record Schedule @4:1-4:62
   label: string required
 
 function ints() @6:1-6:47 =
-  <Range end=5 start=1 />
+  <Range start=1 end=5 />
 
 function names() @7:1-7:64 =
   <Pair key="a" value=1 />
@@ -39,7 +39,7 @@ function span() @13:1-13:51 =
   (endOf(moved()) sub startOf(moved()))
 
 function plan() @14:1-14:56 =
-  <Schedule label="week" slots=ints() />
+  <Schedule slots=ints() label="week" />
 
 function root() @15:1-15:24 =
   ints()

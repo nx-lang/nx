@@ -1,0 +1,71 @@
+{
+  "main.nx::content#false": {
+    "$type": "box",
+    "content": {
+      "$type": "child"
+    }
+  },
+  "main.nx::content#true": {
+    "$type": "box",
+    "content": {
+      "$type": "child"
+    },
+    "tone": "warm"
+  },
+  "main.nx::numeric#0": {
+    "$type": "box",
+    "value": "small"
+  },
+  "main.nx::numeric#2": {
+    "$type": "box",
+    "value": "large"
+  },
+  "main.nx::omitted#false": {
+    "$type": "User",
+    "name": "Default"
+  },
+  "main.nx::omitted#true": {
+    "$type": "User",
+    "name": "Selected"
+  },
+  "main.nx::patch#false": {
+    "$type": "User.Update"
+  },
+  "main.nx::patch#true": {
+    "$type": "User.Update",
+    "note": null
+  },
+  "main.nx::root": {
+    "$type": "results",
+    "card": {
+      "$type": "Card",
+      "title": "Hello"
+    },
+    "greeting": "Default",
+    "intrinsic": {
+      "$type": "button",
+      "after": 2,
+      "before": 1,
+      "label": "Save",
+      "tone": "first"
+    },
+    "nested": {
+      "$type": "notice",
+      "label": "offline"
+    },
+    "record": {
+      "$type": "User",
+      "name": "Default"
+    },
+    "union": {
+      "$type": "Result.ok",
+      "value": 7
+    }
+  },
+  "main.nx::sequenceComponent": {
+    "$type": "SequenceCard",
+    "values": [
+      1
+    ]
+  }
+}

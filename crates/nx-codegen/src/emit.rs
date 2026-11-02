@@ -1,5 +1,5 @@
 use crate::builder::build_codegen_program;
-use crate::ir::visit_declaration_expressions;
+use crate::ir::{visit_declaration_expressions, visit_expression};
 use crate::model::{
     CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
     CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
@@ -44,6 +44,8 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxDiffRecords",
     "nxDiv",
     "nxElement",
+    "nxBindings",
+    "nxPatternMatches",
     "nxEmpty",
     "nxEnumSchema",
     "nxExists",
@@ -242,21 +244,43 @@ fn collect_expression_source_codegen_diagnostics(
                 "action-handler codegen is not supported by this non-reactive executable target",
             ));
         }
-        CodegenExpressionKind::Match { .. } => {
-            diagnostics.push(source_codegen_unsupported_diagnostic(
-                module,
-                expression.span,
-                "match expressions are not supported by executable source codegen yet",
-            ));
+        CodegenExpressionKind::Match {
+            scrutinee,
+            arms,
+            else_branch,
+        } => {
+            if !arms.iter().all(|arm| {
+                matches!(&arm.body.kind,
+                CodegenExpressionKind::Element(element) if element.tag == "$bindings")
+            }) {
+                diagnostics.push(source_codegen_unsupported_diagnostic(
+                    module,
+                    expression.span,
+                    "match expressions are not supported by executable source codegen yet",
+                ));
+            }
+            collect_expression_source_codegen_diagnostics(module, scrutinee, diagnostics);
+            for arm in arms {
+                for pattern in &arm.patterns {
+                    collect_expression_source_codegen_diagnostics(module, pattern, diagnostics);
+                }
+                collect_expression_source_codegen_diagnostics(module, &arm.body, diagnostics);
+            }
+            if let Some(otherwise) = else_branch {
+                collect_expression_source_codegen_diagnostics(module, otherwise, diagnostics);
+            }
         }
-        // A call by name needs the callee's parameter names at run time, which an emitted
-        // JavaScript function does not carry; the IR runtime has them.
-        CodegenExpressionKind::NamedCall { .. } => {
-            diagnostics.push(source_codegen_unsupported_diagnostic(
-                module,
-                expression.span,
-                "calls of function-typed values are not supported by executable source codegen yet",
-            ));
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            if !matches!(&callee.kind, CodegenExpressionKind::Identifier { reference: Some(reference), .. }
+                if reference.kind == ResolvedItemKind::Function)
+            {
+                diagnostics.push(source_codegen_unsupported_diagnostic(module, expression.span,
+                    "calls of function-typed values are not supported by executable source codegen yet"));
+            }
+            collect_expression_source_codegen_diagnostics(module, callee, diagnostics);
+            for arg in args {
+                collect_expression_source_codegen_diagnostics(module, &arg.value, diagnostics);
+            }
         }
         CodegenExpressionKind::Binary { lhs, rhs, .. }
         | CodegenExpressionKind::Concat { lhs, rhs } => {
@@ -3520,21 +3544,62 @@ fn emit_expression(
                 // `readonly never[]`, which TypeScript drops from `T | NxEmpty` when it infers `T`.
                 .unwrap_or_else(|| "nxEmpty".to_string())
         ),
-        // Refused with a diagnostic before emission, in
-        // `collect_expression_source_codegen_diagnostics`, so no program that compiled reaches
-        // this string. Whoever adds match support here must emit an uncovered path as `[]`,
-        // exactly as the `If` arm above emits a missing `else`: a match with no `else` carries
-        // the same implicit `else { }`, and emitting `null` instead would put a null item into
-        // every sequence the match is collected into.
-        CodegenExpressionKind::Match { .. } => {
-            "nxRuntimeError(\"match expressions are not supported by executable source codegen yet\")"
-                .to_string()
+        CodegenExpressionKind::Match { scrutinee, arms, else_branch } => {
+            let mut code = format!("(() => {{ const __nx$match = {}; ", emit_expression(current_module_id, scrutinee, context));
+            for arm in arms {
+                let tests = arm.patterns.iter().map(|pattern| {
+                    // Union payload patterns compare just the case, without constructing its
+                    // required fields or evaluating its defaults.
+                    if let CodegenExpressionKind::IntervalPattern { ty: CodegenTypeRef::Constrained { base, interval } } = &pattern.kind {
+                        let float = base.starts_with("float");
+                        let mut tests = vec!["typeof __nx$match === \"number\"".to_string(), "!Number.isNaN(__nx$match)".to_string()];
+                        if let Some(end) = interval.low {
+                            tests.push(format!("__nx$match {} {}", if end.exclusive { ">" } else { ">=" }, nx_hir::ast::spell_bound(end.value.0, float)));
+                        }
+                        if let Some(end) = interval.high {
+                            tests.push(format!("__nx$match {} {}", if end.exclusive { "<" } else { "<=" }, nx_hir::ast::spell_bound(end.value.0, float)));
+                        }
+                        return format!("({})", tests.join(" && "));
+                    }
+                    let pattern_value = match &pattern.kind {
+                        CodegenExpressionKind::UnionCase { union_reference, case_name, is_constant: false, .. } =>
+                            format!("({{ {} }})", context.type_tag_entry(&format!("{}.{}", union_reference.name, case_name))),
+                        _ => emit_expression(current_module_id, pattern, context),
+                    };
+                    format!("nxPatternMatches(__nx$match, {pattern_value})")
+                }).collect::<Vec<_>>().join(" || ");
+                let narrowing = if context.target.is_typescript() {
+                    if let CodegenExpressionKind::Identifier { .. } = &scrutinee.kind {
+                        let types = arm.patterns.iter().filter_map(|pattern| match &pattern.kind {
+                            CodegenExpressionKind::UnionCase { union_reference, case_name, is_constant: false, .. } =>
+                                Some(format!("{{ readonly $type: {} }}", js_string(&format!("{}.{}", union_reference.name, case_name)))),
+                            _ => None,
+                        }).collect::<Vec<_>>();
+                        if !types.is_empty() {
+                            format!("const {} = __nx$match as Extract<typeof __nx$match, {}>; ",
+                                emit_expression(current_module_id, scrutinee, context), types.join(" | "))
+                        } else { String::new() }
+                    } else { String::new() }
+                } else { String::new() };
+                code.push_str(&format!("if ({tests}) {{ {narrowing}return {}; }} ", emit_expression(current_module_id, &arm.body, context)));
+            }
+            let otherwise = else_branch.as_ref().map(|branch| emit_expression(current_module_id, branch, context))
+                .unwrap_or_else(|| "[]".to_string());
+            code.push_str(&format!("return {otherwise}; }})()"));
+            code
         }
-        CodegenExpressionKind::NamedCall { .. } => {
-            "nxRuntimeError(\"calls of function-typed values are not supported by executable source codegen yet\")"
-                .to_string()
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            let params = referenced_function_params(callee, context).expect("validated declared named call");
+            let input = emit_property_bag(current_module_id, args, &[], context);
+            let arguments = params.iter().map(|param| {
+                let key = js_string(&param.name);
+                let value = format!("__nx$args[{key}]");
+                let value = if admits_many(&param.resolved_ty) { format!("nxItems({value})") } else { value };
+                format!("Object.prototype.hasOwnProperty.call(__nx$args, {key}) ? {value} : undefined")
+            }).collect::<Vec<_>>().join(", ");
+            format!("(() => {{ const __nx$callee = {}; const __nx$args = {input}; return __nx$callee({arguments}); }})()",
+                emit_expression(current_module_id, callee, context))
         }
-        // Only a match holds one, and a match is refused before emission.
         CodegenExpressionKind::IntervalPattern { .. } => {
             "nxRuntimeError(\"numeric patterns are not supported by executable source codegen yet\")"
                 .to_string()
@@ -3736,10 +3801,31 @@ fn emit_update_record_object(
     properties: &[CodegenProperty],
     context: &EmitContext,
 ) -> String {
-    let mut sorted = properties.iter().collect::<Vec<_>>();
-    sorted.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    if properties.iter().any(|property| property.spread) {
+        let bag = emit_property_bag(current_module_id, properties, &[], context);
+        let mut code = format!("(() => {{ const __nx$patch = {bag}; ");
+        for field in fields {
+            let key = js_string(&field.name);
+            let value = if admits_many(&field.resolved_ty) {
+                format!("nxItems(__nx$patch[{key}])")
+            } else {
+                format!("__nx$patch[{key}]")
+            };
+            let value = if field.optional {
+                format!("nxCleared({value})")
+            } else {
+                value
+            };
+            code.push_str(&format!("if (Object.prototype.hasOwnProperty.call(__nx$patch, {key})) __nx$patch[{key}] = {value}; "));
+        }
+        code.push_str(&format!(
+            "return {{ {}, ...__nx$patch }}; }})()",
+            context.type_tag_entry(name)
+        ));
+        return code;
+    }
     let mut entries = vec![context.type_tag_entry(name)];
-    entries.extend(sorted.into_iter().map(|property| {
+    entries.extend(properties.iter().map(|property| {
         let field = fields.iter().find(|field| field.name == property.name);
         let value = emit_expression(current_module_id, &property.value, context);
         let value = match field {
@@ -3816,6 +3902,31 @@ fn emit_component_descriptor(
                 emit_content_value(current_module_id, &descriptor.content, binds_many, context),
             ));
         }
+    }
+    if descriptor.properties.iter().any(|property| property.spread) {
+        let bag = emit_property_bag(
+            current_module_id,
+            &descriptor.properties,
+            &extra_properties,
+            context,
+        );
+        let callee = context.reference_name(current_module_id, &descriptor.component);
+        let mut code = format!("(() => {{ const __nx$props = {bag}; ");
+        if let Some(component) = context.component(&descriptor.component) {
+            for field in &component.props {
+                if admits_many(&field.resolved_ty) {
+                    let key = js_string(&field.name);
+                    code.push_str(&format!("if (Object.prototype.hasOwnProperty.call(__nx$props, {key})) __nx$props[{key}] = nxItems(__nx$props[{key}]); "));
+                }
+            }
+        }
+        let props = if context.target.is_typescript() {
+            format!("(__nx$props as Parameters<typeof {callee}>[0])")
+        } else {
+            "__nx$props".to_string()
+        };
+        code.push_str(&format!("return {callee}({props}); }})()"));
+        return code;
     }
     let mut explicit_properties = explicit_property_values(
         current_module_id,
@@ -3907,6 +4018,70 @@ fn emit_materialized_record_object(
     extra_properties: Vec<(String, String)>,
     context: &EmitContext,
 ) -> String {
+    if properties.iter().any(|property| property.spread) {
+        let bag = emit_property_bag(current_module_id, properties, &extra_properties, context);
+        let mut code =
+            format!("(() => {{ const __nx$input = {bag}; const __nx$rest = {{ ...__nx$input }}; ");
+        let mut entries = vec![context.type_tag_entry(type_name)];
+        for (index, field) in fields.iter().enumerate() {
+            let key = js_string(&field.name);
+            let fallback = field
+                .default
+                .as_ref()
+                .map(|default| {
+                    let mut references = FxHashSet::default();
+                    visit_expression(default, &mut |expression| {
+                        if let CodegenExpressionKind::Identifier {
+                            name,
+                            reference: None,
+                        } = &expression.kind
+                        {
+                            references.insert(name.clone());
+                        }
+                    });
+                    let bindings = fields[..index]
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, field)| references.contains(&field.name))
+                        .map(|(index, field)| {
+                            format!(
+                                "const {} = __nx$field_{index}; ",
+                                safe_identifier(&field.name)
+                            )
+                        })
+                        .collect::<String>();
+                    let value = emit_expression(current_module_id, default, context);
+                    let value = if bindings.is_empty() {
+                        value
+                    } else {
+                        format!("(() => {{ {bindings}return {value}; }})()")
+                    };
+                    lift_to_declared_occurrence(value, default, &field.resolved_ty)
+                })
+                .unwrap_or_else(|| empty_value_at(&field.resolved_ty).to_string());
+            let written = if admits_many(&field.resolved_ty) {
+                format!("nxItems(__nx$input[{key}])")
+            } else {
+                format!("__nx$input[{key}]")
+            };
+            let temp = format!("__nx$field_{index}");
+            code.push_str(&format!("const {temp} = Object.prototype.hasOwnProperty.call(__nx$input, {key}) ? {written} : {fallback}; delete __nx$rest[{key}]; "));
+            if field.optional {
+                entries.push(format!(
+                    "...nxOptional({key}, {temp}{})",
+                    optional_many_argument(&field.resolved_ty)
+                ));
+            } else {
+                entries.push(format!("{key}: {temp}"));
+            }
+        }
+        entries.push("...__nx$rest".into());
+        code.push_str(&format!("return {{ {} }}; }})()", entries.join(", ")));
+        return match pin {
+            Some(pin) => format!("({code} as {pin})"),
+            None => code,
+        };
+    }
     let explicit_properties = explicit_property_values(
         current_module_id,
         properties,
@@ -3991,6 +4166,32 @@ fn emit_materialized_record_object(
         Some(pin) => format!("({{ {} }} satisfies {pin} as {pin})", entries.join(", ")),
         None => format!("({{ {} }})", entries.join(", ")),
     }
+}
+
+/// Materialize selected bindings before target defaults. Spreads omit only the bag's tag.
+fn emit_property_bag(
+    current_module_id: RuntimeModuleId,
+    properties: &[CodegenProperty],
+    extra: &[(String, String)],
+    context: &EmitContext,
+) -> String {
+    let mut entries = properties
+        .iter()
+        .map(|property| {
+            let value = emit_expression(current_module_id, &property.value, context);
+            if property.spread {
+                format!("...nxBindings({value})")
+            } else {
+                format!("{}: {value}", safe_object_key(&property.name))
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.extend(
+        extra
+            .iter()
+            .map(|(name, value)| format!("{}: {value}", safe_object_key(name))),
+    );
+    format!("{{ {} }}", entries.join(", "))
 }
 
 fn explicit_property_values(
@@ -4220,18 +4421,7 @@ fn emit_element(
     element: &CodegenElement,
     context: &EmitContext,
 ) -> String {
-    let properties = element
-        .properties
-        .iter()
-        .map(|property| {
-            format!(
-                "{}: {}",
-                safe_object_key(&property.name),
-                emit_expression(current_module_id, &property.value, context)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let properties = emit_property_bag(current_module_id, &element.properties, &[], context);
     let content = element
         .content
         .iter()
@@ -4239,7 +4429,7 @@ fn emit_element(
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "nxElement({}, {{ {} }}, [{}])",
+        "nxElement({}, {}, [{}])",
         js_string(&element.tag),
         properties,
         content
@@ -5109,6 +5299,19 @@ fn collect_expression_runtime_helpers(
     expression: &CodegenExpression,
     output: &mut FxHashSet<&'static str>,
 ) {
+    let properties = match &expression.kind {
+        CodegenExpressionKind::Record { properties, .. }
+        | CodegenExpressionKind::UnionCase { properties, .. } => Some(properties),
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => Some(&descriptor.properties),
+        CodegenExpressionKind::Element(element) => Some(&element.properties),
+        CodegenExpressionKind::NamedCall { args, .. } => Some(args),
+        _ => None,
+    };
+    if properties.is_some_and(|properties| properties.iter().any(|property| property.spread)) {
+        output.insert("nxBindings");
+        output.insert("nxItems");
+        output.insert("nxOptional");
+    }
     match &expression.kind {
         CodegenExpressionKind::Array(elements) => {
             for element in elements {
@@ -5236,6 +5439,7 @@ fn collect_expression_runtime_helpers(
             arms,
             else_branch,
         } => {
+            output.insert("nxPatternMatches");
             collect_expression_runtime_helpers(scrutinee, output);
             for arm in arms {
                 for pattern in &arm.patterns {

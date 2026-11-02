@@ -477,7 +477,6 @@ fn a_root_bound_handler_in_the_output_runs_and_its_results_are_effects() {
 // ============================================================================
 
 #[test]
-#[ignore = "Pending complete-ir-construction-lowering: example uses conditional properties"]
 fn the_component_example_counts_and_resets() {
     let runtime = Runtime::new(include_str!("../../../../examples/nx/component.nx"));
     let init = runtime.init("Counter", record("object", &[("step", Value::Int(2))]));

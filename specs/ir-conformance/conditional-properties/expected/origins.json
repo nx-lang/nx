@@ -1,0 +1,39 @@
+{
+  "main.nx::content#false": [
+    {"path": "", "module": "main.nx", "start": 972, "end": 1018},
+    {"path": "/content", "module": "main.nx", "start": 1003, "end": 1012}
+  ],
+  "main.nx::content#true": [
+    {"path": "", "module": "main.nx", "start": 972, "end": 1018},
+    {"path": "/content", "module": "main.nx", "start": 1003, "end": 1012}
+  ],
+  "main.nx::numeric#0": [
+    {"path": "", "module": "main.nx", "start": 1050, "end": 1112}
+  ],
+  "main.nx::numeric#2": [
+    {"path": "", "module": "main.nx", "start": 1050, "end": 1112}
+  ],
+  "main.nx::omitted#false": [
+    {"path": "", "module": "main.nx", "start": 893, "end": 931}
+  ],
+  "main.nx::omitted#true": [
+    {"path": "", "module": "main.nx", "start": 893, "end": 931}
+  ],
+  "main.nx::patch#false": [
+    {"path": "", "module": "main.nx", "start": 1143, "end": 1180}
+  ],
+  "main.nx::patch#true": [
+    {"path": "", "module": "main.nx", "start": 1143, "end": 1180}
+  ],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 319, "end": 858},
+    {"path": "/card", "module": "main.nx", "start": 617, "end": 674},
+    {"path": "/intrinsic", "module": "main.nx", "start": 342, "end": 472},
+    {"path": "/nested", "module": "main.nx", "start": 739, "end": 853},
+    {"path": "/record", "module": "main.nx", "start": 484, "end": 540},
+    {"path": "/union", "module": "main.nx", "start": 551, "end": 607}
+  ],
+  "main.nx::sequenceComponent": [
+    {"path": "", "module": "main.nx", "start": 1935, "end": 1994}
+  ]
+}

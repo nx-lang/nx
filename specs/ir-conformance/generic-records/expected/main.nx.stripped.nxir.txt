@@ -15,7 +15,7 @@ record Schedule
   label: string required
 
 function ints() =
-  <Range end=5 start=1 />
+  <Range start=1 end=5 />
 
 function names() =
   <Pair key="a" value=1 />
@@ -39,7 +39,7 @@ function span() =
   (endOf(moved()) sub startOf(moved()))
 
 function plan() =
-  <Schedule label="week" slots=ints() />
+  <Schedule slots=ints() label="week" />
 
 function root() =
   ints()

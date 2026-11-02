@@ -16,7 +16,7 @@ value companyName =
   "Example"
 
 function findPlans(teamSize: int, maxMonthlyPrice?: int): Plan* =
-  <Plan monthlyPrice=20 name="Team" seats=teamSize />
+  <Plan name="Team" seats=teamSize monthlyPrice=20 />
 
 value refundPolicy =
   <@nx/agent/agent.nx:Document title="Refund policy">
@@ -24,19 +24,19 @@ value refundPolicy =
   </@nx/agent/agent.nx:Document>
 
 value shop =
-  <@nx/agent/agent.nx:HttpConnection baseUrl="https://api.example.com" name="shop" />
+  <@nx/agent/agent.nx:HttpConnection name="shop" baseUrl="https://api.example.com" />
 
 function lookupOrder(orderId: string): @nx/agent/agent.nx:HttpArguments =
   <@nx/agent/agent.nx:HttpArguments pathParams=<@nx/agent/agent.nx:HttpParam name="orderId" value=orderId /> />
 
 function openTicket(subject: string): @nx/agent/agent.nx:HttpArguments =
-  <@nx/agent/agent.nx:HttpArguments body=<NewTicket priority=2 subject=subject /> />
+  <@nx/agent/agent.nx:HttpArguments body=<NewTicket subject=subject priority=2 /> />
 
 value supportTools: @nx/agent/agent.nx:Tool+ =
-  [<@nx/agent/agent.nx:WebSearchTool allowedDomains="docs.example.com" />, <@nx/agent/agent.nx:FunctionTool function=findPlans />, <@nx/agent/agent.nx:HttpTool arguments=lookupOrder connection=shop method=@nx/agent/agent.nx:HttpMethod.get path="/orders/{orderId}" />, <@nx/agent/agent.nx:HttpTool arguments=openTicket connection=shop maxCallsPerConversation=1 method=@nx/agent/agent.nx:HttpMethod.post path="/tickets" />]
+  [<@nx/agent/agent.nx:WebSearchTool allowedDomains="docs.example.com" />, <@nx/agent/agent.nx:FunctionTool function=findPlans />, <@nx/agent/agent.nx:HttpTool connection=shop method=@nx/agent/agent.nx:HttpMethod.get path="/orders/{orderId}" arguments=lookupOrder />, <@nx/agent/agent.nx:HttpTool connection=shop method=@nx/agent/agent.nx:HttpMethod.post path="/tickets" arguments=openTicket maxCallsPerConversation=1 />]
 
 value supportAgent =
-  <@nx/agent/agent.nx:Agent documents=refundPolicy limits=<@nx/agent/agent.nx:AgentLimits maxSteps=6 /> model="balanced" name="support" tools=supportTools>
+  <@nx/agent/agent.nx:Agent name="support" model="balanced" documents=refundPolicy tools=supportTools limits=<@nx/agent/agent.nx:AgentLimits maxSteps=6 />>
     (("You are the support assistant for " concat companyName) concat ".\nAnswer from the documents and the documentation site. Offer a call when you cannot help.")
   </@nx/agent/agent.nx:Agent>
 

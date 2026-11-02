@@ -925,7 +925,15 @@ impl<'p> Machine<'p> {
         let mut fields = Vec::with_capacity(properties.len());
         for (name, node) in properties.iter() {
             let value = self.eval(cx, frame, *node)?;
-            set_field(&mut fields, Arc::clone(name), value);
+            if let Some(name) = name {
+                set_field(&mut fields, Arc::clone(name), value);
+            } else if let Value::Record(bag) = value {
+                for (name, value) in &bag.fields {
+                    set_field(&mut fields, Arc::clone(name), value.clone());
+                }
+            } else {
+                return self.fail(cx, *node, "nx-ir-type", "Expected a property binding bag.");
+            }
         }
         Ok(fields)
     }

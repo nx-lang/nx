@@ -14,7 +14,7 @@ function user(): shared/model.nx:User @6:1-6:42 =
   shared/model.nx:makeUser(1, "Ada")
 
 function card() @7:1-7:52 =
-  <shared/model.nx:Card Theme=shared/model.nx:Theme.dark Title="hi" />
+  <shared/model.nx:Card Title="hi" Theme=shared/model.nx:Theme.dark />
 
 function local() @8:1-8:34 =
   <Local label="x" />

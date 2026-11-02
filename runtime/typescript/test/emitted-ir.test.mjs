@@ -2429,3 +2429,31 @@ export type Other extends Shape = { r:int }`);
   assertEqual(callFunction(program, fn, { s: { $type: "Good", r: 1 } }), "ok");
 });
 console.log("ok - a host subtype reaches the expected declaration, not a same-named base in another module");
+
+// Handwritten answers supplement the shared corpus goldens and Rust/TypeScript parity.
+withSource(`
+type User = { name:string = "Default" note?:string }
+type State = ready | failed { message:string }
+let state:State = <State.failed message="offline" />
+external component <Card title:string />
+let greet(name:string = "Default"): string = { name }
+let root(): object = <results
+  record=<User if false { name="ignored" } if true { note={} } />
+  item=<box if { true => label="first" true => label={1 / 0} } />
+  matched=<notice if state is { State.failed => label={state.message} else => label="ready" } />
+  card=<Card if true { title="Hello" } else { title="Other" } />
+  greeting={<greet if false { name="ignored" } />}
+/>
+`, (dir, sourcePath) => {
+  const image = emitIr(dir, sourcePath);
+  const program = prepareNxIrProgram(image);
+  assertEqual(requiredFeaturesOf(image).includes("conditional-properties-v1"), true);
+  const expected = {
+    $type: "results", record: { $type: "User", name: "Default" },
+    item: { $type: "box", label: "first" }, matched: { $type: "notice", label: "offline" },
+    card: { $type: "Card", title: "Hello" }, greeting: "Default",
+  };
+  assertEqual(evaluateFunction(program, "root"), expected);
+  assertEqual(nativeJson(sourcePath), expected);
+  console.log("ok - conditional property bags select lazily and apply target defaults");
+});

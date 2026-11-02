@@ -121,11 +121,11 @@ fn the_snippet_image_is_laid_out_as_the_document_says() {
         vec![2, 0, 4, 10, 1, 0, 0, NONE, 0, 2, 0, 13, NONE, 0]
     );
 
-    // Node 13, `[18, 1, 14, [[3, 1], [5, 2]], [5, 7, 9, 12]]`: the component descriptor of
+    // Node 13, `[18, 1, 14, [[4, 1], [5, 2]], [5, 7, 9, 12]]`: the component descriptor of
     // `SkiaLayout` with two properties and four children.
     let image = NxIrImage::open(&bytes).expect("valid");
     let node = image.entry(Table::Nodes, 13).expect("node 13").to_vec();
-    assert_eq!(node, vec![18, 1, 14, 2, 3, 1, 5, 2, 4, 5, 7, 9, 12]);
+    assert_eq!(node, vec![18, 1, 14, 2, 4, 1, 5, 2, 4, 5, 7, 9, 12]);
     assert_eq!(image.string(14), Some("SkiaLayout"));
 }
 
@@ -417,7 +417,7 @@ fn a_self_referencing_node_is_refused() {
     let artifact = snippet_input();
     let bytes = write_nx_ir_image(&artifact).expect("image");
     let image = NxIrImage::open(&bytes).expect("valid");
-    // Node 13 is `[18, 1, 14, [[3, 1], [5, 2]], [5, 7, 9, 12]]`; its first child is cell 9.
+    // Node 13 is `[18, 1, 14, [[4, 1], [5, 2]], [5, 7, 9, 12]]`; its first child is cell 9.
     assert_eq!(image.entry(Table::Nodes, 13).unwrap().get(9), Some(5));
     let offset = table_cell_offset(&bytes, Table::Nodes, 13, 9);
     let mut cyclic = bytes.clone();

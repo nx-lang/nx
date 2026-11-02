@@ -25,7 +25,7 @@ function double(n: int): int =
   (n mul 2)
 
 function render(Row: <function Item:Contact Index:int />: string, Item: Contact, Index: int): string =
-  <Row Index=Index Item=Item />
+  <Row Item=Item Index=Index />
 
 function invoke(f: <function n:int />: int, n: int): int =
   <f n=n />
@@ -55,4 +55,4 @@ function template() =
   ContactRow
 
 function root() =
-  <List ItemTemplate=ContactRow ItemsSource=contacts />
+  <List ItemsSource=contacts ItemTemplate=ContactRow />
