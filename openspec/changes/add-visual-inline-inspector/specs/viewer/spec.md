@@ -5,7 +5,8 @@ The viewer SHALL read each element in the composition as one row whatever the pa
 element outside the value of another element's non-content property, content children included
 (inside `if`, `for` and braced lists too). The row SHALL show, on one line, the child fold chevron
 when the element holds content, its icon, its kind, its id chip and title when its visualizer names
-them, and its summary, and SHALL be no taller than a source line. An element inside a property's
+them, and its summary, and SHALL be no taller than a source line. As the line fills, the summary
+SHALL give way first, down to its `+N` count, and then a title SHALL be cut and faded. An element inside a property's
 value SHALL read inside its owner's inspector, not as a row. Comments, `if` and `for` SHALL read as
 written between rows, and an element whose syntax a row cannot show losslessly SHALL keep its
 as-written reading. Declarations other than `let` values (types, functions' and components'
@@ -16,6 +17,11 @@ to draw a row.
 - **WHEN** the pane holding `<Star cx=150 cy=55 outerRadius=36 innerRadius=17 pointCount=5 />` is
   narrowed until its summary does not fit
 - **THEN** Star SHALL still read as one row, its summary cut at a whole item, and nothing SHALL wrap
+
+#### Scenario: A long title stays on its line
+- **WHEN** a `SelectQuestion` row's title is a question longer than the room left on its line
+- **THEN** the row SHALL read its kind, its id and the question's first words, faded where cut, and
+  the count of the summary items it left out, on one line
 
 #### Scenario: A paint is not a row
 - **WHEN** a `Circle` has `fill=<Paint.radial …/>`

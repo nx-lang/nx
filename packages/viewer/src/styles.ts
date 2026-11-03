@@ -133,17 +133,27 @@ export const styles = `
 }
 .source .row-element > .row-head > :is(.element-icon, .sheet-kind, .id-value, .row-pin, button.fold) { flex-shrink: 0; }
 .source .row-title {
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: min(8ch, 100%);
   overflow: hidden;
-  text-overflow: ellipsis;
   font-weight: 400;
   font-family: var(--nx-viewer-prose-font-family, inherit);
 }
+/* A title stays on its row's line, as a layer's name does, faded where it is cut. */
+.source .row-title, .source .row-title * { white-space: nowrap; }
+.source .row-title .uitext-block { display: inline; max-width: none; }
+.source .row-title .uitext-block > .uitext-body { white-space: nowrap; }
+.source .row-title.clipped {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
+}
 .source .row-summary {
+  /* The summary gives way before the title does. */
+  flex: 0 100 auto;
   display: flex;
   align-items: baseline;
   gap: 1.4ch;
-  min-width: 0;
+  min-width: 3ch;
   overflow: hidden;
   margin-left: 0.6ch;
   font-weight: 400;

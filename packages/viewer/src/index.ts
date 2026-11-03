@@ -3849,9 +3849,12 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Cuts each row's summary to the whole items that fit on its line, from the end, and says how many
-   * it left out. Words shrink first, and fade where they are cut.
+   * it left out. Words shrink first, and fade where they are cut, as titles do.
    */
   #fitSummaries(): void {
+    for (const title of this.#body.querySelectorAll<HTMLElement>(".row-title")) {
+      title.classList.toggle("clipped", title.scrollWidth > title.clientWidth + 1);
+    }
     for (const summary of this.#body.querySelectorAll<HTMLElement>(".row-summary:not([hidden])")) {
       const items = [...summary.querySelectorAll<HTMLElement>(":scope > .summary-item")];
       const more = summary.querySelector<HTMLElement>(":scope > .summary-more")!;
