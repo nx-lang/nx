@@ -29,7 +29,15 @@ inspector field would, without the field: the icon or short label then the value
 the value for a color; a boolean SHALL read as its icon and label when true and be left out when
 false; a case SHALL read as its label; a reference to a `let` SHALL read as a token. Items that do
 not fit SHALL be left out from the end, whole, and a quiet count such as `+2` SHALL say how many.
-A summary SHALL hide while its element's inspector is open.
+A summary SHALL hide while its element's inspector is open. Content an element holds that reads on
+one line once its surrounding whitespace is set aside, with no element or block in it, SHALL lead
+the summary as prose, ahead of the named properties, and the row SHALL have no fold for it; open,
+the inspector SHALL show it as its first field, above the groups.
+
+#### Scenario: A line of text content
+- **WHEN** a document writes `<Text x=250 y=165 fontSize=18>` and `NX graphics` on its own line before `</Text>`
+- **THEN** Text's row SHALL read `NX graphics` after its name and before its font size, with no fold
+  and no closing tag, and its inspector SHALL show `NX graphics` as its first field
 
 #### Scenario: A curated summary
 - **WHEN** `Star`'s visualizer has `summary={pointCount fill}`, `pointCount` has the icon `star`, and

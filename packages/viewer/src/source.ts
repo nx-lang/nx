@@ -960,16 +960,62 @@ export function renderSource(
    * writes, in that order, or else the first few it writes whose values read on one line, its title
    * and id left out. A false boolean is left out either way.
    */
+  /**
+   * The content of `at` that reads inline, as a property does: a line of text and embedded values,
+   * as `<Text>NX graphics</Text>` holds, with no element or block in it.
+   */
+  const inlineContent = (at: number): number | undefined => {
+    const content = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child));
+    if (content.length !== 1) {
+      return undefined;
+    }
+    const child = content[0]!;
+    const items = childrenOf(child);
+    const blocks = new Set(["element", "condition", "match", "matchArm", "loop", "sequence", "binding"]);
+    if (items.length === 0 || items.some((item) => blocks.has(tree.nodes[item]!.role))) {
+      return undefined;
+    }
+    const [from, to] = inlineRange(child);
+    return from < to && onOneLine(from, to) ? child : undefined;
+  };
+
+  /** Where content's items run, blank space they hold included; it reads collapsed, as in prose. */
+  const itemsRange = (content: number): [number, number] => {
+    const items = childrenOf(content);
+    // An embedded value's closing brace is the content's, past its last item.
+    return [startOf(tree.nodes[items[0]!]!), Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!))];
+  };
+
+  /** Where inline content's text runs, without the blank space around it. */
+  const inlineRange = (content: number): [number, number] => {
+    const items = childrenOf(content);
+    let from = startOf(tree.nodes[items[0]!]!);
+    let to = Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!));
+    while (from < to && /\s/.test(text[from]!)) {
+      from++;
+    }
+    while (to > from && /\s/.test(text[to - 1]!)) {
+      to--;
+    }
+    return [from, to];
+  };
+
   const summaryOf = (at: number, title: number | undefined): number[] => {
     const node = tree.nodes[at]!;
     const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
-    const written = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && !isContent(child));
-    const shows = (attribute: number): boolean => booleanOf(attribute) !== false && soleValue(attribute) !== undefined;
+    const inline = inlineContent(at);
+    const written = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && (!isContent(child) || child === inline));
+    const shows = (attribute: number): boolean => attribute === inline || (booleanOf(attribute) !== false && soleValue(attribute) !== undefined);
     if (visualizer?.summary !== undefined && visualizer.summary.length > 0) {
-      return visualizer.summary.flatMap((name) => {
+      const named = visualizer.summary.flatMap((name) => {
         const found = written.find((child) => tree.nodes[child]!.name === name);
         return found !== undefined && shows(found) ? [found] : [];
       });
+      // Inline content reads first even where the summary leaves it out, since nothing else shows it.
+      return inline !== undefined && !named.includes(inline) ? [inline, ...named] : named;
+    }
+    if (inline !== undefined) {
+      return [inline, ...written.filter((child) => child !== inline && child !== title && child !== idPlans.get(at)?.attribute && shows(child) && soleValue(child) !== undefined && tree.nodes[soleValue(child)!]!.role !== "element" && onOneLine(startOf(tree.nodes[soleValue(child)!]!), endOf(tree.nodes[soleValue(child)!]!))).slice(0, DEFAULT_SUMMARY_LENGTH - 1)];
     }
     return written
       .filter((child) => {
@@ -1005,6 +1051,14 @@ export function renderSource(
     item.className = "summary-item";
     item.title = tooltipOf(presentation);
     hoverable(item, attribute);
+    if (isContent(attribute)) {
+      // Inline content reads as its text, as the element's title does, with no label.
+      const words = document.createElement("span");
+      words.className = "summary-value summary-text";
+      writeNodes(words, childrenOf(attribute), ...itemsRange(attribute));
+      item.append(unmarked(words));
+      return item;
+    }
     const lead = leadOf(presentation, "summary");
     const truth = booleanOf(attribute);
     if (truth === true) {
@@ -1202,7 +1256,8 @@ export function renderSource(
     const visualizer = declaration?.visualizer;
     const present = presentations(at);
     const children = childrenOf(at);
-    const content = children.filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child));
+    const inline = inlineContent(at);
+    const content = children.filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child) && child !== inline);
     const hasContent = content.some((child) => childrenOf(child).length > 0);
     const row = marked(at, "span", "sheet row-element");
     row.classList.toggle("folded", folded && hasContent);
@@ -1276,7 +1331,31 @@ export function renderSource(
     row.append(head);
 
     if (open) {
-      row.append(writeInspector(at, present, visualizer?.properties?.map((property) => property.name) ?? []));
+      const inspector = writeInspector(at, present, visualizer?.properties?.map((property) => property.name) ?? []);
+      if (inline !== undefined) {
+        // Inline content edits in the inspector, first, as the property it is.
+        const presentation = present(tree.nodes[inline]!.name ?? "");
+        const field = marked(inline, "span", "sheet-row prop-field captioned content-field");
+        const lead = leadOf(presentation, "field");
+        lead.classList.add("sheet-name");
+        hoverable(lead, inline);
+        const cell = document.createElement("span");
+        cell.className = "sheet-value held-text";
+        cell.title = tooltipOf(presentation);
+        writeNodes(cell, childrenOf(inline), ...itemsRange(inline));
+        field.append(lead, cell);
+        // Above the groups, which name the properties it is not one of.
+        const first = inspector.firstElementChild;
+        if (first?.classList.contains("inspector-fields") === true) {
+          first.prepend(field);
+        } else {
+          const fields = document.createElement("span");
+          fields.className = "inspector-fields";
+          fields.append(field);
+          inspector.prepend(fields);
+        }
+      }
+      row.append(inspector);
     }
     if (!folded) {
       for (const child of content) {

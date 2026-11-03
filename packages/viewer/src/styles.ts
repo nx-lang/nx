@@ -242,6 +242,9 @@ export const styles = `
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-size: 0.8em;
 }
+/* Inline content reads as prose: the line breaks and indent around it in source collapse. */
+.source .summary-text, .source .summary-text * { white-space: nowrap; }
+.source .content-field > .sheet-value, .source .content-field > .sheet-value * { white-space: normal; }
 .source .field-lead.scrubbable { cursor: ew-resize; touch-action: pan-y; }
 .source .field-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
 /* A property the element does not write: an empty field with a dashed outline. */

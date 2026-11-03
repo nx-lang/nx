@@ -268,13 +268,19 @@ describe("the reading", () => {
     assert.ok(items[1]!.classList.contains("after-blank"), "a blank line between items is kept as room");
   });
 
-  it("reads the text an element holds as written under its row", async () => {
+  it("reads a line of text an element holds in its row's summary, and edits it in the inspector", async () => {
     const content = await fixture("content");
     const element = show(content);
     const source = root(element).querySelector<HTMLElement>(".source")!;
-    const held = rendered(element, "labels.value.text");
-    assert.equal(held.textContent, "Hello {who}", "its text, with its embedded value in braces");
+    const row = root(element).querySelector<HTMLElement>('[data-key="labels.value"]')!;
+    const summary = row.querySelector<HTMLElement>(":scope > .row-head .summary-text")!;
+    assert.equal(summary.textContent!.trim(), "Hello {who}", "its text, with its embedded value in braces");
+    assert.equal(row.querySelector(":scope > .row-head > .fold"), null, "no fold for a line of text");
     assert.ok(!source.textContent!.includes("</Label>"), "no closing tag");
+    element.selection = "labels.value";
+    const held = rendered(element, "labels.value.text");
+    assert.ok(held.closest(".inspector"), "the inspector holds it as a field");
+    assert.equal(held.querySelector(".sheet-value")!.textContent!.trim(), "Hello {who}");
   });
 
   it("measures the reading again once the pane's width settles, not on each step", async (t) => {
