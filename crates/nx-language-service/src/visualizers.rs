@@ -196,6 +196,9 @@ pub(crate) struct ResolvedVisualizer {
     pub icon: Option<String>,
     pub preview: Option<String>,
     pub format: Option<String>,
+    /// The properties the element's row shows, from the latest visualizer that names any, each
+    /// once, in its first place.
+    pub summary: Option<Vec<String>>,
     /// Every editor hint the `ValueVisualizer`s write, by name, as text, the latest first: a reader
     /// takes the first of a name that fits the value, so a later hint that does not fit leaves an
     /// earlier one in force.
@@ -269,9 +272,20 @@ impl ResolvedVisualizer {
         if let Some(preview) = &value.preview {
             self.preview = Some(preview.clone());
         }
+        if let Some(names) = value
+            .attribute("summary")
+            .and_then(VisualizerAttribute::names)
+        {
+            let mut summary = Vec::<String>::new();
+            for name in names {
+                if !summary.contains(&name) {
+                    summary.push(name);
+                }
+            }
+            self.summary = Some(summary);
+        }
         match value.record {
-            VisualizerRecord::Function => {}
-            VisualizerRecord::Element => {
+            VisualizerRecord::Element | VisualizerRecord::Function => {
                 // The later visualizer's property visualizers come first, in its order; the earlier
                 // ones it does not name follow in theirs. Two of one property in one visualizer
                 // merge too.
@@ -344,6 +358,7 @@ fn is_known_value(name: &str, text: &str) -> bool {
         "idPosition" => matches!(text, "start" | "end"),
         "format" => matches!(text, "id" | "color"),
         "editor" => matches!(text, "field" | "dropdown" | "segmented"),
+        "short" => (1..=2).contains(&text.chars().count()),
         _ => true,
     }
 }

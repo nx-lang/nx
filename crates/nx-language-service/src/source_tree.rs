@@ -312,6 +312,9 @@ pub struct SourceVisualizer {
     /// Optional rendered presentation, supplied by a host implementation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<SourcePreviewVisualizer>,
+    /// The properties an element's row shows, in order, each once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub summary: Vec<String>,
     /// Every property, those the visualizer names first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<SourcePropertyVisualizer>,
@@ -335,6 +338,18 @@ pub struct SourcePreviewVisualizer {
 pub struct SourcePropertyVisualizer {
     /// The property's name.
     pub name: String,
+    /// The name a viewer shows for the property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The Lucide icon that stands for the property beside its field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// A one- or two-character label shown where there is no icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short: Option<String>,
+    /// The group the property reads in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// How the property's string value is shown: from its property visualizer, or else from the
     /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2332,6 +2347,10 @@ impl<'a> TreeBuilder<'a> {
             .filter(|merged| names.contains(&merged.property))
             .map(|merged| SourcePropertyVisualizer {
                 name: merged.property.clone(),
+                label: merged.get("label").map(str::to_string),
+                icon: merged.get("icon").map(str::to_string),
+                short: merged.get("short").map(str::to_string),
+                group: merged.get("group").map(str::to_string),
                 format: merged
                     .get("format")
                     .map(str::to_string)
@@ -2345,6 +2364,7 @@ impl<'a> TreeBuilder<'a> {
                     format: type_format(&name),
                     editor: editor(&name, None),
                     name,
+                    ..SourcePropertyVisualizer::default()
                 });
             }
         }
@@ -2359,6 +2379,12 @@ impl<'a> TreeBuilder<'a> {
             preview: resolved
                 .preview
                 .map(|renderer| SourcePreviewVisualizer { renderer }),
+            summary: resolved
+                .summary
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|name| properties.iter().any(|property| &property.name == name))
+                .collect(),
             properties,
             ..SourceVisualizer::default()
         })

@@ -5,7 +5,8 @@ The graphics library's visualizers SHALL give every property of Drawing, Group, 
 paths, text and the element-style shape helpers a label, and SHALL group them as design tools do:
 `Position` (`X`, `Y` short labels, for `x`/`y` and centers `cx`/`cy`), `Size` (`W`, `H`), `Shape`
 (radii as `R` or icons, points, sides, angles), `Transform` (rotation), `Appearance` (opacity),
-`Fill`, `Stroke` and `Text` (font, size). Each SHALL name a `summary` of at most three properties
+`Fill`, `Stroke` and `Text` (font, size), with `Accessibility` and a container's `Content` where an
+element has them. Each SHALL name a `summary` of at most three properties
 that tells siblings apart, such as a Star's points and fill or a Rectangle's width, height and fill.
 Icons SHALL be Lucide names. These SHALL be presentation only and SHALL NOT change evaluation.
 

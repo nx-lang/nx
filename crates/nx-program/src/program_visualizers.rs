@@ -274,7 +274,8 @@ pub struct VisualizerValue {
     pub preview: Option<String>,
     /// The attributes, in source order.
     pub attributes: Vec<(String, VisualizerAttribute)>,
-    /// The `PropertyVisualizer`s of an `ElementVisualizer`, in source order.
+    /// The `PropertyVisualizer`s of an `ElementVisualizer` or a `FunctionVisualizer`, in source
+    /// order.
     pub children: Vec<VisualizerChild>,
     /// The `ValueChoice`s of a `ValueVisualizer`, in source order.
     pub choices: Vec<VisualizerChoice>,
@@ -335,6 +336,8 @@ pub enum VisualizerAttribute {
     Name(String),
     /// A number literal, signed or not.
     Number(OrderedFloat),
+    /// A braced list of bare names, as a `summary` writes: `{points fill}`.
+    Names(Vec<String>),
 }
 
 impl VisualizerAttribute {
@@ -344,6 +347,16 @@ impl VisualizerAttribute {
             VisualizerAttribute::Text(text) | VisualizerAttribute::Name(text) => text.clone(),
             VisualizerAttribute::Boolean(value) => value.to_string(),
             VisualizerAttribute::Number(value) => value.0.to_string(),
+            VisualizerAttribute::Names(names) => names.join(" "),
+        }
+    }
+
+    /// The value as a list of names: a braced list's names, or a bare name alone.
+    pub fn names(&self) -> Option<Vec<String>> {
+        match self {
+            VisualizerAttribute::Names(names) => Some(names.clone()),
+            VisualizerAttribute::Name(name) => Some(vec![name.clone()]),
+            _ => None,
         }
     }
 
@@ -511,6 +524,14 @@ fn attribute_value(module: &LoweredModule, expr: ExprId) -> Option<VisualizerAtt
         Expr::ResolvedUnionCase { case, .. } => {
             Some(VisualizerAttribute::Name(case.as_str().to_string()))
         }
+        Expr::Array { elements, .. } => elements
+            .iter()
+            .map(|element| match attribute_value(module, *element)? {
+                VisualizerAttribute::Name(name) => Some(name),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(VisualizerAttribute::Names),
         _ => number_value(module, expr).map(VisualizerAttribute::Number),
     }
 }

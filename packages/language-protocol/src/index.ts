@@ -520,9 +520,9 @@ export interface SourceDeclaration {
 }
 
 /**
- * A declaration's resolved visualizer. A record, an action or a component has its title, id and
- * icon, and every property once, those its visualizer names first; an alias of a primitive type its
- * format.
+ * A declaration's resolved visualizer. A record, an action, a component or an element function has
+ * its title, id, icon and summary, and every property once, those its visualizer names first; an
+ * alias of a primitive type its format.
  */
 export interface SourceVisualizer {
   /** The property whose value is the element's title. */
@@ -535,6 +535,8 @@ export interface SourceVisualizer {
   icon?: string;
   /** Requested rendered presentation; the host decides whether its implementation is available. */
   preview?: { renderer: string };
+  /** The properties the element's row shows, in order, each once. */
+  summary?: string[];
   /** Every property, those the visualizer names first. */
   properties?: SourcePropertyVisualizer[];
   /** How an alias's string values are shown. */
@@ -587,6 +589,14 @@ export type SourceValueFormat = "id" | "color";
 /** How one property of a declaration reads. */
 export interface SourcePropertyVisualizer {
   name: string;
+  /** The name a viewer shows for the property. Without it, a viewer derives one from `name`. */
+  label?: string;
+  /** The Lucide icon that stands for the property beside its field. */
+  icon?: string;
+  /** A one- or two-character label shown beside the field where there is no icon, such as `"X"`. */
+  short?: string;
+  /** The group the property reads in, such as `"Position"`. */
+  group?: string;
   /**
    * How the property's string value is shown: from its property visualizer, or else from the
    * visualizer of the alias its type names.
