@@ -376,9 +376,10 @@ export const styles = `
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
 /* Among rows, a block written as it is, as an \`if\` or a \`for\`, starts where the rows' icons do, and
-   the rows it holds sit a step in from it, as a row's children do. */
+   the rows it holds sit level with it, the block's first and last lines framing them. */
 .source .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc((4 - var(--column, 0)) * 1ch); }
 .source .sheet-item.as-written .row-element > .row-head { padding-left: 0; }
+.source .row-element > .sheet-held > .sheet-item.as-written .row-element { margin-left: -2ch; }
 /* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
    wherever it sits; and so does one written as its tags on one line inside such an item, as the item's
    other lines wrap from the item's start. One written as its tags over several lines stays inline, its
