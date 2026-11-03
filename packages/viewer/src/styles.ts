@@ -117,44 +117,34 @@ export const styles = `
 /* A sheet inside another is already set in by it, so only its container bounds it. */
 .source .sheet .sheet { max-width: 100%; }
 .source .compact-sheet { width: calc(100% - var(--indent, 0) * 1ch); }
-.source .sheet.compact-sheet > .sheet-head {
+.source .compact-sheet > .sheet-head {
   display: flex;
   align-items: center;
-  height: 1lh;
+  gap: 0.6ch;
   white-space: nowrap;
+  padding: 3px 0;
   text-indent: 0;
   min-width: 0;
 }
-.source .compact-sheet > .sheet-head > :is(.fold, .element-icon, .sheet-kind) { flex-shrink: 0; }
-.source .compact-inline { white-space: pre; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
-.source .compact-inline:empty { display: none; }
-.source .compact-inline * { white-space: pre; }
-.source .compact-inline .uitext-block { display: inline; max-width: none; }
-.source .compact-inline .uitext-block > .uitext-body { white-space: pre; }
-.source .compact-title { margin-left: 1ch; opacity: 0.8; }
-.source .compact-more { flex-shrink: 0; margin-left: 1ch; opacity: 0.55; font: 11px/1 var(--nx-viewer-prose-font-family, system-ui); }
+.source .compact-sheet > .sheet-head > .sheet-kind { flex-shrink: 0; }
+.source .compact-title { font-weight: 400; opacity: 0.7; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .source .compact-control {
+  font: 11px/1.5 var(--nx-viewer-prose-font-family, system-ui);
   color: inherit;
-  background: none;
-  border: 0;
-  border-radius: 3px;
-  padding: 0 2px;
-  margin-left: 1ch;
+  background: light-dark(#00000008, #ffffff09);
+  border: 1px solid light-dark(#00000030, #ffffff30);
+  border-radius: 4px;
+  padding: 1px 6px;
   cursor: pointer;
   flex-shrink: 0;
-  align-self: center;
-  display: inline-flex;
-  opacity: 0;
 }
-.source .compact-control > svg { width: 12px; height: 12px; }
-.source .compact-control:hover { background: light-dark(#0000000f, #ffffff14); }
-.source .sheet-head:hover > .compact-control, .source .compact-sheet.selected > .sheet-head > .compact-control,
-.source .compact-control:focus-visible { opacity: 0.6; }
-.source .compact-control.pinned { opacity: 1; color: light-dark(#795100, #e8cc8b); }
-.source .compact-control.pinned > svg { fill: currentColor; }
-.source .compact-control:focus-visible, .source button.fold:focus-visible { outline: 2px solid light-dark(#0969da, #b8a4ff); outline-offset: 1px; }
+.source .compact-control[aria-pressed="true"] { color: light-dark(#795100, #e8cc8b); }
+.source .compact-control:focus-visible, .source button.fold:focus-visible { outline: 2px solid light-dark(#0969da, #b8a4ff); outline-offset: 2px; }
 .source .compact-properties { display: contents; }
 .source .compact-properties[hidden] { display: none; }
+.source .compact-status { grid-column: 1 / -1; padding: 3px 0 3px 2ch; font: 11px/1.6 system-ui; opacity: 0.65; }
+.source .compact-properties > .sheet-row { background: light-dark(#00000005, #ffffff05); }
+.source .compact-sheet > .sheet-held { padding-top: 2px; }
 .source button.fold { border: 0; padding: 0; background: none; font: inherit; opacity: 1; flex-shrink: 0; }
 .source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
 .source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
@@ -870,5 +860,7 @@ export const styles = `
 .source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
 .source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
 .body.stepping, .body.stepping * { cursor: ns-resize !important; user-select: none; }
-.source .compact-sheet > .sheet-head { padding-left: 0; text-indent: 0; }
+.source .compact-sheet > .sheet-head { padding-left: 0; text-indent: 0; column-gap: 0.6ch; }
+.source .compact-sheet.folded > .sheet-head > .compact-title { flex: 1; }
+.source .compact-sheet > .sheet-head > .compact-title { margin-left: 1ch; }
 `;
