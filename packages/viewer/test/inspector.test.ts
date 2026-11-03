@@ -5,7 +5,7 @@
 import { document } from "./dom.js";
 
 import assert from "node:assert/strict";
-import { after, afterEach, describe, it, type TestContext } from "node:test";
+import { after, afterEach, describe, it } from "node:test";
 
 import { changeDetails, compositionOwner, detailsOpen, emptyDetails, isComposition, reconcileDetails } from "../src/compact.js";
 import { derivedLabel } from "../src/labels.js";
@@ -30,11 +30,12 @@ const PANEL = [
   "type Card = { title:string padding:int = 8 tone:Tone = quiet elevated:boolean = false imageURL?:string }",
   "type Badge = { label:string count:int = 0 }",
   "type Panel = { x:int = 0 y:int = 0 width:int = 10 badge?:Badge content children:Card* }",
-  "visualizer Panel = <ElementVisualizer summary={width x}>",
-  '  <PropertyVisualizer property=x short="X" />',
-  '  <PropertyVisualizer property=y short="Y" />',
+  "visualizer Panel = <ElementVisualizer>",
+  "  <PropertyVisualizer property=x />",
+  "  <PropertyVisualizer property=y />",
   '  <PropertyVisualizer property=width label="Breadth" icon="ruler" />',
   "</ElementVisualizer>",
+  "visualizer Card = <ElementVisualizer title=title />",
   'let panel = <Panel x=1 y=2 width=30 badge=<Badge label="new" count=3 />>',
   '  <Card title="Hello" padding=8 tone=quiet elevated=true />',
   '  <Card title="Bye" elevated=false />',
@@ -88,11 +89,9 @@ function press(target: Element, key: string, init: KeyboardEventInit = {}): void
   target.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, composed: true, cancelable: true, ...init }));
 }
 
-/** What each summary item reads: its lead, then its value. */
-function summary(element: NxViewerElement, key: string): string[] {
-  return [...head(element, key).querySelectorAll<HTMLElement>(".row-summary > .summary-item:not([hidden])")].map((item) =>
-    [...item.children].map((part) => part.textContent || (part.querySelector("svg")?.dataset["icon"] ?? "")).join(" ")
-  );
+/** What a row's head reads after its kind: the one value it is named by, if any. */
+function named(element: NxViewerElement, key: string): string | undefined {
+  return head(element, key).querySelector<HTMLElement>(":scope > .row-title")?.textContent ?? undefined;
 }
 
 describe("the state of inspectors", () => {
@@ -165,14 +164,14 @@ describe("labels", () => {
 });
 
 describe("rows", () => {
-  it("reads each element of the composition as a row: icon, kind, summary and pin", async () => {
+  it("reads each element of the composition as a row: icon, kind, the value it is named by, and pin", async () => {
     const element = show(await panel());
     const row = drawn(element, "panel.value");
     assert.ok(row.matches(".row-element"));
     assert.equal(row.getAttribute("role"), "treeitem");
     assert.equal(row.getAttribute("aria-expanded"), "true", "it holds cards, which fold");
     assert.equal(head(element, "panel.value").querySelector(".sheet-kind")!.textContent, "Panel");
-    assert.deepEqual(summary(element, "panel.value"), ["ruler 30", "X 1"], "the visualizer's summary, in its order");
+    assert.equal(named(element, "panel.value"), undefined, "no title, text or id names it, so nothing else it sets shows");
     assert.equal(pin(element, "panel.value").getAttribute("aria-pressed"), "false");
     assert.equal(pin(element, "panel.value").getAttribute("aria-label"), "Pin Panel");
     const card = drawn(element, "panel.value.children[0]");
@@ -180,43 +179,28 @@ describe("rows", () => {
     assert.equal(card.hasAttribute("aria-expanded"), false);
   });
 
-  it("summarizes the first properties written when no visualizer names any, a false boolean left out", async () => {
+  it("names a row by its title alone, with no label, and copies it without its keys", async () => {
     const element = show(await panel());
-    assert.deepEqual(summary(element, "panel.value.children[0]"), ["Title Hello", "Padding 8", "Tone quiet"]);
-    assert.deepEqual(summary(element, "panel.value.children[1]"), ["Title Bye"], "elevated=false says nothing");
-    const items = head(element, "panel.value.children[0]").querySelectorAll<HTMLElement>(".summary-item");
-    assert.equal(items[0]!.title, "Title · title", "a tooltip with the label and the name as written");
-    for (const part of head(element, "panel.value").querySelectorAll("[data-key]")) {
-      assert.fail(`a summary copies values without their keys: ${(part as HTMLElement).dataset["key"]}`);
+    assert.equal(named(element, "panel.value.children[0]"), "Hello", "not its padding or tone");
+    assert.equal(named(element, "panel.value.children[1]"), "Bye");
+    assert.equal(head(element, "panel.value.children[0]").querySelector<HTMLElement>(".row-title")!.title, "Title · title", "a tooltip with the label and the name as written");
+    for (const part of head(element, "panel.value.children[0]").querySelectorAll("[data-key]")) {
+      assert.fail(`a row's value is a copy, without its keys: ${(part as HTMLElement).dataset["key"]}`);
     }
   });
 
-  it("cuts a summary that does not fit at a whole item, saying how many it left out", async (t: TestContext) => {
-    const prototype = window.HTMLElement.prototype;
-    Object.defineProperty(prototype, "clientWidth", {
-      configurable: true,
-      get(this: HTMLElement) {
-        return this.matches(".row-summary") ? 100 : 400;
-      }
-    });
-    // Each item takes 60 pixels, and the count 20.
-    Object.defineProperty(prototype, "scrollWidth", {
-      configurable: true,
-      get(this: HTMLElement) {
-        const items = this.querySelectorAll(":scope > .summary-item:not([hidden])").length;
-        const more = this.querySelector(":scope > .summary-more:not([hidden])") === null ? 0 : 20;
-        return items * 60 + more;
-      }
-    });
-    t.after(() => {
-      delete (prototype as { clientWidth?: number }).clientWidth;
-      delete (prototype as { scrollWidth?: number }).scrollWidth;
-    });
-    const element = show(await panel());
-    assert.deepEqual(summary(element, "panel.value.children[0]"), ["Title Hello"]);
-    const more = head(element, "panel.value.children[0]").querySelector<HTMLElement>(".summary-more")!;
-    assert.equal(more.hidden, false);
-    assert.equal(more.textContent, "+2");
+  it("edits the value a row is named by in its inspector, on a click, opening the inspector first", async () => {
+    const element = show(await panel(), true);
+    const edits: NxEditDetail[] = [];
+    element.addEventListener(NX_EDIT_EVENT, (event) => edits.push((event as CustomEvent<NxEditDetail>).detail));
+    head(element, "panel.value.children[1]").querySelector<HTMLElement>(".row-title")!.click();
+    assert.equal(element.selection, "panel.value.children[1].title", "its property is selected");
+    assert.equal(isOpen(element, "panel.value.children[1]"), true, "in its element's open inspector");
+    const field = element.shadowRoot!.querySelector<HTMLElement>(".field")!;
+    assert.ok(field.closest(".inspector"), "its field opens in the inspector");
+    field.textContent = "Later";
+    press(field, "Enter");
+    assert.deepEqual(edits, [{ key: "panel.value.children[1].title.value", edit: { kind: "setValue", value: { kind: "string", value: "Later" } } }]);
   });
 });
 
@@ -226,7 +210,6 @@ describe("inspectors", () => {
     assert.equal(isOpen(element, "panel.value"), false, "nothing open until something is selected");
     element.selection = "panel.value";
     assert.equal(isOpen(element, "panel.value"), true);
-    assert.ok(head(element, "panel.value").querySelector<HTMLElement>(".row-summary")!.hidden, "its summary hides while it is open");
     element.selection = "panel.value.children[0]";
     assert.equal(isOpen(element, "panel.value"), false);
     assert.equal(isOpen(element, "panel.value.children[0]"), true);
@@ -245,7 +228,7 @@ describe("inspectors", () => {
     assert.equal(inspector.querySelector(".group-head"), null, "no groups");
     const x = drawn(element, "panel.value.x");
     assert.deepEqual([...x.children].map((child) => child.className.split(" ")[0]), ["field-lead", "sheet-value"], "the label, then the value");
-    assert.equal(x.querySelector(".field-lead")!.textContent, "X", "the label leads, not the short label");
+    assert.equal(x.querySelector(".field-lead")!.textContent, "X", "a label derived from its name");
     assert.equal(x.querySelector<HTMLElement>(".field-lead")!.title, "X · x", "its tooltip names it as source writes it");
     const width = drawn(element, "panel.value.width");
     assert.equal(width.querySelector<HTMLElement>(".field-lead svg")!.dataset["icon"], "ruler", "an icon before the label");

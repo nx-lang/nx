@@ -121,7 +121,7 @@ export const styles = `
 }
 /* A sheet inside another is already set in by it, so only its container bounds it. */
 .source .sheet .sheet { max-width: 100%; }
-/* An element of the composition as one row: its chevron, icon, kind, id, title and summary on one
+/* An element of the composition as one row: its chevron, icon, kind and the one value it is named by on one
    line no taller than a source line, its pin at the end, and under it, while open, its inspector. */
 .source .row-element {
   grid-template-columns: minmax(0, 1fr);
@@ -136,21 +136,17 @@ export const styles = `
   text-indent: 0;
   min-width: 0;
 }
-.source .row-element > .row-head > :is(.element-icon, .sheet-kind, .id-value, .row-pin, button.fold) { flex-shrink: 0; }
-/* A row leads with what the element is called: its kind reads in the prose font, its id as quiet
-   text with no chip, so the title is what the eye lands on. */
+.source .row-element > .row-head > :is(.element-icon, .sheet-kind, .row-pin, button.fold) { flex-shrink: 0; }
+/* A row leads with what the element is: its kind reads in the prose font, then the one value it is
+   named by, which a click edits in its inspector. */
 .source .row-element > .row-head > .sheet-kind,
 .source .row-element > .row-head > .sheet-kind * {
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-weight: 500;
 }
-.source .row-element > .row-head > .id-value {
-  background: none;
-  padding: 0;
-  font-size: 0.9em;
-}
 .source .row-title {
   flex: 0 1 auto;
+  cursor: text;
   min-width: min(8ch, 100%);
   overflow: hidden;
   font-weight: 400;
@@ -160,39 +156,10 @@ export const styles = `
 .source .row-title, .source .row-title * { white-space: nowrap; }
 .source .row-title .uitext-block { display: inline; max-width: none; }
 .source .row-title .uitext-block > .uitext-body { white-space: nowrap; }
-/* UI text in a summary stays on its line too, as the summary's other values do. */
-.source .row-summary .uitext-block { display: inline; max-width: none; }
-.source .row-summary .uitext-block > .uitext-body { white-space: nowrap; }
 .source .row-title.clipped {
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
 }
-.source .row-summary {
-  /* The summary gives way before the title does. */
-  flex: 0 100 auto;
-  display: flex;
-  align-items: baseline;
-  gap: 1.4ch;
-  min-width: 3ch;
-  overflow: hidden;
-  margin-left: 0.6ch;
-  font-weight: 400;
-  color: var(--nx-viewer-summary-color, light-dark(#57606a, #a0a0a0));
-}
-.source .row-summary[hidden], .source .summary-item[hidden], .source .summary-more[hidden] { display: none; }
-.source .summary-item { display: inline-flex; align-items: baseline; gap: 0.5ch; flex-shrink: 0; }
-/* Words, as a Text's content, read as their first few, faded where cut, and shrink before they go. */
-.source .summary-item.summary-words { max-width: 28ch; overflow: hidden; white-space: nowrap; }
-.source .summary-item.summary-words > .summary-value { min-width: 0; overflow: hidden; }
-.source .summary-item.summary-words.clipped > .summary-value {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
-}
-.source .summary-lead.lead-caption, .source .summary-lead.lead-short { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); font-family: var(--nx-viewer-prose-font-family, inherit); }
-.source .summary-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
-.source .summary-more { flex-shrink: 0; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
-.source :is(.summary-lead, .field-lead).lead-icon { display: inline-flex; align-self: center; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
-.source :is(.summary-lead, .field-lead).lead-icon > svg { width: 13px; height: 13px; }
 .source .reference-token :is(.n, span:not(.swatch)), .source .reference-token {
   font-family: var(--nx-viewer-source-font-family, var(--mono));
 }
@@ -274,7 +241,6 @@ export const styles = `
   width: calc(13px + 0.5ch);
 }
 /* Inline content reads as prose: the line breaks and indent around it in source collapse. */
-.source .summary-text, .source .summary-text * { white-space: nowrap; }
 .source .content-field > .sheet-value, .source .content-field > .sheet-value * { white-space: normal; }
 .source .field-lead.scrubbable { cursor: ew-resize; touch-action: pan-y; }
 /* A property the element does not write: an empty value with a dashed outline. */
@@ -303,7 +269,7 @@ export const styles = `
 .source .inspector .boolean-field .sheet-boolean.false, .source .inspector .boolean-field .more-value { color: transparent; border-color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .source .inspector .boolean-field .more-value::before { content: none; }
 .source .row-element > .sheet-held { padding-top: 0; }
-/* An element value: its icon, kind and summary, unfolding into a nested group of its fields. */
+/* An element value: its icon, kind and the value it is named by, unfolding into a nested group of its fields. */
 /* Open, it goes under its label, a step in, its fields under it. */
 .source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value { grid-column: 1 / -1; padding: 0 0 0 2ch; background: none; }
 .source .nested-head { display: block; min-width: 0; }
@@ -312,7 +278,9 @@ export const styles = `
 .source .nested-head > .value-fold { margin-left: 0; width: 1em; opacity: 1; }
 .source .nested-head > .element-icon { margin-right: 0.5ch; }
 .source .nested-kind { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
-.source .nested-summary { display: inline-flex; vertical-align: baseline; margin-left: 1ch; max-width: 100%; }
+.source .nested-head > .nested-value { display: inline-block; vertical-align: bottom; max-width: 100%; margin-left: 1ch; }
+/* An id that names its element reads as the title does: plain, with no chip. */
+.source .row-title.row-id > .id-value { background: none; padding: 0; color: inherit; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
 .source .inspector.nested-inspector { margin: 2px 0 2px 0; padding: 0; }
 .source button.fold { border: 0; padding: 0; background: none; font: inherit; opacity: 1; flex-shrink: 0; }
 .source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }

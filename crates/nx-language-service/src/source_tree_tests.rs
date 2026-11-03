@@ -2661,22 +2661,18 @@ fn property<'t>(visualizer: &'t SourceVisualizer, name: &str) -> &'t SourcePrope
 }
 
 #[test]
-fn labels_and_shorts_reach_the_reader() {
+fn labels_and_icons_reach_the_reader() {
     let source = r#"import "@nx/visualizer"
 type Box = { x:float64 width:float64 fill?:string }
-visualizer Box = <ElementVisualizer summary={width width fill}><PropertyVisualizer property=width label="Width" short="W" /><PropertyVisualizer property=fill icon="paint-bucket" short="Fill" /></ElementVisualizer>
+visualizer Box = <ElementVisualizer><PropertyVisualizer property=width label="Width" /><PropertyVisualizer property=fill icon="paint-bucket" /></ElementVisualizer>
 let root() = { <Box x=1 width=2 /> }
 "#;
     let tree = single_document_tree(source);
     let box_ = visualizer(&tree, "Box");
-    assert_eq!(box_.summary, vec!["width", "fill"]);
     let width = property(box_, "width");
     assert_eq!(width.label.as_deref(), Some("Width"));
-    assert_eq!(width.short.as_deref(), Some("W"));
     let fill = property(box_, "fill");
     assert_eq!(fill.icon.as_deref(), Some("paint-bucket"));
-    // A short label longer than two characters is a warning, and a reader never sees it.
-    assert_eq!(fill.short, None);
     assert_eq!(property(box_, "x").label, None);
 }
 
@@ -2685,15 +2681,14 @@ fn an_element_functions_visualizer_reaches_the_reader() {
     let source = r#"import "@nx/visualizer"
 type Shape = { points:int }
 let <Star cx:float64 points:int = 5 /> = <Shape points={points} />
-visualizer Star = <FunctionVisualizer icon="star" summary={points}><PropertyVisualizer property=points label="Points" /><PropertyVisualizer property=cx label="Center X" short="X" /></FunctionVisualizer>
+visualizer Star = <FunctionVisualizer icon="star"><PropertyVisualizer property=points label="Points" /><PropertyVisualizer property=cx label="Center X" /></FunctionVisualizer>
 let root() = { <Star cx=1 /> }
 "#;
     let tree = single_document_tree(source);
     let star = visualizer(&tree, "Star");
     assert_eq!(star.icon.as_deref(), Some("star"));
-    assert_eq!(star.summary, vec!["points"]);
     assert_eq!(property_names(star), vec!["points", "cx"]);
-    assert_eq!(property(star, "cx").short.as_deref(), Some("X"));
+    assert_eq!(property(star, "cx").label.as_deref(), Some("Center X"));
 }
 
 #[test]
@@ -2701,16 +2696,19 @@ fn a_derived_visualizer_relabels_one_property() {
     let source = r#"import "@nx/visualizer"
 abstract type Base = { x:float64 }
 type Derived extends Base = { y:float64 }
-visualizer Base = <ElementVisualizer summary={x}><PropertyVisualizer property=x label="X" short="X" /></ElementVisualizer>
-visualizer Derived = <ElementVisualizer summary={y x}><PropertyVisualizer property=x label="Left" /></ElementVisualizer>
+visualizer Base = <ElementVisualizer><PropertyVisualizer property=x label="X" icon="move-horizontal" /></ElementVisualizer>
+visualizer Derived = <ElementVisualizer><PropertyVisualizer property=x label="Left" /></ElementVisualizer>
 let root() = { <Derived x=1 y=2 /> }
 "#;
     let tree = single_document_tree(source);
     let derived = visualizer(&tree, "Derived");
     let x = property(derived, "x");
     assert_eq!(x.label.as_deref(), Some("Left"));
-    assert_eq!(x.short.as_deref(), Some("X"));
-    assert_eq!(derived.summary, vec!["y", "x"]);
+    assert_eq!(
+        x.icon.as_deref(),
+        Some("move-horizontal"),
+        "the base's icon stays"
+    );
 }
 
 #[test]
@@ -2746,11 +2744,6 @@ fn every_graphics_property_has_a_label() {
     ];
     for name in elements {
         let visualizer = visualizer(&tree, name);
-        assert!(!visualizer.summary.is_empty(), "{name} has no summary");
-        assert!(
-            visualizer.summary.len() <= 3,
-            "{name}'s summary is too long"
-        );
         for property in &visualizer.properties {
             assert!(
                 property.label.is_some(),
@@ -2759,6 +2752,4 @@ fn every_graphics_property_has_a_label() {
             );
         }
     }
-    let star = visualizer(&tree, "Star");
-    assert_eq!(star.summary, vec!["pointCount", "fill"]);
 }

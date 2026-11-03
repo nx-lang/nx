@@ -1743,9 +1743,6 @@ impl<'a> InferenceContext<'a> {
         let Some((properties, content)) = self.visualizer_element_parts(value) else {
             return;
         };
-        if record != nx_hir::VisualizerRecord::Value {
-            self.check_presentation_hints(&properties, &content);
-        }
         match record {
             nx_hir::VisualizerRecord::Value => {
                 let kind = self.hint_value_kind(target_ty);
@@ -1795,64 +1792,6 @@ impl<'a> InferenceContext<'a> {
                     );
                     let integral = Self::is_integral(&field_ty);
                     self.check_choices(&choices, kind, integral, Some(&field.name));
-                }
-            }
-        }
-    }
-
-    /// Reports the presentation hints a viewer cannot show, as `visualizer-hint` warnings: a
-    /// `short` label that is empty or longer than two characters, and a property named again in
-    /// a `summary`, where the viewer keeps its first place.
-    fn check_presentation_hints(&mut self, properties: &[nx_hir::Property], content: &[ExprId]) {
-        if let Some(summary) = properties
-            .iter()
-            .find(|property| property.key.as_str() == "summary")
-        {
-            let items = match self.module.raw_module().expr(summary.value) {
-                ast::Expr::Array { elements, .. } => elements.clone(),
-                _ => Vec::new(),
-            };
-            let mut seen = Vec::<Name>::new();
-            for item in items {
-                let (name, span) = match self.module.raw_module().expr(item) {
-                    ast::Expr::ContextualName { name, span, .. } => (name.clone(), *span),
-                    ast::Expr::ResolvedUnionCase { case, span, .. } => (case.clone(), *span),
-                    _ => continue,
-                };
-                if seen.contains(&name) {
-                    self.warn(
-                        "visualizer-hint",
-                        format!(
-                            "'{name}' is already in the summary; a viewer shows it once, in its first place"
-                        ),
-                        span,
-                    );
-                } else {
-                    seen.push(name);
-                }
-            }
-        }
-        for child in content {
-            let Some((child_properties, _)) = self.visualizer_element_parts(*child) else {
-                continue;
-            };
-            for property in child_properties
-                .iter()
-                .filter(|property| property.key.as_str() == "short")
-            {
-                if let ast::Expr::Literal(ast::Literal::String(text)) =
-                    self.module.raw_module().expr(property.value)
-                {
-                    let length = text.chars().count();
-                    if length == 0 || length > 2 {
-                        self.warn(
-                            "visualizer-hint",
-                            format!(
-                                "A short label is one or two characters, and \"{text}\" is {length}; a viewer shows the property's label instead"
-                            ),
-                            property.span,
-                        );
-                    }
                 }
             }
         }
@@ -7049,22 +6988,6 @@ impl<'a> InferenceContext<'a> {
         self.check_typed_binding_for(None, actual, expected, span, code, context, "")
     }
 
-    /// The items of `expr` when it is a braced list whose every item is a bare contextual name.
-    fn contextual_name_list(&self, expr: ExprId) -> Option<Vec<(ExprId, Name, TextSpan)>> {
-        let ast::Expr::Array { elements, .. } = self.module.raw_module().expr(expr) else {
-            return None;
-        };
-        elements
-            .iter()
-            .map(|element| match self.module.raw_module().expr(*element) {
-                ast::Expr::ContextualName { name, span, .. } => {
-                    Some((*element, name.clone(), *span))
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
     /// Checks a binding, recording the resolution when `expr` is a contextual name.
     ///
     /// Sites that know which expression they are checking pass it, so a resolved contextual name
@@ -7081,28 +7004,6 @@ impl<'a> InferenceContext<'a> {
         context: String,
         site: &str,
     ) -> bool {
-        // A braced list of bare names, `summary={points fill}`, resolves item by item against the
-        // expected sequence's item type, as one bare name does against its site's type.
-        if let Some(names) = expr.and_then(|expr| self.contextual_name_list(expr)) {
-            if !names.is_empty() && expected.occurrence().admits_many() {
-                let item = expected.item().clone();
-                let mut ok = true;
-                for (element, _, element_span) in names {
-                    let actual = self.infer_expr(element);
-                    ok &= self.check_typed_binding_for(
-                        Some(element),
-                        &actual,
-                        &item,
-                        element_span,
-                        code,
-                        context.clone(),
-                        site,
-                    );
-                }
-                return ok;
-            }
-        }
-
         // A pending contextual name resolves here, where the expected type is finally known.
         if let Type::ContextualName(name) = actual {
             let name = name.clone();

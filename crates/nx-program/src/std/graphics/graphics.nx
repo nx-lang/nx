@@ -753,7 +753,7 @@ visualizer Shape = <ElementVisualizer>
   <PropertyVisualizer property=stroke label="Stroke" icon="pen-line" />
 </ElementVisualizer>
 
-visualizer Drawing = <ElementVisualizer icon="frame" preview=<PreviewVisualizer renderer="nx.graphics" /> summary={viewBox background}>
+visualizer Drawing = <ElementVisualizer icon="frame" preview=<PreviewVisualizer renderer="nx.graphics" />>
   <PropertyVisualizer property=viewBox label="View box" icon="scan" />
   <PropertyVisualizer property=fit label="Fit" icon="maximize" />
   <PropertyVisualizer property=contentAlignment label="Alignment" icon="align-center" />
@@ -763,55 +763,55 @@ visualizer Drawing = <ElementVisualizer icon="frame" preview=<PreviewVisualizer 
   <PropertyVisualizer property=children label="Children" />
 </ElementVisualizer>
 
-visualizer Group = <ElementVisualizer icon="group" summary={opacity transform}>
+visualizer Group = <ElementVisualizer icon="group">
   <PropertyVisualizer property=children label="Children" />
 </ElementVisualizer>
 
-visualizer Rectangle = <ElementVisualizer icon="rectangle-horizontal" summary={width height fill}>
-  <PropertyVisualizer property=x label="X" short="X" />
-  <PropertyVisualizer property=y label="Y" short="Y" />
-  <PropertyVisualizer property=width label="Width" short="W" />
-  <PropertyVisualizer property=height label="Height" short="H" />
+visualizer Rectangle = <ElementVisualizer icon="rectangle-horizontal">
+  <PropertyVisualizer property=x label="X" />
+  <PropertyVisualizer property=y label="Y" />
+  <PropertyVisualizer property=width label="Width" />
+  <PropertyVisualizer property=height label="Height" />
   <PropertyVisualizer property=rx label="Corner radius" icon="square-round-corner" />
-  <PropertyVisualizer property=ry label="Vertical corner radius" short="RY" />
+  <PropertyVisualizer property=ry label="Vertical corner radius" />
 </ElementVisualizer>
 
-visualizer Circle = <ElementVisualizer icon="circle" summary={r fill}>
-  <PropertyVisualizer property=cx label="Center X" short="X" />
-  <PropertyVisualizer property=cy label="Center Y" short="Y" />
-  <PropertyVisualizer property=r label="Radius" short="R" />
+visualizer Circle = <ElementVisualizer icon="circle">
+  <PropertyVisualizer property=cx label="Center X" />
+  <PropertyVisualizer property=cy label="Center Y" />
+  <PropertyVisualizer property=r label="Radius" />
 </ElementVisualizer>
 
-visualizer Ellipse = <ElementVisualizer icon="ellipse" summary={rx ry fill}>
-  <PropertyVisualizer property=cx label="Center X" short="X" />
-  <PropertyVisualizer property=cy label="Center Y" short="Y" />
-  <PropertyVisualizer property=rx label="Horizontal radius" short="RX" />
-  <PropertyVisualizer property=ry label="Vertical radius" short="RY" />
+visualizer Ellipse = <ElementVisualizer icon="ellipse">
+  <PropertyVisualizer property=cx label="Center X" />
+  <PropertyVisualizer property=cy label="Center Y" />
+  <PropertyVisualizer property=rx label="Horizontal radius" />
+  <PropertyVisualizer property=ry label="Vertical radius" />
 </ElementVisualizer>
 
-visualizer Line = <ElementVisualizer icon="minus" summary={x2 y2 stroke}>
-  <PropertyVisualizer property=x1 label="Start X" short="X1" />
-  <PropertyVisualizer property=y1 label="Start Y" short="Y1" />
-  <PropertyVisualizer property=x2 label="End X" short="X2" />
-  <PropertyVisualizer property=y2 label="End Y" short="Y2" />
+visualizer Line = <ElementVisualizer icon="minus">
+  <PropertyVisualizer property=x1 label="Start X" />
+  <PropertyVisualizer property=y1 label="Start Y" />
+  <PropertyVisualizer property=x2 label="End X" />
+  <PropertyVisualizer property=y2 label="End Y" />
 </ElementVisualizer>
 
-visualizer Polyline = <ElementVisualizer icon="waypoints" summary={points stroke}>
+visualizer Polyline = <ElementVisualizer icon="waypoints">
   <PropertyVisualizer property=points label="Points" icon="waypoints" />
 </ElementVisualizer>
 
-visualizer Polygon = <ElementVisualizer icon="pentagon" summary={points fill}>
+visualizer Polygon = <ElementVisualizer icon="pentagon">
   <PropertyVisualizer property=points label="Points" icon="waypoints" />
 </ElementVisualizer>
 
-visualizer Path = <ElementVisualizer icon="spline" summary={fill stroke}>
+visualizer Path = <ElementVisualizer icon="spline">
   <PropertyVisualizer property=data label="Path data" icon="spline" />
 </ElementVisualizer>
 
-visualizer Text = <ElementVisualizer icon="type" summary={text fontSize fill}>
+visualizer Text = <ElementVisualizer icon="type">
   <PropertyVisualizer property=text label="Text" icon="type" />
-  <PropertyVisualizer property=x label="X" short="X" />
-  <PropertyVisualizer property=y label="Y" short="Y" />
+  <PropertyVisualizer property=x label="X" />
+  <PropertyVisualizer property=y label="Y" />
   <PropertyVisualizer property=fontFamily label="Font" icon="case-sensitive" />
   <PropertyVisualizer property=fontSize label="Font size" icon="a-large-small" />
   <PropertyVisualizer property=fontWeight label="Weight" icon="bold" />
@@ -820,10 +820,10 @@ visualizer Text = <ElementVisualizer icon="type" summary={text fontSize fill}>
   <PropertyVisualizer property=fill label="Fill" icon="paint-bucket" />
 </ElementVisualizer>
 
-visualizer RegularPolygon = <FunctionVisualizer icon="hexagon" summary={pointCount radius fill}>
-  <PropertyVisualizer property=cx label="Center X" short="X" />
-  <PropertyVisualizer property=cy label="Center Y" short="Y" />
-  <PropertyVisualizer property=radius label="Radius" short="R" />
+visualizer RegularPolygon = <FunctionVisualizer icon="hexagon">
+  <PropertyVisualizer property=cx label="Center X" />
+  <PropertyVisualizer property=cy label="Center Y" />
+  <PropertyVisualizer property=radius label="Radius" />
   <PropertyVisualizer property=pointCount label="Sides" icon="hexagon" />
   <PropertyVisualizer property=rotation label="Rotation" icon="rotate-cw" />
   <PropertyVisualizer property=fill label="Fill" icon="paint-bucket" />
@@ -834,11 +834,11 @@ visualizer RegularPolygon = <FunctionVisualizer icon="hexagon" summary={pointCou
   <PropertyVisualizer property=clipRule label="Clip rule" />
 </FunctionVisualizer>
 
-visualizer Star = <FunctionVisualizer icon="star" summary={pointCount fill}>
-  <PropertyVisualizer property=cx label="Center X" short="X" />
-  <PropertyVisualizer property=cy label="Center Y" short="Y" />
-  <PropertyVisualizer property=outerRadius label="Outer radius" short="R" />
-  <PropertyVisualizer property=innerRadius label="Inner radius" short="r" />
+visualizer Star = <FunctionVisualizer icon="star">
+  <PropertyVisualizer property=cx label="Center X" />
+  <PropertyVisualizer property=cy label="Center Y" />
+  <PropertyVisualizer property=outerRadius label="Outer radius" />
+  <PropertyVisualizer property=innerRadius label="Inner radius" />
   <PropertyVisualizer property=pointCount label="Points" icon="star" />
   <PropertyVisualizer property=rotation label="Rotation" icon="rotate-cw" />
   <PropertyVisualizer property=fill label="Fill" icon="paint-bucket" />
@@ -849,11 +849,11 @@ visualizer Star = <FunctionVisualizer icon="star" summary={pointCount fill}>
   <PropertyVisualizer property=clipRule label="Clip rule" />
 </FunctionVisualizer>
 
-visualizer Arrow = <FunctionVisualizer icon="move-right" summary={x2 y2 fill}>
-  <PropertyVisualizer property=x1 label="Start X" short="X1" />
-  <PropertyVisualizer property=y1 label="Start Y" short="Y1" />
-  <PropertyVisualizer property=x2 label="End X" short="X2" />
-  <PropertyVisualizer property=y2 label="End Y" short="Y2" />
+visualizer Arrow = <FunctionVisualizer icon="move-right">
+  <PropertyVisualizer property=x1 label="Start X" />
+  <PropertyVisualizer property=y1 label="Start Y" />
+  <PropertyVisualizer property=x2 label="End X" />
+  <PropertyVisualizer property=y2 label="End Y" />
   <PropertyVisualizer property=shaftWidth label="Shaft width" icon="minus" />
   <PropertyVisualizer property=headWidth label="Head width" icon="chevron-right" />
   <PropertyVisualizer property=headLength label="Head length" icon="move-horizontal" />
@@ -865,10 +865,10 @@ visualizer Arrow = <FunctionVisualizer icon="move-right" summary={x2 y2 fill}>
   <PropertyVisualizer property=clipRule label="Clip rule" />
 </FunctionVisualizer>
 
-visualizer Arc = <FunctionVisualizer icon="radius" summary={radius sweepAngle stroke}>
-  <PropertyVisualizer property=cx label="Center X" short="X" />
-  <PropertyVisualizer property=cy label="Center Y" short="Y" />
-  <PropertyVisualizer property=radius label="Radius" short="R" />
+visualizer Arc = <FunctionVisualizer icon="radius">
+  <PropertyVisualizer property=cx label="Center X" />
+  <PropertyVisualizer property=cy label="Center Y" />
+  <PropertyVisualizer property=radius label="Radius" />
   <PropertyVisualizer property=startAngle label="Start angle" icon="rotate-cw" />
   <PropertyVisualizer property=sweepAngle label="Sweep" icon="pie-chart" />
   <PropertyVisualizer property=stroke label="Stroke" icon="pen-line" />
@@ -878,11 +878,11 @@ visualizer Arc = <FunctionVisualizer icon="radius" summary={radius sweepAngle st
   <PropertyVisualizer property=clipRule label="Clip rule" />
 </FunctionVisualizer>
 
-visualizer RingSector = <FunctionVisualizer icon="donut" summary={outerRadius sweepAngle fill}>
-  <PropertyVisualizer property=cx label="Center X" short="X" />
-  <PropertyVisualizer property=cy label="Center Y" short="Y" />
-  <PropertyVisualizer property=outerRadius label="Outer radius" short="R" />
-  <PropertyVisualizer property=innerRadius label="Inner radius" short="r" />
+visualizer RingSector = <FunctionVisualizer icon="donut">
+  <PropertyVisualizer property=cx label="Center X" />
+  <PropertyVisualizer property=cy label="Center Y" />
+  <PropertyVisualizer property=outerRadius label="Outer radius" />
+  <PropertyVisualizer property=innerRadius label="Inner radius" />
   <PropertyVisualizer property=startAngle label="Start angle" icon="rotate-cw" />
   <PropertyVisualizer property=sweepAngle label="Sweep" icon="pie-chart" />
   <PropertyVisualizer property=fill label="Fill" icon="paint-bucket" />

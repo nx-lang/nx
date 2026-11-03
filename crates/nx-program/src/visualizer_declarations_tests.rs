@@ -850,12 +850,12 @@ fn element_function_visualizers_only_describe_invocation_icons() {
 }
 
 #[test]
-fn labels_icons_letters_and_a_summary() {
+fn labels_and_icons() {
     assert_clean(
-        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\" summary={width fill}><PropertyVisualizer property=x label=\"X\" short=\"X\" /><PropertyVisualizer property=width label=\"Width\" short=\"W\" /><PropertyVisualizer property=fill label=\"Fill\" icon=\"paint-bucket\" /></ElementVisualizer>",
+        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\"><PropertyVisualizer property=x label=\"X\" /><PropertyVisualizer property=width label=\"Width\" /><PropertyVisualizer property=fill label=\"Fill\" icon=\"paint-bucket\" /></ElementVisualizer>",
     );
     assert_error(
-        "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer summary={width height} />",
+        "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer><PropertyVisualizer property=height label=\"Height\" /></ElementVisualizer>",
         None,
         &["height"],
     );
@@ -876,37 +876,12 @@ fn an_element_function_has_a_props_record() {
 #[test]
 fn an_element_functions_visualizer_names_its_properties() {
     assert_clean(
-        "let <Badge label:string tone:string = \"neutral\" /> = <Label text={label} />\nvisualizer Badge = <FunctionVisualizer summary={tone}><PropertyVisualizer property=tone label=\"Tone\" /></FunctionVisualizer>",
+        "let <Badge label:string tone:string = \"neutral\" /> = <Label text={label} />\nvisualizer Badge = <FunctionVisualizer icon=\"badge\"><PropertyVisualizer property=tone label=\"Tone\" /></FunctionVisualizer>",
     );
     assert_error(
         "let <Badge label:string /> = <Label text={label} />\nvisualizer Badge = <FunctionVisualizer><PropertyVisualizer property=tone /></FunctionVisualizer>",
         None,
         &["tone"],
-    );
-}
-
-#[test]
-fn a_long_short_label_and_a_repeated_summary_property_are_warnings() {
-    let warnings = warnings_of(
-        "type Box = { width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer summary={width width fill}><PropertyVisualizer property=width short=\"Width\" /><PropertyVisualizer property=fill short=\"F\" /></ElementVisualizer>",
-        "visualizer-hint",
-    );
-    assert_eq!(warnings.len(), 2, "{warnings:#?}");
-    assert!(warnings
-        .iter()
-        .any(|w| w.message.contains("already in the summary")));
-    assert!(warnings
-        .iter()
-        .any(|w| w.message.contains("\"Width\" is 5")));
-}
-
-#[test]
-fn a_single_bare_summary_property() {
-    assert_clean(
-        "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer summary=width />",
-    );
-    assert_clean(
-        "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer summary={width} />",
     );
 }
 

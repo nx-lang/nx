@@ -89,11 +89,12 @@ declare module "react" {
 
 ### Rows and inspectors
 
-Each composition element reads as one row: its icon, kind, ID, title and a short summary of what it
-sets. The summary comes from the visualizer's `summary`, or else the first few written one-line
-properties; items that do not fit are counted as `+N`. Text content, such as that of
-`<Text>NX graphics</Text>`, leads the summary however long it is and is the inspector's first field.
-Text in a summary reads as its first few words, faded where it is cut.
+Each composition element reads as one row, as a design tool's layer list does: its icon, its kind
+and one value that names it, with no label. That value is the visualizer's `title`, such as a
+button's label; else the text the element holds, such as that of `<Text>NX graphics</Text>`; else
+its `id`. An element with none of these shows its icon and kind alone. The value reads on one line,
+faded where it is cut. Clicking it opens the element's inspector with that property's field ready to
+edit; every other property is edited in the inspector.
 
 Selecting a row opens its inspector under it. Clicking the selected row, or pressing Enter, closes
 and reopens it. **Pin** keeps an inspector open while another row is selected, so two elements can be

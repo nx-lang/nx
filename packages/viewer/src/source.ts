@@ -47,8 +47,6 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
 const PIN_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
 
-/** How many properties a row's summary shows when its visualizer names none. */
-const DEFAULT_SUMMARY_LENGTH = 3;
 
 /** What the reading draws with, beyond the text and its colors. */
 export interface SourceLayout {
@@ -917,38 +915,22 @@ export function renderSource(
   };
 
   /**
-   * The lead of a property's field or summary item. A field's is its label, after its icon when it
-   * has one. A summary item's is its icon, else its short label, else its label as a caption. Either
-   * carries the property's label and its name as source writes it as a tooltip.
+   * The lead of a property's field: its label, after its icon when it has one, with the label and
+   * the name as source writes it as a tooltip.
    */
-  const leadOf = (presentation: Presentation, place: "field" | "summary"): HTMLElement => {
+  const leadOf = (presentation: Presentation): HTMLElement => {
     const lead = document.createElement("span");
     lead.title = tooltipOf(presentation);
+    lead.className = "field-lead lead-caption";
     const drawn = presentation.icon === undefined ? undefined : layout.icons?.(presentation.icon);
-    if (place === "field") {
-      lead.className = "field-lead lead-caption";
-      if (drawn !== undefined) {
-        const glyph = document.createElement("span");
-        glyph.className = "lead-glyph";
-        glyph.setAttribute("aria-hidden", "true");
-        glyph.append(drawn.cloneNode(true));
-        lead.append(glyph);
-      }
-      lead.append(presentation.label);
-      return lead;
-    }
     if (drawn !== undefined) {
-      lead.className = `${place}-lead lead-icon`;
-      lead.append(drawn.cloneNode(true));
-      lead.setAttribute("aria-label", presentation.label);
-    } else if (presentation.short !== undefined) {
-      lead.className = `${place}-lead lead-short`;
-      lead.textContent = presentation.short;
-      lead.setAttribute("aria-label", presentation.label);
-    } else {
-      lead.className = `${place}-lead lead-caption`;
-      lead.textContent = presentation.label;
+      const glyph = document.createElement("span");
+      glyph.className = "lead-glyph";
+      glyph.setAttribute("aria-hidden", "true");
+      glyph.append(drawn.cloneNode(true));
+      lead.append(glyph);
     }
+    lead.append(presentation.label);
     return lead;
   };
 
@@ -966,14 +948,9 @@ export function renderSource(
   };
 
   /**
-   * The attributes a row's summary shows: those its visualizer's summary names that the element
-   * writes, in that order, or else the first few it writes whose values are words or read on one
-   * line, its title and id left out. A false boolean is left out either way.
-   */
-  /**
    * The content of `at` that reads inline, as a property does: text and embedded values, as
    * `<Text>NX graphics</Text>` holds, with no element or block in it. However long, its row shows
-   * its first words.
+   * its first words, where it has no title.
    */
   const inlineContent = (at: number): number | undefined => {
     const content = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child));
@@ -988,15 +965,6 @@ export function renderSource(
     }
     const [from, to] = inlineRange(child);
     return from < to ? child : undefined;
-  };
-
-  /** Whether an attribute holds words: content of text, or a quoted string. */
-  const isWords = (attribute: number): boolean => {
-    if (isContent(attribute)) {
-      return true;
-    }
-    const value = soleValue(attribute);
-    return value !== undefined && tree.nodes[value]!.role === "literal" && (tree.nodes[value]!.value ?? "").startsWith('"');
   };
 
   /** Where content's items run, blank space they hold included; it reads collapsed, as in prose. */
@@ -1021,38 +989,6 @@ export function renderSource(
     return [from, to];
   };
 
-  const summaryOf = (at: number, title: number | undefined): number[] => {
-    const node = tree.nodes[at]!;
-    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
-    const inline = inlineContent(at);
-    const written = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && (!isContent(child) || child === inline));
-    const shows = (attribute: number): boolean => attribute === inline || (booleanOf(attribute) !== false && soleValue(attribute) !== undefined);
-    if (visualizer?.summary !== undefined && visualizer.summary.length > 0) {
-      const named = visualizer.summary.flatMap((name) => {
-        const found = written.find((child) => tree.nodes[child]!.name === name);
-        return found !== undefined && shows(found) ? [found] : [];
-      });
-      // Inline content reads first even where the summary leaves it out, since nothing else shows it.
-      return inline !== undefined && !named.includes(inline) ? [inline, ...named] : named;
-    }
-    if (inline !== undefined) {
-      return [inline, ...written.filter((child) => child !== inline && child !== title && child !== idPlans.get(at)?.attribute && shows(child) && soleValue(child) !== undefined && tree.nodes[soleValue(child)!]!.role !== "element" && (isWords(child) || onOneLine(startOf(tree.nodes[soleValue(child)!]!), endOf(tree.nodes[soleValue(child)!]!)))).slice(0, DEFAULT_SUMMARY_LENGTH - 1)];
-    }
-    return written
-      .filter((child) => {
-        const value = soleValue(child);
-        return (
-          child !== title &&
-          child !== idPlans.get(at)?.attribute &&
-          shows(child) &&
-          value !== undefined &&
-          tree.nodes[value]!.role !== "element" &&
-          (isWords(child) || onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!)))
-        );
-      })
-      .slice(0, DEFAULT_SUMMARY_LENGTH);
-  };
-
   /** The one attribute `at` writes, when it writes just one, on one line and not an element. */
   const soleSetting = (at: number): number | undefined => {
     const written = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && !isContent(child));
@@ -1066,63 +1002,42 @@ export function renderSource(
     return written[0];
   };
 
-  /** One item of a row's summary: the property's lead and a copy of its value, as its field reads. */
-  const summaryItem = (attribute: number, presentation: Presentation): HTMLElement => {
-    const item = document.createElement("span");
-    item.className = "summary-item";
-    item.title = tooltipOf(presentation);
-    hoverable(item, attribute);
-    if (isWords(attribute)) {
-      // Words read as their first few, cut and faded where they run long.
-      item.classList.add("summary-words");
-    }
-    if (isContent(attribute)) {
-      // Inline content reads as its text, as the element's title does, with no label.
-      const words = document.createElement("span");
-      words.className = "summary-value summary-text";
-      writeNodes(words, childrenOf(attribute), ...itemsRange(attribute));
-      item.append(unmarked(words));
-      return item;
-    }
-    const lead = leadOf(presentation, "summary");
-    const truth = booleanOf(attribute);
-    if (truth === true) {
-      // A true boolean reads as what it turns on: its icon and its label.
-      item.classList.add("summary-flag");
-      if (lead.classList.contains("lead-caption")) {
-        item.append(lead);
-      } else {
-        const label = document.createElement("span");
-        label.className = "summary-label";
-        label.textContent = presentation.label;
-        item.append(lead, label);
-      }
-      return item;
+  /**
+   * The one value a row or a folded element value names its element by, as a layer list does: its
+   * title, else the text it holds, else its id. A folded element value with none of these reads as
+   * what it sets when it sets one thing, as a paint its color.
+   */
+  const headValue = (at: number, nested: boolean): HTMLElement | undefined => {
+    const title = titleOf(at) ?? computedTitleOf(at);
+    const inline = inlineContent(at);
+    const plan = idPlans.get(at);
+    const shown = title ?? inline ?? plan?.attribute ?? (nested ? soleSetting(at) : undefined);
+    if (shown === undefined) {
+      return undefined;
     }
     const value = document.createElement("span");
-    value.className = "summary-value";
-    const at = soleValue(attribute);
-    const only = at !== undefined && tree.nodes[at]!.role === "element" ? soleSetting(at) : undefined;
-    if (only !== undefined) {
-      // An element value that sets one thing, as a paint its color, reads as that value.
-      writeValue(value, only);
-    } else if (at !== undefined && tree.nodes[at]!.role === "element") {
-      // Any other element value reads by its kind, as its field does when folded.
-      value.textContent = tree.nodes[at]!.name ?? "";
+    value.className = "row-title";
+    // A click on it edits the property it shows, in the element's inspector.
+    value.dataset["field"] = tree.nodes[shown]!.key;
+    hoverable(value, shown);
+    if (shown === inline) {
+      writeNodes(value, childrenOf(inline), ...itemsRange(inline));
+    } else if (shown === title) {
+      writeValue(value, shown);
+    } else if (plan !== undefined && shown === plan.attribute) {
+      value.classList.add("row-id");
+      value.append(idChip(plan));
     } else {
-      writeValue(value, attribute);
-      if (at !== undefined && tree.nodes[at]!.role === "reference") {
-        value.classList.add("reference-token");
-      }
+      writeValue(value, shown);
     }
-    item.append(lead, unmarked(value));
-    return item;
+    value.title = tooltipOf(presentations(at)(tree.nodes[shown]!.name ?? ""));
+    return unmarked(value);
   };
 
   /** A field of an inspector for an attribute the element writes, its value editable in place. */
   const writtenField = (attribute: number, presentation: Presentation): HTMLElement => {
     const field = marked(attribute, "span", "sheet-row prop-field");
-    const lead = leadOf(presentation, "field");
+    const lead = leadOf(presentation);
     lead.classList.add("sheet-name");
     hoverable(lead, attribute);
     const cell = document.createElement("span");
@@ -1167,7 +1082,7 @@ export function renderSource(
     });
 
   /**
-   * An element value in its property's field: its icon, kind and summary, which unfold into a
+   * An element value in its property's field: its icon, kind and the value it is named by, which unfold into a
    * nested group of its own fields, edited as any others.
    */
   const writeNested = (field: HTMLElement, cell: HTMLElement, at: number): void => {
@@ -1199,18 +1114,10 @@ export function renderSource(
     writeText(kind, start + 1, nameEnd(text, node, start));
     head.append(kind);
     if (!open) {
-      const summary = document.createElement("span");
-      summary.className = "row-summary nested-summary";
-      const present = presentations(at);
-      for (const attribute of summaryOf(at, titleOf(at))) {
-        summary.append(summaryItem(attribute, present(tree.nodes[attribute]!.name ?? "")));
-      }
-      if (summary.childElementCount > 0) {
-        const more = document.createElement("span");
-        more.className = "summary-more";
-        more.hidden = true;
-        summary.append(more);
-        head.append(summary);
+      const value = headValue(at, true);
+      if (value !== undefined) {
+        value.classList.add("nested-value");
+        head.append(value);
       }
     }
     cell.append(head);
@@ -1233,7 +1140,7 @@ export function renderSource(
     field.dataset["moreOf"] = key;
     field.dataset["name"] = presentation.name;
     field.title = tooltipOf(presentation);
-    const lead = leadOf(presentation, "field");
+    const lead = leadOf(presentation);
     lead.classList.add("sheet-name");
     const cell = document.createElement("span");
     cell.className = "sheet-value";
@@ -1246,7 +1153,7 @@ export function renderSource(
 
   /**
    * An element of the composition as one row: its children's chevron when it holds content, its
-   * icon, kind, id and title, its summary, cut by the element to what fits, and its pin. Under it,
+   * icon, kind and the one value it is named by, and its pin. Under it,
    * while open, its inspector: a field to each property it declares, written or not;
    * then, unless folded, what it holds.
    */
@@ -1294,32 +1201,9 @@ export function renderSource(
     hoverable(kind, at);
     writeText(kind, start + 1, nameEnd(text, node, start));
     head.append(kind);
-    if (plan !== undefined && !plan.atEnd) {
-      head.append(unmarked(idChip(plan)));
-    }
-    const title = titleOf(at);
-    if (title !== undefined) {
-      const words = document.createElement("span");
-      words.className = "row-title";
-      hoverable(words, title);
-      writeValue(words, title);
-      head.append(unmarked(words));
-    }
-    if (plan !== undefined && plan.atEnd) {
-      head.append(unmarked(idChip(plan)));
-    }
-    const summary = document.createElement("span");
-    summary.className = "row-summary";
-    summary.hidden = open;
-    for (const attribute of summaryOf(at, title)) {
-      summary.append(summaryItem(attribute, present(tree.nodes[attribute]!.name ?? "")));
-    }
-    if (summary.childElementCount > 0) {
-      const more = document.createElement("span");
-      more.className = "summary-more";
-      more.hidden = true;
-      summary.append(more);
-      head.append(summary);
+    const value = headValue(at, false);
+    if (value !== undefined) {
+      head.append(value);
     }
     const pin = document.createElement("button");
     pin.type = "button";
@@ -1340,7 +1224,7 @@ export function renderSource(
         // Inline content edits in the inspector, first, as the property it is.
         const presentation = present(tree.nodes[inline]!.name ?? "");
         const field = marked(inline, "span", "sheet-row prop-field content-field");
-        const lead = leadOf(presentation, "field");
+        const lead = leadOf(presentation);
         lead.classList.add("sheet-name");
         hoverable(lead, inline);
         const cell = document.createElement("span");
@@ -1600,6 +1484,28 @@ export function renderSource(
         values.length === 1 &&
         tree.nodes[values[0]!]!.role === "literal" &&
         (tree.nodes[values[0]!]!.value ?? "").startsWith('"')
+      );
+    });
+  };
+
+  /**
+   * The attribute the element's visualizer names as its title when its value is not a string but
+   * reads on one line, as `name={member.name}` does: a row names its element by it as written.
+   */
+  const computedTitleOf = (at: number): number | undefined => {
+    const node = tree.nodes[at]!;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
+    if (visualizer?.title === undefined) {
+      return undefined;
+    }
+    return childrenOf(at).find((child) => {
+      const value = soleValue(child);
+      return (
+        tree.nodes[child]!.name === visualizer.title &&
+        tree.nodes[child]!.role === "attribute" &&
+        value !== undefined &&
+        tree.nodes[value]!.role !== "element" &&
+        onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!))
       );
     });
   };

@@ -173,10 +173,6 @@ pub struct LoweringContext {
     state_records: FxHashMap<Name, RecordDef>,
     /// Derived props records keyed by the name of their component or element-style function.
     props_records: FxHashMap<Name, RecordDef>,
-    /// Whether a visualizer declaration's value is being lowered, where a bare name in a braced
-    /// list (`summary={points fill}`) names a property, as a contextual name does, rather than a
-    /// binding in scope.
-    in_visualizer_value: bool,
     /// Update records to add once every declared item has been added, in declaration order.
     pending_update_items: Vec<RecordDef>,
     /// Derived property unions keyed by the name of the declaration whose fields they name.
@@ -222,7 +218,6 @@ impl LoweringContext {
             update_records: FxHashMap::default(),
             state_records: FxHashMap::default(),
             props_records: FxHashMap::default(),
-            in_visualizer_value: false,
             pending_update_items: Vec::new(),
             property_unions: FxHashMap::default(),
             pending_property_items: Vec::new(),
@@ -1672,21 +1667,6 @@ impl LoweringContext {
             // Identifier
             SyntaxKind::QUALIFIED_NAME => self.lower_qualified_name_expr(node),
 
-            SyntaxKind::IDENTIFIER_EXPRESSION
-                if self.in_visualizer_value && Self::is_in_summary_list(node) =>
-            {
-                let name = node
-                    .children()
-                    .find(|child| child.kind() == SyntaxKind::IDENTIFIER)
-                    .map(|identifier| Name::new(identifier.text().trim()))
-                    .unwrap_or_else(|| Name::new(node.text().trim()));
-                self.alloc_expr(Expr::ContextualName {
-                    name,
-                    occurrence: None,
-                    span: node.span(),
-                })
-            }
-
             SyntaxKind::IDENTIFIER | SyntaxKind::IDENTIFIER_EXPRESSION => {
                 // For identifier expressions, get the actual identifier child
                 if let Some(id_node) = node
@@ -2478,12 +2458,10 @@ impl LoweringContext {
             self.check_visualizer_value_is_written_out(value_node);
         }
         let first_expr = self.module.exprs().len();
-        self.in_visualizer_value = true;
         let value = node
             .child_by_field("value")
             .map(|value_node| self.lower_expr(value_node))
             .unwrap_or_else(|| self.error_expr(node.span()));
-        self.in_visualizer_value = false;
         Some(VisualizerDecl {
             target: Name::new(target.text()),
             target_span: target.span(),
@@ -2516,12 +2494,6 @@ impl LoweringContext {
             }
             SyntaxKind::PROPERTY_VALUE => {
                 if let Some(value) = node.child_by_field("value") {
-                    let is_summary = node
-                        .child_by_field("name")
-                        .is_some_and(|name| name.text() == "summary");
-                    if is_summary && Self::is_braced_name_list(value) {
-                        return;
-                    }
                     self.check_visualizer_value_is_written_out(value);
                 }
             }
@@ -2543,51 +2515,6 @@ impl LoweringContext {
             SyntaxKind::SIGNED_NUMERIC_LITERAL | SyntaxKind::CONTEXTUAL_NAME => {}
             kind if kind.is_comment() => {}
             _ => self.report_visualizer_value_not_written_out(node),
-        }
-    }
-
-    /// Whether `node` is a braced list of bare names, `{points fill}`: the one braced value a
-    /// visualizer takes, for an element's `summary`.
-    fn is_braced_name_list(node: SyntaxNode) -> bool {
-        let node = if node.kind() == SyntaxKind::RHS_EXPRESSION {
-            match node.children().next() {
-                Some(child) => child,
-                None => return false,
-            }
-        } else {
-            node
-        };
-        node.kind() == SyntaxKind::VALUES_BRACED_EXPRESSION
-            && node
-                .children()
-                .all(|item| item.kind().is_comment() || Self::is_bare_name_item(item))
-    }
-
-    /// Whether `node` is an item of a visualizer's `summary={…}` list.
-    fn is_in_summary_list(node: SyntaxNode) -> bool {
-        let mut current = node.parent();
-        while let Some(parent) = current {
-            if parent.kind() == SyntaxKind::PROPERTY_VALUE {
-                return parent
-                    .child_by_field("name")
-                    .is_some_and(|name| name.text() == "summary");
-            }
-            current = parent.parent();
-        }
-        false
-    }
-
-    fn is_bare_name_item(node: SyntaxNode) -> bool {
-        match node.kind() {
-            SyntaxKind::IDENTIFIER_EXPRESSION => true,
-            SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_LIST_ITEM_EXPRESSION => {
-                let mut children = node.children().filter(|child| !child.kind().is_comment());
-                match (children.next(), children.next()) {
-                    (Some(child), None) => Self::is_bare_name_item(child),
-                    _ => false,
-                }
-            }
-            _ => false,
         }
     }
 

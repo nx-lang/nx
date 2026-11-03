@@ -137,11 +137,11 @@ describe("hover targets", () => {
     const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
     assert.deepEqual(
       marksOf(element, type).map((mark) => mark.className),
-      ["summary-item", "field-lead lead-caption sheet-name"],
-      "its summary item and its field's lead"
+      ["field-lead lead-caption sheet-name"],
+      "its field's lead"
     );
     const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
-    assert.deepEqual(marksOf(element, circle).map((mark) => mark.dataset["key"]), [undefined, circle], "a case marks itself, and its copy in the summary");
+    assert.deepEqual(marksOf(element, circle).map((mark) => mark.dataset["key"]), [circle], "a case marks itself");
     for (const value of [
       keyIn(hover, (node) => node.role === "case" && node.name === "Rectangle"),
       keyIn(hover, (node) => node.role === "member"),
@@ -152,11 +152,11 @@ describe("hover targets", () => {
     }
     const union = keyIn(hover, (node) => node.role === "reference" && node.name === "ShapeType");
     assert.equal(drawn(element, union).dataset["hover"], undefined, "a qualified case's union is the case's");
-    // A task's id and title read without their names on its row, and show their properties' cards,
-    // as their fields' leads do.
+    // A task's title reads without its name on its row, and shows its property's card, as its
+    // field's lead does. Its id, with a title to name the task, reads only in its inspector.
     const id = keyIn(hover, (node) => node.role === "attribute" && node.name === "id");
     const title = keyIn(hover, (node) => node.role === "attribute" && node.name === "title");
-    assert.deepEqual(marksOf(element, id).map((mark) => mark.textContent), ["ship", "ID"]);
+    assert.deepEqual(marksOf(element, id).map((mark) => mark.textContent), ["ID"]);
     assert.deepEqual(marksOf(element, title).map((mark) => mark.textContent), ["Ship it", "Title"]);
     // Nothing else is marked: a literal, a comment, or a unit's room.
     const hi = keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"');
@@ -347,20 +347,20 @@ describe("hover cards", () => {
     assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle");
   });
 
-  it("takes the spans of one node for one target: a line's name and its =", async (t) => {
+  it("takes the spans of one node for one target: a row's title and its field's lead", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
-    const [name, equals] = marksOf(element, type);
-    pointAt(name!);
+    const title = keyIn(hover, (node) => node.role === "attribute" && node.name === "title");
+    const [named, lead] = marksOf(element, title);
+    pointAt(named!);
     t.mock.timers.tick(300);
-    pointAt(equals!);
+    pointAt(lead!);
     t.mock.timers.tick(200);
-    assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle", "the rest is not restarted");
-    pointAt(name!);
+    assert.equal(signatureOf(element), "(property) title: string", "the rest is not restarted");
+    pointAt(named!);
     t.mock.timers.tick(1000);
-    assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle", "and it stays open");
+    assert.equal(signatureOf(element), "(property) title: string", "and it stays open");
   });
 
   it("closes on a new tree", async (t) => {

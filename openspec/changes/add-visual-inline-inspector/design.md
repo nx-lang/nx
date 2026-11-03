@@ -25,7 +25,7 @@ builds on its code.
 - Evaluating expressions or showing runtime values; selection mapping from preview instances beyond
   what exists today.
 - Localizing labels (NX has no built-in localizable text type yet; labels are strings).
-- Summary templates (`"{} points"`) or computed summaries (an arrow's length).
+- Showing more than one value on a row, or a per-kind summary of what an element sets.
 - New editors for compound values (gradient editors); nested values edit field by field.
 
 ## Decisions
@@ -53,11 +53,9 @@ A value that spans lines, such as a list of elements, and an unfolded element va
 label, a step in. Unset properties are dashed values with the default as placeholder. There are no
 group headings and no `group` hint.
 
-### 4. Field labels; summary leads
+### 4. Field labels
 A field always shows its label, after its icon when it has one; where any label in an inspector has
-an icon, the others keep its room so labels start in line. `short` is for summaries, where room is
-tight: a summary item leads with its icon, else its short label, else its label. Every lead has a
-tooltip `Label · name`. Booleans are checkboxes beside their label. Dragging a number's label scrubs
+an icon, the others keep its room so labels start in line. Every lead has a tooltip `Label · name`. Booleans are checkboxes beside their label. Dragging a number's label scrubs
 it.
 
 ### 5. Labels
@@ -72,16 +70,23 @@ the field. One step per 3 px; Shift ×10, Alt ×0.1. Values go out as live edits
 live-edit path and commit once on release, so undo is one step. Pointer lock is left for later.
 Steppers and their layout rules ("room on a line") are deleted.
 
-### 7. Summaries
-`summary` lists properties, resolved whole (derived visualizer wins). Items draw like their fields,
-minus the box. Without `summary`: up to three written one-line values in source order. Overflow is
-measured after layout (as the prototype's `#fitCompactLines` does) and cut at whole items with `+N`.
+### 7. One value names a row
+Design tools keep their layer lists quiet: Figma shows one name per layer, with no label, which is a
+text layer's text, an image's file name or the layer's type until someone renames it. Bret chose the
+same for rows (2026-11-03): a row shows its icon, its kind and one value: the visualizer's `title`
+when the element writes it on one line (a string, or an expression as written), else its text
+content, else its `id`. Nothing else it sets reads on the row. A row of several values was busy, and
+it invited clicks on values that could not be edited there; now a click on the one value opens the
+inspector with that field ready to edit. This replaced curated `summary` lists and one- or
+two-character `short` labels, which existed only for summaries; both are gone from `@nx/visualizer`,
+with the braced bare-name lists (`summary={points fill}`) the compiler accepted for them. An image
+names itself by its file name when its visualizer makes its source the title.
 
 ### 8. References and nested elements
 A reference to a top-level `let` is a token. The swatch comes from the `let`'s written value when it
 is a color literal or an element whose visualizer formats one property as a color, which is a lookup
-in the source tree, not evaluation. A nested element value is a field showing its kind and summary
-that unfolds into a nested group; its fields edit the nested element through the same source edits.
+in the source tree, not evaluation. A nested element value is a field showing its kind and the value that
+names it, or else the one thing it sets (a paint's color), that unfolds into a nested group; its fields edit the nested element through the same source edits.
 
 ### 9. `F.Props` for element-style functions
 Graphics helpers (`Star`, `Arrow`, `Arc`, `RingSector`, `RegularPolygon`) are element-style
@@ -100,15 +105,12 @@ prototype's one-line rows.
 
 ## Risks / Trade-offs
 
-- [Rows hide values that lines showed] → curated summaries; the inspector opens on selection; Source
-  is one click away.
+- [Rows hide values that lines showed, such as a shape's size and fill] → the preview shows them, the
+  inspector opens on selection, and Source is one click away; design tools make the same trade.
 - [Layout shift when inspectors open] → anchoring the acted-on row; scroll only for off-screen
   selections; dense two-column fields.
 - [Big elements bury the tree] → one line per field keeps inspectors short; the pin and closing the
   selected row put them away.
-- [Bare property names inside `summary={…}`] → each item is at a `Target.Property`-typed site, so bare
-  case names should resolve as they do for `title=label`; verify early, and if braced items don't
-  resolve contextually, extend contextual resolution to items of a typed braced sequence.
 - [Remaining editing requirements still speak of lines] → they apply to fields in the inspector;
   wording can be tightened while syncing the specs.
 

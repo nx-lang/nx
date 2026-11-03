@@ -144,9 +144,6 @@ const SCRUB_SLOP = 4;
 /** How far the pointer moves while pressed, in pixels, before the text it selects is a selection of text, not a click. */
 const TEXT_SELECT_SLOP = 6;
 
-/** How narrow, in pixels, a summary's words may shrink before they are left out. */
-const MIN_WORDS_WIDTH = 48;
-
 /** How far the pointer moves sideways, in pixels, for a scrubbed number to step once. */
 const SCRUB_STEP = 3;
 
@@ -1194,7 +1191,7 @@ export class NxViewerElement extends ElementBase {
     }
     this.#fillUnwritten(index);
     this.#markScrubbable();
-    this.#fitSummaries();
+    this.#fitTitles();
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
     // by the reader or the host, is kept: when it hides the selection, the selection moves to the
     // folded unit that hides it, as a tree's does, or is cleared when no drawn unit holds it.
@@ -3584,7 +3581,7 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Begins a press on a number field's lead, its icon, short label or caption: dragged sideways, it
+   * Begins a press on a number field's lead, its icon or label: dragged sideways, it
    * scrubs the number; let go before it moves, it focuses the field.
    */
   #onLeadPointerDown(event: PointerEvent): void {
@@ -3840,53 +3837,10 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /**
-   * Cuts each row's summary to the whole items that fit on its line, from the end, and says how many
-   * it left out. Words shrink first, and fade where they are cut, as titles do.
-   */
-  #fitSummaries(): void {
+  /** Fades each row's value where its line cuts it. */
+  #fitTitles(): void {
     for (const title of this.#body.querySelectorAll<HTMLElement>(".row-title")) {
       title.classList.toggle("clipped", title.scrollWidth > title.clientWidth + 1);
-    }
-    for (const summary of this.#body.querySelectorAll<HTMLElement>(".row-summary:not([hidden])")) {
-      const items = [...summary.querySelectorAll<HTMLElement>(":scope > .summary-item")];
-      const more = summary.querySelector<HTMLElement>(":scope > .summary-more")!;
-      items.forEach((item) => {
-        item.hidden = false;
-        item.style.removeProperty("max-width");
-      });
-      more.hidden = true;
-      if (summary.parentElement!.clientWidth === 0) {
-        continue;
-      }
-      // The summary gives way first as its line fills, so what overflows it is what does not fit.
-      const fits = (): boolean => summary.scrollWidth <= summary.clientWidth + 1;
-      let shown = items.length;
-      while (!fits() && shown > 0) {
-        const last = items[shown - 1]!;
-        if (last.classList.contains("summary-words") && !last.style.maxWidth) {
-          // Words shrink to what is left before they go, if a few still show.
-          const width = last.clientWidth - (summary.scrollWidth - summary.clientWidth);
-          if (width >= MIN_WORDS_WIDTH) {
-            last.style.maxWidth = `${width}px`;
-            continue;
-          }
-        }
-        shown -= 1;
-        items[shown]!.hidden = true;
-        more.hidden = false;
-        more.textContent = `+${items.length - shown}`;
-        more.title = items
-          .slice(shown)
-          .map((item) => item.title)
-          .join(", ");
-      }
-      for (const words of items) {
-        const value = words.querySelector<HTMLElement>(":scope > .summary-value");
-        if (words.classList.contains("summary-words") && value !== null) {
-          words.classList.toggle("clipped", !words.hidden && value.scrollWidth > value.clientWidth + 1);
-        }
-      }
     }
   }
 
@@ -4274,6 +4228,13 @@ export class NxViewerElement extends ElementBase {
       this.#select(keyOf(property), true);
       return;
     }
+    // A click on the value a row or a folded element value is named by edits that property in its
+    // inspector, opening the inspector first.
+    const named = this.#editable ? (target.closest?.(".row-title[data-field]") as HTMLElement | null | undefined) : undefined;
+    if (named !== null && named !== undefined && this.#body.contains(named)) {
+      this.#editNamed(named);
+      return;
+    }
     // A click chooses the unit it falls in: the element, row or line, not a word in it. Outside
     // every unit, as in a function's body, it chooses the smallest node there.
     const chosen = this.#unitOf(target) ?? (target.closest?.("[data-key]") as HTMLElement | null | undefined);
@@ -4285,6 +4246,38 @@ export class NxViewerElement extends ElementBase {
         return;
       }
       this.#select(key, true);
+    }
+  }
+
+  /**
+   * Edits the property whose value `named` shows on a row or a folded element value: opens the
+   * inspector it is in, then the property's value, or selects the property when it cannot be edited
+   * in place.
+   */
+  #editNamed(named: HTMLElement): void {
+    const field = named.dataset["field"]!;
+    const nested = named.closest<HTMLElement>(".nested-head[data-key]");
+    const row = named.closest<HTMLElement>(".row-element[data-key]");
+    if (nested !== null) {
+      const key = keyOf(nested)!;
+      if (!this.#valuesOpen.has(key)) {
+        this.#toggleValue(key);
+      }
+    } else if (row !== null) {
+      const key = keyOf(row)!;
+      if (this.#selection !== key) {
+        this.#select(key, true);
+      }
+      if (this.#rendered.get(key)?.querySelector(":scope > .inspector") == null) {
+        this.#toggleDetails(key, "toggle");
+      }
+    }
+    const drawn = this.#rendered.get(field);
+    const value = drawn?.closest(".inspector") == null ? undefined : drawn.querySelector<HTMLElement>(".editable-value[data-key]");
+    if (value !== null && value !== undefined) {
+      this.#openEditor(keyOf(value)!);
+    } else if (drawn !== undefined) {
+      this.#select(field, true);
     }
   }
 

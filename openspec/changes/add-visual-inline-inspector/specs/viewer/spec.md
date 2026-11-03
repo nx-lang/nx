@@ -4,9 +4,8 @@
 The viewer SHALL read each element in the composition as one row whatever the pane's width: an
 element outside the value of another element's non-content property, content children included
 (inside `if`, `for` and braced lists too). The row SHALL show, on one line, the child fold chevron
-when the element holds content, its icon, its kind, its id chip and title when its visualizer names
-them, and its summary, and SHALL be no taller than a source line. As the line fills, the summary
-SHALL give way first, down to its `+N` count, and then a title SHALL be cut and faded. An element inside a property's
+when the element holds content, its icon, its kind and the one value it is named by, and SHALL be
+no taller than a source line. As the line fills, that value SHALL be cut and faded. An element inside a property's
 value SHALL read inside its owner's inspector, not as a row. Comments, `if` and `for` SHALL read as
 written between rows, and an element whose syntax a row cannot show losslessly SHALL keep its
 as-written reading. Declarations other than `let` values (types, functions' and components'
@@ -14,14 +13,13 @@ signatures, visualizers) SHALL keep their existing reading. The viewer SHALL NOT
 to draw a row.
 
 #### Scenario: A narrow pane keeps the structure
-- **WHEN** the pane holding `<Star cx=150 cy=55 outerRadius=36 innerRadius=17 pointCount=5 />` is
-  narrowed until its summary does not fit
-- **THEN** Star SHALL still read as one row, its summary cut at a whole item, and nothing SHALL wrap
+- **WHEN** the pane holding `<Text x=250 y=165 fontSize=18>NX graphics</Text>` is narrowed until
+  its text does not fit
+- **THEN** Text SHALL still read as one row, its text cut and faded, and nothing SHALL wrap
 
 #### Scenario: A long title stays on its line
 - **WHEN** a `SelectQuestion` row's title is a question longer than the room left on its line
-- **THEN** the row SHALL read its kind, its id and the question's first words, faded where cut, and
-  the count of the summary items it left out, on one line
+- **THEN** the row SHALL read its kind and the question's first words, faded where cut, on one line
 
 #### Scenario: A paint is not a row
 - **WHEN** a `Circle` has `fill=<Paint.radial …/>`
@@ -44,38 +42,43 @@ keywords in their code colors.
 - **THEN** `for`, MemberRow, the inner `if`, the Text and both closing braces SHALL start at the same
   place
 
-### Requirement: A row's summary shows the properties its visualizer names
-A row SHALL show, after its title, the properties its resolved `summary` names that the element
-writes, in that order; without a `summary`, up to three of the properties it writes whose values
-read on one line, in source order, leaving out its title and id. Each item SHALL read as its
-inspector field would, without the field and led by the icon, else the short label, else the label: then the value, or a swatch and
-the value for a color; a boolean SHALL read as its icon and label when true and be left out when
-false; a case SHALL read as its label; a reference to a `let` SHALL read as a token. Items that do
-not fit SHALL be left out from the end, whole, and a quiet count such as `+2` SHALL say how many.
-A summary SHALL hide while its element's inspector is open. Text content an element holds, with no element or block in it, SHALL lead
-the summary, ahead of the named properties, however many lines it runs, and the row SHALL have no
-fold for it; open, the inspector SHALL show it as its first field. Words in a
-summary, as text content or a quoted string, SHALL read on one line as their first few, at most
-about 28 characters, faded where they are cut, and SHALL shrink to fit before they are left out.
-Content that holds elements SHALL read as the row's children.
+### Requirement: A row names its element by one value
+A row SHALL show, after its kind, at most one value and no label, as a design tool's layer list
+shows a layer's name: the element's title when its visualizer names one and the element writes it on
+one line; else the text content it holds, with no element or block in it, however many lines it
+runs; else its id when its visualizer names one. An element with none of these SHALL show its icon
+and kind alone. The value SHALL read on one line, as its inspector field would, faded where it is
+cut, and SHALL stay while the inspector is open. No other property SHALL read on the row. A row SHALL
+have no fold for its text content; open, the inspector SHALL show that text as its first field.
+Content that holds elements SHALL read as the row's children. A folded element value in an
+inspector SHALL be named by the same rule, or else, when it sets just one thing on one line, by
+that value, as a paint by its color.
 
-#### Scenario: A line of text content
+A click on that value SHALL select its property, open the element's inspector if it is closed, and
+open the property's field for editing, as a click on the field's value does; a value that cannot be
+edited in place SHALL select its property.
+
+#### Scenario: A title names the row
+- **WHEN** a `Button` whose visualizer has `title=label` writes `<Button label="Save changes" kind=primary />`
+- **THEN** its row SHALL read its icon, `Button` and `Save changes`, and not `primary`
+
+#### Scenario: Text content names the row
 - **WHEN** a document writes `<Text x=250 y=165 fontSize=18>` and `NX graphics` on its own line before `</Text>`
-- **THEN** Text's row SHALL read `NX graphics` after its name and before its font size, with no fold
-  and no closing tag, and its inspector SHALL show `NX graphics` as its first field
+- **THEN** Text's row SHALL read `NX graphics` after its name, with no fold, no closing tag and no font
+  size, and its inspector SHALL show `NX graphics` as its first field
 
-#### Scenario: Long text content
-- **WHEN** a `Document` holds several lines of instructions as its content
-- **THEN** its row SHALL read the first words of the first line, faded where they are cut, with no fold
+#### Scenario: An id names the row only without a title
+- **WHEN** `Workspace`'s visualizer has `title=name id=slug` and a document writes
+  `<Workspace name="Hive5 Tools" slug="hive5-tools" … />`
+- **THEN** its row SHALL read `Hive5 Tools` and not `hive5-tools`, which SHALL read in its inspector
 
-#### Scenario: A curated summary
-- **WHEN** `Star`'s visualizer has `summary={pointCount fill}`, `pointCount` has the icon `star`, and
-  a document writes `<Star … pointCount=5 fill={blue} />` where `let blue = <Paint.color color=#2563eb/>`
-- **THEN** Star's row SHALL read its star icon, `5`, a `#2563eb` swatch and the token `blue`
+#### Scenario: Nothing names the row
+- **WHEN** a `Star` with no title, text or id writes `pointCount=5 fill={blue}`
+- **THEN** its row SHALL read its icon and `Star` alone
 
-#### Scenario: No summary declared
-- **WHEN** an element with no visualizer writes `<Card title="Hello" padding=8 tone=quiet elevated=true />`
-- **THEN** its row SHALL read `Title Hello`, `Padding 8` and `Tone quiet` with their labels as captions
+#### Scenario: Editing the row's value
+- **WHEN** a closed row reads `Hive5 Tools` and the reader clicks it
+- **THEN** Workspace SHALL be selected with its inspector open and its Name field open for editing
 
 ### Requirement: Selecting an element opens its inspector under its row
 Selecting a row, or any node inside its element's property values, SHALL open that element's
@@ -179,7 +182,7 @@ A property whose value is a reference to a top-level `let` SHALL read as a token
 the `let` is written as a literal color, or as an element whose visualizer formats one property as a
 color, the token SHALL show that color's swatch. Opening the token SHALL offer Go to `blue` and
 Show in Source. A property whose value is an element SHALL read as a field with the element's icon,
-kind and summary, and SHALL unfold into a nested group of that element's fields, edited the same
+kind and the value it is named by, and SHALL unfold into a nested group of that element's fields, edited the same
 way. An action value, a component's `State.Update` included, SHALL show the action icon. Any other expression SHALL read as written, code-styled, and open in Source.
 
 #### Scenario: A shared paint

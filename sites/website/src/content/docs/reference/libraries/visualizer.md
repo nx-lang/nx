@@ -63,30 +63,28 @@ A union cannot have a visualizer yet.
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, `preview?: PreviewVisualizer`, `summary?`, content `properties?: PropertyVisualizer+` | `title`, `id` and each `summary` item name a property of the target. |
+| `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, `preview?: PreviewVisualizer`, content `properties?: PropertyVisualizer+` | `title` and `id` name a property of the target. |
 | `PreviewVisualizer` | `renderer: string` | Nonempty literal host renderer ID; see [Preview descriptors](#preview-descriptors). |
-| `FunctionVisualizer` | `icon?: string`, `summary?`, content `properties?: PropertyVisualizer+` | Like `ElementVisualizer`, for element-style function invocations; its target is the function's props. |
+| `FunctionVisualizer` | `icon?: string`, content `properties?: PropertyVisualizer+` | Like `ElementVisualizer`, for element-style function invocations; its target is the function's props. |
 | `IdPosition` | `start`, `end` | Where the element's id reads. |
-| `PropertyVisualizer` | `property`, `label?`, `icon?`, `short?`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
+| `PropertyVisualizer` | `property`, `label?`, `icon?`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
 
-- `title` is the property whose value is the element's title. The playground's Visual view shows its
-  value alone on the element's row, without the property's name or quotes.
+- `title` is the property whose value is the element's title: the display text that names it, such
+  as a button's label. The playground's Visual view names each row by one value, with no label, as
+  a design tool's layer list does: the title, else the text the element holds, else its id. A
+  click on that value edits it in the element's inspector.
 - `id` is the property whose value identifies the element: a key that names it and is kept, such
-  as an id stored in a database. Visual shows its value alone, as one quiet token: right after the
-  element's name when `idPosition` is `start`, the default, or after its title when it is `end`.
+  as an id stored in a database. A row with no title and no text shows it in the title's place.
+  Where an element reads on one line, Visual shows its value alone, as one quiet token: right after
+  the element's name when `idPosition` is `start`, the default, or after its title when it is `end`.
 - `icon` names the icon that marks the element where it starts, from the
   [Lucide](https://lucide.dev/icons) set, such as `"list-checks"`. Visual shows it at the start of the
   element's row; an element with none takes one for its kind of declaration. A kind that extends
   another inherits it.
-- `summary` lists the properties Visual shows on the element's row, in order, so siblings can be told
-  apart without opening them, such as `summary={r fill}` for a circle. Only properties the element
-  writes show; items that do not fit are counted as `+N`. Without it, Visual shows the first few
-  written one-line properties.
 - `properties` says how individual properties read and edit. Visual's inspector, which opens under a
   selected row, lists the element's properties one to a line, in the order the visualizer lists
   them and then in declaration order, each `label` beside its value, after the property's `icon`
-  when it has one. A row's summary leads each value with the `icon`, else the `short` label (one or
-  two characters, such as `"X"` or `"W"`), else the `label`. Without a `label`, Visual derives one
+  when it has one. Without a `label`, Visual derives one
   from the name: `outerRadius` reads `Outer radius`, and a boolean's leading `is` or `has` is
   dropped. A `PropertyVisualizer`'s `format` says how the property's string value is shown, in place
   of the format its type gives it, and its [editor hints](#editor-hints) how the value is edited.
@@ -96,7 +94,7 @@ import "@nx/visualizer"
 
 export abstract component <Question id:string label:string help?:string required:boolean = true />
 
-visualizer Question = <ElementVisualizer title=label id=id icon="circle-help" summary={required}>
+visualizer Question = <ElementVisualizer title=label id=id icon="circle-help">
   <PropertyVisualizer property=help label="Help text" icon="circle-question-mark" />
   <PropertyVisualizer property=required />
 </ElementVisualizer>
@@ -232,7 +230,7 @@ existing ValueVisualizer formats and editors.
 
 ## Element functions
 
-An element-style function may use a `FunctionVisualizer`, with a Lucide `icon`, a `summary` and
+An element-style function may use a `FunctionVisualizer`, with a Lucide `icon` and
 `PropertyVisualizer`s, as an element does. Its `Target` is the function's props record, `F.Props`,
 so property names are the function's parameters:
 
@@ -240,7 +238,7 @@ so property names are the function's parameters:
 import "@nx/visualizer"
 
 let <Badge text:string tone:string = "neutral"/> = <Label text={text}/>
-visualizer Badge = <FunctionVisualizer icon="badge" summary={tone}>
+visualizer Badge = <FunctionVisualizer icon="badge">
   <PropertyVisualizer property=text label="Text" />
 </FunctionVisualizer>
 ```
@@ -270,11 +268,12 @@ functions; function targets carried only by an interface without source are not 
 export type ElementVisualizer = {
   // The declaration this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
-  /// The property whose value is the element's title: it reads alone on the element's line, and
-  /// says what a folded element holds.
+  /// The property whose value is the element's title, the display text that names it, such as a
+  /// button's label. A viewer's row shows it alone, with no label, as a layer list shows a name.
   title?: Target.Property
-  /// The property whose value identifies the element: a key that names it and is kept. It reads as
-  /// one quiet token, its value alone, where `idPosition` puts it.
+  /// The property whose value identifies the element: a key that names it and is kept. A row with
+  /// no title and no text shows it in the title's place. On a line it reads as one quiet token,
+  /// its value alone, where `idPosition` puts it.
   id?: Target.Property
   idPosition: IdPosition = start                              /// Where the element's id reads.
 
@@ -284,9 +283,6 @@ export type ElementVisualizer = {
   /// Host-rendered view, inherited and overridden like other hints. Unsupported renderer IDs leave
   /// structured Output available.
   preview?: PreviewVisualizer
-  /// The properties a viewer shows, in order, on the element's one-line row, so siblings can be
-  /// told apart without opening them, such as `{points fill}`.
-  summary?: Target.Property+
 
   content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
@@ -304,7 +300,6 @@ export type FunctionVisualizer = {
   // The function's derived props record. Bound by the `visualizer` declaration.
   Target: type
   icon?: string                                               /// Lucide icon name for the invocation, such as "star".
-  summary?: Target.Property+                                  /// The properties shown, in order, on its row.
   content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
 
@@ -324,8 +319,6 @@ export type PropertyVisualizer = {
                                   /// a viewer derives one from the property's name.
   icon?: string                   /// A Lucide icon that stands for the property beside its field, such as
                                   /// `"paint-bucket"`.
-  short?: string                  /// A one- or two-character label a row's summary shows where there is no icon, such
-                                  /// as `"X"` or `"W"`.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.

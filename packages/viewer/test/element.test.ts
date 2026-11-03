@@ -177,18 +177,22 @@ describe("the reading", () => {
     const element = show(fixtureText);
     const source = root(element).querySelector<HTMLElement>(".source")!;
     assert.deepEqual(Array.from(source.querySelectorAll(".prose"), read), ["// A note for whoever reads the source."]);
-    const shown = Array.from(source.querySelectorAll<HTMLElement>(".uitext"), (node) => node.textContent);
-    assert.deepEqual(shown, [
+    const uitext = (): (string | null)[] => Array.from(root(element).querySelectorAll<HTMLElement>(".source .uitext"), (node) => node.textContent);
+    assert.deepEqual(uitext(), [
       '"Fine"', // a field's default
       '"Hello, "', // in a function that returns uitext
-      "First choice", // a uitext property, on an element's line without its quotes
-      "Pick me", // a property whose type is an alias of uitext
-      "Shown to people", // an element's text, bound to a uitext content property
-      '"Second "', // inside an expression a uitext property holds
-      '"choice"',
+      "Shown to people", // an element's text, bound to a uitext content property, as its row's value
     ]);
+    const rows = Array.from(source.querySelectorAll<HTMLElement>(".row-element"), (row) => row.dataset["key"]!);
+    element.selection = rows[0]!;
+    const shown = uitext();
+    assert.ok(shown.includes("First choice"), "a uitext property, in its element's inspector");
+    assert.ok(shown.includes("Pick me"), "a property whose type is an alias of uitext");
+    element.selection = rows[2]!;
+    const inExpression = uitext();
+    assert.ok(inExpression.includes('"Second "') && inExpression.includes('"choice"'), "inside an expression a uitext property holds");
     assert.ok(!shown.includes("a") && !shown.includes('"plain"'), "a string property's value stays code");
-    const fine = Array.from(source.querySelectorAll<HTMLElement>(".uitext")).find((node) => node.textContent === '"Fine"')!;
+    const fine = Array.from(root(element).querySelectorAll<HTMLElement>(".source .uitext")).find((node) => node.textContent === '"Fine"')!;
     assert.equal(fine.querySelectorAll(".uitext-quote").length, 2, "written with its quotes, it sets them apart from its words");
     const block = fine.querySelector<HTMLElement>(".uitext-block")!;
     assert.equal(block.style.getPropertyValue("--column"), String(fixtureText.text.split("\n")[3]!.indexOf('"Fine"') + 1), "the words' column is known");
@@ -197,6 +201,7 @@ describe("the reading", () => {
   it("sets a string its visualizer formats as an identifier apart as one quiet token", async () => {
     const identifiers = await fixture("identifiers");
     const element = show(identifiers);
+    element.selection = "first.value";
     const source = root(element).querySelector<HTMLElement>(".source")!;
     const tokens = Array.from(source.querySelectorAll<HTMLElement>(".id-value"), (node) => node.textContent);
     assert.deepEqual(tokens, ["welcome"], "only the property the visualizer names, without its quotes; next is a plain string");
@@ -205,6 +210,7 @@ describe("the reading", () => {
   it("shows the color a string its visualizer formats as a color names, as a square before it", async () => {
     const colors = await fixture("colors");
     const element = show(colors);
+    element.selection = "brand.value";
     const source = root(element).querySelector<HTMLElement>(".source")!;
     const squares = Array.from(source.querySelectorAll<HTMLElement>(".swatch"));
     assert.equal(squares.length, 1, "only a color the type's visualizer formats, and only one that names a color");
@@ -217,6 +223,7 @@ describe("the reading", () => {
     // module, and the document importing only the first.
     const imported = await fixture("importedAliases");
     const element = show(imported);
+    element.selection = root(element).querySelector<HTMLElement>(".row-element")!.dataset["key"]!;
     const source = root(element).querySelector<HTMLElement>(".source")!;
     assert.deepEqual(
       Array.from(source.querySelectorAll<HTMLElement>(".uitext-body"), (node) => node.textContent),
@@ -261,20 +268,21 @@ describe("the reading", () => {
     const row = rendered(element, "row.value");
     assert.ok(row.matches(".row-element"), "the element reads as a row");
     assert.equal(row.querySelector(".row-head > .sheet-kind")!.textContent, "Row");
-    assert.equal(read(row.querySelector(".row-summary")!), "Gapwide", "its summary: the gap's caption and value");
+    assert.equal(row.querySelector(".row-head > .row-title"), null, "no title, text or id names it, so its row shows no value");
     assert.ok(!source.textContent!.includes("</Row>"), "no closing tag");
     const items = Array.from(row.querySelectorAll<HTMLElement>(":scope > .sheet-held > .sheet-item"));
     assert.deepEqual(items.map((item) => item.querySelector(".sheet-kind")!.textContent), ["Item", "Item"]);
     assert.ok(items[1]!.classList.contains("after-blank"), "a blank line between items is kept as room");
   });
 
-  it("reads a line of text an element holds in its row's summary, and edits it in the inspector", async () => {
+  it("names an element by a line of text it holds, and edits it in the inspector", async () => {
     const content = await fixture("content");
     const element = show(content);
     const source = root(element).querySelector<HTMLElement>(".source")!;
     const row = root(element).querySelector<HTMLElement>('[data-key="labels.value"]')!;
-    const summary = row.querySelector<HTMLElement>(":scope > .row-head .summary-text")!;
-    assert.equal(summary.textContent!.trim(), "Hello {who}", "its text, with its embedded value in braces");
+    const named = row.querySelector<HTMLElement>(":scope > .row-head > .row-title")!;
+    assert.equal(named.textContent!.trim(), "Hello {who}", "its text, with its embedded value in braces");
+    assert.equal(row.querySelector(":scope > .row-head")!.textContent!.includes("quiet"), false, "and nothing else it sets");
     assert.equal(row.querySelector(":scope > .row-head > .fold"), null, "no fold for a line of text");
     assert.ok(!source.textContent!.includes("</Label>"), "no closing tag");
     element.selection = "labels.value";
@@ -325,15 +333,15 @@ describe("the reading", () => {
     assert.equal(drawn(), second, "and only once");
   });
 
-  it("moves an element's id to where its visualizer puts it, as its value alone", async () => {
+  it("names an element by its id only where it has no title", async () => {
     const ids = await fixture("elementIds");
     const element = show(ids);
     const source = root(element).querySelector<HTMLElement>(".source")!;
-    // At the beginning, after the name; at the end, after the title.
-    const heads = Array.from(source.querySelectorAll<HTMLElement>('[data-key="steps"] .row-head'), (head) =>
-      Array.from(head.querySelectorAll(":scope > :is(.sheet-kind, .id-value, .row-title)"), (part) => part.textContent)
-    );
-    assert.deepEqual(heads, [["Step", "welcome", "Welcome"], ["Choice", "Yes", "yes"]]);
+    const heads = (): (string | null)[][] =>
+      Array.from(root(element).querySelectorAll<HTMLElement>('.source [data-key="steps"] .row-head'), (head) =>
+        Array.from(head.querySelectorAll(":scope > :is(.sheet-kind, .row-title)"), (part) => part.textContent)
+      );
+    assert.deepEqual(heads(), [["Step", "Welcome"], ["Choice", "Yes"]], "a title names each, and its id reads in its inspector");
   });
 
   it("keeps an element written as its tags over several lines in its item's lines", async () => {
@@ -347,12 +355,12 @@ describe("the reading", () => {
     assert.ok(written.textContent!.includes('\n      note="n"'), "its later line keeps the source's indentation");
   });
 
-  it("reads text over several lines as its first words in its row's summary", async () => {
+  it("names an element by text it holds over several lines, its lines read as one", async () => {
     const poem = await fixture("textOnItsTag");
     const element = show(poem);
     assert.equal(root(element).querySelector(".sheet-item.as-written"), null, "not as written");
-    const words = root(element).querySelector<HTMLElement>(".row-head .summary-item.summary-words")!;
-    assert.ok(words, "the summary holds the words");
+    const words = root(element).querySelector<HTMLElement>(".row-head > .row-title")!;
+    assert.ok(words, "the row's value is its words");
     assert.equal(words.textContent!.replace(/\s+/g, " ").trim(), "Two lines of text", "its lines read as one");
   });
 
@@ -400,7 +408,7 @@ describe("selection", () => {
     const events: NxSelectDetail[] = [];
     element.addEventListener(NX_SELECT_EVENT, (event) => events.push((event as CustomEvent<NxSelectDetail>).detail));
     const row = root(element).querySelector<HTMLElement>(".row-element")!;
-    row.querySelector<HTMLElement>(".row-summary")!.click();
+    row.querySelector<HTMLElement>(".sheet-kind")!.click();
     assert.equal(events.at(-1)!.key, row.dataset["key"], "a word of a row chooses its element");
     assert.equal(events.at(-1)!.role, "element");
     assert.match(root(element).querySelector('[role="status"]')!.textContent ?? "", /^Selected Task/);
@@ -506,7 +514,7 @@ describe("the keyboard", () => {
     const [sheet, first, second] = Array.from(body.querySelectorAll<HTMLElement>(".row-element"));
     // A click on a row chooses its element.
     first!.querySelector<HTMLElement>(".sheet-kind")!.click();
-    rendered(element, sheet!.dataset["key"]!).querySelector<HTMLElement>(".row-summary")!.click();
+    rendered(element, sheet!.dataset["key"]!).querySelector<HTMLElement>(".sheet-kind")!.click();
     key(body, "ArrowRight");
     key(body, "ArrowDown");
     key(body, "ArrowLeft");

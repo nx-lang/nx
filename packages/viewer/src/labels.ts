@@ -1,7 +1,6 @@
 /**
- * How a property is presented in a row's summary and its inspector: its label, the icon or short
- * label its field starts with, and the group it reads in, from its resolved visualizer or derived
- * from its name.
+ * How a property is presented in an inspector: its label and the icon its field starts with, from
+ * its resolved visualizer or derived from its name.
  */
 import type { SourcePropertyVisualizer, SourceTree, SourceVisualizer } from "@nx-lang/language-protocol";
 
@@ -38,7 +37,6 @@ export interface Presentation {
   readonly name: string;
   readonly label: string;
   readonly icon?: string | undefined;
-  readonly short?: string | undefined;
 }
 
 /** The presentation of `name` under `visualizer`, its label derived when the visualizer gives none. */
@@ -52,7 +50,6 @@ export function presentationOf(
     name,
     label: found?.label ?? derivedLabel(name, boolean),
     icon: found?.icon,
-    short: found?.short,
   };
 }
 

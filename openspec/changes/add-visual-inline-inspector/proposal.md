@@ -13,7 +13,9 @@ The agreed mockup is https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA.
 ## What Changes
 
 - **Inline inspector.** Each element in the composition (an element outside another element's
-  property value) reads as one row: icon, kind, title and a curated summary. Selecting it opens an
+  property value) reads as one row: icon, kind and one value that names it, with no label, as a
+  design tool's layer list does: its title, else its text, else its id. Clicking that value edits it
+  in the inspector. Selecting the row opens an
   inspector under the row with its properties as fields, one to a line, each label beside its value,
   indented at most one step. Clicking the selected row again closes it. A pin keeps an inspector open
   for comparison. The row the reader acts on stays put on screen while inspectors open and close.
@@ -22,22 +24,19 @@ The agreed mockup is https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA.
 - **Friendly names.** A property shows its visualizer's `label`, else one derived from its name:
   words split at case changes, `_`, `-` and letter–digit edges; known acronyms upper case; sentence
   case; `is`/`has` dropped from a boolean. The raw name stays in the tooltip and the hover card.
-- **Icons and letters.** A property visualizer can name a Lucide `icon` or a `short` label of one or
-  two characters (`X`, `W`), drawn at the start of the field. A property with neither gets a caption.
-- **Scrubbing replaces steppers.** Dragging a number's icon, letter or caption left and right changes
+- **Icons.** A property visualizer can name a Lucide `icon`, drawn before the field's label.
+- **Scrubbing replaces steppers.** Dragging a number's label left and right changes
   it (Shift ×10, Alt ×0.1), live, as one edit and one undo step. Up and Down step a focused field.
   The stepper buttons are removed.
 - **Order and unset properties.** Fields follow the visualizer's order, then declaration order, with
   no groups. Unset properties show as quiet empty fields, replacing "Show N unset properties".
-- **Curated summaries.** `ElementVisualizer.summary` names the properties a row shows, drawn with the
-  same icons and letters. Without one, a row shows up to three short written values.
 - **References and nested values.** `{blue}` reads as a token chip with the swatch of the `let` it
-  names when that `let` is written as a literal; a nested element value reads as its summary and
-  opens into a nested group.
+  names when that `let` is written as a literal; a nested element value reads as its kind and the value
+  that names it, and opens into a nested group.
 - **Visualizers for element functions' properties.** Element-style functions get a derived
-  `F.Props` record, as components have, so `FunctionVisualizer` can carry property visualizers and a
-  `summary` checked against `F.Props.Property`. `@nx/graphics` helpers such as `Star` use this.
-- `@nx/graphics` and the playground examples ship visualizers with labels, icons and summaries.
+  `F.Props` record, as components have, so `FunctionVisualizer` can carry property visualizers
+  checked against `F.Props.Property`. `@nx/graphics` helpers such as `Star` use this.
+- `@nx/graphics` and the playground examples ship visualizers with labels and icons.
 - **BREAKING (unstable API):** the viewer's `compact` property and PR #71's Details button,
   "kept open" state and status line are removed; `detailsState` keeps `pinned` and `suppressed`.
 
@@ -49,16 +48,16 @@ None.
 
 ### Modified Capabilities
 
-- `viewer`: element rows with curated summaries, the inline inspector, labels, icons,
+- `viewer`: element rows named by one value, the inline inspector, labels, icons,
   scrubbing instead of steppers, pins and restorable state.
-- `visualizer-library`: `label`, `icon` and `short` on `PropertyVisualizer`; `summary` on
-  `ElementVisualizer`; `Target`, property visualizers and `summary` on `FunctionVisualizer`.
-- `visualizer-declarations`: `Target` binding for function visualizers; checks for `short` and
-  `summary`.
+- `visualizer-library`: `label` and `icon` on `PropertyVisualizer`; `Target` and property
+  visualizers on `FunctionVisualizer`.
+- `visualizer-declarations`: `Target` binding for function visualizers; labels and icons resolve
+  like other hints.
 - `component-props-type`: element-style functions derive `F.Props` as components do.
-- `source-tree`: visualizer values carry labels, icons, short labels and summaries, and
+- `source-tree`: visualizer values carry labels and icons, and
   function entries carry their property visualizers.
-- `graphics-library`: visualizers with labels, icons and summaries.
+- `graphics-library`: visualizers with labels and icons.
 - `fiddle-nx-visual-view`: the inline inspector, its state across switches, scrubbing.
 
 ## Impact

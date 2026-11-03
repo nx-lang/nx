@@ -5,8 +5,8 @@ description: 'How a visualizer declaration tells a viewer, such as the NX readin
 
 A **visualizer declaration** tells a viewer how to present one declaration. A viewer is a tool that
 shows NX source to people, such as the `<nx-viewer>` reading view from `@nx-lang/viewer` that the
-Visual view of the [playground](/play) shows. It reads each element as a row, its kind and a short
-summary of what it sets, and opens an inspector of its properties under the row you select. Without
+Visual view of the [playground](/play) shows. It reads each element as a row, its kind and the
+one value that names it, and opens an inspector of its properties under the row you select. Without
 visualizer declarations it reads every element the same way, labelling each property after its name.
 A library author knows better, and a visualizer declaration says so:
 
@@ -19,9 +19,8 @@ visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon=
 ```
 
 Now each `<Choice value="eng" label="Engineering" />` in a list of choices reads as one row: a
-circle-dot icon, "Engineering", and `eng` as a quiet identifier after it. A visualizer can also name
-the properties a row summarizes, and give each property a label, an icon and a group for the
-inspector; see [`@nx/visualizer`](/reference/libraries/visualizer).
+circle-dot icon, "Engineering", and `eng` as a quiet identifier after it. A visualizer can also give each
+property a label and an icon for the inspector; see [`@nx/visualizer`](/reference/libraries/visualizer).
 
 A visualizer declaration is applied, not weighed. The compiler resolves every visualizer declaration that
 applies to a declaration into one result, the same for every reader, and a viewer presents the

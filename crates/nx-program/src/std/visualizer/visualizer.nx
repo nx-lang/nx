@@ -15,11 +15,12 @@
 export type ElementVisualizer = {
   // The declaration this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
-  /// The property whose value is the element's title: it reads alone on the element's line, and
-  /// says what a folded element holds.
+  /// The property whose value is the element's title, the display text that names it, such as a
+  /// button's label. A viewer's row shows it alone, with no label, as a layer list shows a name.
   title?: Target.Property
-  /// The property whose value identifies the element: a key that names it and is kept. It reads as
-  /// one quiet token, its value alone, where `idPosition` puts it.
+  /// The property whose value identifies the element: a key that names it and is kept. A row with
+  /// no title and no text shows it in the title's place. On a line it reads as one quiet token,
+  /// its value alone, where `idPosition` puts it.
   id?: Target.Property
   idPosition: IdPosition = start                              /// Where the element's id reads.
 
@@ -29,9 +30,6 @@ export type ElementVisualizer = {
   /// Host-rendered view, inherited and overridden like other hints. Unsupported renderer IDs leave
   /// structured Output available.
   preview?: PreviewVisualizer
-  /// The properties a viewer shows, in order, on the element's one-line row, so siblings can be
-  /// told apart without opening them, such as `{points fill}`.
-  summary?: Target.Property+
 
   content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
@@ -49,7 +47,6 @@ export type FunctionVisualizer = {
   // The function's derived props record. Bound by the `visualizer` declaration.
   Target: type
   icon?: string                                               /// Lucide icon name for the invocation, such as "star".
-  summary?: Target.Property+                                  /// The properties shown, in order, on its row.
   content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
 
@@ -69,8 +66,6 @@ export type PropertyVisualizer = {
                                   /// a viewer derives one from the property's name.
   icon?: string                   /// A Lucide icon that stands for the property beside its field, such as
                                   /// `"paint-bucket"`.
-  short?: string                  /// A one- or two-character label a row's summary shows where there is no icon, such
-                                  /// as `"X"` or `"W"`.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.

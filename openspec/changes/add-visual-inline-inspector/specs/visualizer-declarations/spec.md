@@ -1,30 +1,13 @@
 ## ADDED Requirements
 
-### Requirement: Presentation hints that cannot be shown are warnings
-Analysis SHALL report a `visualizer-hint` warning, and a viewer SHALL ignore the hint, for a `short`
-that is empty or longer than two characters, and for a property named more than once in a
-`summary`, where the viewer keeps its first place. A property named in a `summary` SHALL be shown
-on the row even when the visualizer gives it no `PropertyVisualizer`.
-
-#### Scenario: A long short label
-- **WHEN** a property visualizer has `short="Width"`
-- **THEN** analysis SHALL report `visualizer-hint` at the value, and a viewer SHALL show the property's
-  label as a caption instead
-
-#### Scenario: A repeated summary property
-- **WHEN** an element visualizer has `summary={width width fill}`
-- **THEN** analysis SHALL report `visualizer-hint` at the second `width`, and the row SHALL show
-  `width` then `fill`
-
-### Requirement: Labels, icons, short labels and summaries resolve like other hints
-A property's `label`, `icon` and `short` SHALL each resolve on its own, as the editor hints
-do: to what its resolved `PropertyVisualizer` sets, the derived or later visualizer winning, and
-otherwise to none. An element's `summary` SHALL resolve whole to the derived or later visualizer's
-that sets one. A viewer SHALL derive a label for a property without one from its name.
+### Requirement: Labels and icons resolve like other hints
+A property's `label` and `icon` SHALL each resolve on its own, as the editor hints do: to what its
+resolved `PropertyVisualizer` sets, the derived or later visualizer winning, and otherwise to none.
+A viewer SHALL derive a label for a property without one from its name.
 
 #### Scenario: A derived visualizer relabels one property
-- **WHEN** a base element's visualizer gives `x` the label `"X"` and the short `"X"`, and a derived element's visualizer gives `x` only the label `"Left"`
-- **THEN** the derived element's `x` SHALL resolve to the label `Left` and the short `X`
+- **WHEN** a base element's visualizer gives `x` the label `"X"` and the icon `"move-horizontal"`, and a derived element's visualizer gives `x` only the label `"Left"`
+- **THEN** the derived element's `x` SHALL resolve to the label `Left` and the icon `move-horizontal`
 
 ## MODIFIED Requirements
 
@@ -59,5 +42,5 @@ SHALL hold.
 - **THEN** analysis SHALL reject the element because `Target` was not specified
 
 #### Scenario: An element function's visualizer names its properties
-- **WHEN** a module declares `let <Badge label:string tone:string = "neutral" /> = <Label text={label} />` and `visualizer Badge = <FunctionVisualizer summary={tone}><PropertyVisualizer property=tone label="Tone" /></FunctionVisualizer>`
+- **WHEN** a module declares `let <Badge label:string tone:string = "neutral" /> = <Label text={label} />` and `visualizer Badge = <FunctionVisualizer icon="badge"><PropertyVisualizer property=tone label="Tone" /></FunctionVisualizer>`
 - **THEN** analysis SHALL accept the visualizer, checking `tone` against `Badge.Props.Property`
