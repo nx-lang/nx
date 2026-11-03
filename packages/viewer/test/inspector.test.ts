@@ -264,6 +264,30 @@ describe("inspectors", () => {
     assert.ok(elevated.classList.contains("boolean-field"), "a boolean reads as a checkbox");
   });
 
+  it("marks an action value, a component's State.Update included, with the action icon", async () => {
+    const source = [
+      "external component <Button label:string emits { Tapped { } } />",
+      "external component <Row content children:Button* />",
+      "component <Counter emits { Finished { total:int } } /> = {",
+      "  state { count:int = 0 }",
+      "  <Row>",
+      "    <Button label=\"Add\" onTapped=<State.Update count={count + 1} /> />",
+      "    <Button label=\"Finish\" onTapped=<Counter.Finished total={count} /> />",
+      "  </Row>",
+      "}",
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///counter.nx", identity: "counter.nx", source }]));
+    const icons = (key: string): string[] => {
+      element.selection = key;
+      return [...drawn(element, key).querySelectorAll<HTMLElement>(".nested-head > .element-icon svg")].map((svg) => svg.dataset["icon"]!);
+    };
+    const buttons = [...element.shadowRoot!.querySelectorAll<HTMLElement>(".row-element[aria-label='Button']")].map((row) => row.dataset["key"]!);
+    assert.equal(buttons.length, 2);
+    assert.deepEqual(icons(buttons[0]!), ["zap"], "State.Update reads as an action");
+    assert.deepEqual(icons(buttons[1]!), ["zap"], "an emitted action too");
+  });
+
   it("unfolds an element value into a nested group of its fields, edited in that element", async () => {
     const element = show(await panel(), true);
     const edits: NxEditDetail[] = [];

@@ -539,7 +539,9 @@ export function renderSource(
     const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
     const draw = (name: string | undefined): Element | undefined => (name === undefined ? undefined : layout.icons?.(name));
     // An icon the host cannot draw, as a name Lucide does not have, gives way to the kind's.
-    const drawn = draw(declaration?.visualizer?.icon) ?? draw(declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
+    // A component's `State.Update` is an action too, so it reads with an action's icon.
+    const kind = declaration?.kind === "record" && declaration.name.endsWith(".State.Update") ? "action" : declaration?.kind;
+    const drawn = draw(declaration?.visualizer?.icon) ?? draw(kind === undefined ? undefined : KIND_ICONS[kind]);
     if (drawn === undefined) {
       return undefined;
     }
