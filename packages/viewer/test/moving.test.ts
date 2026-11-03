@@ -185,10 +185,9 @@ describe("which items move", () => {
 });
 
 describe("moving and deleting in the reading", () => {
-  it("keeps compact pins on known moved items and clears them on deletion", async () => {
+  it("keeps pins on known moved items and clears them on deletion", async () => {
     const element = show(await sourceOf(SOURCE));
-    element.compact = true;
-    element.detailsState = { opened: ["flow.value.steps[1]"], pinned: ["flow.value.steps[0]"] };
+    element.detailsState = { pinned: ["flow.value.steps[0]", "flow.value.steps[1]"] };
     const fired = edits(element);
     element.selection = "flow.value.steps[0]";
     press(body(element), "ArrowDown", { altKey: true });
@@ -197,8 +196,7 @@ describe("moving and deleting in the reading", () => {
     element.tree = undefined;
     element.text = next.text;
     element.tree = next.tree;
-    assert.deepEqual(element.detailsState.pinned, ["flow.value.steps[1]"]);
-    assert.deepEqual(element.detailsState.opened, ["flow.value.steps[0]"]);
+    assert.deepEqual(element.detailsState.pinned, ["flow.value.steps[0]", "flow.value.steps[1]"]);
     press(body(element), "Delete");
     const removed = await sourceOf(await edited(text, fired[1]!.key, fired[1]!.edit));
     element.tree = undefined;

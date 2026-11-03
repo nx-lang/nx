@@ -165,7 +165,6 @@ export function ReadingView({
     if (target === null || reading.tree === null || reading.text === null) {
       return;
     }
-    target.compact = true;
     target.detailsState = detailsState;
     target.tree = undefined;
     target.text = reading.text;

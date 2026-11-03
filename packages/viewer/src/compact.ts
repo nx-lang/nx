@@ -1,16 +1,21 @@
 import type { TreeIndex } from "./tree.js";
 import { itemListOf } from "./move.js";
 
-/** Deliberate property disclosure choices, independent of child folds and source history. */
+/**
+ * Which inspectors a reader keeps open or closed, apart from the selection, child folds and source
+ * history: the pinned elements, and the selected element whose inspector the reader closed.
+ */
 export interface NxDetailsState {
-  readonly opened: readonly string[];
   readonly pinned: readonly string[];
   readonly suppressed?: string | undefined;
 }
 
-export const emptyDetails = (): NxDetailsState => ({ opened: [], pinned: [] });
+export const emptyDetails = (): NxDetailsState => ({ pinned: [] });
 
-/** An element in the composition, rather than a record inside another element's property. */
+/**
+ * An element in the composition, which reads as a row: one outside the value of another element's
+ * non-content property, and outside a declaration's signature, a default and a visualizer.
+ */
 export function isComposition(index: TreeIndex, at: number): boolean {
   if (index.tree.nodes[at]?.role !== "element") {
     return false;
@@ -18,6 +23,12 @@ export function isComposition(index: TreeIndex, at: number): boolean {
   for (let parent = index.tree.nodes[at]!.parent; parent !== undefined; parent = index.tree.nodes[parent]!.parent) {
     const node = index.tree.nodes[parent]!;
     if (node.role === "attribute" && !node.flags?.includes("content")) {
+      return false;
+    }
+    if (node.role === "field" || node.role === "parameter" || node.role === "stateField" || node.role === "typeReference") {
+      return false;
+    }
+    if (node.parent === undefined && node.flags?.includes("visualizer") === true) {
       return false;
     }
   }
@@ -34,14 +45,18 @@ export function compositionOwner(index: TreeIndex, key: string | undefined): str
   return undefined;
 }
 
+/** Whether the inspector of `owner` is open, where the selection is in `selected`'s. */
 export function detailsOpen(state: NxDetailsState, owner: string, selected: string | undefined): boolean {
-  return state.opened.includes(owner) || state.pinned.includes(owner) || (owner === selected && state.suppressed !== owner);
+  return state.pinned.includes(owner) || (owner === selected && state.suppressed !== owner);
 }
 
+/**
+ * The state after the reader pins or unpins `key`, or closes or reopens its inspector, where the
+ * selection is in `selected`'s. Closing a pinned inspector unpins it too.
+ */
 export function changeDetails(
-  state: NxDetailsState, key: string, action: "details" | "pin", selected: string | undefined
+  state: NxDetailsState, key: string, action: "toggle" | "pin", selected: string | undefined
 ): NxDetailsState {
-  const opened = new Set(state.opened);
   const pinned = new Set(state.pinned);
   let suppressed = state.suppressed;
   if (action === "pin") {
@@ -54,18 +69,16 @@ export function changeDetails(
       }
     }
   } else if (detailsOpen(state, key, selected)) {
-    opened.delete(key);
     pinned.delete(key);
     if (selected === key) {
       suppressed = key;
     }
+  } else if (suppressed === key) {
+    suppressed = undefined;
   } else {
-    opened.add(key);
-    if (suppressed === key) {
-      suppressed = undefined;
-    }
+    pinned.add(key);
   }
-  return { opened: [...opened], pinned: [...pinned], suppressed };
+  return { pinned: [...pinned], suppressed };
 }
 
 export function mapDetails(state: NxDetailsState, map: (key: string) => string | undefined): NxDetailsState {
@@ -74,15 +87,13 @@ export function mapDetails(state: NxDetailsState, map: (key: string) => string |
     return next === undefined ? [] : [next];
   }))].sort();
   return {
-    opened: keys(state.opened),
     pinned: keys(state.pinned),
     suppressed: state.suppressed === undefined ? undefined : map(state.suppressed)
   };
 }
 
 export function sameDetails(a: NxDetailsState, b: NxDetailsState): boolean {
-  return a.suppressed === b.suppressed && a.opened.length === b.opened.length && a.pinned.length === b.pinned.length &&
-    a.opened.every((key) => b.opened.includes(key)) && a.pinned.every((key) => b.pinned.includes(key));
+  return a.suppressed === b.suppressed && a.pinned.length === b.pinned.length && a.pinned.every((key) => b.pinned.includes(key));
 }
 
 /** Preserve unambiguous list identities across Source edits, including undo of known moves. */

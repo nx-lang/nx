@@ -1,6 +1,6 @@
 /**
  * The reading is lossless: the source tree of every `.nx` file in the repository, rendered, carries
- * the key of every node exactly once.
+ * the key of every node exactly once, with every row's inspector open.
  */
 import { document } from "./dom.js";
 
@@ -20,10 +20,11 @@ const { indexTree } = await import("../src/tree.js");
 after(async () => (await nxHost()).dispose());
 
 /** The keys of `tree` that do not appear exactly once in its rendering, with how often they do. */
-function uncovered({ tree, text }: Fixture, wrapAll = false, compact = false): string[] {
-  // With every element wrapped, each reads as a group where it can, values under their names too.
-  const wrapped = wrapAll ? new Set(tree.nodes.filter((node) => node.role === "element").map((node) => node.key)) : undefined;
-  const rendered = renderSource(document, indexTree(tree, text), [], { wrapped, compact, details: new Set(tree.nodes.filter((node) => node.role === "element").map((node) => node.key)) });
+function uncovered({ tree, text }: Fixture, wrapAll = false): string[] {
+  // With every element wrapped, each reads as a group where it can, values under their names too,
+  // and with every inspector open, so every property of every row is drawn.
+  const elements = new Set(tree.nodes.filter((node) => node.role === "element").map((node) => node.key));
+  const rendered = renderSource(document, indexTree(tree, text), [], { wrapped: wrapAll ? elements : undefined, details: elements, valuesOpen: elements });
   const counts = new Map<string, number>();
   for (const element of rendered.querySelectorAll<HTMLElement>("[data-key]")) {
     const key = element.dataset["key"]!;
@@ -61,10 +62,10 @@ async function repositoryTrees(): Promise<{ path: string; fixture: Fixture }[]> 
 function failuresOf(trees: readonly { path: string; fixture: Fixture }[]): string[] {
   const failures: string[] = [];
   for (const { path, fixture } of trees) {
-    for (const [wrapAll, compact] of [[false, false], [true, false], [false, true], [true, true]] as const) {
-      const missing = uncovered(fixture, wrapAll, compact);
+    for (const wrapAll of [false, true]) {
+      const missing = uncovered(fixture, wrapAll);
       if (missing.length > 0) {
-        const how = `${wrapAll ? " (everything wrapped)" : ""}${compact ? " (compact)" : ""}`;
+        const how = wrapAll ? " (everything wrapped)" : "";
         failures.push(`${path}${how}: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ` and ${missing.length - 5} more` : ""}`);
       }
     }

@@ -134,23 +134,17 @@ export interface NxSelectDetail {
 export type NxViewerMarkdown = (markdown: string) => Node;
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable", "compact", "detailsState"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable", "detailsState"] as const;
 
-/** How many unwritten properties a selected element lists before a filter field leads them. */
-const MORE_FILTER_PAST = 12;
 
-/**
- * How far the pointer moves before a press on a stepper becomes a drag, in pixels: more than a name's,
- * since a stepper is clicked far more often than dragged, and a hand rarely keeps still on so small a
- * target.
- */
-const STEPPER_SLOP = 6;
+/** How far the pointer moves sideways before a press on a number's lead scrubs it, in pixels. */
+const SCRUB_SLOP = 4;
 
 /** How far the pointer moves while pressed, in pixels, before the text it selects is a selection of text, not a click. */
 const TEXT_SELECT_SLOP = 6;
 
-/** How far the pointer moves up or down, in pixels, for a stepper dragged to step its number once. */
-const STEPPER_STEP = 4;
+/** How far the pointer moves sideways, in pixels, for a scrubbed number to step once. */
+const SCRUB_STEP = 3;
 
 /** The tooltip of a value's choices chevron. */
 const CHOICES_TITLE = "Choices (Alt+\u2193)";
@@ -290,17 +284,12 @@ interface Live {
 
 /** How long typing pauses before its entry goes live. */
 const LIVE_TYPING_DELAY = 300;
-/** How long after the last stepper click, with the field closed, the clicks are committed. */
-const STEP_SETTLE_DELAY = 500;
-
-/** A stepper pressed on a number, and dragged up or down once the press became a drag. */
-interface Stepping {
+/** A number's lead pressed, and dragged sideways to scrub the number once the press became a drag. */
+interface Scrub {
   target: EditTarget;
   readonly pointer: number;
   /** Where the press began, and, once it became a drag, where the drag began. */
-  y: number;
-  /** Which stepper: up, `1`, or down, `-1`. */
-  readonly direction: 1 | -1;
+  x: number;
   /** The number when the press began. */
   readonly from: string;
   /** The number now, once the press became a drag. */
@@ -364,12 +353,6 @@ interface Following {
   said: string;
 }
 
-/** A stepper's tooltip, which names the keys that do the same. */
-const STEPPER_TITLES = {
-  up: "Step up (\u2191). Shift+click steps 10. Drag up or down to scrub.",
-  down: "Step down (\u2193). Shift+click steps 10. Drag up or down to scrub."
-} as const;
-
 function keyOf(element: Element): string | undefined {
   return (element as HTMLElement).dataset["key"];
 }
@@ -383,9 +366,12 @@ function keyOf(element: Element): string | undefined {
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
 
-  #compact = false;
   #detailsState: NxDetailsState = emptyDetails();
   #lastIndex: TreeIndex | undefined;
+  /** The inspector groups folded, by element kind and group name, for the session. */
+  #groupsFolded = new Set<string>();
+  /** The element values unfolded into nested groups of fields. */
+  #valuesOpen = new Set<string>();
   #refreshingDetails = false;
   #tree: SourceTree | undefined;
   #text = "";
@@ -449,19 +435,8 @@ export class NxViewerElement extends ElementBase {
   #ignoreClick = false;
   /** The value whose popover a press on it closed, which the click that follows leaves closed. */
   #closedOnPress: string | undefined;
-  /** A stepper pressed, and dragged up or down once the press became a drag. */
-  #stepping: Stepping | undefined;
-  /** A press on a stepper held through a cleared tree, to go on with the next one. */
-  #restep: Stepping | undefined;
-  /** The key of the element whose unwritten properties are listed. */
-  #moreOpen: string | undefined;
-  /** What the filter of the unwritten properties holds. */
-  #moreFilter = "";
-  /** What the list of unwritten properties was drawn for: the element's key and whether it was open. */
-  #moreFor: string | undefined;
-  /** The rows of unwritten properties drawn, and the block that holds them under a line. */
-  #moreDrawn: HTMLElement[] = [];
-  #moreBlock: HTMLElement | undefined;
+  /** A number's lead pressed, and scrubbing it once the press became a drag. */
+  #scrub: Scrub | undefined;
   /** The keys of the unwritten properties' values, which the reading edits as written ones. */
   #moreKeys: string[] = [];
   /** The cards of the unwritten properties' names, by the key their attribute would have. */
@@ -484,7 +459,7 @@ export class NxViewerElement extends ElementBase {
   readonly #card: HTMLDivElement;
   /** The popover a case or a color is chosen in, or a field's choices are listed in. */
   readonly #popover: HTMLDivElement;
-  /** A number's steppers and a field's choices chevron, drawn past the value they act on. */
+  /** A field's choices chevron, drawn past the value it acts on. */
   readonly #tools: HTMLSpanElement;
   /** The menu of a row's actions. */
   readonly #menu: HTMLDivElement;
@@ -496,9 +471,6 @@ export class NxViewerElement extends ElementBase {
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => {
     this.#closeCard();
-    if (this.#tools.isConnected) {
-      this.#edgeTools();
-    }
   };
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
@@ -512,7 +484,7 @@ export class NxViewerElement extends ElementBase {
   /** Cancels a popover when the pointer goes down anywhere outside it. */
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
-    if (this.#compact && session !== undefined && !event.composedPath().includes(session.field ?? this.#popover) && !event.composedPath().includes(this.#tools)) {
+    if (session !== undefined && !event.composedPath().includes(session.field ?? this.#popover) && !event.composedPath().includes(this.#tools)) {
       if (!this.finishEditing()) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -633,22 +605,11 @@ export class NxViewerElement extends ElementBase {
     this.#tools = document.createElement("span");
     this.#tools.className = "value-tools";
     this.#tools.setAttribute("aria-hidden", "true");
-    const steppers = document.createElement("span");
-    steppers.className = "steppers";
-    for (const direction of ["up", "down"] as const) {
-      const stepper = document.createElement("span");
-      stepper.className = `stepper ${direction}`;
-      stepper.title = STEPPER_TITLES[direction];
-      steppers.append(stepper);
-    }
     const toggle = document.createElement("span");
     toggle.className = "choices-toggle";
     toggle.title = CHOICES_TITLE;
-    this.#tools.append(steppers, toggle);
+    this.#tools.append(toggle);
     this.#tools.addEventListener("pointerdown", (event) => this.#onToolsPointerDown(event));
-    this.#tools.addEventListener("pointermove", (event) => this.#onToolsPointerMove(event));
-    this.#tools.addEventListener("pointerup", (event) => this.#onToolsPointerUp(event, true));
-    this.#tools.addEventListener("pointercancel", (event) => this.#onToolsPointerUp(event, false));
     for (const name of ["click", "dblclick", "mousedown"]) {
       this.#tools.addEventListener(name, (event) => {
         event.stopPropagation();
@@ -678,10 +639,27 @@ export class NxViewerElement extends ElementBase {
 
     this.#body.addEventListener("click", (event) => this.#onClick(event));
     this.#body.addEventListener("dblclick", (event) => this.#onDoubleClick(event));
-    this.#body.addEventListener("pointerdown", (event) => this.#onPointerDown(event));
-    this.#body.addEventListener("pointermove", (event) => this.#onPointerMove(event));
-    this.#body.addEventListener("pointerup", (event) => this.#onPointerUp(event, true));
-    this.#body.addEventListener("pointercancel", (event) => this.#onPointerUp(event, false));
+    this.#body.addEventListener("pointerdown", (event) => {
+      this.#onLeadPointerDown(event);
+      if (this.#scrub === undefined) {
+        this.#onPointerDown(event);
+      }
+    });
+    this.#body.addEventListener("pointermove", (event) => {
+      if (!this.#onScrubMove(event)) {
+        this.#onPointerMove(event);
+      }
+    });
+    this.#body.addEventListener("pointerup", (event) => {
+      if (!this.#onScrubUp(event, true)) {
+        this.#onPointerUp(event, true);
+      }
+    });
+    this.#body.addEventListener("pointercancel", (event) => {
+      if (!this.#onScrubUp(event, false)) {
+        this.#onPointerUp(event, false);
+      }
+    });
     // A focus ring is for a reader on the keyboard; after a click, the selection says where they are.
     this.#body.addEventListener("pointerdown", () => {
       this.#body.classList.add("by-pointer");
@@ -747,17 +725,8 @@ export class NxViewerElement extends ElementBase {
     this.#dropSession();
   }
 
-  /** Use compact composition rows with independently disclosed properties. */
-  get compact(): boolean { return this.#compact; }
-  set compact(value: boolean) {
-    if (this.#compact !== Boolean(value)) {
-      this.#compact = Boolean(value);
-      this.#render();
-    }
-  }
-
   get detailsState(): NxDetailsState {
-    return { opened: [...this.#detailsState.opened], pinned: [...this.#detailsState.pinned], suppressed: this.#detailsState.suppressed };
+    return { pinned: [...this.#detailsState.pinned], suppressed: this.#detailsState.suppressed };
   }
   set detailsState(value: NxDetailsState | undefined) {
     const next = mapDetails(value ?? emptyDetails(), (key) => key);
@@ -801,22 +770,69 @@ export class NxViewerElement extends ElementBase {
     return result;
   }
 
-  #toggleDetails(key: string, action: "details" | "pin"): void {
+  /**
+   * Closes or reopens the inspector of the element with `key`, or pins or unpins it, keeping its
+   * row where it was on screen. An inspector holding an invalid entry stays open.
+   */
+  #toggleDetails(key: string, action: "toggle" | "pin"): void {
     if (!this.finishEditing()) { return; }
     const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, this.#selection);
+    const wasOpen = detailsOpen(this.#detailsState, key, owner);
+    const focusedInside = this.#rendered.get(key)?.querySelector(":scope > .inspector")?.contains(this.shadowRoot?.activeElement ?? null) === true;
     this.#detailsState = changeDetails(this.#detailsState, key, action, owner);
-    if (action === "details" && !detailsOpen(this.#detailsState, key, owner) && owner === key && this.#selection !== key) {
-      this.#selectNode(key, true, false);
+    const isOpen = detailsOpen(this.#detailsState, key, owner);
+    this.#keepRow(key, () => this.#render());
+    const drawn = this.#rendered.get(key);
+    if (action === "pin") {
+      drawn?.querySelector<HTMLElement>(":scope > .sheet-head .row-pin")?.focus({ preventScroll: true });
+    } else if (focusedInside && !isOpen) {
+      this.#body.focus({ preventScroll: true });
     }
-    const header = this.#rendered.get(key)?.querySelector<HTMLElement>(":scope > .sheet-head");
-    const top = header?.getBoundingClientRect().top;
-    this.#render();
-    const drawn = this.#rendered.get(key)?.querySelector<HTMLElement>(":scope > .sheet-head");
-    const after = drawn?.getBoundingClientRect().top;
-    if (top !== undefined && after !== undefined) { this.#scroller()?.scrollBy?.({ top: after - top }); }
-    drawn?.querySelector<HTMLElement>(`.compact-${action}`)?.focus({ preventScroll: true });
-    this.#announcer.textContent = `${action === "pin" ? "Pin" : "Properties"} changed for ${drawn?.querySelector(".sheet-kind")?.textContent ?? "element"}`;
+    const name = drawn?.querySelector(".sheet-kind")?.textContent ?? "element";
+    const pinned = this.#detailsState.pinned.includes(key);
+    this.#announcer.textContent =
+      action === "pin" ? `${name} ${pinned ? "pinned" : "unpinned"}` : wasOpen === isOpen ? "" : `${name} properties ${isOpen ? "shown" : "hidden"}`;
     this.#reportDetails();
+  }
+
+  /** Runs `change`, which draws the reading again, keeping the row of `key` where it was on screen. */
+  #keepRow(key: string | undefined, change: () => void): void {
+    const headOf = (drawn: HTMLElement | undefined): HTMLElement | undefined =>
+      drawn?.matches(".sheet") === true ? (drawn.querySelector<HTMLElement>(":scope > .sheet-head") ?? drawn) : drawn;
+    const top = key === undefined ? undefined : headOf(this.#rendered.get(key))?.getBoundingClientRect().top;
+    change();
+    const after = key === undefined ? undefined : headOf(this.#rendered.get(key))?.getBoundingClientRect().top;
+    if (top !== undefined && after !== undefined && after !== top) {
+      this.#scroller()?.scrollBy?.({ top: after - top });
+    }
+  }
+
+  /** Unfolds an element value into a nested group of its fields, or folds it back. */
+  #toggleValue(key: string): void {
+    if (!this.finishEditing()) { return; }
+    const open = new Set(this.#valuesOpen);
+    if (!open.delete(key)) {
+      open.add(key);
+    }
+    this.#valuesOpen = open;
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, key);
+    this.#keepRow(owner, () => this.#render());
+    [...this.#body.querySelectorAll<HTMLElement>(".value-fold")].find((candidate) => candidate.dataset["valueKey"] === key)?.focus({ preventScroll: true });
+  }
+
+  /** Folds or unfolds an inspector group, for every element of its kind. */
+  #toggleGroup(groupKey: string, near: string | undefined): void {
+    if (!this.finishEditing()) { return; }
+    const folded = new Set(this.#groupsFolded);
+    if (!folded.delete(groupKey)) {
+      folded.add(groupKey);
+    }
+    this.#groupsFolded = folded;
+    this.#keepRow(near, () => this.#render());
+    const heading = [...this.#body.querySelectorAll<HTMLElement>(".group-head")].find(
+      (candidate) => candidate.dataset["groupKey"] === groupKey && (near === undefined || candidate.closest<HTMLElement>(".row-element")?.dataset["key"] === near)
+    );
+    heading?.focus({ preventScroll: true });
   }
 
   /** The source tree to show, as the language service's `sourceTree` query answers it. */
@@ -856,7 +872,7 @@ export class NxViewerElement extends ElementBase {
       this.#selection = undefined;
     }
     const beforeDetails = this.#detailsState;
-    if (tree !== undefined && this.#compact) {
+    if (tree !== undefined) {
       const next = indexTree(tree, this.#text);
       if (follows) {
         this.#detailsState = mapDetails(this.#detailsState, (key) => mappedKey(key, following.list, following.map, following.sequence));
@@ -967,7 +983,7 @@ export class NxViewerElement extends ElementBase {
 
   /** Folds everything that can fold. */
   collapseAll(): void {
-    if (this.#compact && !this.finishEditing()) {
+    if (!this.finishEditing()) {
       return;
     }
     // What can fold inside a folded unit is not drawn, so it is found with everything unfolded.
@@ -1114,9 +1130,6 @@ export class NxViewerElement extends ElementBase {
         this.#keptColor = { key: session.target.key, input: session.input, picker: session.picker, listening: session.listening };
       }
     }
-    // A press on a stepper goes on with the next tree, on the same number, through a cleared one too.
-    const stepping = this.#stepping ?? this.#restep;
-    this.#restep = undefined;
     this.#dropSession();
     this.#pointedKey = undefined;
     this.#rendered.clear();
@@ -1132,10 +1145,8 @@ export class NxViewerElement extends ElementBase {
     this.#body.classList.toggle("editable", this.#editable);
     this.#index = undefined;
     this.#targets = new Map();
-    this.#moreDrawn = [];
-    this.#moreBlock = undefined;
     this.#moreKeys = [];
-    this.#moreFor = undefined;
+    this.#moreCards.clear();
     this.#closeMenu(false);
     if (tree === undefined) {
       // A host that gives the next tree soon, at once or once it has it, keeps the height; one that
@@ -1145,7 +1156,6 @@ export class NxViewerElement extends ElementBase {
           this.#body.style.minHeight = "";
         }
       }, EMPTY_HOLD);
-      this.#restep = stepping;
       return;
     }
     const index = indexTree(tree, this.#text);
@@ -1155,7 +1165,7 @@ export class NxViewerElement extends ElementBase {
     const targets = editTargets(index);
     const draw = (wrapped?: ReadonlySet<string>): void => {
       this.#body.replaceChildren(
-        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, compact: this.#compact, details: this.#openDetailsKeys(), opened: this.#detailsState.opened, pinned: this.#detailsState.pinned })
+        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, details: this.#openDetailsKeys(), pinned: this.#detailsState.pinned, groupsFolded: this.#groupsFolded, valuesOpen: this.#valuesOpen })
       );
     };
     try {
@@ -1186,6 +1196,9 @@ export class NxViewerElement extends ElementBase {
       this.#targets = targets;
       this.#markEditable();
     }
+    this.#fillUnwritten(index);
+    this.#markScrubbable();
+    this.#fitSummaries();
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
     // by the reader or the host, is kept: when it hides the selection, the selection moves to the
     // folded unit that hides it, as a tree's does, or is cleared when no drawn unit holds it.
@@ -1221,9 +1234,15 @@ export class NxViewerElement extends ElementBase {
       kept.listening.abort();
       this.#closePopover();
     }
-    if (stepping !== undefined) {
-      this.#resumeStepping(stepping);
-    } else if (!this.#tools.isConnected) {
+    // A number being scrubbed goes on with the next tree, showing the number it has reached.
+    const scrub = this.#scrub;
+    if (scrub !== undefined) {
+      scrub.target = this.#targets.get(scrub.target.key) ?? scrub.target;
+      if (scrub.value !== undefined) {
+        this.#showStepped(scrub.target, scrub.value);
+      }
+    }
+    if (!this.#tools.isConnected) {
       this.#restTools();
     }
     // Fonts that arrive later change where the rows fall, and what fits on a line.
@@ -1328,7 +1347,7 @@ export class NxViewerElement extends ElementBase {
    * Alt+click does in a design tool's layers.
    */
   #toggleFold(key: string, deep: boolean): void {
-    if (this.#compact && !this.finishEditing()) { return; }
+    if (!this.finishEditing()) { return; }
     const folded = new Set(this.#folded);
     const folding = !folded.has(key);
     this.#turning = { key, wasFolded: !folding };
@@ -1460,22 +1479,6 @@ export class NxViewerElement extends ElementBase {
       } else {
         draw(unit, unit.getBoundingClientRect(), "selected");
       }
-      // A line's unwritten properties, listed under it, are part of what is selected.
-      if (this.#moreBlock !== undefined && this.#body.contains(this.#moreBlock)) {
-        // The rows' cells stretch across the block, so how far they reach is read from what they hold.
-        const reach = [...this.#moreBlock.querySelectorAll<HTMLElement>(".more-label, .more-filter, .sheet-name, .more-value, .more-default")]
-          .filter((part) => part.closest<HTMLElement>(".sheet-row")?.hidden !== true)
-          .map((part) => {
-            // A cell may stretch across its grid; its text's own box says where it ends.
-            if (part.childNodes.length === 0) {
-              return part.getBoundingClientRect().right;
-            }
-            const range = this.ownerDocument.createRange();
-            range.selectNodeContents(part);
-            return range.getBoundingClientRect().right;
-          });
-        draw(unit, this.#moreBlock.getBoundingClientRect(), "selected-body", Math.max(0, ...reach));
-      }
     }
     const hovered = this.#hoveredUnit;
     if (hovered !== undefined && this.#body.contains(hovered)) {
@@ -1551,16 +1554,11 @@ export class NxViewerElement extends ElementBase {
     if (fire && this.#live !== undefined) {
       this.#settleLive();
     }
-    // Selecting another unit closes the list of an element's unwritten properties.
-    if (key !== this.#moreOpen) {
-      this.#moreOpen = undefined;
-      this.#moreFilter = "";
-    }
     if (this.#menuKey !== undefined && this.#menuKey !== key) {
       this.#closeMenu(false);
     }
     let detailsChanged = false;
-    if (this.#compact && reveal && !this.#refreshingDetails && this.#index !== undefined) {
+    if (reveal && !this.#refreshingDetails && this.#index !== undefined) {
       const before = this.#openDetailsKeys();
       const oldOwner = compositionOwner(this.#index, this.#selection);
       const owner = compositionOwner(this.#index, key);
@@ -1592,7 +1590,6 @@ export class NxViewerElement extends ElementBase {
     }
     this.#selectNode(key, fire, reveal);
     if (detailsChanged) { this.#reportDetails(); }
-    this.#drawMore();
     this.#fitPropertyMark();
     // A selected property shows its value's tools, and only it.
     this.#restTools();
@@ -1635,7 +1632,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     // A node folded away is unfolded to, so what is selected can be seen.
-    const hiding = reveal ? [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded) && !(this.#compact && compositionOwner(index, key) === folded)) : [];
+    const hiding = reveal ? [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded) && !(compositionOwner(index, key) === folded)) : [];
     if (hiding.length > 0) {
       this.#selection = key;
       const folded = new Set(this.#folded);
@@ -1961,10 +1958,9 @@ export class NxViewerElement extends ElementBase {
     // Enter on a selected unit does, and so does an element whose unset properties are listed, so
     // the list stays.
     const property = this.#propertyOf(key);
-    const listing = this.#moreOpen !== undefined && property !== undefined && this.#isInside(property, this.#moreOpen);
     const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, property);
-    const comparing = this.#compact && owner !== undefined && this.#detailsState.pinned.includes(owner) && compositionOwner(this.#index!, this.#selection) !== owner;
-    if (select && caret === undefined && property !== undefined && property !== this.#selection && !listing && !comparing) {
+    const comparing = owner !== undefined && this.#detailsState.pinned.includes(owner) && compositionOwner(this.#index!, this.#selection) !== owner;
+    if (select && caret === undefined && property !== undefined && property !== this.#selection && !comparing) {
       this.#select(property, true, false);
     }
     this.#closeCard();
@@ -2101,7 +2097,7 @@ export class NxViewerElement extends ElementBase {
     });
     field.addEventListener("blur", () => {
       if (!session.closed) {
-        this.#finishField(session, this.#compact ? "key" : "blur");
+        this.#finishField(session, "key");
       }
     });
     this.#validate(session);
@@ -2378,8 +2374,6 @@ export class NxViewerElement extends ElementBase {
     this.#reportDraft(false);
     this.#closePopover();
     this.#hideTools();
-    this.#stepping = undefined;
-    this.#body.classList.remove("stepping");
   }
 
   /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
@@ -3340,26 +3334,23 @@ export class NxViewerElement extends ElementBase {
     this.#fire(NX_EDIT_EVENT, { key, edit: { kind: "remove" } });
   }
 
-  // ---- Steppers -----------------------------------------------------------------------------
+  // ---- A value's tools ------------------------------------------------------------------------
 
   /**
-   * Draws the tools past the value `span` draws for `target`: a number's steppers, and a chevron
-   * past a case, past a selected property's value with choices, or past an open field with choices.
-   * Nothing for a value with none of these.
+   * Draws the tools past the value `span` draws for `target`: a chevron past a case, past a selected
+   * property's value with choices, or past an open field with choices. Nothing for a value with none.
    */
   #showTools(span: HTMLElement, target: EditTarget): void {
     const session = this.#session?.target.key === target.key ? this.#session : undefined;
-    const steppers = target.kind === "number";
     const isCase = target.kind === "case";
     // The chevron says a list is there: past a case, past an open field with choices, and past a
     // selected property's value with choices.
     const chevron =
       isCase || (session === undefined ? this.#hasChoices(target) : session.field !== undefined && (session.choices?.length ?? 0) > 0);
-    if (!steppers && !chevron) {
+    if (!chevron) {
       this.#hideTools();
       return;
     }
-    this.#tools.classList.toggle("with-steppers", steppers);
     this.#tools.classList.toggle("with-choices", chevron);
     // A case's popover open is its list open.
     this.#tools.classList.toggle("open", session?.choicesOpen === true || (isCase && session !== undefined));
@@ -3381,31 +3372,9 @@ export class NxViewerElement extends ElementBase {
       this.#tools.classList.remove("in-line");
     }
     this.#fitRowMark();
-    this.#edgeTools();
     if (inLine || wasInLine) {
       // The line grew or shrank, so its highlight is redrawn to fit it.
       queueMicrotask(() => this.#paintHighlights());
-    }
-  }
-
-  /**
-   * Keeps the steppers, a little taller than their line, inside what the reading shows: at its top
-   * or bottom edge they reach from their line's edge inward rather than past the edge, where they
-   * would be cut off. Nothing scrolls.
-   */
-  #edgeTools(): void {
-    const steppers = this.#tools.querySelector<HTMLElement>(".steppers");
-    this.#tools.classList.remove("at-top", "at-bottom");
-    const line = this.#tools.getBoundingClientRect();
-    const reach = steppers === null ? 0 : (steppers.getBoundingClientRect().height - line.height) / 2;
-    if (line.height === 0 || reach <= 0) {
-      return;
-    }
-    const port = this.#scrollPort();
-    if (line.top - reach < port.top) {
-      this.#tools.classList.add("at-top");
-    } else if (line.bottom + reach > port.top + port.height) {
-      this.#tools.classList.add("at-bottom");
     }
   }
 
@@ -3447,9 +3416,9 @@ export class NxViewerElement extends ElementBase {
     return parent !== undefined && index.tree.nodes[parent]!.role === "attribute" ? index.tree.nodes[parent]!.key : undefined;
   }
 
-  /** Whether `target`'s value has tools to show: a number's steppers, a case's or its choices' chevron. */
+  /** Whether `target`'s value has tools to show: a case's or its choices' chevron. */
   #offersTools(target: EditTarget): boolean {
-    return target.kind === "number" || target.kind === "case" || this.#hasChoices(target);
+    return target.kind === "case" || this.#hasChoices(target);
   }
 
   /**
@@ -3485,7 +3454,7 @@ export class NxViewerElement extends ElementBase {
    * nowhere. An editor open or a stepper pressed keeps the tools it has.
    */
   #restTools(): void {
-    if (this.#session !== undefined || this.#stepping !== undefined) {
+    if (this.#session !== undefined || this.#scrub !== undefined) {
       return;
     }
     const selected = this.#selectedToolsValue();
@@ -3544,7 +3513,7 @@ export class NxViewerElement extends ElementBase {
     event.stopPropagation();
     // The open field keeps the focus, and nothing is selected as text.
     event.preventDefault();
-    const part = (event.target as Element).closest?.(".stepper, .choices-toggle") as HTMLElement | null;
+    const part = (event.target as Element).closest?.(".choices-toggle") as HTMLElement | null;
     const key = this.#tools.dataset["toolsFor"];
     const target = key === undefined ? undefined : this.#targets.get(key);
     if (part === null || target === undefined || event.button !== 0) {
@@ -3578,110 +3547,99 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    const from = session?.field !== undefined ? (session.field.textContent ?? "").trim() : this.#shownOf(target);
-    this.#stepping = { target, pointer: event.pointerId, y: event.clientY, direction: part.classList.contains("up") ? 1 : -1, from, value: undefined };
-    try {
-      part.setPointerCapture?.(event.pointerId);
-    } catch {
-      // A pointer the element cannot capture still steps on release over it.
-    }
-  }
-
-  #onToolsPointerMove(event: PointerEvent): void {
-    const stepping = this.#stepping;
-    if (stepping === undefined || event.pointerId !== stepping.pointer) {
-      return;
-    }
-    event.stopPropagation();
-    // Up is more, as the steppers point.
-    const moved = stepping.y - event.clientY;
-    if (stepping.value === undefined) {
-      if (Math.abs(moved) < STEPPER_SLOP) {
-        return;
-      }
-      // The drag counts from here, so it starts at the number pressed rather than a few steps on.
-      stepping.y = event.clientY;
-    }
-    const target = stepping.target;
-    const steps = Math.trunc((stepping.y - event.clientY) / STEPPER_STEP) * (event.shiftKey ? 10 : 1);
-    const value = stepNumber(stepping.from, steps, target.signed !== false, target.hints) ?? stepping.from;
-    if (stepping.value === undefined) {
-      this.#body.classList.add("stepping");
-    }
-    stepping.value = value;
-    this.#showStepped(target, value);
   }
 
   /**
-   * Ends a press on a stepper: a click steps once, or ten steps with Shift; a drag has scrubbed. Into
-   * the open field, or committed once, at release; a cancelled drag puts the value back.
+   * Begins a press on a number field's lead, its icon, short label or caption: dragged sideways, it
+   * scrubs the number; let go before it moves, it focuses the field.
    */
-  #onToolsPointerUp(event: PointerEvent, commit: boolean): void {
-    const stepping = this.#stepping;
-    if (stepping === undefined || event.pointerId !== stepping.pointer) {
+  #onLeadPointerDown(event: PointerEvent): void {
+    if (!this.#editable || event.button !== 0 || this.#scrub !== undefined) {
       return;
     }
+    const lead = (event.target as Element).closest?.(".field-lead") as HTMLElement | null;
+    const field = lead?.closest<HTMLElement>(".prop-field");
+    if (lead === null || lead === undefined || field === null || field === undefined || !this.#body.contains(field)) {
+      return;
+    }
+    const value = field.querySelector<HTMLElement>(":scope > .sheet-value > .editable-value, :scope > .sheet-value > .more-value.editable-value");
+    const target = value === null ? undefined : this.#targets.get(keyOf(value)!);
+    if (target?.kind !== "number") {
+      return;
+    }
+    event.preventDefault();
     event.stopPropagation();
-    this.#stepping = undefined;
-    this.#body.classList.remove("stepping");
-    const target = stepping.target;
-    const dragged = stepping.value !== undefined;
-    const value = !commit
-      ? stepping.from
-      : (stepping.value ??
-        stepNumber(stepping.from, stepping.direction * (event.shiftKey ? 10 : 1), target.signed !== false, target.hints));
-    if (value === undefined || (!dragged && value === stepping.from)) {
-      return;
+    const session = this.#session?.target.key === target.key && this.#session.field !== undefined ? this.#session : undefined;
+    const from = session !== undefined ? (session.field!.textContent ?? "").trim() : this.#shownOf(target);
+    this.#scrub = { target, pointer: event.pointerId, x: event.clientX, from, value: undefined };
+    try {
+      this.#body.setPointerCapture?.(event.pointerId);
+    } catch {
+      // A pointer the element cannot capture still scrubs while it stays over the reading.
     }
+  }
+
+  /** Scrubs the number pressed: one step for every few pixels sideways, ten with Shift, a tenth with Alt. */
+  #onScrubMove(event: PointerEvent): boolean {
+    const scrub = this.#scrub;
+    if (scrub === undefined || event.pointerId !== scrub.pointer) {
+      return false;
+    }
+    event.preventDefault();
+    if (scrub.value === undefined) {
+      if (Math.abs(event.clientX - scrub.x) < SCRUB_SLOP) {
+        return true;
+      }
+      // The drag counts from here, so it starts at the number pressed rather than a step on.
+      scrub.x = event.clientX;
+      this.#body.classList.add("scrubbing");
+    }
+    const target = scrub.target;
+    const steps = Math.trunc((event.clientX - scrub.x) / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
+    const step = target.hints?.step !== undefined && target.hints.step > 0 ? target.hints.step : 1;
+    const hints = event.altKey ? { ...target.hints, step: step / 10 } : target.hints;
+    const value = stepNumber(scrub.from, steps, target.signed !== false, hints) ?? scrub.from;
+    if (value !== scrub.value) {
+      scrub.value = value;
+      this.#showStepped(target, value);
+    }
+    return true;
+  }
+
+  /**
+   * Ends a press on a number's lead: a drag commits the number it reached once, or puts it back when
+   * cancelled; a press that never moved focuses the field.
+   */
+  #onScrubUp(event: PointerEvent, commit: boolean): boolean {
+    const scrub = this.#scrub;
+    if (scrub === undefined || event.pointerId !== scrub.pointer) {
+      return false;
+    }
+    this.#scrub = undefined;
+    this.#body.classList.remove("scrubbing");
+    try {
+      this.#body.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Already released.
+    }
+    const target = scrub.target;
+    if (scrub.value === undefined) {
+      if (commit && this.#session?.target.key !== target.key) {
+        this.#openEditor(target.key);
+      }
+      this.#ignoreClick = true;
+      setTimeout(() => (this.#ignoreClick = false), 0);
+      return true;
+    }
+    this.#ignoreClick = true;
+    setTimeout(() => (this.#ignoreClick = false), 0);
     const session = this.#session?.target.key === target.key && this.#session.field !== undefined ? this.#session : undefined;
     if (session !== undefined) {
-      this.#showStepped(target, value);
-      if (commit) {
-        this.#selectAll(session.field!);
-      }
-      return;
+      this.#showStepped(target, commit ? scrub.value : scrub.from);
+      return true;
     }
-    if (!dragged && commit) {
-      // A click goes live, and clicks on the same number are committed together once the reader
-      // pauses, or moves on.
-      this.#showStepped(target, value);
-      const live = this.#live;
-      if (live !== undefined && live.target.key === target.key) {
-        clearTimeout(live.settle);
-        live.settle = setTimeout(() => {
-          if (this.#live === live) {
-            this.#settleLive();
-          }
-        }, STEP_SETTLE_DELAY);
-      }
-      return;
-    }
-    this.#endNumberDrag(target, stepping.from, value, commit);
-  }
-
-  /**
-   * Carries a press on a stepper on through a reading drawn again: its tools drawn past the same
-   * number, showing the number it has reached. When the number is gone, the press ends.
-   */
-  #resumeStepping(stepping: Stepping): void {
-    const target = this.#targets.get(stepping.target.key);
-    const session = this.#session?.target.key === stepping.target.key ? this.#session : undefined;
-    const span = session?.span ?? this.#rendered.get(stepping.target.key);
-    if (target === undefined || target.kind !== "number" || span === undefined) {
-      return;
-    }
-    stepping.target = target;
-    this.#stepping = stepping;
-    this.#showTools(span, target);
-    try {
-      this.#tools.querySelector(stepping.direction === 1 ? ".stepper.up" : ".stepper.down")?.setPointerCapture?.(stepping.pointer);
-    } catch {
-      // A pointer the DOM no longer knows ends with its next event.
-    }
-    if (stepping.value !== undefined) {
-      this.#body.classList.add("stepping");
-      this.#showStepped(target, stepping.value);
-    }
+    this.#endNumberDrag(target, scrub.from, commit ? scrub.value : scrub.from, commit);
+    return true;
   }
 
   /**
@@ -3746,116 +3704,29 @@ export class NxViewerElement extends ElementBase {
   // ---- Properties an element does not write -------------------------------------------------
 
   /**
-   * Draws, on the selected element, the quiet row that lists the properties it does not write, and
-   * under it, when open, a dimmed row to each. Drawn again only when the element or its state
-   * changed, or with `force`.
+   * Fills the empty field of each property an open inspector's element does not write: its
+   * default, quieter, or the type it takes as a placeholder, and, while the reading is editable, the
+   * editor that writes it.
    */
-  #drawMore(force = false): void {
-    const key = this.#selection;
-    const open = key !== undefined && this.#moreOpen === key;
-    const state = key === undefined ? undefined : `${key}\u0000${open}`;
-    if (!force && state === this.#moreFor && (state === undefined || this.#moreDrawn.some((drawn) => this.#body.contains(drawn)))) {
-      return;
+  #fillUnwritten(index: TreeIndex): void {
+    const fields = [...this.#body.querySelectorAll<HTMLElement>(".dimmed-row[data-more-of]")];
+    const byElement = new Map<string, HTMLElement[]>();
+    for (const field of fields) {
+      const key = field.dataset["moreOf"]!;
+      byElement.set(key, [...(byElement.get(key) ?? []), field]);
     }
-    const focused = this.shadowRoot?.activeElement;
-    const refocus = focused instanceof HTMLElement && this.#moreDrawn.some((drawn) => drawn.contains(focused)) ? focused.dataset["moreFocus"] : undefined;
-    for (const drawn of this.#moreDrawn) {
-      drawn.remove();
-    }
-    for (const stale of this.#moreKeys) {
-      this.#targets.delete(stale);
-      this.#rendered.delete(stale);
-    }
-    this.#moreDrawn = [];
-    this.#moreBlock = undefined;
-    this.#moreKeys = [];
-    this.#moreCards.clear();
-    this.#moreFor = state;
-    const index = this.#index;
-    const at = key === undefined ? undefined : index?.byKey.get(key);
-    const element = key === undefined ? undefined : this.#rendered.get(key);
-    if (!this.#editable || index === undefined || at === undefined || element === undefined || !element.matches(".compact-sheet, .sheet:not(.folded), .line-element, .tag-line")) {
-      return;
-    }
-    if (element.classList.contains("compact-sheet") && !this.#openDetailsKeys().has(key!)) {
-      return;
-    }
-    const unwritten = unwrittenProperties(index, at);
-    if (unwritten.length === 0) {
-      return;
-    }
-    const document = this.ownerDocument;
-    const rows: HTMLElement[] = [];
-    const toggle = document.createElement("span");
-    toggle.className = open ? "sheet-row more more-toggle open" : "sheet-row more more-toggle";
-    toggle.tabIndex = 0;
-    toggle.dataset["moreFocus"] = "toggle";
-    toggle.setAttribute("role", "button");
-    toggle.setAttribute("aria-expanded", String(open));
-    const label = document.createElement("span");
-    label.className = "more-label";
-    const properties = unwritten.length === 1 ? "property" : "properties";
-    // Named for what it lists, unset properties, so it does not read as more of those written.
-    label.textContent = open ? `Hide unset ${properties}` : `Show ${unwritten.length} unset ${properties}`;
-    toggle.setAttribute("aria-label", `${unwritten.length} unset ${properties}`);
-    toggle.append(label);
-    rows.push(toggle);
-    if (open) {
-      if (unwritten.length > MORE_FILTER_PAST) {
-        const holder = document.createElement("span");
-        holder.className = "sheet-row more more-filter-row";
-        const filter = document.createElement("input");
-        filter.className = "more-filter";
-        filter.placeholder = "Filter properties";
-        filter.spellcheck = false;
-        filter.value = this.#moreFilter;
-        filter.dataset["moreFocus"] = "filter";
-        filter.setAttribute("aria-label", "Filter properties");
-        filter.addEventListener("input", () => {
-          this.#moreFilter = filter.value;
-          this.#filterMore();
-        });
-        holder.append(filter);
-        rows.push(holder);
+    for (const [key, drawn] of byElement) {
+      const at = index.byKey.get(key);
+      if (at === undefined) {
+        continue;
       }
-      for (const entry of unwritten) {
-        rows.push(this.#dimmedRow(index, at, key!, entry));
+      const entries = new Map(unwrittenProperties(index, at).map((entry) => [entry.property.name, entry]));
+      for (const field of drawn) {
+        const entry = entries.get(field.dataset["name"]!);
+        if (entry !== undefined) {
+          this.#fillDimmed(index, at, key, field, entry);
+        }
       }
-    }
-    for (const row of rows) {
-      row.dataset["moreOf"] = key;
-    }
-    if (element.matches(".sheet")) {
-      const container = element.querySelector<HTMLElement>(":scope > .compact-properties") ?? element;
-      const written = [...container.children].filter((child) => child.matches(".sheet-row:not(.more), .sheet-head"));
-      if (written.length) { written[written.length - 1]!.after(...rows); } else { container.append(...rows); }
-      this.#moreDrawn = rows;
-    } else {
-      // A line lists them under it, as a group would.
-      const block = document.createElement("span");
-      block.className = "more-block";
-      block.dataset["moreOf"] = key;
-      const inGroup = element.parentElement?.closest(".sheet") !== null;
-      const line = this.#text.split("\n")[index.tree.nodes[at]!.range.start.line] ?? "";
-      block.style.setProperty("--more-indent", String(inGroup ? 0 : line.length - line.trimStart().length));
-      block.append(...rows);
-      // After the line's end, so the block takes no blank line of its own.
-      const next = element.nextSibling;
-      if (next !== null && next.nodeType === 3 && (next.textContent ?? "").startsWith("\n")) {
-        (next as Text).splitText(1);
-        next.after(block);
-      } else {
-        element.after(block);
-      }
-      // Under the element itself, inside its highlight, where it starts partway along its line.
-      const blockBox = block.getBoundingClientRect();
-      const from = element.getClientRects()[0];
-      if (blockBox.width > 0 && from !== undefined) {
-        // In a narrow pane, no further in than halfway, so the rows keep room to read.
-        block.style.paddingLeft = `${Math.min(blockBox.width / 2, Math.max(0, from.left - blockBox.left))}px`;
-      }
-      this.#moreDrawn = [block];
-      this.#moreBlock = block;
     }
     for (const value of this.#moreKeys) {
       const span = this.#rendered.get(value);
@@ -3865,33 +3736,19 @@ export class NxViewerElement extends ElementBase {
         this.#markAdded(this.#targets.get(value)!, span);
       }
     }
-    this.#filterMore();
-    if (refocus !== undefined) {
-      [...this.#moreDrawn.flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])]
-        .find((candidate) => candidate.dataset["moreFocus"] === refocus)
-        ?.focus({ preventScroll: true });
-    }
-    queueMicrotask(() => this.#paintHighlights());
   }
 
-  /** A dimmed row for a property the element at `at`, with `key`, does not write. */
-  #dimmedRow(index: TreeIndex, at: number, key: string, entry: UnwrittenProperty): HTMLElement {
+  /** Fills the empty field of a property the element at `at`, with `key`, does not write. */
+  #fillDimmed(index: TreeIndex, at: number, key: string, field: HTMLElement, entry: UnwrittenProperty): void {
     const document = this.ownerDocument;
     const { property, editor, hints } = entry;
     const attributeKey = `${key}.${property.name}`;
     const valueKey = `${attributeKey}.value`;
-    const row = document.createElement("span");
-    row.className = "sheet-row more dimmed-row";
-    row.tabIndex = -1;
-    row.dataset["moreFocus"] = `row:${property.name}`;
-    row.dataset["name"] = property.name;
-    const name = document.createElement("span");
-    name.className = "sheet-name";
-    name.textContent = property.name;
-    name.dataset["hover"] = attributeKey;
+    field.tabIndex = -1;
+    field.dataset["moreFocus"] = `row:${property.name}`;
+    field.querySelector<HTMLElement>(".sheet-name")?.setAttribute("data-hover", attributeKey);
     this.#moreCards.set(attributeKey, propertyCardOf(property));
-    const cell = document.createElement("span");
-    cell.className = "sheet-value";
+    const cell = field.querySelector<HTMLElement>(":scope > .sheet-value")!;
     const value = document.createElement("span");
     value.className = "more-value";
     // Text shown to people is typed in the prose font it reads in once written.
@@ -3905,7 +3762,7 @@ export class NxViewerElement extends ElementBase {
     const start = defaultValue(property.default, editor);
     value.append(...defaultShown(document, property.default, editor, entry.format));
     cell.append(value);
-    if (editor !== undefined) {
+    if (editor !== undefined && this.#editable) {
       const target: EditTarget = {
         at,
         key: valueKey,
@@ -3922,87 +3779,65 @@ export class NxViewerElement extends ElementBase {
       this.#targets.set(valueKey, target);
       this.#rendered.set(valueKey, value);
       this.#moreKeys.push(valueKey);
-    } else {
+    } else if (this.#editable) {
       // No editor takes its type, as a record's: Enter or a double-click opens the element in Source.
-      row.dataset["opens"] = "true";
+      field.dataset["opens"] = "true";
     }
-    if (property.default !== undefined) {
-      const quiet = document.createElement("span");
-      quiet.className = "more-default";
-      quiet.textContent = "default";
-      cell.append(" ", quiet);
-    }
-    row.append(name, cell);
-    row.setAttribute("aria-label", `${property.name}, not written${property.default === undefined ? "" : `, default ${property.default}`}`);
-    return row;
+    field.setAttribute("aria-label", `${property.name}, not written${property.default === undefined ? "" : `, default ${property.default}`}`);
   }
 
-  /** Hides the dimmed rows whose names do not hold what the filter holds. */
-  #filterMore(): void {
-    const query = this.#moreFilter.trim().toLowerCase();
-    for (const drawn of this.#moreDrawn) {
-      const rows = drawn.matches(".dimmed-row, .added-row") ? [drawn] : [...drawn.querySelectorAll<HTMLElement>(".dimmed-row, .added-row")];
-      for (const row of rows) {
-        row.hidden = query !== "" && !row.dataset["name"]!.toLowerCase().includes(query);
+  /** Marks the lead of each editable number's field, which scrubs the number when dragged sideways. */
+  #markScrubbable(): void {
+    if (!this.#editable) {
+      return;
+    }
+    for (const lead of this.#body.querySelectorAll<HTMLElement>(".prop-field > .field-lead")) {
+      const value = lead.parentElement!.querySelector<HTMLElement>(":scope > .sheet-value > .editable-value");
+      if (value !== null && this.#targets.get(keyOf(value)!)?.kind === "number") {
+        lead.classList.add("scrubbable");
+        lead.title = `${lead.title}\nDrag sideways to change; Shift for 10 steps, Alt for a tenth`;
       }
     }
   }
 
-  /** Opens or closes the selected element's list of unwritten properties. */
-  #toggleMore(): void {
-    const key = this.#selection;
-    if (key === undefined) {
-      return;
-    }
-    this.#moreOpen = this.#moreOpen === key ? undefined : key;
-    this.#moreFilter = "";
-    this.#drawMore();
-    const focus = this.#moreDrawn
-      .flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])
-      .find((candidate) => candidate.dataset["moreFocus"] === (this.#moreOpen === undefined ? "toggle" : "filter"));
-    if (this.#moreOpen !== undefined && focus !== undefined) {
-      focus.focus({ preventScroll: true });
-    } else if (this.shadowRoot?.activeElement === null || this.shadowRoot?.activeElement === undefined) {
-      this.#body.focus({ preventScroll: true });
+  /**
+   * Cuts each row's summary to the whole items that fit on its line, from the end, and says how many
+   * it left out.
+   */
+  #fitSummaries(): void {
+    for (const summary of this.#body.querySelectorAll<HTMLElement>(".row-summary:not([hidden])")) {
+      const items = [...summary.querySelectorAll<HTMLElement>(":scope > .summary-item")];
+      const more = summary.querySelector<HTMLElement>(":scope > .summary-more")!;
+      items.forEach((item) => (item.hidden = false));
+      more.hidden = true;
+      if (summary.parentElement!.clientWidth === 0) {
+        continue;
+      }
+      // The summary gives way first as its line fills, so what overflows it is what does not fit.
+      const fits = (): boolean => summary.scrollWidth <= summary.clientWidth + 1;
+      let shown = items.length;
+      while (!fits() && shown > 0) {
+        shown -= 1;
+        items[shown]!.hidden = true;
+        more.hidden = false;
+        more.textContent = `+${items.length - shown}`;
+        more.title = items
+          .slice(shown)
+          .map((item) => item.title)
+          .join(", ");
+      }
     }
   }
 
-  /** Closes the list of unwritten properties, and the reading takes the keys again. */
-  #closeMore(): void {
-    this.#moreOpen = undefined;
-    this.#moreFilter = "";
-    this.#drawMore();
-    this.#body.focus({ preventScroll: true });
-  }
-
-  /** The keys of the list of unwritten properties, where focus is in it. */
+  /** The keys of an unwritten property's field, where focus is on it. */
   #onMoreKey(event: KeyboardEvent, target: HTMLElement): void {
-    const focusables = this.#moreDrawn
-      .flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])
-      .filter((candidate) => candidate.dataset["moreFocus"] !== undefined && !candidate.hidden && candidate.closest("[hidden]") === null);
-    const holder = target.closest<HTMLElement>("[data-more-focus]");
-    const at = holder === null ? -1 : focusables.indexOf(holder);
+    const holder = target.closest<HTMLElement>(".dimmed-row, .added-row");
     if (event.key === "Escape") {
       event.preventDefault();
-      this.#closeMore();
+      this.#body.focus({ preventScroll: true });
       return;
     }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const next = at + (event.key === "ArrowDown" ? 1 : -1);
-      if (next < 0) {
-        this.#body.focus({ preventScroll: true });
-      } else {
-        focusables[Math.min(next, focusables.length - 1)]?.focus({ preventScroll: true });
-      }
-      return;
-    }
-    if (holder?.classList.contains("more-toggle") === true && (event.key === "Enter" || event.key === " ")) {
-      event.preventDefault();
-      this.#toggleMore();
-      return;
-    }
-    if (holder?.classList.contains("dimmed-row") !== true && holder?.classList.contains("added-row") !== true) {
+    if (holder === null) {
       return;
     }
     const value = holder.querySelector<HTMLElement>(".editable-value");
@@ -4282,7 +4117,17 @@ export class NxViewerElement extends ElementBase {
     const target = event.target as Element;
     const details = target.closest<HTMLElement>("[data-details-action]");
     if (details !== null) {
-      this.#toggleDetails(details.dataset["detailsKey"]!, details.dataset["detailsAction"] as "details" | "pin");
+      this.#toggleDetails(details.dataset["detailsKey"]!, details.dataset["detailsAction"] as "toggle" | "pin");
+      return;
+    }
+    const valueFold = target.closest<HTMLElement>(".value-fold[data-value-key]");
+    if (valueFold !== null && this.#body.contains(valueFold)) {
+      this.#toggleValue(valueFold.dataset["valueKey"]!);
+      return;
+    }
+    const groupHead = target.closest<HTMLElement>(".group-head[data-group-key]");
+    if (groupHead !== null && this.#body.contains(groupHead)) {
+      this.#toggleGroup(groupHead.dataset["groupKey"]!, groupHead.closest<HTMLElement>(".row-element")?.dataset["key"]);
       return;
     }
     const toggle = (target.closest?.(".fold-run-head")?.querySelector(".fold") ?? target.closest?.(".fold")) as
@@ -4313,14 +4158,9 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    // The quiet row on a selected element opens and closes its list of unwritten properties, and the
-    // rest of that list, but its values, is no choice of node.
+    // An unwritten property's field is no choice of node: a click on it edits its value.
     const more = target.closest?.(".more") as HTMLElement | null | undefined;
     if (more !== null && more !== undefined && this.#body.contains(more)) {
-      if (more.classList.contains("more-toggle")) {
-        this.#toggleMore();
-        return;
-      }
       if (target.closest?.(".editable-value") == null) {
         // A click anywhere on a dimmed row edits its value, which may be empty, as an optional one is.
         const row = target.closest?.(".dimmed-row, .added-row") as HTMLElement | null | undefined;
@@ -4382,7 +4222,13 @@ export class NxViewerElement extends ElementBase {
     // every unit, as in a function's body, it chooses the smallest node there.
     const chosen = this.#unitOf(target) ?? (target.closest?.("[data-key]") as HTMLElement | null | undefined);
     if (chosen !== null && chosen !== undefined && this.#body.contains(chosen)) {
-      this.#select(keyOf(chosen), true);
+      // A click on the selected row closes its inspector, and the next opens it again.
+      const key = keyOf(chosen);
+      if (key !== undefined && key === this.#selection && chosen.matches(".row-element") && target.closest?.(".row-head")?.parentElement === chosen) {
+        this.#toggleDetails(key, "toggle");
+        return;
+      }
+      this.#select(key, true);
     }
   }
 
@@ -4437,9 +4283,6 @@ export class NxViewerElement extends ElementBase {
     }
     if (event.key === "Escape") {
       this.#closeCard();
-      if (this.#moreOpen !== undefined) {
-        this.#closeMore();
-      }
       return;
     }
     // Cmd+Backspace leaves out the selected row's property, as Delete does: a Mac laptop's delete
@@ -4450,16 +4293,18 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
+    // Enter on a selected row closes its inspector, and opens it again.
+    if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && this.#selection !== undefined && this.#rendered.get(this.#selection)?.matches(".row-element") === true) {
+      event.preventDefault();
+      this.#toggleDetails(this.#selection, "toggle");
+      return;
+    }
     // Enter or F2 opens the selected unit's first value, Space toggles its boolean, and Delete leaves
     // out its property. Ctrl or Cmd with Z or Y are the host's, for its undo.
     if (this.#editable && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (event.key === "Enter" || event.key === "F2") {
         if (this.#openSelected(event.key === "Enter")) {
           event.preventDefault();
-        } else if (event.key === "Enter" && this.#moreDrawn.length > 0) {
-          // An element with no value of its own to open opens its list of unwritten properties.
-          event.preventDefault();
-          this.#toggleMore();
         }
         return;
       }

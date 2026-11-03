@@ -138,8 +138,15 @@ export function boundedHints(
  * The step of a floating-point number offered `low` to `high`: the largest power of ten not above
  * a tenth of the span, or nothing for an integer or a range without both ends.
  */
+/** The largest finite `float32`, a little less: an end at or past it is no end a reader steps to. */
+const LARGEST_FLOAT32 = 3.4e38;
+
 function derivedStep(base: string | undefined, low: number | undefined, high: number | undefined): number | undefined {
   if (base === undefined || !FLOAT_TYPES.has(base) || low === undefined || high === undefined || !(high > low)) {
+    return undefined;
+  }
+  // An end `finite` gives, the largest float there is, bounds no range a reader steps through.
+  if (Math.abs(low) >= LARGEST_FLOAT32 || Math.abs(high) >= LARGEST_FLOAT32) {
     return undefined;
   }
   return 10 ** Math.floor(Math.log10((high - low) / 10));

@@ -116,35 +116,168 @@ export const styles = `
 }
 /* A sheet inside another is already set in by it, so only its container bounds it. */
 .source .sheet .sheet { max-width: 100%; }
-.source .compact-sheet { width: calc(100% - var(--indent, 0) * 1ch); }
-.source .compact-sheet > .sheet-head {
+/* An element of the composition as one row: its chevron, icon, kind, id, title and summary on one
+   line no taller than a source line, its pin at the end, and under it, while open, its inspector. */
+.source .row-element {
+  grid-template-columns: minmax(0, 1fr);
+  width: calc(100% - var(--indent, 0) * 1ch);
+}
+.source .row-element > .row-head {
   display: flex;
-  align-items: center;
-  gap: 0.6ch;
+  align-items: baseline;
+  gap: 0.8ch;
   white-space: nowrap;
-  padding: 3px 0;
+  padding-left: 0;
   text-indent: 0;
   min-width: 0;
 }
-.source .compact-sheet > .sheet-head > .sheet-kind { flex-shrink: 0; }
-.source .compact-title { font-weight: 400; opacity: 0.7; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-.source .compact-control {
-  font: 11px/1.5 var(--nx-viewer-prose-font-family, system-ui);
-  color: inherit;
-  background: light-dark(#00000008, #ffffff09);
-  border: 1px solid light-dark(#00000030, #ffffff30);
-  border-radius: 4px;
-  padding: 1px 6px;
-  cursor: pointer;
-  flex-shrink: 0;
+.source .row-element > .row-head > :is(.element-icon, .sheet-kind, .id-value, .row-pin, button.fold) { flex-shrink: 0; }
+.source .row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
 }
-.source .compact-control[aria-pressed="true"] { color: light-dark(#795100, #e8cc8b); }
-.source .compact-control:focus-visible, .source button.fold:focus-visible { outline: 2px solid light-dark(#0969da, #b8a4ff); outline-offset: 2px; }
-.source .compact-properties { display: contents; }
-.source .compact-properties[hidden] { display: none; }
-.source .compact-status { grid-column: 1 / -1; padding: 3px 0 3px 2ch; font: 11px/1.6 system-ui; opacity: 0.65; }
-.source .compact-properties > .sheet-row { background: light-dark(#00000005, #ffffff05); }
-.source .compact-sheet > .sheet-held { padding-top: 2px; }
+.source .row-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 1.4ch;
+  min-width: 0;
+  overflow: hidden;
+  margin-left: 0.6ch;
+  font-weight: 400;
+  color: var(--nx-viewer-summary-color, light-dark(#57606a, #a0a0a0));
+}
+.source .row-summary[hidden], .source .summary-item[hidden], .source .summary-more[hidden] { display: none; }
+.source .summary-item { display: inline-flex; align-items: baseline; gap: 0.5ch; flex-shrink: 0; }
+.source .summary-lead.lead-caption, .source .summary-lead.lead-short { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); font-family: var(--nx-viewer-prose-font-family, inherit); }
+.source .summary-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
+.source .summary-more { flex-shrink: 0; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.source :is(.summary-lead, .field-lead).lead-icon { display: inline-flex; align-self: center; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
+.source :is(.summary-lead, .field-lead).lead-icon > svg { width: 13px; height: 13px; }
+.source .reference-token :is(.n, span:not(.swatch)), .source .reference-token {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+}
+/* A row's pin: shown under the pointer, while selected and always while pinned. */
+.source .row-pin {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  cursor: pointer;
+  visibility: hidden;
+}
+.source .row-pin > svg { width: 13px; height: 13px; }
+.source .row-head:hover > .row-pin, .source .row-element.selected > .row-head > .row-pin,
+.source .row-element.pinned > .row-head > .row-pin, .source .row-pin:focus-visible { visibility: visible; }
+.source .row-pin:hover { color: var(--nx-viewer-foreground, CanvasText); }
+.source .row-pin[aria-pressed="true"] { color: var(--nx-viewer-pin-color, light-dark(#9a6700, #e3b341)); }
+.source .row-pin[aria-pressed="true"] > svg { fill: currentColor; }
+.source .row-pin:focus-visible, .source button.fold:focus-visible, .source .group-head:focus-visible {
+  outline: 2px solid light-dark(#0969da, #b8a4ff);
+  outline-offset: 1px;
+}
+/* The inspector: a step in from the row's icon, whatever the depth, its groups across the room left,
+   their fields in two columns where the pane is wide enough and one where not. */
+.source .inspector {
+  display: block;
+  margin: 2px 0 4px 2ch;
+  padding: 2px 0 4px;
+  white-space: normal;
+  font-weight: 400;
+}
+.source .inspector-group { display: block; }
+.source .group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6ch;
+  width: 100%;
+  margin: 0;
+  padding: 3px 0 2px;
+  border: 0;
+  background: none;
+  color: var(--nx-viewer-group-color, light-dark(#57606a, #a0a0a0));
+  font: 600 0.8em/1.5 var(--nx-viewer-prose-font-family, system-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.source .group-head > .fold { margin-left: 0; width: 1em; opacity: 1; }
+.source .group-count { font-weight: 400; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.source .inspector-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(18ch, calc(50% - 0.6ch)), 1fr));
+  gap: 3px 1.2ch;
+}
+.source .inspector .sheet-row.prop-field {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7ch;
+  grid-column: auto;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--nx-viewer-field-background, light-dark(#0000000a, #ffffff0d));
+  white-space: pre-wrap;
+}
+.source .inspector .sheet-row.prop-field.captioned { flex-wrap: wrap; row-gap: 0; }
+.source .inspector .sheet-row.prop-field.captioned > .lead-caption { flex-basis: 100%; }
+.source .inspector .sheet-row.prop-field.field-below { flex-wrap: wrap; }
+.source .inspector .sheet-row.prop-field.field-below > .sheet-below { flex-basis: 100%; padding-left: 0; }
+.source .inspector .sheet-row.prop-field > .sheet-value { flex: 1; min-width: 0; }
+.source .field-lead { opacity: 1; flex-shrink: 0; user-select: none; }
+.source .field-lead.lead-short {
+  min-width: 1.4ch;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+}
+.source .field-lead.lead-caption {
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.8em;
+}
+.source .field-lead.scrubbable { cursor: ew-resize; }
+.source .field-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
+/* A property the element does not write: an empty field with a dashed outline. */
+.source .inspector .sheet-row.prop-field.dimmed-row {
+  opacity: 1;
+  background: none;
+  border: 1px dashed var(--nx-viewer-unset-border, light-dark(#d0d7de, #484f58));
+}
+.source .inspector .dimmed-row > .sheet-value { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.source .inspector .dimmed-row .more-default { display: none; }
+/* A boolean as a checkbox, its icon and label after it. */
+.source .inspector .boolean-field .sheet-value { flex: 0 0 auto; }
+.source .inspector .boolean-field .sheet-boolean,
+.source .inspector .boolean-field .more-value {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15em;
+  height: 1.15em;
+  min-width: 0;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 0.85em;
+  line-height: 1;
+  vertical-align: middle;
+}
+.source .inspector .boolean-field .sheet-boolean.false, .source .inspector .boolean-field .more-value { color: transparent; border-color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.source .inspector .boolean-field .more-value::before { content: none; }
+.source .row-element > .sheet-held { padding-top: 0; }
+/* An element value: its icon, kind and summary, unfolding into a nested group of its fields. */
+.source .inspector .sheet-row.prop-field.nested-field.open { grid-column: 1 / -1; align-items: flex-start; }
+.source .nested-head { display: block; min-width: 0; }
+.source .nested-head > .value-fold { margin-left: 0; width: 1em; opacity: 1; }
+.source .nested-head > .element-icon { margin-right: 0.5ch; }
+.source .nested-kind { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
+.source .nested-summary { display: inline-flex; vertical-align: baseline; margin-left: 1ch; max-width: 100%; }
+.source .inspector.nested-inspector { margin: 2px 0 2px 0; padding: 0; }
 .source button.fold { border: 0; padding: 0; background: none; font: inherit; opacity: 1; flex-shrink: 0; }
 .source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
 .source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
@@ -266,6 +399,8 @@ export const styles = `
   border-bottom-left-radius: 3px;
   pointer-events: none;
 }
+/* A row with nothing under it, its inspector closed and nothing held, has no bracket. */
+.source .row-element:not(:has(> .sheet-held, > .inspector))::after { display: none; }
 /* A group that starts with an icon drops its bracket from under the icon's middle. */
 .source .sheet:has(> .sheet-head > .element-icon)::after { left: calc(0.5em - 0.5px); }
 /* A span in another font takes no line height of its own, so every line keeps the height the
@@ -797,8 +932,8 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
   vertical-align: -0.05em;
 }
-/* A number's steppers, Framer-style, and a field's choices chevron: drawn where they would stand in
-   the line, just past the value, and taken out of it, so nothing moves. */
+/* A field's choices chevron: drawn where it would stand in the line, just past the value, and taken
+   out of it, so nothing moves. */
 .source .value-tools {
   position: absolute;
   z-index: 2;
@@ -813,54 +948,18 @@ export const styles = `
 }
 /* Taking room in the line, past an open field with more of its line after it. */
 .source .value-tools.in-line { position: static; vertical-align: top; }
-.source .value-tools .steppers, .source .value-tools .choices-toggle { display: none; }
-.source .value-tools.with-steppers .steppers {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 1px;
-  align-self: center;
-  box-sizing: border-box;
-  /* A little taller than the line, so each half is a target a pointer can hit; whole pixels, with the
-     rule between them as the gap, so the two halves are exactly the same height. */
-  width: 18px;
-  height: 25px;
-  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
-}
-/* At the top or bottom edge of what the reading shows, the steppers reach inward from their line. */
-.source .value-tools.at-top .steppers { align-self: flex-start; }
-.source .value-tools.at-bottom .steppers { align-self: flex-end; }
-/* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
-.source .value-tools .stepper {
-  position: relative;
-  flex: 1 1 0;
-  cursor: default;
-  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
-}
-/* The hover and press tints lie over the field's color, so the rule's color never shows through. */
-.source .value-tools .stepper:hover {
-  background-image: linear-gradient(var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)) 0 0);
-}
-.source .value-tools .stepper:active {
-  background-image: linear-gradient(var(--nx-viewer-edit-active, light-dark(#0000001f, #ffffff29)) 0 0);
-}
-.source .value-tools .stepper::after, .source .value-tools .choices-toggle::after {
+.source .value-tools .choices-toggle { display: none; }
+.source .value-tools .choices-toggle::after {
   content: "";
   position: absolute;
   inset: 0;
   background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 10px no-repeat;
 }
-.source .value-tools .stepper.up::after { transform: rotate(180deg); }
-.source .value-tools .stepper:hover::after, .source .value-tools .choices-toggle:hover::after {
+.source .value-tools .choices-toggle:hover::after {
   background: var(--nx-viewer-foreground, CanvasText);
 }
 .source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
 .source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
-.body.stepping, .body.stepping * { cursor: ns-resize !important; user-select: none; }
-.source .compact-sheet > .sheet-head { padding-left: 0; text-indent: 0; column-gap: 0.6ch; }
-.source .compact-sheet.folded > .sheet-head > .compact-title { flex: 1; }
-.source .compact-sheet > .sheet-head > .compact-title { margin-left: 1ch; }
+.body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 `;
