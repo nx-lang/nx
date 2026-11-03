@@ -385,7 +385,7 @@ the item is not inside an `if` branch or a `for` body. An `if` or a `for` that i
 where it is unless moved past, and items it makes do not move.
 
 - **Drag.** Where the reading draws the list an item to a line, an item of two or more is dragged by
-  its icon and its name: the pointer shows a grab hand there, and the hover card ends with `Drag to
+  its icon and its name: the pointer stays as it is there, a closed hand only while dragging, and the hover card ends with `Drag to
   reorder`. A press that moves 4 pixels starts the drag; a click still selects. The item is muted
   where it stands, a copy of one line follows the pointer, and a line in the selection's color marks
   the gap it would land in, above the comments directly over the item there; nothing else moves.

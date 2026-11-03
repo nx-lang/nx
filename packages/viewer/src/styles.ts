@@ -749,9 +749,9 @@ export const styles = `
 .source .sheet-head:hover > .item-menu > .row-menu:not(.shared),
 .source .line-element.selected > .item-menu > .row-menu:not(.shared),
 .source .line-element:hover > .item-menu > .row-menu:not(.shared) { visibility: visible; }
-/* An item that moves is dragged by its icon and its name: a hand to grab, and no text selection
-   or panning to compete with it. */
-.body.editable .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* An item that moves is dragged by its icon and its name, which keep the usual pointer, as rows in
+   a design tool's layers do, with no text selection or panning to compete with the drag. */
+.body.editable .drag-handle { touch-action: none; user-select: none; -webkit-user-select: none; }
 /* A touch on a handle's icon may be taken as one on the fold chevron beside it, which then must not
    pan either. */
 .body.editable .sheet-head:has(> .drag-handle) > .fold { touch-action: none; }

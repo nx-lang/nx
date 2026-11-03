@@ -460,6 +460,44 @@ that range's span, so a `0.0..=1.0` number steps by `0.1`, as does a `0.0..=1000
 - **THEN** the editor SHALL offer `0..=1` and step by `0.1`
 - **AND** a plain `float64`, or a `float64 where >= 0.0`, hinted `min=0 max=1` SHALL step by `0.1` too
 
+### Requirement: An item of a list is dragged by its icon
+When the host has set `editable`, the element SHALL let the reader move an item that moves: an
+element that is an item of a sequence or of element content, not an item of a condition's branch or a loop's body, in a list of two or more items that holds no text. Where the reading draws such a list
+an item to a line, the item's handle SHALL be its icon, with the element's name beside it where the
+reading shows one, or its name alone where the host draws no icons; the element SHALL add no mark of
+its own for it. Over the handle the pointer SHALL keep its usual cursor, showing a grabbing hand only
+while a drag is under way, and the hover card the icon or name shows SHALL end with a quiet `Drag to
+reorder`. A click on the handle SHALL select the item, as
+today; pressing it and moving the pointer 4 pixels or more SHALL instead start a drag and close any
+hover card. While dragging, the item SHALL be drawn muted where it stands, a copy of one line holding
+its icon and its title, or its name, SHALL follow the pointer, and a line in the selection colour SHALL
+mark the gap between items of the item's own list nearest the pointer, except the two gaps beside
+the item, where it SHALL show no line; nothing else in the reading SHALL move. Releasing over the list at a gap that does not leave the item where it is SHALL fire
+`nx-edit` with the item's key and `move` to the position that gap gives it. Releasing anywhere else,
+or Escape, SHALL cancel the drag and fire nothing. While the pointer is near the top or bottom edge of
+the reading's scrolling area, the reading SHALL scroll toward it. The drag SHALL work with a mouse, a
+pen and a touch on the handle. An item that shows neither an icon nor a name moves only as the next
+requirement says.
+
+#### Scenario: Dragging a step down
+- **WHEN** the reader drags the icon of the first of four steps and releases it with the line marking
+  the gap between the third and the fourth
+- **THEN** the element SHALL fire `nx-edit` with the first step's key and `move` to `2`, and nothing
+  else in the reading SHALL have moved during the drag
+
+#### Scenario: Cancelling
+- **WHEN** the reader presses Escape during a drag
+- **THEN** the drag SHALL end, the item SHALL read as before, and no event SHALL fire
+
+#### Scenario: A click on the icon
+- **WHEN** the reader clicks the icon of a step without moving the pointer
+- **THEN** the step SHALL be selected and no drag SHALL start
+
+#### Scenario: Nothing to drag
+- **WHEN** the reader presses and moves the icon of the only choice of a question, or of an element inside an
+  `if` block
+- **THEN** no drag SHALL start
+
 ## REMOVED Requirements
 
 ### Requirement: An element reads as a group where its properties do not fit on a line
