@@ -91,8 +91,9 @@ declare module "react" {
 
 Each composition element reads as one row: its icon, kind, ID, title and a short summary of what it
 sets. The summary comes from the visualizer's `summary`, or else the first few written one-line
-properties; items that do not fit are counted as `+N`. A line of content, such as the text of
-`<Text>NX graphics</Text>`, leads the summary and is the inspector's first field.
+properties; items that do not fit are counted as `+N`. Text content, such as that of
+`<Text>NX graphics</Text>`, leads the summary however long it is and is the inspector's first field.
+Text in a summary reads as its first few words, faded where it is cut.
 
 Selecting a row opens its inspector under it. Clicking the selected row, or pressing Enter, closes
 and reopens it. **Pin** keeps an inspector open while another row is selected, so two elements can be

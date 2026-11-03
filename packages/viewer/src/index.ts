@@ -143,6 +143,9 @@ const SCRUB_SLOP = 4;
 /** How far the pointer moves while pressed, in pixels, before the text it selects is a selection of text, not a click. */
 const TEXT_SELECT_SLOP = 6;
 
+/** How narrow, in pixels, a summary's words may shrink before they are left out. */
+const MIN_WORDS_WIDTH = 48;
+
 /** How far the pointer moves sideways, in pixels, for a scrubbed number to step once. */
 const SCRUB_STEP = 3;
 
@@ -3846,13 +3849,16 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Cuts each row's summary to the whole items that fit on its line, from the end, and says how many
-   * it left out.
+   * it left out. Words shrink first, and fade where they are cut.
    */
   #fitSummaries(): void {
     for (const summary of this.#body.querySelectorAll<HTMLElement>(".row-summary:not([hidden])")) {
       const items = [...summary.querySelectorAll<HTMLElement>(":scope > .summary-item")];
       const more = summary.querySelector<HTMLElement>(":scope > .summary-more")!;
-      items.forEach((item) => (item.hidden = false));
+      items.forEach((item) => {
+        item.hidden = false;
+        item.style.removeProperty("max-width");
+      });
       more.hidden = true;
       if (summary.parentElement!.clientWidth === 0) {
         continue;
@@ -3861,6 +3867,15 @@ export class NxViewerElement extends ElementBase {
       const fits = (): boolean => summary.scrollWidth <= summary.clientWidth + 1;
       let shown = items.length;
       while (!fits() && shown > 0) {
+        const last = items[shown - 1]!;
+        if (last.classList.contains("summary-words") && !last.style.maxWidth) {
+          // Words shrink to what is left before they go, if a few still show.
+          const width = last.clientWidth - (summary.scrollWidth - summary.clientWidth);
+          if (width >= MIN_WORDS_WIDTH) {
+            last.style.maxWidth = `${width}px`;
+            continue;
+          }
+        }
         shown -= 1;
         items[shown]!.hidden = true;
         more.hidden = false;
@@ -3869,6 +3884,12 @@ export class NxViewerElement extends ElementBase {
           .slice(shown)
           .map((item) => item.title)
           .join(", ");
+      }
+      for (const words of items) {
+        const value = words.querySelector<HTMLElement>(":scope > .summary-value");
+        if (words.classList.contains("summary-words") && value !== null) {
+          words.classList.toggle("clipped", !words.hidden && value.scrollWidth > value.clientWidth + 1);
+        }
       }
     }
   }

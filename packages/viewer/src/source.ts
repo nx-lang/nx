@@ -957,12 +957,13 @@ export function renderSource(
 
   /**
    * The attributes a row's summary shows: those its visualizer's summary names that the element
-   * writes, in that order, or else the first few it writes whose values read on one line, its title
-   * and id left out. A false boolean is left out either way.
+   * writes, in that order, or else the first few it writes whose values are words or read on one
+   * line, its title and id left out. A false boolean is left out either way.
    */
   /**
-   * The content of `at` that reads inline, as a property does: a line of text and embedded values,
-   * as `<Text>NX graphics</Text>` holds, with no element or block in it.
+   * The content of `at` that reads inline, as a property does: text and embedded values, as
+   * `<Text>NX graphics</Text>` holds, with no element or block in it. However long, its row shows
+   * its first words.
    */
   const inlineContent = (at: number): number | undefined => {
     const content = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child));
@@ -976,20 +977,30 @@ export function renderSource(
       return undefined;
     }
     const [from, to] = inlineRange(child);
-    return from < to && onOneLine(from, to) ? child : undefined;
+    return from < to ? child : undefined;
+  };
+
+  /** Whether an attribute holds words: content of text, or a quoted string. */
+  const isWords = (attribute: number): boolean => {
+    if (isContent(attribute)) {
+      return true;
+    }
+    const value = soleValue(attribute);
+    return value !== undefined && tree.nodes[value]!.role === "literal" && (tree.nodes[value]!.value ?? "").startsWith('"');
   };
 
   /** Where content's items run, blank space they hold included; it reads collapsed, as in prose. */
   const itemsRange = (content: number): [number, number] => {
     const items = childrenOf(content);
     // An embedded value's closing brace is the content's, past its last item.
-    return [startOf(tree.nodes[items[0]!]!), Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!))];
+    // So is an embedded value's opening brace, before its first.
+    return [Math.min(startOf(tree.nodes[items[0]!]!), startOf(tree.nodes[content]!)), Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!))];
   };
 
   /** Where inline content's text runs, without the blank space around it. */
   const inlineRange = (content: number): [number, number] => {
     const items = childrenOf(content);
-    let from = startOf(tree.nodes[items[0]!]!);
+    let from = Math.min(startOf(tree.nodes[items[0]!]!), startOf(tree.nodes[content]!));
     let to = Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!));
     while (from < to && /\s/.test(text[from]!)) {
       from++;
@@ -1015,7 +1026,7 @@ export function renderSource(
       return inline !== undefined && !named.includes(inline) ? [inline, ...named] : named;
     }
     if (inline !== undefined) {
-      return [inline, ...written.filter((child) => child !== inline && child !== title && child !== idPlans.get(at)?.attribute && shows(child) && soleValue(child) !== undefined && tree.nodes[soleValue(child)!]!.role !== "element" && onOneLine(startOf(tree.nodes[soleValue(child)!]!), endOf(tree.nodes[soleValue(child)!]!))).slice(0, DEFAULT_SUMMARY_LENGTH - 1)];
+      return [inline, ...written.filter((child) => child !== inline && child !== title && child !== idPlans.get(at)?.attribute && shows(child) && soleValue(child) !== undefined && tree.nodes[soleValue(child)!]!.role !== "element" && (isWords(child) || onOneLine(startOf(tree.nodes[soleValue(child)!]!), endOf(tree.nodes[soleValue(child)!]!)))).slice(0, DEFAULT_SUMMARY_LENGTH - 1)];
     }
     return written
       .filter((child) => {
@@ -1026,7 +1037,7 @@ export function renderSource(
           shows(child) &&
           value !== undefined &&
           tree.nodes[value]!.role !== "element" &&
-          onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!))
+          (isWords(child) || onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!)))
         );
       })
       .slice(0, DEFAULT_SUMMARY_LENGTH);
@@ -1051,6 +1062,10 @@ export function renderSource(
     item.className = "summary-item";
     item.title = tooltipOf(presentation);
     hoverable(item, attribute);
+    if (isWords(attribute)) {
+      // Words read as their first few, cut and faded where they run long.
+      item.classList.add("summary-words");
+    }
     if (isContent(attribute)) {
       // Inline content reads as its text, as the element's title does, with no label.
       const words = document.createElement("span");

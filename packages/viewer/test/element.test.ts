@@ -347,14 +347,13 @@ describe("the reading", () => {
     assert.ok(written.textContent!.includes('\n      note="n"'), "its later line keeps the source's indentation");
   });
 
-  it("keeps text that starts on its element's tag from reaching left of where the item is drawn", async () => {
+  it("reads text over several lines as its first words in its row's summary", async () => {
     const poem = await fixture("textOnItsTag");
     const element = show(poem);
-    const item = root(element).querySelector<HTMLElement>(".sheet-item.as-written")!;
-    assert.ok(item, "the text over two lines reads as written");
-    // Its first line starts at column 16, on the tag, and its second at column 2: measured from the
-    // first, the second would be drawn 14 columns left of the item.
-    assert.equal(item.style.getPropertyValue("--column"), "2", "measured from its least indented line");
+    assert.equal(root(element).querySelector(".sheet-item.as-written"), null, "not as written");
+    const words = root(element).querySelector<HTMLElement>(".row-head .summary-item.summary-words")!;
+    assert.ok(words, "the summary holds the words");
+    assert.equal(words.textContent!.replace(/\s+/g, " ").trim(), "Two lines of text", "its lines read as one");
   });
 
   it("measures a block on a line of its own from its start, whatever the lines inside it", async () => {

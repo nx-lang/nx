@@ -151,6 +151,13 @@ export const styles = `
 }
 .source .row-summary[hidden], .source .summary-item[hidden], .source .summary-more[hidden] { display: none; }
 .source .summary-item { display: inline-flex; align-items: baseline; gap: 0.5ch; flex-shrink: 0; }
+/* Words, as a Text's content, read as their first few, faded where cut, and shrink before they go. */
+.source .summary-item.summary-words { max-width: 28ch; overflow: hidden; white-space: nowrap; }
+.source .summary-item.summary-words > .summary-value { min-width: 0; overflow: hidden; }
+.source .summary-item.summary-words.clipped > .summary-value {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
+}
 .source .summary-lead.lead-caption, .source .summary-lead.lead-short { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); font-family: var(--nx-viewer-prose-font-family, inherit); }
 .source .summary-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
 .source .summary-more { flex-shrink: 0; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
