@@ -242,7 +242,7 @@ export const styles = `
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-size: 0.8em;
 }
-.source .field-lead.scrubbable { cursor: ew-resize; }
+.source .field-lead.scrubbable { cursor: ew-resize; touch-action: pan-y; }
 .source .field-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
 /* A property the element does not write: an empty field with a dashed outline. */
 .source .inspector .sheet-row.prop-field.dimmed-row {

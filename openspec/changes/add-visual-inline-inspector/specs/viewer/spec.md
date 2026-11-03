@@ -365,10 +365,10 @@ SHALL still fire `nx-open`.
 - **THEN** the element SHALL fire `nx-edit` setting the number `9`, and then the number `19`
 
 #### Scenario: A case's chevron
-- **WHEN** the reader selects `size=large` in `<Drink code="SPC" size=large />`, on one line, and
-  clicks the chevron past it
-- **THEN** the chevron SHALL sit before the closing `/>`, covering nothing, SHALL stay shown, and the
-  popover of `Size`'s cases SHALL open
+- **WHEN** the reader opens the inspector of `<Drink code="SPC" size=large />`, selects the field of
+  `size=large` and clicks the chevron past its value
+- **THEN** the chevron SHALL sit inside the field, covering nothing, SHALL stay shown, and the popover
+  of `Size`'s cases SHALL open
 
 #### Scenario: A refused choice
 - **WHEN** the reader opens a number hinted `max=10` with the choices `5` and `99`, and chooses `99`
