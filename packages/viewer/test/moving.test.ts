@@ -202,7 +202,7 @@ describe("moving and deleting in the reading", () => {
     element.tree = undefined;
     element.text = removed.text;
     element.tree = removed.tree;
-    assert.deepEqual(element.detailsState.pinned, []);
+    assert.deepEqual(element.detailsState.pinned, ["flow.value.steps[0]"], "the deleted item's pin goes, the other stays");
   });
 
   it("moves the selected item with Alt+Up and Alt+Down, and nothing past the ends", async () => {
@@ -454,7 +454,7 @@ describe("moving and deleting in the reading", () => {
     const element = show(await sourceOf(SOURCE), [], false);
     const handles = [...root(element).querySelectorAll<HTMLElement>('.drag-handle[data-drag-key="flow.value.steps[0]"]')];
     assert.deepEqual(
-      handles.map((handle) => handle.classList.contains("line-kind")),
+      handles.map((handle) => handle.classList.contains("sheet-kind")),
       [true]
     );
   });
@@ -484,20 +484,6 @@ describe("moving and deleting in the reading", () => {
     press(body(element), "Delete");
     press(body(element), "Delete");
     assert.deepEqual(fired, [{ key: "pair.value.choices.value[0]", edit: { kind: "remove" } }]);
-  });
-
-  it("hangs the menu mark of an item sharing its line at the end of its row, shown while selected", async () => {
-    const element = show(await sourceOf(SOURCE));
-    const mark = [...root(element).querySelectorAll<HTMLElement>(".row-menu")].find(
-      (candidate) => candidate.dataset["menuKey"] === "pick.value.choices.value[1]"
-    )!;
-    assert.ok(mark.classList.contains("shared"));
-    assert.equal(mark.parentElement!.parentElement, rendered(element, "pick.value"), "at the end of the line");
-    assert.ok(!rendered(element, "pick.value.choices.value[1]").contains(mark), "not after the item");
-    element.selection = "pick.value.choices.value[1]";
-    assert.ok(mark.classList.contains("selected"));
-    element.selection = "pick.value.choices.value[0]";
-    assert.ok(!mark.classList.contains("selected"));
   });
 
   it("hangs the menu mark of an item of a let's one-line sequence after the sequence", async () => {

@@ -28,6 +28,8 @@ function show({ tree, text }: { tree: SourceTree; text: string }, parent: Node =
   element.icons = () => document.createElementNS("http://www.w3.org/2000/svg", "svg");
   element.text = text;
   element.tree = tree;
+  // Every row's inspector open, so every property reads.
+  element.detailsState = { pinned: tree.nodes.filter((node) => node.role === "element").map((node) => node.key) };
   created.push(element);
   return element;
 }
@@ -128,14 +130,18 @@ describe("hover targets", () => {
     const line = drawn(element, shape);
     assert.deepEqual(
       marksOf(element, shape).map((mark) => mark.className),
-      ["element-icon", "line-kind"],
+      ["element-icon", "sheet-kind"],
       "the element's icon and name"
     );
     assert.equal(line.querySelector(".element-icon")!.hasAttribute("title"), false, "the card names it, not a tooltip");
     const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
-    assert.deepEqual(marksOf(element, type).map((mark) => mark.className), ["line-name", "line-equals"], "a line's name=");
+    assert.deepEqual(
+      marksOf(element, type).map((mark) => mark.className),
+      ["summary-item", "field-lead lead-caption sheet-name"],
+      "its summary item and its field's lead"
+    );
     const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
-    assert.deepEqual(marksOf(element, circle).map((mark) => mark.dataset["key"]), [circle], "a case marks itself");
+    assert.deepEqual(marksOf(element, circle).map((mark) => mark.dataset["key"]), [undefined, circle], "a case marks itself, and its copy in the summary");
     for (const value of [
       keyIn(hover, (node) => node.role === "case" && node.name === "Rectangle"),
       keyIn(hover, (node) => node.role === "member"),
@@ -146,11 +152,12 @@ describe("hover targets", () => {
     }
     const union = keyIn(hover, (node) => node.role === "reference" && node.name === "ShapeType");
     assert.equal(drawn(element, union).dataset["hover"], undefined, "a qualified case's union is the case's");
-    // A task's id and title read without their names, and show their properties' cards.
+    // A task's id and title read without their names on its row, and show their properties' cards,
+    // as their fields' leads do.
     const id = keyIn(hover, (node) => node.role === "attribute" && node.name === "id");
     const title = keyIn(hover, (node) => node.role === "attribute" && node.name === "title");
-    assert.deepEqual(marksOf(element, id).map((mark) => mark.textContent), ["ship"]);
-    assert.deepEqual(marksOf(element, title).map((mark) => mark.textContent), ["Ship it"]);
+    assert.deepEqual(marksOf(element, id).map((mark) => mark.textContent), ["ship", "ID"]);
+    assert.deepEqual(marksOf(element, title).map((mark) => mark.textContent), ["Ship it", "Title"]);
     // Nothing else is marked: a literal, a comment, or a unit's room.
     const hi = keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"');
     const note = keyIn(hover, (node) => node.role === "comment");
@@ -159,16 +166,15 @@ describe("hover targets", () => {
     assert.equal(root(element).querySelectorAll(":is(.line-element, .sheet, .sheet-row, .sheet-head)[data-hover]").length, 0);
   });
 
-  it("are a group's name and its rows' names", async (t) => {
-    narrow(t, 30);
+  it("are a row's kind and its fields' leads", async () => {
     const wrapped = await fixture("wrappedAttributes");
     const element = show(wrapped);
-    const sheet = root(element).querySelector<HTMLElement>(".sheet")!;
-    assert.equal(sheet.querySelector(":scope > .sheet-head > .sheet-kind")!.getAttribute("data-hover"), sheet.dataset["key"]);
-    const rows = [...sheet.querySelectorAll<HTMLElement>(":scope > .sheet-row")];
-    assert.ok(rows.length > 0);
-    for (const row of rows) {
-      assert.equal(row.querySelector(".sheet-name")!.getAttribute("data-hover"), row.dataset["key"]);
+    const row = root(element).querySelector<HTMLElement>(".row-element")!;
+    assert.equal(row.querySelector(":scope > .row-head > .sheet-kind")!.getAttribute("data-hover"), row.dataset["key"]);
+    const fields = [...row.querySelectorAll<HTMLElement>(":scope > .inspector .prop-field[data-key]")];
+    assert.ok(fields.length > 0);
+    for (const field of fields) {
+      assert.equal(field.querySelector(".field-lead")!.getAttribute("data-hover"), field.dataset["key"]);
     }
   });
 });
@@ -179,7 +185,7 @@ describe("hover cards", () => {
     const hover = await fixture("hover");
     const element = show(hover);
     const shape = keyIn(hover, firstShape);
-    const name = drawn(element, shape).querySelector(".line-kind")!;
+    const name = drawn(element, shape).querySelector(".sheet-kind")!;
     layOut(t, element, (node) => (node === name ? { top: 100, left: 50 } : { top: 0, left: 0 }));
     const folded = element.folded;
     pointAt(name);
@@ -200,7 +206,7 @@ describe("hover cards", () => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    const name = drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!;
+    const name = drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!;
     layOut(t, element, (node) => (node === name ? { top: 260, left: 350 } : { top: 0, left: 0 }));
     pointAt(name);
     t.mock.timers.tick(500);
@@ -234,7 +240,7 @@ describe("hover cards", () => {
     const element = show(hover);
     const hi = drawn(element, keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"'));
     const note = drawn(element, keyIn(hover, (node) => node.role === "comment"));
-    const room = drawn(element, keyIn(hover, firstShape)).querySelector(".line-gap")!;
+    const room = drawn(element, keyIn(hover, firstShape)).querySelector(".row-head")!;
     for (const target of [hi, note, room]) {
       pointAt(target);
       t.mock.timers.tick(1000);
@@ -300,7 +306,7 @@ describe("hover cards", () => {
     customElements.define(tag, class extends ViewerClass {});
     created.push(element);
     assert.equal(element.markdown, markdown);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!);
     t.mock.timers.tick(500);
     assert.equal(card(element).querySelector(".card-doc > b")!.textContent, "A FILLED SHAPE.");
   });
@@ -312,7 +318,7 @@ describe("hover cards", () => {
     const shape = tree.declarations.find((declaration) => declaration.name === "Shape")!;
     shape.doc = 'Draws <img src=x onerror="alert(1)"> and [runs](javascript:alert(1)).';
     const element = show({ tree, text: hover.text });
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!);
     t.mock.timers.tick(500);
     const doc = card(element).querySelector(".card-doc")!;
     assert.equal(doc.querySelector("img, a"), null);
@@ -335,7 +341,7 @@ describe("hover cards", () => {
     // From the card onto another target, and across a gap, the same.
     card(element).dispatchEvent(new window.MouseEvent("pointerenter"));
     card(element).dispatchEvent(new window.MouseEvent("pointerleave"));
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-gap")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".row-head")!);
     pointAt(marksOf(element, type)[0]!);
     t.mock.timers.tick(500);
     assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle");
@@ -361,7 +367,7 @@ describe("hover cards", () => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!);
     t.mock.timers.tick(500);
     assert.notEqual(signatureOf(element), undefined);
     element.tree = structuredClone(hover.tree);
@@ -378,7 +384,7 @@ describe("hover cards", () => {
     scroller.style.overflowY = "auto";
     host.attachShadow({ mode: "open" }).append(scroller);
     const element = show(hover, scroller);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!);
     t.mock.timers.tick(500);
     assert.equal(card(element).hidden, false);
     scroller.dispatchEvent(new window.Event("scroll"));
@@ -406,7 +412,7 @@ describe("hover cards", () => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!);
     t.mock.timers.tick(500);
     assert.equal(card(element).hidden, false);
     element.selection = keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"');
@@ -426,7 +432,7 @@ describe("hover cards", () => {
     ]) {
       const element = show(hover);
       element.markdown = markdown;
-      pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
+      pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".sheet-kind")!);
       t.mock.timers.tick(500);
       assert.equal(card(element).querySelector(".card-doc > p")!.textContent, "A filled shape.");
     }

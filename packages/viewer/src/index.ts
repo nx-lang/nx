@@ -484,7 +484,13 @@ export class NxViewerElement extends ElementBase {
   /** Cancels a popover when the pointer goes down anywhere outside it. */
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
-    if (session !== undefined && !event.composedPath().includes(session.field ?? this.#popover) && !event.composedPath().includes(this.#tools)) {
+    // A press on the lead of the open field's own property scrubs into the field, which stays open.
+    const onLead =
+      session?.field !== undefined &&
+      event.composedPath().some((node) => (node as Element).classList?.contains("field-lead") === true && (node as Element).parentElement?.contains(session.span) === true);
+    // A press elsewhere settles an open field first, and one holding an invalid entry keeps the press
+    // from choosing anything, so the inspector holding it stays open.
+    if (session?.field !== undefined && !onLead && !event.composedPath().includes(session.field) && !event.composedPath().includes(this.#tools)) {
       if (!this.finishEditing()) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1491,6 +1497,10 @@ export class NxViewerElement extends ElementBase {
   #units(): HTMLElement[] {
     const units: HTMLElement[] = [];
     for (const found of this.#body.querySelectorAll<HTMLElement>(UNITS)) {
+      // The arrows walk rows; a row's inspector is reached with Tab.
+      if (found.closest(".inspector") !== null) {
+        continue;
+      }
       const unit = this.#unitOf(found);
       if (unit !== undefined && !units.includes(unit)) {
         units.push(unit);
@@ -1623,6 +1633,13 @@ export class NxViewerElement extends ElementBase {
     for (const element of this.#body.querySelectorAll(".selected")) {
       element.classList.remove("selected");
       element.removeAttribute("aria-current");
+      if (element.matches(".row-element")) {
+        element.setAttribute("aria-selected", "false");
+      }
+    }
+    // Only the selected row's pin is a stop for Tab, so the rows are not a long run of them.
+    for (const pin of this.#body.querySelectorAll<HTMLElement>(".row-pin")) {
+      pin.tabIndex = -1;
     }
     queueMicrotask(() => this.#paintHighlights());
     const index = this.#index;
@@ -1644,6 +1661,10 @@ export class NxViewerElement extends ElementBase {
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
+    if (original?.matches(".row-element") === true) {
+      original.setAttribute("aria-selected", "true");
+      original.querySelector<HTMLElement>(":scope > .row-head > .row-pin")!.tabIndex = 0;
+    }
     // The menu mark of an item sharing its line stands apart from it, at the end of its row.
     for (const mark of this.#body.querySelectorAll<HTMLElement>(".row-menu.shared")) {
       if (mark.dataset["menuKey"] === key) {
@@ -1955,12 +1976,9 @@ export class NxViewerElement extends ElementBase {
     }
     // The value's property is selected as its editor opens, from a click, Tab or a chevron, so its
     // tools and its menu stay once the editor closes. A reading drawn again keeps the selection, as
-    // Enter on a selected unit does, and so does an element whose unset properties are listed, so
-    // the list stays.
+    // Enter on a selected unit does.
     const property = this.#propertyOf(key);
-    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, property);
-    const comparing = owner !== undefined && this.#detailsState.pinned.includes(owner) && compositionOwner(this.#index!, this.#selection) !== owner;
-    if (select && caret === undefined && property !== undefined && property !== this.#selection && !comparing) {
+    if (select && caret === undefined && property !== undefined && property !== this.#selection) {
       this.#select(property, true, false);
     }
     this.#closeCard();
@@ -4292,6 +4310,26 @@ export class NxViewerElement extends ElementBase {
         event.preventDefault();
       }
       return;
+    }
+    // Tab from a selected row goes into its open inspector: the first value it can edit, or else its
+    // first field.
+    if (event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && target === this.#body && this.#selection !== undefined) {
+      const inspector = this.#rendered.get(this.#selection)?.matches(".row-element") === true
+        ? this.#rendered.get(this.#selection)!.querySelector<HTMLElement>(":scope > .inspector")
+        : null;
+      if (inspector !== null) {
+        const value = this.#editable ? inspector.querySelector<HTMLElement>(".editable-value[data-key]") : null;
+        const first = inspector.querySelector<HTMLElement>(".sheet-row[data-key]");
+        if (value !== null || first !== null) {
+          event.preventDefault();
+          if (value !== null) {
+            this.#openEditor(keyOf(value)!);
+          } else {
+            this.#select(keyOf(first!), true);
+          }
+          return;
+        }
+      }
     }
     // Enter on a selected row closes its inspector, and opens it again.
     if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && this.#selection !== undefined && this.#rendered.get(this.#selection)?.matches(".row-element") === true) {

@@ -1192,6 +1192,12 @@ export function renderSource(
     row.classList.toggle("open", open);
     row.classList.toggle("pinned", pinned);
     row.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-selected", "false");
+    row.setAttribute("aria-label", node.name ?? "element");
+    if (hasContent) {
+      row.setAttribute("aria-expanded", String(!folded));
+    }
     if (plan !== undefined) {
       plan.written = true;
     }
@@ -1212,7 +1218,7 @@ export function renderSource(
     hoverable(kind, at);
     writeText(kind, start + 1, nameEnd(text, node, start));
     head.append(kind);
-    if (plan !== undefined) {
+    if (plan !== undefined && !plan.atEnd) {
       head.append(unmarked(idChip(plan)));
     }
     const title = titleOf(at);
@@ -1222,6 +1228,9 @@ export function renderSource(
       hoverable(words, title);
       writeValue(words, title);
       head.append(unmarked(words));
+    }
+    if (plan !== undefined && plan.atEnd) {
+      head.append(unmarked(idChip(plan)));
     }
     const summary = document.createElement("span");
     summary.className = "row-summary";
@@ -1255,7 +1264,14 @@ export function renderSource(
     if (!folded) {
       for (const child of content) {
         const held = marked(child, "span", "sheet-held");
-        writeItems(held, childrenOf(child));
+        const items = childrenOf(child);
+        if (items.some((item) => tree.nodes[item]!.role === "text") && onOneLine(startOf(tree.nodes[child]!), endOf(tree.nodes[child]!))) {
+          // A line of text reads as written, its embedded values in their braces.
+          held.classList.add("held-text");
+          writeNodes(held, items, startOf(tree.nodes[child]!), endOf(tree.nodes[child]!));
+        } else {
+          writeItems(held, items);
+        }
         row.append(held);
       }
     }
@@ -1813,6 +1829,10 @@ export function renderSource(
   }
   writeNodes(root, top.slice(next), from, text.length);
   markIndentation(document, root);
+  if (root.querySelector(".row-element") !== null) {
+    root.setAttribute("role", "tree");
+    root.setAttribute("aria-label", "Composition");
+  }
   return root;
 }
 
