@@ -67,20 +67,49 @@ type Workspace = {
   members:Member+
 }
 
-visualizer Page = <ElementVisualizer icon="app-window" />
-visualizer Section = <ElementVisualizer icon="panel-top" />
-visualizer Stack = <ElementVisualizer icon="rows-3" />
-visualizer Row = <ElementVisualizer icon="columns-3" />
-visualizer Text = <ElementVisualizer icon="type" />
-visualizer Badge = <ElementVisualizer icon="badge" />
-visualizer Avatar = <ElementVisualizer icon="circle-user-round" />
-visualizer Banner = <ElementVisualizer icon="megaphone" />
-visualizer TextField = <ElementVisualizer icon="text-cursor-input" />
-visualizer Toggle = <ElementVisualizer icon="toggle-right" />
-visualizer Button = <ElementVisualizer icon="mouse-pointer-click" />
+visualizer Page = <ElementVisualizer title=title icon="app-window" />
+visualizer Section = <ElementVisualizer title=title icon="panel-top" />
+visualizer Stack = <ElementVisualizer icon="rows-3" summary={gap} />
+visualizer Row = <ElementVisualizer icon="columns-3" summary={gap} />
+visualizer Text = <ElementVisualizer icon="type" summary={text style tone}>
+  <PropertyVisualizer property=style label="Style" icon="heading" group="Appearance" />
+  <PropertyVisualizer property=tone label="Tone" icon="palette" group="Appearance" />
+</ElementVisualizer>
+visualizer Badge = <ElementVisualizer title=label icon="badge" summary={tone}>
+  <PropertyVisualizer property=tone label="Tone" icon="palette" />
+</ElementVisualizer>
+visualizer Avatar = <ElementVisualizer title=name icon="circle-user-round">
+  <PropertyVisualizer property=imageUrl label="Image" icon="image" />
+</ElementVisualizer>
+visualizer Banner = <ElementVisualizer title=title icon="megaphone" summary={tone}>
+  <PropertyVisualizer property=tone label="Tone" icon="palette" />
+</ElementVisualizer>
+visualizer TextField = <ElementVisualizer title=label icon="text-cursor-input" summary={value}>
+  <PropertyVisualizer property=value label="Value" group="Content" />
+  <PropertyVisualizer property=placeholder label="Placeholder" group="Content" />
+  <PropertyVisualizer property=help label="Help" icon="circle-help" group="Messages" />
+  <PropertyVisualizer property=error label="Error" icon="circle-alert" group="Messages" />
+</ElementVisualizer>
+visualizer Toggle = <ElementVisualizer title=label icon="toggle-right" summary={on}>
+  <PropertyVisualizer property=on label="On" />
+  <PropertyVisualizer property=help label="Help" icon="circle-help" />
+</ElementVisualizer>
+visualizer Button = <ElementVisualizer title=label icon="mouse-pointer-click" summary={kind disabled}>
+  <PropertyVisualizer property=kind label="Kind" icon="shapes" />
+  <PropertyVisualizer property=disabled label="Disabled" />
+</ElementVisualizer>
 visualizer Divider = <ElementVisualizer icon="minus" />
-visualizer Workspace = <ElementVisualizer title=name id=slug icon="building" />
-visualizer Member = <ElementVisualizer title=name icon="user-round" />
+visualizer Workspace = <ElementVisualizer title=name id=slug icon="building" summary={plan seats seatsUsed}>
+  <PropertyVisualizer property=plan label="Plan" icon="credit-card" group="Billing" />
+  <PropertyVisualizer property=seats label="Seats" icon="armchair" group="Billing" />
+  <PropertyVisualizer property=seatsUsed label="Seats used" icon="users" group="Billing" />
+</ElementVisualizer>
+visualizer Member = <ElementVisualizer title=name icon="user-round" summary={role twoFactor}>
+  <PropertyVisualizer property=email label="Email" icon="mail" />
+  <PropertyVisualizer property=role label="Role" icon="shield" />
+  <PropertyVisualizer property=lastSeen label="Last seen" icon="clock" />
+  <PropertyVisualizer property=twoFactor label="Two-factor" />
+</ElementVisualizer>
 
 action Saved = { name:string slug:string requireTwoFactor:boolean }
 action MemberRemoved = { email:string }

@@ -210,7 +210,7 @@ export const styles = `
 .source .group-count { font-weight: 400; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .source .inspector-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(max(18ch, calc(50% - 0.6ch)), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(max(26ch, calc(50% - 0.6ch)), 1fr));
   gap: 3px 1.2ch;
 }
 .source .inspector .sheet-row.prop-field {
@@ -253,7 +253,7 @@ export const styles = `
 .source .inspector .dimmed-row > .sheet-value { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .source .inspector .dimmed-row .more-default { display: none; }
 /* A boolean as a checkbox, its icon and label after it. */
-.source .inspector .boolean-field .sheet-value { flex: 0 0 auto; }
+.source .inspector .sheet-row.prop-field.boolean-field > .sheet-value { flex: 0 0 auto; }
 .source .inspector .boolean-field .sheet-boolean,
 .source .inspector .boolean-field .more-value {
   display: inline-grid;
