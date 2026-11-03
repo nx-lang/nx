@@ -1848,6 +1848,35 @@ export function renderSource(
   }
   writeNodes(root, top.slice(next), from, text.length);
   markIndentation(document, root);
+  // Among rows, an `if` or a `for` holds children of the row it sits in, so every line of it, its own
+  // and those of the blocks inside it, starts where its first line does: the rows it holds read level
+  // with their siblings, framed by its lines.
+  for (const item of root.querySelectorAll<HTMLElement>(".row-element > .sheet-held > .sheet-item.as-written")) {
+    const block = item.querySelector<HTMLElement>(':scope > .n:is([data-role="condition"], [data-role="loop"])');
+    if (block === null) {
+      continue;
+    }
+    const lead = " ".repeat(Number(item.style.getPropertyValue("--column")) || 0);
+    const walker = document.createTreeWalker(block, 4 /* NodeFilter.SHOW_TEXT */);
+    // A line's indentation may run over several text runs; each run at a line's start loses it.
+    let lineStart = false;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const owner = node.parentElement?.closest(".n");
+      if (owner?.matches('[data-role="condition"], [data-role="loop"]') !== true) {
+        lineStart = lineStart && node.textContent!.trim() === "";
+        continue;
+      }
+      let written = node.textContent!;
+      if (lineStart) {
+        written = written.replace(/^[ \t]*/, "");
+      }
+      written = written.replace(/\n[ \t]*/g, `\n${lead}`);
+      lineStart = /\n[ \t]*$/.test(written) || (lineStart && written === "");
+      if (written !== node.textContent) {
+        node.textContent = written;
+      }
+    }
+  }
   // The braces of an `if` or a `for` read quieter than the code they hold.
   for (const token of root.querySelectorAll<HTMLElement>(':is(.n[data-role="condition"], .n[data-role="loop"]) > .t')) {
     if (/^\s*[{}]\s*$/.test(token.textContent ?? "")) {

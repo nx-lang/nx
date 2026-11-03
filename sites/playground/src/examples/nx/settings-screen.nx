@@ -222,6 +222,9 @@ component <WorkspaceSettings workspace:Workspace emits { Saved MemberRemoved } /
       <Stack gap=small>
         for member in workspace.members {
           <MemberRow member={member} canRemove={member.role != Role.owner} />
+          if requireTwoFactor && !member.twoFactor {
+            <Text style=caption>Asked to set up two-factor at next sign-in</Text>
+          }
         }
       </Stack>
       <Button label="Invite people" kind=primary />
