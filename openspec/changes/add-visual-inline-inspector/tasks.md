@@ -26,5 +26,5 @@
 
 ## 4. Wrap-up
 
-- [ ] 4.1 `openspec validate add-visual-inline-inspector --strict`; independent review loop until high-confidence findings are fixed and verified
+- [x] 4.1 `openspec validate add-visual-inline-inspector --strict`; independent review loop until high-confidence findings are fixed and verified
 - [ ] 4.2 Screenshots for Bret; close PR #71

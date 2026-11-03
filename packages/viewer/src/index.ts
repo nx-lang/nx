@@ -2441,7 +2441,7 @@ export class NxViewerElement extends ElementBase {
       }
       this.#live = undefined;
       clearTimeout(live.timer);
-        this.#pending.set(target.key, value);
+      this.#pending.set(target.key, value);
       const span = this.#rendered.get(target.key);
       if (span !== undefined) {
         showValue(span, target, this.#writtenOf(target), value);
