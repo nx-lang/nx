@@ -75,6 +75,8 @@ export const styles = `
   font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
   color: var(--nx-viewer-uitext-color, light-dark(#222222, #e4e4e4));
 }
+/* Its words keep that color even where the highlighter reads one as code, as \`for\` in "for everyone". */
+.source .uitext-body > .t { color: inherit; }
 /* The quotes are in the words' font, so they sit against the words and not a character away. */
 .source .uitext-quote {
   font-family: var(--nx-viewer-prose-font-family, inherit);

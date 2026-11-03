@@ -27,6 +27,23 @@ to draw a row.
 - **WHEN** a `Circle` has `fill=<Paint.radial …/>`
 - **THEN** Circle SHALL have a row and the paint SHALL read in Circle's inspector, not as a row
 
+### Requirement: An `if` or a `for` among rows frames rows level with their siblings
+Among an element's rows, an `if` or a `for` SHALL read as written, with every one of its lines, its
+first, its `else`, its closing brace and those of the blocks inside it, starting where the icons of
+its sibling rows do. The rows it holds SHALL read level with those siblings, as children of the same
+element, framed by the block's lines. Its braces SHALL read in the quiet color, and its condition and
+keywords in their code colors.
+
+#### Scenario: A condition among rows
+- **WHEN** a Section holds a Toggle and then `if requireTwoFactor { <Banner …/> }`
+- **THEN** `if`, the Banner's icon, the closing brace and the Toggle's icon SHALL start at the same
+  place, and the braces SHALL be gray
+
+#### Scenario: A condition inside a loop
+- **WHEN** a Stack holds `for member in members { <MemberRow …/> if !member.twoFactor { <Text …/> } }`
+- **THEN** `for`, MemberRow, the inner `if`, the Text and both closing braces SHALL start at the same
+  place
+
 ### Requirement: A row's summary shows the properties its visualizer names
 A row SHALL show, after its title, the properties its resolved `summary` names that the element
 writes, in that order; without a `summary`, up to three of the properties it writes whose values
@@ -163,7 +180,7 @@ the `let` is written as a literal color, or as an element whose visualizer forma
 color, the token SHALL show that color's swatch. Opening the token SHALL offer Go to `blue` and
 Show in Source. A property whose value is an element SHALL read as a field with the element's icon,
 kind and summary, and SHALL unfold into a nested group of that element's fields, edited the same
-way. Any other expression SHALL read as written, code-styled, and open in Source.
+way. An action value, a component's `State.Update` included, SHALL show the action icon. Any other expression SHALL read as written, code-styled, and open in Source.
 
 #### Scenario: A shared paint
 - **WHEN** Star writes `fill={blue}` and `let blue: Paint = <Paint.color color=#2563eb/>`

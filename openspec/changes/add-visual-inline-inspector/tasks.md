@@ -29,3 +29,4 @@
 - [x] 4.1 `openspec validate add-visual-inline-inspector --strict`; independent review loop until high-confidence findings are fixed and verified
 - [ ] 4.2 Screenshots for Bret; close PR #71
 - [x] 4.3 Labels beside values, one field to a line; lists and unfolded element values under their label; no groups (Bret, 2026-11-03): remove `group` from `PropertyVisualizer`, the source tree, `@nx/graphics` and the inspector
+- [x] 4.4 `if`/`for` among rows: lines start at the sibling icons, held rows level with siblings, quiet braces; State.Update reads with the action icon; UI text keeps its color where the highlighter reads a word as a keyword (Bret, 2026-11-03)
