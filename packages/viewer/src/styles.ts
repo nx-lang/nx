@@ -157,6 +157,9 @@ export const styles = `
 .source .row-title, .source .row-title * { white-space: nowrap; }
 .source .row-title .uitext-block { display: inline; max-width: none; }
 .source .row-title .uitext-block > .uitext-body { white-space: nowrap; }
+/* UI text in a summary stays on its line too, as the summary's other values do. */
+.source .row-summary .uitext-block { display: inline; max-width: none; }
+.source .row-summary .uitext-block > .uitext-body { white-space: nowrap; }
 .source .row-title.clipped {
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
