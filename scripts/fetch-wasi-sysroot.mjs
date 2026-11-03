@@ -8,7 +8,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -43,7 +42,9 @@ export async function fetchWasiSysroot() {
   await rm(sysrootPath, { recursive: true, force: true });
   await mkdir(cacheRoot, { recursive: true });
 
-  const stagingDirectory = await mkdtemp(path.join(tmpdir(), "nx-wasi-sysroot-"));
+  // Staged beside the cache, not in the system temp directory, so the rename below stays on one
+  // device: on CI runners where /tmp is its own mount, a rename across them fails with EXDEV.
+  const stagingDirectory = await mkdtemp(path.join(cacheRoot, ".staging-"));
   try {
     const tarballPath = path.join(stagingDirectory, "wasi-sysroot.tar.gz");
     await download(tarballUrl, tarballPath);
