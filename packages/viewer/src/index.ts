@@ -42,6 +42,7 @@ import {
 } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.js";
+import { derivedLabel } from "./labels.js";
 import { defaultFolded, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
@@ -1486,7 +1487,8 @@ export class NxViewerElement extends ElementBase {
     if (unit !== undefined) {
       const head = firstLine(unit);
       if (head !== undefined) {
-        draw(unit, unit.getBoundingClientRect(), "selected-body");
+        // An element's open inspector is a panel of its own; the selection colours only its row.
+        draw(unit, unit.getBoundingClientRect(), unit.matches(".row-element") ? "selected-body inspector-panel" : "selected-body");
         draw(unit, head, "selected");
       } else {
         draw(unit, unit.getBoundingClientRect(), "selected");
@@ -3752,7 +3754,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Fills the empty field of each property an open inspector's element does not write: its
-   * default, quieter, or the type it takes as a placeholder, and, while the reading is editable, the
+   * default, quieter, or a placeholder (for text, "Add" and its label; else the type it takes), and, while the reading is editable, the
    * editor that writes it.
    */
   #fillUnwritten(index: TreeIndex): void {
@@ -3803,8 +3805,13 @@ export class NxViewerElement extends ElementBase {
       value.classList.add("more-prose");
     }
     // With no default to show, the value's place reads the type it takes, quieter.
+    // Text asks for itself by its label, as a form's empty field does.
     if (property.default === undefined) {
-      value.dataset["placeholder"] = hints?.placeholder ?? property.type;
+      const label = field.querySelector(".lead-caption")?.textContent || derivedLabel(property.name);
+      value.dataset["placeholder"] = hints?.placeholder ?? (editor?.kind === "text" ? `Add ${label.toLowerCase()}` : property.type);
+      if (hints?.placeholder !== undefined || editor?.kind === "text") {
+        value.classList.add("prose-placeholder");
+      }
     }
     const start = defaultValue(property.default, editor);
     value.append(...defaultShown(document, property.default, editor, entry.format));

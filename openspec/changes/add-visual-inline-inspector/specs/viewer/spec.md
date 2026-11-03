@@ -114,7 +114,7 @@ group under a heading named after the element's kind. A property's field SHALL s
 resolved icon, else its resolved short label; a property with neither SHALL show its label as a
 caption above the field. A boolean SHALL read as a checkbox with its icon and label. A property the
 element does not write SHALL show as an empty field with a dashed outline and its default, if any,
-as a quiet placeholder; setting it SHALL write it, and a menu on a written property SHALL offer
+as a quiet placeholder, else, for text, "Add" and its label, as `Add description`; setting it SHALL write it, and a menu on a written property SHALL offer
 Reset to default or Remove as the row menu does today. A group heading SHALL fold the group; a folded
 group SHALL say how many of its properties are written, and folded groups SHALL be remembered per
 element kind for the session. Every field, icon and short label SHALL carry a tooltip with the

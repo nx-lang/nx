@@ -789,15 +789,15 @@ describe("what an element does not write", () => {
     assert.equal(unset(reading, "latte.value")[2]!.querySelector(".editable-value"), null, "but edits none");
   });
 
-  it("reads each default, or the type a value takes, in its place", async () => {
+  it("reads each default, or a placeholder, in its place", async () => {
     const element = show(await fixture("adding"));
     assert.deepEqual(unset(element, "latte.value").map(reads), ["Note", "\u2717 Iced", "Shots 1", "Color"]);
     const note = rendered(element, "latte.value.note.value");
     assert.equal(note.textContent, "", "nothing is written there");
-    assert.equal(note.dataset["placeholder"], "string", "its type, as a placeholder");
+    assert.equal(note.dataset["placeholder"], "Add note", "text asks for itself by its label");
     assert.equal(rendered(element, "latte.value.iced.value").dataset["placeholder"], undefined, "a default reads instead");
     note.click();
-    assert.equal(field(element)!.dataset["placeholder"], "string", "the field keeps it until something is typed");
+    assert.equal(field(element)!.dataset["placeholder"], "Add note", "the field keeps it until something is typed");
   });
 
   it("adds a property from its field, which then reads as written", async () => {

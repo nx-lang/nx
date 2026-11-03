@@ -103,6 +103,8 @@ export const styles = `
 }
 /* A chip last in its tag closes it with a small gap, less than a space, before the \`/>\`. */
 .source .id-end { margin-right: 3px; }
+/* An id never breaks inside: it moves to the next line whole. */
+.source .id-value { white-space: nowrap; }
 .source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
 /* An element as a property sheet: its name, then a row to an attribute, its names in one quiet
    column and its values in another, and what it holds under them. It sits where the element began
@@ -132,6 +134,18 @@ export const styles = `
   min-width: 0;
 }
 .source .row-element > .row-head > :is(.element-icon, .sheet-kind, .id-value, .row-pin, button.fold) { flex-shrink: 0; }
+/* A row leads with what the element is called: its kind reads in the prose font, its id as quiet
+   text with no chip, so the title is what the eye lands on. */
+.source .row-element > .row-head > .sheet-kind,
+.source .row-element > .row-head > .sheet-kind * {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-weight: 500;
+}
+.source .row-element > .row-head > .id-value {
+  background: none;
+  padding: 0;
+  font-size: 0.9em;
+}
 .source .row-title {
   flex: 0 1 auto;
   min-width: min(8ch, 100%);
@@ -508,6 +522,11 @@ export const styles = `
 .highlight.selected-body {
   background: color-mix(in srgb, var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)) 45%, transparent);
 }
+/* An open inspector: a raised neutral surface, in or out of focus. */
+.highlight.selected-body.inspector-panel,
+:host(:not(:focus-within)) .highlight.selected-body.inspector-panel {
+  background: var(--nx-viewer-inspector-background, light-dark(#f6f8fa, #252526));
+}
 /* Out of focus, a selection stays, quieter, as a list's does. */
 :host(:not(:focus-within)) .highlight.selected { background: var(--nx-viewer-selection-inactive, light-dark(#0000000f, #ffffff17)); }
 :host(:not(:focus-within)) .highlight.selected-body {
@@ -725,6 +744,9 @@ export const styles = `
   content: attr(data-placeholder);
   color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
 }
+/* A placeholder that asks for text, as "Add description" does, reads in the prose font. */
+.source .more-value.prose-placeholder:empty::before,
+.source .more-value.prose-placeholder > .field:empty::before { font-family: var(--nx-viewer-prose-font-family, inherit); }
 /* An empty field still reads as one, with room for the caret. */
 .source .field:empty { display: inline-block; min-width: 1ch; min-height: 1lh; vertical-align: top; }
 /* A written row's menu: a quiet mark just past its value, or past the tools drawn there, under the
