@@ -64,6 +64,7 @@ export const styles = `
 .badge:not([hidden]) { animation: nx-viewer-late 0.15s ease-out 0.5s both; }
 @keyframes nx-viewer-late { from { opacity: 0; } }
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
+.source .t.block-brace { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .source .n { border-radius: 2px; }
 /* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
    clear color of their own, since they are content and every hue in a theme means code; its quotes
@@ -374,6 +375,10 @@ export const styles = `
   text-indent: calc((var(--column, 0) + 4) * 1ch) hanging each-line;
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
+/* Among rows, a block written as it is, as an \`if\` or a \`for\`, starts where the rows' icons do, and
+   the rows it holds sit a step in from it, as a row's children do. */
+.source .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc((4 - var(--column, 0)) * 1ch); }
+.source .sheet-item.as-written .row-element > .row-head { padding-left: 0; }
 /* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
    wherever it sits; and so does one written as its tags on one line inside such an item, as the item's
    other lines wrap from the item's start. One written as its tags over several lines stays inline, its

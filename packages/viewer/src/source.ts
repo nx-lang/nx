@@ -1848,6 +1848,12 @@ export function renderSource(
   }
   writeNodes(root, top.slice(next), from, text.length);
   markIndentation(document, root);
+  // The braces of an `if` or a `for` read quieter than the code they hold.
+  for (const token of root.querySelectorAll<HTMLElement>(':is(.n[data-role="condition"], .n[data-role="loop"]) > .t')) {
+    if (/^\s*[{}]\s*$/.test(token.textContent ?? "")) {
+      token.classList.add("block-brace");
+    }
+  }
   if (root.querySelector(".row-element") !== null) {
     root.setAttribute("role", "tree");
     root.setAttribute("aria-label", "Composition");
