@@ -5,10 +5,10 @@ description: 'How a visualizer declaration tells a viewer, such as the NX readin
 
 A **visualizer declaration** tells a viewer how to present one declaration. A viewer is a tool that
 shows NX source to people, such as the `<nx-viewer>` reading view from `@nx-lang/viewer` that the
-Visual view of the [playground](/play) shows. It reads an element written over several lines as a
-group with a row to each property, and an element on one line as its name and its properties as
-`name=value`, without quotes. Without visualizer declarations it reads every element the same way. A
-library author knows better, and a visualizer declaration says so:
+Visual view of the [playground](/play) shows. It reads each element as a row, its kind and a short
+summary of what it sets, and opens an inspector of its properties under the row you select. Without
+visualizer declarations it reads every element the same way, labelling each property after its name.
+A library author knows better, and a visualizer declaration says so:
 
 ```nx
 import "@nx/visualizer"
@@ -18,8 +18,10 @@ type Choice = { value:string label:string description?:string }
 visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot" />
 ```
 
-Now each `<Choice value="eng" label="Engineering" />` in a list of choices reads as one line: a
-circle-dot icon, "Engineering", and `eng` as a quiet identifier at the end.
+Now each `<Choice value="eng" label="Engineering" />` in a list of choices reads as one row: a
+circle-dot icon, "Engineering", and `eng` as a quiet identifier after it. A visualizer can also name
+the properties a row summarizes, and give each property a label, an icon and a group for the
+inspector; see [`@nx/visualizer`](/reference/libraries/visualizer).
 
 A visualizer declaration is applied, not weighed. The compiler resolves every visualizer declaration that
 applies to a declaration into one result, the same for every reader, and a viewer presents the
@@ -90,10 +92,10 @@ let roleQuestion =
 
 The compiler resolves these into one visualizer for each declaration. `SingleChoice` has no visualizer
 declaration of its own, so the visualizer for `Question` applies to it: its title is `label`, its id
-`id`, and its icon `circle-help`. Each choice's title is its `label`, its id its `value`, read at the
-end of its line, and every `Color` reads with a swatch. In the playground's Visual view,
-`roleQuestion` reads as a group headed `SingleChoice role`, and each choice as one line, such as
-`Engineering  tint=■ #3b82f6  eng`.
+`id`, and its icon `circle-help`. Each choice's title is its `label`, its id its `value`, read after
+its title, and every `Color` reads with a swatch. In the playground's Visual view, `roleQuestion`
+reads as a row headed `SingleChoice role`, and each choice as a row under it, such as
+`Choice Engineering eng  Tint ■ #3b82f6`.
 
 The playground's *Visualizer declarations* example is a smaller library of the same kind. Open it in
 the [playground](/play) and switch to Visual to see the reading follow its visualizer declarations.

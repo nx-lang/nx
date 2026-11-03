@@ -49,7 +49,7 @@ export type FunctionVisualizer = {
   // The function's derived props record. Bound by the `visualizer` declaration.
   Target: type
   icon?: string                                               /// Lucide icon name for the invocation, such as "star".
-  summary?: Target.Property+                                  /// The properties shown, in order, on the invocation's row.
+  summary?: Target.Property+                                  /// The properties shown, in order, on its row.
   content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
 
@@ -83,7 +83,7 @@ export type PropertyVisualizer = {
   /// The largest number the editor offers. Not a constraint: a document may write a larger one. A
   /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
-  step?: float64                  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
+  step?: float64                  /// How far one step moves a number, by arrow key or by dragging its label.
   multiline: boolean = false      /// Whether the property's string field takes line breaks: Enter starts a new line,
                                   /// and the value is written over several lines.
   placeholder?: string            /// Text shown in the property's empty field, quieter than a value, and never written.
@@ -105,7 +105,7 @@ export type ValueVisualizer = {
   /// The largest number the editor offers. Not a constraint: a document may write a larger one. A
   /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
-  step?: float64                  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
+  step?: float64                  /// How far one step moves a number, by arrow key or by dragging its label.
   content choices?: ValueChoice+  /// The values a viewer offers to pick for a value of the type, in order. They suggest
                                   /// and never restrict: any value of the type may still be written.
 }
