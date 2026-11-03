@@ -97,12 +97,13 @@ Text in a summary reads as its first few words, faded where it is cut.
 
 Selecting a row opens its inspector under it. Clicking the selected row, or pressing Enter, closes
 and reopens it. **Pin** keeps an inspector open while another row is selected, so two elements can be
-compared. The inspector lists the element's properties in groups, each field led by the property's
-icon, short label or caption from its visualizer (or a label derived from its name, so `outerRadius`
-reads `Outer radius`). Unset properties show as dashed fields with their default; booleans read as
-checkboxes. Element values unfold in place. Dragging a number field's lead scrubs its value: Shift
-steps ten times faster, Alt ten times finer, and the change commits once, as one undo step. Folding a
-group folds it for every element of that kind.
+compared. The inspector lists the element's properties one to a line, each label beside its value:
+the label from its visualizer, after its icon if it has one, or else one derived from its name, so
+`outerRadius` reads `Outer radius`. Labels share a column as wide as the longest, up to 40% of the
+inspector. A value over several lines, such as a list of elements, reads under its label. Unset
+properties show as dashed values with their default; booleans read as checkboxes. Element values
+unfold in place, under their label. Dragging a number field's label scrubs its value: Shift steps ten
+times faster, Alt ten times finer, and the change commits once, as one undo step.
 
 ```ts
 import { NX_DETAILS_EVENT, type NxDetailsDetail } from "@nx-lang/viewer";
@@ -347,7 +348,7 @@ suggestion, and any entry the field takes commits. A choice the field would refu
 `max`, stays in the field with the field's note. A color's choices lead its popover, over its hex
 field.
 
-In an inspector, pressing a number field's lead (its icon, short label or caption) and dragging left
+In an inspector, pressing a number field's label and dragging left
 or right scrubs the number: a step for every three pixels from the press, ten with Shift, a tenth with
 Alt (never below one for a whole number), within the range. The pointer reads as a horizontal resize
 there. Each new value goes live, and release commits once, as one undo step; a press that moves less
@@ -415,7 +416,7 @@ tree, as Alt+Down held, fire edits keyed as the text will be once the ones befor
 that applies edits in order makes them all.
 
 An inspector lists the properties its element does not write as dashed fields among the written
-ones, in their groups, each with its default or an optional one's type, quieter; one written under a
+ones, each with its default or an optional one's type, quieter; one written under a
 property-list `if` or match counts as written, and an element of a union's case offers its case's
 properties. An unset field edits as a written value does, opening on its default; a commit fires
 `nx-edit` with the element's key and `{ kind: "addProperty", name, value }`, and the field reads as

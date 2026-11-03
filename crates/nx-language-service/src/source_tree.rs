@@ -347,9 +347,6 @@ pub struct SourcePropertyVisualizer {
     /// A one- or two-character label shown where there is no icon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub short: Option<String>,
-    /// The group the property reads in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group: Option<String>,
     /// How the property's string value is shown: from its property visualizer, or else from the
     /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2350,7 +2347,6 @@ impl<'a> TreeBuilder<'a> {
                 label: merged.get("label").map(str::to_string),
                 icon: merged.get("icon").map(str::to_string),
                 short: merged.get("short").map(str::to_string),
-                group: merged.get("group").map(str::to_string),
                 format: merged
                     .get("format")
                     .map(str::to_string)

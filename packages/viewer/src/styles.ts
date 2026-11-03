@@ -212,12 +212,11 @@ export const styles = `
 .source .row-pin:hover { color: var(--nx-viewer-foreground, CanvasText); }
 .source .row-pin[aria-pressed="true"] { color: var(--nx-viewer-pin-color, light-dark(#9a6700, #e3b341)); }
 .source .row-pin[aria-pressed="true"] > svg { fill: currentColor; }
-.source .row-pin:focus-visible, .source button.fold:focus-visible, .source .group-head:focus-visible {
+.source .row-pin:focus-visible, .source button.fold:focus-visible {
   outline: 2px solid light-dark(#0969da, #b8a4ff);
   outline-offset: 1px;
 }
-/* The inspector: a step in from the row's icon, whatever the depth, its groups across the room left,
-   their fields in two columns where the pane is wide enough and one where not. */
+/* The inspector: a step in from the row's icon, whatever the depth, a field to a line. */
 .source .inspector {
   display: block;
   margin: 2px 0 4px 2ch;
@@ -225,72 +224,66 @@ export const styles = `
   white-space: normal;
   font-weight: 400;
 }
-.source .inspector-group { display: block; }
-.source .group-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6ch;
-  width: 100%;
-  margin: 0;
-  padding: 3px 0 2px;
-  border: 0;
-  background: none;
-  color: var(--nx-viewer-group-color, light-dark(#57606a, #a0a0a0));
-  font: 600 0.8em/1.5 var(--nx-viewer-prose-font-family, system-ui);
-  text-align: left;
-  cursor: pointer;
-}
-.source .group-head > .fold { margin-left: 0; width: 1em; opacity: 1; }
-.source .group-count { font-weight: 400; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+/* The inspector's fields, one to a line: the labels in a column as wide as the longest, up to 40%
+   of the room, and the values beside them. */
 .source .inspector-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(max(26ch, calc(50% - 0.6ch)), 1fr));
-  gap: 3px 1.2ch;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  gap: 2px 1.2ch;
+  align-items: baseline;
 }
 .source .inspector .sheet-row.prop-field {
-  display: flex;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: baseline;
-  gap: 0.7ch;
-  grid-column: auto;
+  min-width: 0;
+  padding: 0;
+  white-space: pre-wrap;
+}
+.source .inspector .sheet-row.prop-field > .field-lead { grid-column: 1; }
+.source .inspector .sheet-row.prop-field > .sheet-value {
+  grid-column: 2;
   min-width: 0;
   padding: 1px 6px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: var(--nx-viewer-field-background, light-dark(#0000000a, #ffffff0d));
-  white-space: pre-wrap;
 }
-.source .inspector .sheet-row.prop-field.captioned { flex-wrap: wrap; row-gap: 0; }
-.source .inspector .sheet-row.prop-field.captioned > .lead-caption { flex-basis: 100%; }
-.source .inspector .sheet-row.prop-field.field-below { flex-wrap: wrap; }
-.source .inspector .sheet-row.prop-field.field-below > .sheet-below { flex-basis: 100%; padding-left: 0; }
-.source .inspector .sheet-row.prop-field > .sheet-value { flex: 1; min-width: 0; }
-.source .field-lead { opacity: 1; flex-shrink: 0; user-select: none; }
-.source .field-lead.lead-short {
-  min-width: 1.4ch;
+/* A value over several lines, as a list of elements, goes under its label, a step in. */
+.source .inspector .sheet-row.prop-field.field-below > .sheet-value { padding: 0; border: 0; background: none; }
+.source .inspector .sheet-row.prop-field.field-below > .sheet-below { grid-column: 1 / -1; padding-left: 2ch; }
+.source .field-lead {
+  opacity: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+  user-select: none;
   color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-size: 0.85em;
 }
-.source .field-lead.lead-caption {
-  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
-  font-family: var(--nx-viewer-prose-font-family, inherit);
-  font-size: 0.8em;
+.source .field-lead > .lead-glyph { display: inline-flex; vertical-align: -2px; margin-right: 0.5ch; }
+.source .field-lead > .lead-glyph > svg { width: 13px; height: 13px; }
+/* Where any label has an icon, the others keep its room, so the labels start in line. */
+.source .inspector-fields:has(> .prop-field > .field-lead > .lead-glyph) > .prop-field > .field-lead:not(:has(> .lead-glyph))::before {
+  content: "";
+  display: inline-block;
+  width: calc(13px + 0.5ch);
 }
 /* Inline content reads as prose: the line breaks and indent around it in source collapse. */
 .source .summary-text, .source .summary-text * { white-space: nowrap; }
 .source .content-field > .sheet-value, .source .content-field > .sheet-value * { white-space: normal; }
 .source .field-lead.scrubbable { cursor: ew-resize; touch-action: pan-y; }
-.source .field-label { font-family: var(--nx-viewer-prose-font-family, inherit); }
-/* A property the element does not write: an empty field with a dashed outline. */
-.source .inspector .sheet-row.prop-field.dimmed-row {
-  opacity: 1;
+/* A property the element does not write: an empty value with a dashed outline. */
+.source .inspector .sheet-row.prop-field.dimmed-row { opacity: 1; }
+.source .inspector .sheet-row.prop-field.dimmed-row > .sheet-value {
   background: none;
   border: 1px dashed var(--nx-viewer-unset-border, light-dark(#d0d7de, #484f58));
 }
 .source .inspector .dimmed-row > .sheet-value { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .source .inspector .dimmed-row .more-default { display: none; }
-/* A boolean as a checkbox, its icon and label after it. */
-.source .inspector .sheet-row.prop-field.boolean-field > .sheet-value { flex: 0 0 auto; }
+/* A boolean as a checkbox beside its label, with no box around it. */
+.source .inspector .sheet-row.prop-field.boolean-field > .sheet-value { background: none; border-color: transparent; padding-left: 0; }
 .source .inspector .boolean-field .sheet-boolean,
 .source .inspector .boolean-field .more-value {
   display: inline-grid;
@@ -308,8 +301,11 @@ export const styles = `
 .source .inspector .boolean-field .more-value::before { content: none; }
 .source .row-element > .sheet-held { padding-top: 0; }
 /* An element value: its icon, kind and summary, unfolding into a nested group of its fields. */
-.source .inspector .sheet-row.prop-field.nested-field.open { grid-column: 1 / -1; align-items: flex-start; }
+/* Open, it goes under its label, a step in, its fields under it. */
+.source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value { grid-column: 1 / -1; padding: 0 0 0 2ch; background: none; }
 .source .nested-head { display: block; min-width: 0; }
+/* Folded, it shares its line with the row menu's anchor after it. */
+.source .nested-field:not(.open) .nested-head { display: inline; }
 .source .nested-head > .value-fold { margin-left: 0; width: 1em; opacity: 1; }
 .source .nested-head > .element-icon { margin-right: 0.5ch; }
 .source .nested-kind { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
@@ -413,9 +409,9 @@ export const styles = `
 /* In a narrow pane every value moves under its name, so text never runs down a thin column. */
 .source { container-type: inline-size; }
 @container (width < 64ch) {
-  .source .sheet-row > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
+  .source .sheet-row:not(.prop-field) > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
   /* An unwritten property with nothing to show takes no line of its own; a click on its name edits it. */
-  .source .dimmed-row > .sheet-value:has(> .more-value:empty:only-child) { display: none; }
+  .source .dimmed-row:not(.prop-field) > .sheet-value:has(> .more-value:empty:only-child) { display: none; }
 }
 
 /* A group's name is a step bolder than its rows, and a bracket runs down the group from under its

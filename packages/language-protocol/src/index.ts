@@ -595,8 +595,6 @@ export interface SourcePropertyVisualizer {
   icon?: string;
   /** A one- or two-character label shown beside the field where there is no icon, such as `"X"`. */
   short?: string;
-  /** The group the property reads in, such as `"Position"`. */
-  group?: string;
   /**
    * How the property's string value is shown: from its property visualizer, or else from the
    * visualizer of the alias its type names.

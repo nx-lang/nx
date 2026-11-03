@@ -16,17 +16,15 @@ on the row even when the visualizer gives it no `PropertyVisualizer`.
 - **THEN** analysis SHALL report `visualizer-hint` at the second `width`, and the row SHALL show
   `width` then `fill`
 
-### Requirement: Labels, icons, short labels, groups and summaries resolve like other hints
-A property's `label`, `icon`, `short` and `group` SHALL each resolve on its own, as the editor hints
+### Requirement: Labels, icons, short labels and summaries resolve like other hints
+A property's `label`, `icon` and `short` SHALL each resolve on its own, as the editor hints
 do: to what its resolved `PropertyVisualizer` sets, the derived or later visualizer winning, and
 otherwise to none. An element's `summary` SHALL resolve whole to the derived or later visualizer's
 that sets one. A viewer SHALL derive a label for a property without one from its name.
 
 #### Scenario: A derived visualizer relabels one property
-- **WHEN** a base element's visualizer gives `x` the label `"X"`, the short `"X"` and the group
-  `"Position"`, and a derived element's visualizer gives `x` only the label `"Left"`
-- **THEN** the derived element's `x` SHALL resolve to the label `Left`, the short `X` and the group
-  `Position`
+- **WHEN** a base element's visualizer gives `x` the label `"X"` and the short `"X"`, and a derived element's visualizer gives `x` only the label `"Left"`
+- **THEN** the derived element's `x` SHALL resolve to the label `Left` and the short `X`
 
 ## MODIFIED Requirements
 

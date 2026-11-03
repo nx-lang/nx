@@ -7,7 +7,7 @@ playground, reconciliation of state across tree updates and list moves, and brow
 reviewed it against the existing view and a mockup
 (https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA, source in
 `/mnt/project-files/reviews/pr-71-ux/visual-inspector-mockup.html`) and chose a design-tool
-direction: friendly names, icons and letters, groups, scrubbing, curated summaries, and an inline
+direction: friendly names, icons and letters, groups (later dropped), scrubbing, curated summaries, and an inline
 (not docked) inspector, which is the view's distinctive idea. This change replaces #71's change and
 builds on its code.
 
@@ -45,17 +45,20 @@ the Details button. `changeDetails` keeps its pin and suppress logic; `mapDetail
 `reconcileDetails` keep working on the smaller state.
 
 ### 3. Inspector layout
-Groups come from `PropertyVisualizer.group`; their order is the order of their first property in the
-resolved property order (visualizer-listed properties first, then declaration order), which is
-already what the source tree sends. Ungrouped properties come last under the element's kind.
-Fields are a two-column grid (one column under ~300 px), indented at most one step. Unset
-properties are dashed fields with the default as placeholder. Group folding is per element kind for
-the session, held in the viewer (not host state; cheap to lose).
+Fields read one to a line in the resolved property order (visualizer-listed properties first, then
+declaration order), which is already what the source tree sends: the label on the left, in a column
+as wide as the longest label up to 40% of the inspector, and the value on the right. Bret chose this
+over labels above values and over groups (2026-11-03): it takes less height and is simpler to read.
+A value that spans lines, such as a list of elements, and an unfolded element value go under their
+label, a step in. Unset properties are dashed values with the default as placeholder. There are no
+group headings and no `group` hint.
 
-### 4. Field leads: icon, short label, or caption
-`icon` wins over `short`; with neither the label becomes a caption above the field. Every lead has
-a tooltip `Label · name`. Booleans are checkboxes with icon and label. This keeps every field
-identifiable without relying on recognizing an icon.
+### 4. Field labels; summary leads
+A field always shows its label, after its icon when it has one; where any label in an inspector has
+an icon, the others keep its room so labels start in line. `short` is for summaries, where room is
+tight: a summary item leads with its icon, else its short label, else its label. Every lead has a
+tooltip `Label · name`. Booleans are checkboxes beside their label. Dragging a number's label scrubs
+it.
 
 ### 5. Labels
 Visualizer `label` (a string) wins. The derived label follows the common conversion (Rails
@@ -101,7 +104,8 @@ prototype's one-line rows.
   is one click away.
 - [Layout shift when inspectors open] → anchoring the acted-on row; scroll only for off-screen
   selections; dense two-column fields.
-- [Big elements bury the tree] → collapsible groups remembered per kind.
+- [Big elements bury the tree] → one line per field keeps inspectors short; the pin and closing the
+  selected row put them away.
 - [Bare property names inside `summary={…}`] → each item is at a `Target.Property`-typed site, so bare
   case names should resolve as they do for `title=label`; verify early, and if braced items don't
   resolve contextually, extend contextual resolution to items of a typed braced sequence.

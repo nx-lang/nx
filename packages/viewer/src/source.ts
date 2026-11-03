@@ -56,11 +56,6 @@ export interface SourceLayout {
   readonly details?: ReadonlySet<string> | undefined;
   /** The keys of the composition elements whose inspectors are pinned open. */
   readonly pinned?: readonly string[] | undefined;
-  /**
-   * The inspector groups folded, each as an element's kind and the group's name joined by a NUL,
-   * so a group folded on one `Star` is folded on every `Star`.
-   */
-  readonly groupsFolded?: ReadonlySet<string> | undefined;
   /** The keys of the element values unfolded into nested groups of fields in an inspector. */
   readonly valuesOpen?: ReadonlySet<string> | undefined;
   /**
@@ -920,13 +915,26 @@ export function renderSource(
   };
 
   /**
-   * The lead of a property's field or summary item: its icon, else its short label, else its label
-   * as a caption. It carries the property's label and its name as source writes it as a tooltip.
+   * The lead of a property's field or summary item. A field's is its label, after its icon when it
+   * has one. A summary item's is its icon, else its short label, else its label as a caption. Either
+   * carries the property's label and its name as source writes it as a tooltip.
    */
   const leadOf = (presentation: Presentation, place: "field" | "summary"): HTMLElement => {
     const lead = document.createElement("span");
     lead.title = tooltipOf(presentation);
     const drawn = presentation.icon === undefined ? undefined : layout.icons?.(presentation.icon);
+    if (place === "field") {
+      lead.className = "field-lead lead-caption";
+      if (drawn !== undefined) {
+        const glyph = document.createElement("span");
+        glyph.className = "lead-glyph";
+        glyph.setAttribute("aria-hidden", "true");
+        glyph.append(drawn.cloneNode(true));
+        lead.append(glyph);
+      }
+      lead.append(presentation.label);
+      return lead;
+    }
     if (drawn !== undefined) {
       lead.className = `${place}-lead lead-icon`;
       lead.append(drawn.cloneNode(true));
@@ -1118,23 +1126,13 @@ export function renderSource(
     const cell = document.createElement("span");
     cell.className = "sheet-value";
     cell.title = tooltipOf(presentation);
+    field.append(lead, cell);
     if (booleanOf(attribute) !== undefined) {
-      // A checkbox with its label after it: the mark, then the lead and the label.
+      // A checkbox beside its label.
       field.classList.add("boolean-field");
       writeValue(cell, attribute);
-      field.append(cell, lead);
-      if (!lead.classList.contains("lead-caption")) {
-        const label = document.createElement("span");
-        label.className = "field-label";
-        label.textContent = presentation.label;
-        field.append(label);
-      }
       return field;
     }
-    if (lead.classList.contains("lead-caption")) {
-      field.classList.add("captioned");
-    }
-    field.append(lead, cell);
     const nested = soleValue(attribute);
     if (nested !== undefined && tree.nodes[nested]!.role === "element" && nestable(nested)) {
       writeNested(field, cell, nested);
@@ -1239,17 +1237,6 @@ export function renderSource(
     cell.className = "sheet-value";
     if (boolean) {
       field.classList.add("boolean-field");
-      field.append(cell, lead);
-      if (!lead.classList.contains("lead-caption")) {
-        const label = document.createElement("span");
-        label.className = "field-label";
-        label.textContent = presentation.label;
-        field.append(label);
-      }
-      return field;
-    }
-    if (lead.classList.contains("lead-caption")) {
-      field.classList.add("captioned");
     }
     field.append(lead, cell);
     return field;
@@ -1258,7 +1245,7 @@ export function renderSource(
   /**
    * An element of the composition as one row: its children's chevron when it holds content, its
    * icon, kind, id and title, its summary, cut by the element to what fits, and its pin. Under it,
-   * while open, its inspector: a field to each property it declares, written or not, in groups;
+   * while open, its inspector: a field to each property it declares, written or not;
    * then, unless folded, what it holds.
    */
   const writeRow = (at: number, start: number): HTMLElement => {
@@ -1350,7 +1337,7 @@ export function renderSource(
       if (inline !== undefined) {
         // Inline content edits in the inspector, first, as the property it is.
         const presentation = present(tree.nodes[inline]!.name ?? "");
-        const field = marked(inline, "span", "sheet-row prop-field captioned content-field");
+        const field = marked(inline, "span", "sheet-row prop-field content-field");
         const lead = leadOf(presentation, "field");
         lead.classList.add("sheet-name");
         hoverable(lead, inline);
@@ -1359,16 +1346,7 @@ export function renderSource(
         cell.title = tooltipOf(presentation);
         writeNodes(cell, childrenOf(inline), ...itemsRange(inline));
         field.append(lead, cell);
-        // Above the groups, which name the properties it is not one of.
-        const first = inspector.firstElementChild;
-        if (first?.classList.contains("inspector-fields") === true) {
-          first.prepend(field);
-        } else {
-          const fields = document.createElement("span");
-          fields.className = "inspector-fields";
-          fields.append(field);
-          inspector.prepend(fields);
-        }
+        inspector.querySelector(":scope > .inspector-fields")!.prepend(field);
       }
       row.append(inspector);
     }
@@ -1400,8 +1378,7 @@ export function renderSource(
   /**
    * An element's inspector: a field to each property its type declares, in the order its
    * visualizer lists them, then the rest in declaration order, then any it writes that its type
-   * does not declare. Fields read in their groups, in the order each group's first property comes,
-   * and the properties of no group last, under the element's kind.
+   * does not declare, each its label beside its value.
    */
   const writeInspector = (at: number, present: (name: string) => Presentation, order: readonly string[]): HTMLElement => {
     const node = tree.nodes[at]!;
@@ -1434,96 +1411,25 @@ export function renderSource(
         names.push(name);
       }
     }
-    const groups = new Map<string, string[]>();
-    for (const name of names) {
-      const group = present(name).group ?? "";
-      groups.set(group, [...(groups.get(group) ?? []), name]);
-    }
-    // The properties of no group come last, under the element's kind.
-    const ungrouped = groups.get("");
-    groups.delete("");
-    if (ungrouped !== undefined) {
-      groups.set("", ungrouped);
-    }
-
     const inspector = document.createElement("span");
     inspector.className = "inspector";
     inspector.setAttribute("role", "group");
     inspector.setAttribute("aria-label", `Properties of ${kindName}`);
-    for (const [group, members] of groups) {
-      const groupKey = `${kindName}\u0000${group}`;
-      const groupFolded = layout.groupsFolded?.has(groupKey) === true;
-      const section = document.createElement("span");
-      section.className = groupFolded ? "inspector-group folded" : "inspector-group";
-      if (groups.size === 1 && group === "" && node.role === "element" && !isComposition(index, at)) {
-        // A nested element of no groups needs no heading: its field names it.
-        const fields = document.createElement("span");
-        fields.className = "inspector-fields";
-        for (const name of members) {
-          const attribute = written.get(name);
-          const property = declared.find((candidate) => candidate.name === name);
-          fields.append(
-            attribute !== undefined
-              ? writtenField(attribute, present(name))
-              : unwrittenField(node.key, present(name), isBooleanType(tree, property?.type))
-          );
-        }
-        for (const attribute of repeated) {
-          fields.append(writtenField(attribute, present(tree.nodes[attribute]!.name ?? "")));
-        }
-        inspector.append(fields);
-        return inspector;
-      }
-      const heading = document.createElement("button");
-      heading.type = "button";
-      heading.tabIndex = -1;
-      heading.className = "group-head";
-      heading.dataset["groupKey"] = groupKey;
-      heading.setAttribute("aria-expanded", String(!groupFolded));
-      const chevron = document.createElement("span");
-      chevron.className = groupFolded ? "fold folded" : "fold";
-      chevron.setAttribute("aria-hidden", "true");
-      const label = document.createElement("span");
-      label.className = "group-name";
-      label.textContent = group === "" ? kindName : group;
-      heading.append(chevron, label);
-      if (groupFolded) {
-        const set = members.filter((name) => written.has(name)).length;
-        const count = document.createElement("span");
-        count.className = "group-count";
-        count.textContent = `${set} set`;
-        heading.append(count);
-      }
-      section.append(heading);
-      if (!groupFolded) {
-        const fields = document.createElement("span");
-        fields.className = "inspector-fields";
-        for (const name of members) {
-          const attribute = written.get(name);
-          const property = declared.find((candidate) => candidate.name === name);
-          if (attribute !== undefined) {
-            fields.append(writtenField(attribute, present(name)));
-          } else {
-            fields.append(unwrittenField(node.key, present(name), isBooleanType(tree, property?.type)));
-          }
-        }
-        if (group === "") {
-          for (const attribute of repeated) {
-            fields.append(writtenField(attribute, present(tree.nodes[attribute]!.name ?? "")));
-          }
-        }
-        section.append(fields);
-      }
-      inspector.append(section);
+    const fields = document.createElement("span");
+    fields.className = "inspector-fields";
+    for (const name of names) {
+      const attribute = written.get(name);
+      const property = declared.find((candidate) => candidate.name === name);
+      fields.append(
+        attribute !== undefined
+          ? writtenField(attribute, present(name))
+          : unwrittenField(node.key, present(name), isBooleanType(tree, property?.type))
+      );
     }
-    if (repeated.length > 0 && !groups.has("")) {
-      const fields = document.createElement("span");
-      fields.className = "inspector-fields";
-      for (const attribute of repeated) {
-        fields.append(writtenField(attribute, present(tree.nodes[attribute]!.name ?? "")));
-      }
-      inspector.append(fields);
+    for (const attribute of repeated) {
+      fields.append(writtenField(attribute, present(tree.nodes[attribute]!.name ?? "")));
     }
+    inspector.append(fields);
     return inspector;
   };
 

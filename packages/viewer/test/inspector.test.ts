@@ -31,9 +31,9 @@ const PANEL = [
   "type Badge = { label:string count:int = 0 }",
   "type Panel = { x:int = 0 y:int = 0 width:int = 10 badge?:Badge content children:Card* }",
   "visualizer Panel = <ElementVisualizer summary={width x}>",
-  '  <PropertyVisualizer property=x short="X" group="Position" />',
-  '  <PropertyVisualizer property=y short="Y" group="Position" />',
-  '  <PropertyVisualizer property=width label="Breadth" icon="ruler" group="Size" />',
+  '  <PropertyVisualizer property=x short="X" />',
+  '  <PropertyVisualizer property=y short="Y" />',
+  '  <PropertyVisualizer property=width label="Breadth" icon="ruler" />',
   "</ElementVisualizer>",
   'let panel = <Panel x=1 y=2 width=30 badge=<Badge label="new" count=3 />>',
   '  <Card title="Hello" padding=8 tone=quiet elevated=true />',
@@ -234,22 +234,22 @@ describe("inspectors", () => {
     assert.equal(isOpen(element, "panel.value"), true, "a property's selection opens its element's inspector");
   });
 
-  it("shows every property as a field in its group, then the rest under the element's kind", async () => {
+  it("shows every property as a field, its label beside its value, in visualizer order", async () => {
     const element = show(await panel());
     element.selection = "panel.value";
     const inspector = drawn(element, "panel.value").querySelector<HTMLElement>(":scope > .inspector")!;
-    const groups = [...inspector.querySelectorAll<HTMLElement>(":scope > .inspector-group")].map((group) => [
-      group.querySelector(".group-name")!.textContent,
-      ...[...group.querySelectorAll<HTMLElement>(":scope > .inspector-fields > .prop-field")].map(
-        (field) => field.dataset["name"] ?? field.dataset["key"]!.split(".").at(-1)
-      )
-    ]);
-    assert.deepEqual(groups, [["Position", "x", "y"], ["Size", "width"], ["Panel", "badge"]]);
+    const fields = [...inspector.querySelectorAll<HTMLElement>(":scope > .inspector-fields > .prop-field")].map(
+      (field) => field.dataset["name"] ?? field.dataset["key"]!.split(".").at(-1)
+    );
+    assert.deepEqual(fields, ["x", "y", "width", "badge"]);
+    assert.equal(inspector.querySelector(".group-head"), null, "no groups");
     const x = drawn(element, "panel.value.x");
-    assert.equal(x.querySelector(".field-lead")!.textContent, "X", "a short label leads");
+    assert.deepEqual([...x.children].map((child) => child.className.split(" ")[0]), ["field-lead", "sheet-value"], "the label, then the value");
+    assert.equal(x.querySelector(".field-lead")!.textContent, "X", "the label leads, not the short label");
     assert.equal(x.querySelector<HTMLElement>(".field-lead")!.title, "X · x", "its tooltip names it as source writes it");
     const width = drawn(element, "panel.value.width");
-    assert.equal(width.querySelector<HTMLElement>(".field-lead svg")!.dataset["icon"], "ruler", "an icon leads");
+    assert.equal(width.querySelector<HTMLElement>(".field-lead svg")!.dataset["icon"], "ruler", "an icon before the label");
+    assert.equal(width.querySelector(".field-lead")!.textContent, "Breadth");
     assert.equal(width.querySelector<HTMLElement>(".field-lead")!.title, "Breadth · width");
   });
 
@@ -262,27 +262,6 @@ describe("inspectors", () => {
     assert.equal(unset[0]!.textContent!.replace(/\s+/g, " ").trim(), "Padding8");
     const elevated = drawn(element, "panel.value.children[1].elevated");
     assert.ok(elevated.classList.contains("boolean-field"), "a boolean reads as a checkbox");
-  });
-
-  it("folds a group for every element of its kind, saying how many of its properties are set", async () => {
-    const value = await treeOf([
-      {
-        uri: "nx:///two.nx",
-        identity: "two.nx",
-        source: PANEL.replace("let panel =", "let other = <Panel y=4 />\nlet panel =")
-      }
-    ], { visualizers: { modules: [] } });
-    const element = show(value);
-    element.selection = "panel.value";
-    const position = (key: string) =>
-      [...drawn(element, key).querySelectorAll<HTMLElement>(".inspector-group")].find((group) => group.querySelector(".group-name")!.textContent === "Position")!;
-    position("panel.value").querySelector<HTMLElement>(".group-head")!.click();
-    assert.ok(position("panel.value").classList.contains("folded"));
-    assert.equal(position("panel.value").querySelector(".group-count")!.textContent, "2 set");
-    assert.equal(element.selection, "panel.value", "folding a group selects nothing");
-    element.selection = "other.value";
-    assert.ok(position("other.value").classList.contains("folded"), "folded for every Panel");
-    assert.equal(position("other.value").querySelector(".group-count")!.textContent, "1 set");
   });
 
   it("unfolds an element value into a nested group of its fields, edited in that element", async () => {

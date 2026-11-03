@@ -791,7 +791,7 @@ describe("what an element does not write", () => {
 
   it("reads each default, or a placeholder, in its place", async () => {
     const element = show(await fixture("adding"));
-    assert.deepEqual(unset(element, "latte.value").map(reads), ["Note", "\u2717 Iced", "Shots 1", "Color"]);
+    assert.deepEqual(unset(element, "latte.value").map(reads), ["Note", "Iced \u2717", "Shots 1", "Color"]);
     const note = rendered(element, "latte.value.note.value");
     assert.equal(note.textContent, "", "nothing is written there");
     assert.equal(note.dataset["placeholder"], "Add note", "text asks for itself by its label");

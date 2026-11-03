@@ -28,3 +28,4 @@
 
 - [x] 4.1 `openspec validate add-visual-inline-inspector --strict`; independent review loop until high-confidence findings are fixed and verified
 - [ ] 4.2 Screenshots for Bret; close PR #71
+- [x] 4.3 Labels beside values, one field to a line; lists and unfolded element values under their label; no groups (Bret, 2026-11-03): remove `group` from `PropertyVisualizer`, the source tree, `@nx/graphics` and the inspector

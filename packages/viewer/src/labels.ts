@@ -39,7 +39,6 @@ export interface Presentation {
   readonly label: string;
   readonly icon?: string | undefined;
   readonly short?: string | undefined;
-  readonly group?: string | undefined;
 }
 
 /** The presentation of `name` under `visualizer`, its label derived when the visualizer gives none. */
@@ -54,7 +53,6 @@ export function presentationOf(
     label: found?.label ?? derivedLabel(name, boolean),
     icon: found?.icon,
     short: found?.short,
-    group: found?.group,
   };
 }
 

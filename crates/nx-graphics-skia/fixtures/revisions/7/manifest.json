@@ -3,13 +3,13 @@
   "image": "image.png",
   "profile": "graphics-core-v4",
   "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
-  "revision": "5b6ef50a8ef01489e592670c36c491361335cacb1c3e762c27fe9014f450b721",
+  "revision": "71c8d794dd99f8b5568616bcb7dd396adafc1eba9d67f4ac7bf21cf6055f7b28",
   "scene": {
     "config": {
       "fonts": [
         "sha256:ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280"
       ],
-      "graphics_version": "9b1d02e6408e9771",
+      "graphics_version": "463e155940bf68a9",
       "height": 240.0,
       "limits": {
         "coordinate": 10000000.0,
@@ -20,14 +20,14 @@
         "path_commands": 100000,
         "surface_pixels": 16777216.0
       },
-      "program_revision": "6b96b75f9050c93b",
+      "program_revision": "fc9c7a031d83f7af",
       "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
       "scale": 1.0,
       "text_ink_padding": 0.0,
       "width": 400.0
     },
     "profile": "graphics-core-v4",
-    "revision": "5b6ef50a8ef01489e592670c36c491361335cacb1c3e762c27fe9014f450b721",
+    "revision": "71c8d794dd99f8b5568616bcb7dd396adafc1eba9d67f4ac7bf21cf6055f7b28",
     "root": {
       "accessibility": null,
       "children": [
@@ -59,7 +59,7 @@
           "identity": {
             "declaration": "Polygon",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 1.0,
           "order": 0,
@@ -165,7 +165,7 @@
           "identity": {
             "declaration": "Polygon",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 1.0,
           "order": 1,
@@ -319,7 +319,7 @@
           "identity": {
             "declaration": "Polygon",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 1.0,
           "order": 2,
@@ -423,7 +423,7 @@
           "identity": {
             "declaration": "Path",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 1.0,
           "order": 3,
@@ -642,7 +642,7 @@
           "identity": {
             "declaration": "Path",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 1.0,
           "order": 4,
@@ -1112,7 +1112,7 @@
               "identity": {
                 "declaration": "Rectangle",
                 "module": "@nx/graphics/graphics.nx",
-                "version": "9b1d02e6408e9771"
+                "version": "463e155940bf68a9"
               },
               "opacity": 1.0,
               "order": 0,
@@ -1206,7 +1206,7 @@
               "identity": {
                 "declaration": "Circle",
                 "module": "@nx/graphics/graphics.nx",
-                "version": "9b1d02e6408e9771"
+                "version": "463e155940bf68a9"
               },
               "opacity": 1.0,
               "order": 1,
@@ -1442,7 +1442,7 @@
           "identity": {
             "declaration": "Group",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 0.5,
           "order": 5,
@@ -1510,7 +1510,7 @@
           "identity": {
             "declaration": "Text",
             "module": "@nx/graphics/graphics.nx",
-            "version": "9b1d02e6408e9771"
+            "version": "463e155940bf68a9"
           },
           "opacity": 1.0,
           "order": 6,
@@ -1628,7 +1628,7 @@
       "identity": {
         "declaration": "Drawing",
         "module": "@nx/graphics/graphics.nx",
-        "version": "9b1d02e6408e9771"
+        "version": "463e155940bf68a9"
       },
       "opacity": 1.0,
       "order": 0,

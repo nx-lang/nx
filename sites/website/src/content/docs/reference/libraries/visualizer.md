@@ -67,7 +67,7 @@ A union cannot have a visualizer yet.
 | `PreviewVisualizer` | `renderer: string` | Nonempty literal host renderer ID; see [Preview descriptors](#preview-descriptors). |
 | `FunctionVisualizer` | `icon?: string`, `summary?`, content `properties?: PropertyVisualizer+` | Like `ElementVisualizer`, for element-style function invocations; its target is the function's props. |
 | `IdPosition` | `start`, `end` | Where the element's id reads. |
-| `PropertyVisualizer` | `property`, `label?`, `icon?`, `short?`, `group?`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
+| `PropertyVisualizer` | `property`, `label?`, `icon?`, `short?`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
 
 - `title` is the property whose value is the element's title. The playground's Visual view shows its
   value alone on the element's row, without the property's name or quotes.
@@ -83,13 +83,13 @@ A union cannot have a visualizer yet.
   writes show; items that do not fit are counted as `+N`. Without it, Visual shows the first few
   written one-line properties.
 - `properties` says how individual properties read and edit. Visual's inspector, which opens under a
-  selected row, lists the element's properties by `group`, in the order of each group's first
-  property, and leads each field with the property's `icon`, else its `short` label (one or two
-  characters, such as `"X"` or `"W"`), else its `label` as a caption. Without a `label`, Visual
-  derives one from the name: `outerRadius` reads `Outer radius`, and a boolean's leading `is` or
-  `has` is dropped. A `PropertyVisualizer`'s `format` says how the property's string value is shown,
-  in place of the format its type gives it, and its [editor hints](#editor-hints) how the value is
-  edited. Properties no group names read together, in a group named after the element.
+  selected row, lists the element's properties one to a line, in the order the visualizer lists
+  them and then in declaration order, each `label` beside its value, after the property's `icon`
+  when it has one. A row's summary leads each value with the `icon`, else the `short` label (one or
+  two characters, such as `"X"` or `"W"`), else the `label`. Without a `label`, Visual derives one
+  from the name: `outerRadius` reads `Outer radius`, and a boolean's leading `is` or `has` is
+  dropped. A `PropertyVisualizer`'s `format` says how the property's string value is shown, in place
+  of the format its type gives it, and its [editor hints](#editor-hints) how the value is edited.
 
 ```nx
 import "@nx/visualizer"
@@ -97,8 +97,8 @@ import "@nx/visualizer"
 export abstract component <Question id:string label:string help?:string required:boolean = true />
 
 visualizer Question = <ElementVisualizer title=label id=id icon="circle-help" summary={required}>
-  <PropertyVisualizer property=help label="Help text" icon="circle-question-mark" group="Text" />
-  <PropertyVisualizer property=required group="Validation" />
+  <PropertyVisualizer property=help label="Help text" icon="circle-question-mark" />
+  <PropertyVisualizer property=required />
 </ElementVisualizer>
 ```
 
@@ -241,7 +241,7 @@ import "@nx/visualizer"
 
 let <Badge text:string tone:string = "neutral"/> = <Label text={text}/>
 visualizer Badge = <FunctionVisualizer icon="badge" summary={tone}>
-  <PropertyVisualizer property=text label="Text" group="Content" />
+  <PropertyVisualizer property=text label="Text" />
 </FunctionVisualizer>
 ```
 
@@ -324,10 +324,8 @@ export type PropertyVisualizer = {
                                   /// a viewer derives one from the property's name.
   icon?: string                   /// A Lucide icon that stands for the property beside its field, such as
                                   /// `"paint-bucket"`.
-  short?: string                  /// A one- or two-character label shown beside the field where there is no icon, such
+  short?: string                  /// A one- or two-character label a row's summary shows where there is no icon, such
                                   /// as `"X"` or `"W"`.
-  group?: string                  /// The group the property reads in, such as `"Position"`. Groups read in the order
-                                  /// of their first property.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.

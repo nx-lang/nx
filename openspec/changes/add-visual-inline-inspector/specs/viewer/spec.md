@@ -31,13 +31,13 @@ to draw a row.
 A row SHALL show, after its title, the properties its resolved `summary` names that the element
 writes, in that order; without a `summary`, up to three of the properties it writes whose values
 read on one line, in source order, leaving out its title and id. Each item SHALL read as its
-inspector field would, without the field: the icon or short label then the value, or a swatch and
+inspector field would, without the field and led by the icon, else the short label, else the label: then the value, or a swatch and
 the value for a color; a boolean SHALL read as its icon and label when true and be left out when
 false; a case SHALL read as its label; a reference to a `let` SHALL read as a token. Items that do
 not fit SHALL be left out from the end, whole, and a quiet count such as `+2` SHALL say how many.
 A summary SHALL hide while its element's inspector is open. Text content an element holds, with no element or block in it, SHALL lead
 the summary, ahead of the named properties, however many lines it runs, and the row SHALL have no
-fold for it; open, the inspector SHALL show it as its first field, above the groups. Words in a
+fold for it; open, the inspector SHALL show it as its first field. Words in a
 summary, as text content or a quoted string, SHALL read on one line as their first few, at most
 about 28 characters, faded where they are cut, and SHALL shrink to fit before they are left out.
 Content that holds elements SHALL read as the row's children.
@@ -106,30 +106,30 @@ SHALL change folds only.
 - **WHEN** the reader folds Drawing's children and selects Drawing
 - **THEN** Drawing's inspector SHALL open with its children still hidden
 
-### Requirement: The inspector shows properties as labeled fields in groups
-An inspector SHALL show every property its element's type declares, written or not, as a field:
-first the resolved groups in the order their first property comes in the resolved property order,
-each headed by its group name and holding its properties in that order, then the properties with no
-group under a heading named after the element's kind. A property's field SHALL start with its
-resolved icon, else its resolved short label; a property with neither SHALL show its label as a
-caption above the field. A boolean SHALL read as a checkbox with its icon and label. A property the
-element does not write SHALL show as an empty field with a dashed outline and its default, if any,
-as a quiet placeholder, else, for text, "Add" and its label, as `Add description`; setting it SHALL write it, and a menu on a written property SHALL offer
-Reset to default or Remove as the row menu does today. A group heading SHALL fold the group; a folded
-group SHALL say how many of its properties are written, and folded groups SHALL be remembered per
-element kind for the session. Every field, icon and short label SHALL carry a tooltip with the
+### Requirement: The inspector shows properties as labeled fields
+An inspector SHALL show every property its element's type declares, written or not, as a field, one
+to a line, in the resolved property order. A field SHALL show the property's resolved label on the
+left, after its resolved icon when it has one, and its value on the right; the labels SHALL share a
+column as wide as the longest, up to about 40% of the inspector, and a longer label SHALL wrap. A
+value over several lines, as a list of elements, or an unfolded element value SHALL read under its
+label, a step in. A boolean SHALL read as a checkbox beside its label. A property the element does
+not write SHALL show as an empty value with a dashed outline and its default, if any, as a quiet
+placeholder, else, for text, "Add" and its label, as `Add description`; setting it SHALL write it,
+and a menu on a written property SHALL offer Reset to default or Remove as the row menu does today.
+The inspector SHALL have no group headings. Every field and label SHALL carry a tooltip with the
 property's label and its name as written in source. The `title` and `id` properties SHALL read in
 the inspector as fields too.
 
 #### Scenario: Star's inspector
-- **WHEN** Star's visualizer groups `cx` and `cy` as `Position` with the shorts `X` and `Y`, and
-  `outerRadius`, `innerRadius` and `pointCount` as `Shape` with icons, and Star writes no `stroke`
-- **THEN** the inspector SHALL show `Position` with `X 150` and `Y 55`, `Shape` with three icon
-  fields, and `stroke` as an empty dashed field
+- **WHEN** Star's visualizer lists `cx` and `cy` with the labels `Center X` and `Center Y`, then
+  `outerRadius`, `innerRadius` and `pointCount` with icons, and Star writes no `stroke`
+- **THEN** the inspector SHALL show `Center X` beside `150` and `Center Y` beside `55` first, then the
+  three labels with their icons, and `Stroke` beside an empty dashed value
 
-#### Scenario: Folding a group
-- **WHEN** the reader folds Star's `Shape` group and selects another Star
-- **THEN** the other Star's `Shape` group SHALL be folded too and say `3 set`
+#### Scenario: A list of elements under its label
+- **WHEN** a Page writes `actions={ <Button label="Export" /> <Button label="Invite" /> }` and the
+  reader opens Page's inspector
+- **THEN** `Actions` SHALL read on its own line, with the two Buttons under it, a step in
 
 ### Requirement: A property without a label is named from its name
 Where a property has no resolved label, the viewer SHALL derive one from its name: split it into
@@ -143,17 +143,17 @@ property's name when other words follow.
 - **WHEN** properties are named `outerRadius`, `imageURL`, `max_length`, `isRequired` and `x1`
 - **THEN** their labels SHALL be `Outer radius`, `Image URL`, `Max length`, `Required` and `X1`
 
-### Requirement: Numbers change by dragging their icon, short label or caption
-Pressing a number field's icon, short label or caption and dragging left or right SHALL change the
+### Requirement: Numbers change by dragging their label
+Pressing a number field's label, with its icon, and dragging left or right SHALL change the
 number by one `step` (or one) for every three pixels, ten steps with Shift and a tenth with Alt,
 within `min` and `max`, showing it in the field and going live as it changes, and SHALL commit once
-on release as one undo step. The pointer SHALL read as a horizontal resize over them. A press that
+on release as one undo step. The pointer SHALL read as a horizontal resize over it. A press that
 moves less than four pixels SHALL focus the field instead. In a focused number field, Up and Down
 SHALL step it, Shift by ten steps. The viewer SHALL NOT show stepper buttons. On touch, a drag on the
-icon SHALL scrub and a tap SHALL focus the field.
+label SHALL scrub and a tap SHALL focus the field.
 
 #### Scenario: Scrubbing a radius
-- **WHEN** the reader drags Star's outer-radius icon 30 pixels to the right
+- **WHEN** the reader drags Star's `Outer radius` label 30 pixels to the right
 - **THEN** the field SHALL read `46` during the drag, the preview SHALL follow, and one `nx-edit`
   SHALL commit `outerRadius=46` on release
 
@@ -229,7 +229,7 @@ an editor fits it:
 - a string, a `uitext` string or an id: a text field holding the value without quotes or escapes;
 - a number, typed `int`, `float32` or `float64` or by an alias of one, or a numeric literal where no
   type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and that
-  changes as its icon, short label or caption is dragged left or right;
+  changes as its label is dragged left or right;
 - a boolean: a toggle, with no field;
 - a bare case of a union: a popover listing the union's cases that hold no properties, each with its
   doc, the current one marked, filtered as the reader types;
@@ -529,5 +529,5 @@ requirement says.
 **Migration**: None.
 
 ### Requirement: A selected element offers the properties it does not write
-**Reason**: The inspector shows unwritten properties as empty fields in their groups.
+**Reason**: The inspector shows unwritten properties as empty fields.
 **Migration**: None.

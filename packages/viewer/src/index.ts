@@ -370,8 +370,6 @@ export class NxViewerElement extends ElementBase {
 
   #detailsState: NxDetailsState = emptyDetails();
   #lastIndex: TreeIndex | undefined;
-  /** The inspector groups folded, by element kind and group name, for the session. */
-  #groupsFolded = new Set<string>();
   /** The element values unfolded into nested groups of fields. */
   #valuesOpen = new Set<string>();
   #refreshingDetails = false;
@@ -833,21 +831,6 @@ export class NxViewerElement extends ElementBase {
     [...this.#body.querySelectorAll<HTMLElement>(".value-fold")].find((candidate) => candidate.dataset["valueKey"] === key)?.focus({ preventScroll: true });
   }
 
-  /** Folds or unfolds an inspector group, for every element of its kind. */
-  #toggleGroup(groupKey: string, near: string | undefined): void {
-    if (!this.finishEditing()) { return; }
-    const folded = new Set(this.#groupsFolded);
-    if (!folded.delete(groupKey)) {
-      folded.add(groupKey);
-    }
-    this.#groupsFolded = folded;
-    this.#keepRow(near, () => this.#render());
-    const heading = [...this.#body.querySelectorAll<HTMLElement>(".group-head")].find(
-      (candidate) => candidate.dataset["groupKey"] === groupKey && (near === undefined || candidate.closest<HTMLElement>(".row-element")?.dataset["key"] === near)
-    );
-    heading?.focus({ preventScroll: true });
-  }
-
   /** The source tree to show, as the language service's `sourceTree` query answers it. */
   get tree(): SourceTree | undefined {
     return this.#tree;
@@ -1178,7 +1161,7 @@ export class NxViewerElement extends ElementBase {
     const targets = editTargets(index);
     const draw = (wrapped?: ReadonlySet<string>): void => {
       this.#body.replaceChildren(
-        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, details: this.#openDetailsKeys(), pinned: this.#detailsState.pinned, groupsFolded: this.#groupsFolded, valuesOpen: this.#valuesOpen })
+        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, details: this.#openDetailsKeys(), pinned: this.#detailsState.pinned, valuesOpen: this.#valuesOpen })
       );
     };
     try {
@@ -1745,7 +1728,10 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-haspopup", "menu");
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
       mark.dataset["menuKey"] = row.dataset["key"]!;
-      const holder = row.querySelector<HTMLElement>(":scope > .sheet-below") ?? row.querySelector<HTMLElement>(":scope > .sheet-value");
+      // An inspector's field keeps it beside its label, even where its value goes under the label.
+      const holder = row.classList.contains("prop-field")
+        ? row.querySelector<HTMLElement>(":scope > .sheet-value")
+        : row.querySelector<HTMLElement>(":scope > .sheet-below") ?? row.querySelector<HTMLElement>(":scope > .sheet-value");
       if (holder === null) {
         row.append(mark);
         continue;
@@ -4198,11 +4184,6 @@ export class NxViewerElement extends ElementBase {
     const valueFold = target.closest<HTMLElement>(".value-fold[data-value-key]");
     if (valueFold !== null && this.#body.contains(valueFold)) {
       this.#toggleValue(valueFold.dataset["valueKey"]!);
-      return;
-    }
-    const groupHead = target.closest<HTMLElement>(".group-head[data-group-key]");
-    if (groupHead !== null && this.#body.contains(groupHead)) {
-      this.#toggleGroup(groupHead.dataset["groupKey"]!, groupHead.closest<HTMLElement>(".row-element")?.dataset["key"]);
       return;
     }
     const toggle = (target.closest?.(".fold-run-head")?.querySelector(".fold") ?? target.closest?.(".fold")) as

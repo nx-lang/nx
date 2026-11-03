@@ -850,9 +850,9 @@ fn element_function_visualizers_only_describe_invocation_icons() {
 }
 
 #[test]
-fn labels_icons_letters_groups_and_a_summary() {
+fn labels_icons_letters_and_a_summary() {
     assert_clean(
-        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\" summary={width fill}><PropertyVisualizer property=x label=\"X\" short=\"X\" group=\"Position\" /><PropertyVisualizer property=width label=\"Width\" short=\"W\" group=\"Size\" /><PropertyVisualizer property=fill label=\"Fill\" icon=\"paint-bucket\" group=\"Fill\" /></ElementVisualizer>",
+        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\" summary={width fill}><PropertyVisualizer property=x label=\"X\" short=\"X\" /><PropertyVisualizer property=width label=\"Width\" short=\"W\" /><PropertyVisualizer property=fill label=\"Fill\" icon=\"paint-bucket\" /></ElementVisualizer>",
     );
     assert_error(
         "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer summary={width height} />",

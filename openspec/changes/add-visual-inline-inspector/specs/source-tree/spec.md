@@ -10,10 +10,10 @@ SHALL attach to each declaration entry with a resolved visualizer a `visualizer`
 - for a record, an action or a component: its `title`, `id`, `icon`, `summary` and `preview` descriptor when set, its `idPosition`
   when it has an `id`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the visualizer lists, then the rest in declaration order), each with
-  its name and its resolved `format`, `label`, `icon`, `short` and `group` when set;
+  its name and its resolved `format`, `label`, `icon` and `short` when set;
 - for an element function (`let <Name … />`): its FunctionVisualizer icon and `summary` when set and a
   `properties` list holding each of its properties once, in the same resolved order, each with its
-  name and its resolved `format`, `label`, `icon`, `short` and `group` when set;
+  name and its resolved `format`, `label`, `icon` and `short` when set;
 - for an alias: its `format`.
 
 An entry for a record, action, component or element function that has no visualizer but has a
@@ -63,8 +63,8 @@ and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through J
 by the document, including derived kinds that only inherit a visualizer, with the same resolved inheritance/override metadata
 - **AND** the default query SHALL retain its existing bounded declaration-table behavior
 
-#### Scenario: Labels and groups reach the reader
+#### Scenario: Labels and short labels reach the reader
 - **WHEN** a client asks with `visualizers` and `Box`'s visualizer gives `width` the label `Width`, the
-  short `W` and the group `Size`, and names `summary={width}`
+  short `W`, and names `summary={width}`
 - **THEN** the entry for `Box` SHALL carry the summary `width`, and its `width` property SHALL carry the
-  label `Width`, the short `W` and the group `Size`
+  label `Width` and the short `W`
