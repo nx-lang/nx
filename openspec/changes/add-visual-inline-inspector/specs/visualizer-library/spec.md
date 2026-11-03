@@ -8,10 +8,10 @@ optional field `icon:string` naming an icon from the Lucide set, an optional fie
 properties a viewer shows on the element's row, and an optional content field
 `properties` holding one or more `<PropertyVisualizer Target=Target/>`. `IdPosition` SHALL be the
 constant union `start | end`. `PropertyVisualizer` SHALL be a record with the type parameter
-`Target`, a required field `property:Target.Property`, an optional field `label:uitext` (the name a
+`Target`, a required field `property:Target.Property`, an optional field `label:string` (the name a
 viewer shows for the property), an optional field `icon:string` naming a Lucide icon, an optional
 field `short:string` (a one- or two-character label a viewer may show in the icon's place, such as
-`"X"` or `"W"`), an optional field `group:uitext` naming the group the property reads in, an
+`"X"` or `"W"`), an optional field `group:string` naming the group the property reads in, an
 optional field `format:ValueFormat`, the
 editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float64` and
 `step:float64`, a field `multiline:boolean` defaulting to `false`, an optional field

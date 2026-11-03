@@ -195,7 +195,7 @@ fn classify(
             declared_name: function.name.clone(),
             kind_label: "element function",
             record: VisualizerRecord::Function,
-            target_type: None,
+            target_type: Some(props_record_name(target.as_str())),
             is_component: false,
         }),
         Item::Function(_) => not_allowed("it is a paren-style function; only an element-style function (`let <Name …/>`) can have a FunctionVisualizer"),

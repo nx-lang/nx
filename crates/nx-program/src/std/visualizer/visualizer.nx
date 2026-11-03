@@ -8,7 +8,8 @@
 // as their type parameter `Target`. Inside a
 // `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
 // <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
-// component, `Target` is its props record, so property names are its props.
+// component or an element-style function, `Target` is its props record, so property names are its
+// props.
 
 /// How a viewer presents an element of a record, action or component.
 export type ElementVisualizer = {
@@ -28,6 +29,9 @@ export type ElementVisualizer = {
   /// Host-rendered view, inherited and overridden like other hints. Unsupported renderer IDs leave
   /// structured Output available.
   preview?: PreviewVisualizer
+  /// The properties a viewer shows, in order, on the element's one-line row, so siblings can be
+  /// told apart without opening them, such as `{points fill}`.
+  summary?: Target.Property+
 
   content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
@@ -39,10 +43,14 @@ export type PreviewVisualizer = {
   renderer: string  /// Logical renderer ID registered by the host, such as "nx.graphics".
 }
 
-/// How a viewer marks an authored element-style function invocation.
-/// Previews are selected from the function's result type, independently of this invocation icon.
+/// How a viewer presents an authored element-style function invocation, as `ElementVisualizer`
+/// does an element. Previews are selected from the function's result type, independently of this.
 export type FunctionVisualizer = {
-  icon?: string  /// Lucide icon name for the invocation, such as "star".
+  // The function's derived props record. Bound by the `visualizer` declaration.
+  Target: type
+  icon?: string                                               /// Lucide icon name for the invocation, such as "star".
+  summary?: Target.Property+                                  /// The properties shown, in order, on the invocation's row.
+  content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
 
 /// Where an element's id reads.
@@ -57,6 +65,14 @@ export type PropertyVisualizer = {
   // The declaration whose property this describes. Bound by the `visualizer` declaration.
   Target: type
   property: Target.Property       /// The property this describes.
+  label?: string                  /// The name a viewer shows for the property, such as `"Corner radius"`. Without it,
+                                  /// a viewer derives one from the property's name.
+  icon?: string                   /// A Lucide icon that stands for the property beside its field, such as
+                                  /// `"paint-bucket"`.
+  short?: string                  /// A one- or two-character label shown beside the field where there is no icon, such
+                                  /// as `"X"` or `"W"`.
+  group?: string                  /// The group the property reads in, such as `"Position"`. Groups read in the order
+                                  /// of their first property.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.

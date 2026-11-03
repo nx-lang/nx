@@ -24,7 +24,7 @@ builds on its code.
 - A docked inspector, multi-select, or editing several elements at once.
 - Evaluating expressions or showing runtime values; selection mapping from preview instances beyond
   what exists today.
-- Localizing labels (they are `uitext`, so it can come later).
+- Localizing labels (NX has no built-in localizable text type yet; labels are strings).
 - Summary templates (`"{} points"`) or computed summaries (an arrow's length).
 - New editors for compound values (gradient editors); nested values edit field by field.
 
@@ -58,7 +58,7 @@ a tooltip `Label · name`. Booleans are checkboxes with icon and label. This kee
 identifiable without relying on recognizing an icon.
 
 ### 5. Labels
-Visualizer `label` (uitext) wins. The derived label follows the common conversion (Rails
+Visualizer `label` (a string) wins. The derived label follows the common conversion (Rails
 `humanize`, Django `verbose_name`, Unity `NicifyVariableName`) but in sentence case, which matches
 Figma, Apple and Microsoft field labels. Abbreviations like `cx` can't be fixed mechanically, so
 libraries supply labels; graphics does in this change.
