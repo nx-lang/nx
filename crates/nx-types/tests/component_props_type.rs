@@ -300,3 +300,34 @@ fn props_is_a_reserved_emitted_action_name() {
         "would collide with the component's derived props record",
     );
 }
+
+#[test]
+fn an_element_functions_props_record_keeps_parameter_order_and_no_defaults() {
+    let result = assert_ok(
+        r#"
+        let <Badge label:string tone:string = "neutral" count?:int /> = <Label text={label} />
+        let p = <Badge.Props label="a" tone="b" />
+        "#,
+        "function-props-fields.nx",
+    );
+    assert_eq!(
+        record_fields(&result, "Badge.Props"),
+        vec![
+            ("label".to_string(), false),
+            ("tone".to_string(), false),
+            ("count".to_string(), true)
+        ]
+    );
+    assert_eq!(
+        union_cases(&result, "Badge.Props.Property"),
+        vec!["label", "tone", "count"]
+    );
+    assert_message(
+        r#"
+        let <Badge label:string tone:string = "neutral" /> = <Label text={label} />
+        let p = <Badge.Props label="a" />
+        "#,
+        "function-props-no-defaults.nx",
+        "tone",
+    );
+}

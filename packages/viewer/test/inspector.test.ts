@@ -377,15 +377,45 @@ describe("inspectors", () => {
     assert.equal(isOpen(element, "panel.value.children[0]"), false);
   });
 
-  it("goes from a selected row into its inspector with Tab, and offers only its pin to Tab", async () => {
+  it("answers a refused host selection with the one it keeps, and drops the entry on a press outside", async () => {
+    const element = show(await panel(), true);
+    element.selection = "panel.value";
+    drawn(element, "panel.value.x.value").click();
+    const field = element.shadowRoot!.querySelector<HTMLElement>(".field")!;
+    field.textContent = "abc";
+    const selected: string[] = [];
+    element.addEventListener("nx-select", (event) => selected.push((event as CustomEvent<{ key: string }>).detail.key));
+    element.selection = "panel.value.children[0]";
+    assert.deepEqual(selected, ["panel.value.x"], "the host hears the selection kept");
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+    outside.remove();
+    assert.equal(element.shadowRoot!.querySelector(".field"), null, "the entry is dropped");
+    assert.equal(drawn(element, "panel.value.x.value").textContent, "1");
+  });
+
+  it("goes from a selected row to its pin with Tab, and from there into its inspector", async () => {
     const element = show(await panel(), true);
     element.selection = "panel.value";
     assert.equal(pin(element, "panel.value").tabIndex, 0);
     assert.equal(pin(element, "panel.value.children[0]").tabIndex, -1);
     body(element).focus();
     press(body(element), "Tab");
+    assert.equal(element.shadowRoot!.activeElement, pin(element, "panel.value"), "the pin takes focus");
+    press(pin(element, "panel.value"), "Tab");
     const field = element.shadowRoot!.querySelector<HTMLElement>(".field");
     assert.ok(field, "the first value it can edit opens");
     assert.equal(element.selection, "panel.value.x");
+    assert.equal(pin(element, "panel.value").tabIndex, 0, "the pin of the row the selection is in stays a stop");
+  });
+
+  it("walks the rows with Up and Down from a focused pin", async () => {
+    const element = show(await panel(), true);
+    element.selection = "panel.value";
+    pin(element, "panel.value").focus();
+    press(pin(element, "panel.value"), "ArrowDown");
+    assert.equal(element.selection, "panel.value.children[0]");
+    assert.equal(element.shadowRoot!.activeElement, body(element));
   });
 });

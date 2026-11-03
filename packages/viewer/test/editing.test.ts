@@ -1250,24 +1250,32 @@ describe("scrubbing", () => {
     const caption = lead(element, "base.value.size");
     assert.ok(caption.classList.contains("scrubbable"), "a number's lead scrubs");
     assert.ok(!lead(element, "base.value.tone").classList.contains("scrubbable"), "a string's does not");
-    // Past the four pixels a press may wander, one step for every three.
+    // Past the four pixels a press may wander, one step for every three from the press.
     scrub(caption, [4, 7, 10, 13]);
-    assert.deepEqual(lives.map((live) => (live.edit as { value: { text: string } }).value.text), ["17", "18", "19"]);
-    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }]);
+    assert.deepEqual(lives.map((live) => (live.edit as { value: { text: string } }).value.text), ["17", "18", "19", "20"]);
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "20" } } }]);
     assert.equal(field(element), null, "no field opens");
   });
 
   it("takes ten steps with Shift, a tenth of one with Alt, and keeps within the range", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
-    scrub(lead(element, "card.value.gap"), [4, 7], { shiftKey: true });
+    scrub(lead(element, "card.value.gap"), [4, 5], { shiftKey: true });
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "14" } } }]);
     scrub(lead(element, "card.value.padding"), [4, -400]);
     assert.deepEqual(edits[1], { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "0" } } }, "no lower than its min");
     const fine = show(await treeOf([{ uri: "nx:///fine.nx", identity: "fine.nx", source: "type Dot = { r:float64 = 1.0 }\nlet dot = <Dot r=1.0 />\n" }]));
     const fired = events(fine);
-    scrub(lead(fine, "dot.value.r"), [4, 7, 10], { altKey: true });
+    scrub(lead(fine, "dot.value.r"), [4, 7], { altKey: true });
     assert.deepEqual(fired.edits, [{ key: "dot.value.r.value", edit: { kind: "setValue", value: { kind: "number", text: "1.2" } } }]);
+  });
+
+  it("steps a whole number by at least one with Alt, and fires nothing before the first step", async () => {
+    const whole = show(await treeOf([{ uri: "nx:///whole.nx", identity: "whole.nx", source: "type Dot = { count:int = 3 }\nlet dot = <Dot count=3 />\n" }]));
+    const { edits, lives } = events(whole);
+    scrub(lead(whole, "dot.value.count"), [4, 7], { altKey: true });
+    assert.deepEqual(lives.map((live) => (live.edit as { value: { text: string } }).value.text), ["4", "5"]);
+    assert.deepEqual(edits, [{ key: "dot.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
   });
 
   it("focuses the field on a press that moves less than four pixels", async () => {
@@ -1284,7 +1292,7 @@ describe("scrubbing", () => {
     const element = show(await fixture("adding"));
     const { edits, lives } = events(element);
     scrub(lead(element, "base.value.size"), [4, 7, 10], { cancel: true });
-    assert.equal(lives.length, 2);
+    assert.equal(lives.length, 3);
     assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }], "the live edits end");
     assert.equal(rendered(element, "base.value.size.value").textContent, "16");
   });
@@ -1292,7 +1300,7 @@ describe("scrubbing", () => {
   it("scrubs an unset number from its default, adding it", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
-    scrub(unset(element, "latte.value").find((row) => row.dataset["name"] === "shots")!.querySelector(".field-lead")!, [4, 7]);
+    scrub(unset(element, "latte.value").find((row) => row.dataset["name"] === "shots")!.querySelector(".field-lead")!, [4, 5]);
     assert.deepEqual(edits, [{ key: "latte.value", edit: { kind: "addProperty", name: "shots", value: { kind: "number", text: "2" } } }]);
   });
 
@@ -1300,7 +1308,7 @@ describe("scrubbing", () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     rendered(element, "card.value.count.value").click();
-    scrub(lead(element, "card.value.count"), [4, 7, 10]);
+    scrub(lead(element, "card.value.count"), [4, 7]);
     assert.equal(field(element)!.textContent, "4");
     assert.deepEqual(edits, []);
     press(field(element)!, "Enter");
@@ -1601,7 +1609,7 @@ describe("value constraints", () => {
     assert.deepEqual(targets.get("paint.value.opacity.value")?.hints, { min: 0, max: 1, step: 0.1 });
     assert.deepEqual(targets.get("paint.value.layer.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
     assert.deepEqual(targets.get("paint.value.weight.value")?.hints, { min: 0, minExclusive: true });
-    assert.deepEqual(targets.get("paint.value.columns.value")?.hints, { min: 1, max: 12 }, "an integer steps by one");
+    assert.deepEqual(targets.get("paint.value.columns.value")?.hints, { min: 1, max: 12, integer: true }, "an integer steps by one");
     assert.deepEqual(targets.get("half.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
     assert.deepEqual(
       targets.get("paint.value.dim.value")?.hints,
@@ -1613,7 +1621,7 @@ describe("value constraints", () => {
     assert.deepEqual(targets.get("paint.value.upper.value")?.hints, { min: 0, max: 1, step: 0.1 });
     const extra = unwrittenProperties(index, index.byKey.get("paint.value")!).find((entry) => entry.property.name === "extra");
     assert.equal(extra?.editor?.kind, "number");
-    assert.deepEqual(extra?.hints, { min: 1, max: 10 });
+    assert.deepEqual(extra?.hints, { min: 1, max: 10, integer: true });
   });
 
   it("steps up to an inclusive end and stays there", async () => {

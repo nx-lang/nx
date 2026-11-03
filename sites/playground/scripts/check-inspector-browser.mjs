@@ -97,7 +97,8 @@ try {
 
   // Keyboard: the selected row's pin is a Tab stop with a visible focus ring.
   await head(circle).locator(".sheet-kind").click();
-  await head(circle).locator(".row-pin").focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await head(circle).locator(".row-pin").evaluate((button) => button.getRootNode().activeElement === button), true, "Tab reaches the pin");
   await page.keyboard.press("Space");
   assert.equal(await head(circle).locator(".row-pin").getAttribute("aria-pressed"), "true");
   assert.equal(await head(circle).locator(".row-pin").evaluate((button) => getComputedStyle(button).outlineStyle), "solid");

@@ -305,17 +305,17 @@ The host asks its language service for the text edits, applies them to its own t
 joins its editor's undo history, and sets the new text and tree. Until it does, the edited value
 reads muted; a host that sets the same tree again, as after a refused edit, has it read as before.
 
-While a value is still changing, as with a stepper, the arrows, dragging a stepper, the color picker or a
+While a value is still changing, as with the arrows, scrubbing a number's lead, the color picker or a
 pause of 300 ms in typing, `nx-edit` fires with `live: true` on each change, for the host to show at
 once, outside its undo history. Each live value replaces the one before, and the change ends with an
-edit without `live`: the value committed (Enter, leaving the field, closing the popover, or 500 ms after
-the last stepper click on a closed field) or, when it is cancelled with Escape, the value it began from.
+edit without `live`: the value committed (Enter, leaving the field, closing the popover, or releasing a
+scrub) or, when it is cancelled with Escape, the value it began from.
 A host that ignores live edits sees only the commits, as before.
 
 | Value                                              | Editor                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------- |
 | A string, `uitext` or an id                        | A field in the value's place, holding it without quotes or escapes |
-| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; its steppers step on a click and change it as they are dragged up or down, committed once on release |
+| An `int`, `float32` or `float64`, or an alias of one | A number field: the up and down arrows step by 1, Shift by 10; dragging the field's lead sideways scrubs it, committed once on release |
 | A boolean                                          | Toggles: a click on its mark, or Space                         |
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
@@ -326,7 +326,7 @@ Editor hints from the tree's visualizers shape the editors:
 | Hint                                         | Editor                                                     |
 | -------------------------------------------- | ---------------------------------------------------------- |
 | `editor=field`                               | The number field every number has                          |
-| `min`, `max`, `step`                         | Arrows, steppers and dragging stay in the range and step by `step`; a typed number outside it stays in the field with a note, as `At most 64` |
+| `min`, `max`, `step`                         | Arrows and scrubbing stay in the range and step by `step`; a typed number outside it stays in the field with a note, as `At most 64` |
 | `ValueChoice` content (`choices`)            | A list under a number's or a string's field: each choice's label, then its value, quieter, or the value alone when none has a label; the default's row, `Default 16`, leads it |
 | `editor=segmented`                           | A case's popover shows the cases as one row of buttons, or the list past five cases or when they do not fit |
 | `multiline`                                  | Enter breaks the line, and Ctrl or Cmd+Enter commits      |
@@ -345,25 +345,16 @@ suggestion, and any entry the field takes commits. A choice the field would refu
 `max`, stays in the field with the field's note. A color's choices lead its popover, over its hex
 field.
 
-A number shows steppers, an up and a down button drawn just past the value so nothing moves, while
-its field is open and while its property is selected; the pointer over a value shows no tools, so
-nothing moves as it passes. A click steps once, Shift+click ten steps, within the range: into the open field, or committed at once.
-A press that moves less than six pixels is still a click. Pressing a stepper and dragging further up
-or down scrubs the number, a step every four pixels, shown in place: on release it goes into the open
-field, or is committed once. A stepper keeps the usual cursor until it is dragged. Their tooltip names
-the keys that do the same.
-
-On a one-line element, or a group's header, the steppers and the chevron would cover the next
-property, so where more of the line follows the value, its closing `/>` included, they take room in
-the line while shown, pushing the rest right until they go. In a sheet's
-row, or at the end of a line, they are drawn over the gap and nothing moves, and so they are where
-taking room would wrap a line that only just fits. An unset property's row moves its quiet `default`
-aside. They stay with the selection through a redrawn reading, so the next click steps again, and a
-case's chevron stays after it closes its popover.
+In an inspector, pressing a number field's lead (its icon, short label or caption) and dragging left
+or right scrubs the number: a step for every three pixels from the press, ten with Shift, a tenth with
+Alt (never below one for a whole number), within the range. The pointer reads as a horizontal resize
+there. Each new value goes live, and release commits once, as one undo step; a press that moves less
+than four pixels focuses the field instead. On touch, a sideways drag on the lead scrubs and a tap
+focuses. A case's chevron and a value's choices chevron sit inside the field, so nothing moves.
 
 Only whole values edit: an attribute's value, an item of a braced list, or the value of a `let`
 with no parameters. A click on a value edits it, as a form's field does, and selects its property,
-so its steppers, chevron and `⋯` stay once the editor closes: a field opens with the
+so its chevron and `⋯` stay once the editor closes: a field opens with the
 caret where the click fell, a boolean toggles, and a case or a color opens its popover. A selected case shows a
 chevron past it, drawn and placed as a value's choices chevron is, room on a line included; a click
 on it opens the popover, or closes it. A click on
@@ -380,7 +371,7 @@ backslash they stand for; a string drawn as code, between its own quotes, reads 
 On a selected row whose property has a default or is optional, Delete, or Cmd+Backspace (a Mac
 laptop's delete key), fires `nx-edit` with `{ kind: "remove" }` for the attribute, and the element it
 was on is selected. Backspace alone does not, since a reader who meant to change the text would
-press it. A written row shows a quiet `⋯` just past its value (and past its steppers or chevron) under the pointer and when selected; it opens a
+press it. A written row shows a quiet `⋯` just past its value (and past its chevron) under the pointer and when selected; it opens a
 menu, as do the context menu key and Shift+F10, offering Reset to default for a property with a
 default (with the default, quieter, as `Reset to default  8`), Remove for an optional one, and Show in Source, which fires `nx-open` with the row's value.
 A property written on a line has the same menu: a click on its name selects it, and its `⋯` shows
@@ -421,18 +412,13 @@ other lists' moves and deletes wait, so a host sets the tree again after an edit
 tree, as Alt+Down held, fire edits keyed as the text will be once the ones before are made, so a host
 that applies edits in order makes them all.
 
-A selected element ends with a quiet row, `Show N unset properties` (`Hide unset properties` while
-open), N being the properties it does not write; one
-written under a property-list `if` or match counts as written, and an element of a union's case
-offers its case's properties. A
-click on it, or Enter, lists them as dimmed rows in its visualizer's order, else declaration order,
-each with its default and a quiet `default`, or an optional one's type, quieter, in a place wide
-enough to click and type in, and a filter field past twelve. Under a one-line element the rows start
-where the element does. A dimmed row edits as a
-written value does, opening on its default; a commit fires `nx-edit` with the element's key and
-`{ kind: "addProperty", name, value }`, and the row reads as written until the host's tree. A
-property no editor takes, such as a record, fires `nx-open` with the element's key on Enter or a
-double-click. Escape, or selecting another unit, closes the list.
+An inspector lists the properties its element does not write as dashed fields among the written
+ones, in their groups, each with its default or an optional one's type, quieter; one written under a
+property-list `if` or match counts as written, and an element of a union's case offers its case's
+properties. An unset field edits as a written value does, opening on its default; a commit fires
+`nx-edit` with the element's key and `{ kind: "addProperty", name, value }`, and the field reads as
+written until the host's tree. A property no editor takes, such as a record, fires `nx-open` with the
+element's key on Enter or a double-click.
 
 Enter or a double-click on a value the reading cannot edit, such as an expression or a reference to
 a named value, fires `nx-open` with the node's `{ key, role, range }`, for the

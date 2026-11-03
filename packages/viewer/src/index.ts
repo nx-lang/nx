@@ -89,7 +89,7 @@ export interface NxEditDetail {
   readonly key: string;
   readonly edit: SourceEdit;
   /**
-   * Set on a value the reader is still changing, as a stepper, the color picker or a pause in typing
+   * Set on a value the reader is still changing, as scrubbing, the color picker or a pause in typing
    * gives it: shown at once, replaced by the next value, and ended by an edit without `live`, the
    * value committed or, when the change is cancelled, the value it began from.
    */
@@ -278,8 +278,6 @@ interface Live {
   last: string | undefined;
   /** A value waiting for typing to pause. */
   timer: ReturnType<typeof setTimeout> | undefined;
-  /** The commit of stepper clicks made with the field closed, once the reader pauses. */
-  settle: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** How long typing pauses before its entry goes live. */
@@ -488,17 +486,22 @@ export class NxViewerElement extends ElementBase {
     const onLead =
       session?.field !== undefined &&
       event.composedPath().some((node) => (node as Element).classList?.contains("field-lead") === true && (node as Element).parentElement?.contains(session.span) === true);
-    // A press elsewhere settles an open field first, and one holding an invalid entry keeps the press
-    // from choosing anything, so the inspector holding it stays open.
+    // A press elsewhere settles an open field first. In the viewer, one holding an invalid entry keeps
+    // the press from choosing anything, so the inspector holding it stays open; outside it, the press
+    // goes on and the entry is dropped, as leaving the field does.
     if (session?.field !== undefined && !onLead && !event.composedPath().includes(session.field) && !event.composedPath().includes(this.#tools)) {
-      if (!this.finishEditing()) {
+      if (!event.composedPath().includes(this)) {
+        if (!session.closed) {
+          this.#finishField(session, "blur");
+        }
+      } else if (!this.finishEditing()) {
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
     }
     this.#closedOnPress = undefined;
-    // Stepper clicks made with the field closed are committed by a press anywhere but the tools, as
+    // A value still going live with no field open is committed by a press anywhere but the tools, as
     // on the host's Undo, which then takes back the whole change.
     if (session === undefined && this.#live !== undefined && !event.composedPath().includes(this.#tools)) {
       this.#settleLive();
@@ -1583,6 +1586,10 @@ export class NxViewerElement extends ElementBase {
       if (before.size !== after.size || [...before].some((value) => !after.has(value))) {
         if (!this.finishEditing()) {
           this.#detailsState = priorState;
+          // A host's selection the viewer refuses is answered with the one it keeps, so the two agree.
+          if (!fire) {
+            this.#announceSelection();
+          }
           return;
         }
         const drawn = key === undefined ? undefined : this.#rendered.get(key);
@@ -1663,7 +1670,12 @@ export class NxViewerElement extends ElementBase {
     original?.setAttribute("aria-current", "true");
     if (original?.matches(".row-element") === true) {
       original.setAttribute("aria-selected", "true");
-      original.querySelector<HTMLElement>(":scope > .row-head > .row-pin")!.tabIndex = 0;
+    }
+    // The pin of the row the selection is in, the row itself or a field of its inspector, is a stop.
+    const row = original?.closest<HTMLElement>(".row-element");
+    const pin = row?.querySelector<HTMLElement>(":scope > .row-head > .row-pin");
+    if (pin !== null && pin !== undefined) {
+      pin.tabIndex = 0;
     }
     // The menu mark of an item sharing its line stands apart from it, at the end of its row.
     for (const mark of this.#body.querySelectorAll<HTMLElement>(".row-menu.shared")) {
@@ -1682,6 +1694,18 @@ export class NxViewerElement extends ElementBase {
     } else if (reveal) {
       original?.scrollIntoView?.({ block: "nearest" });
     }
+  }
+
+  /** Fires `nx-select` for what is selected now. */
+  #announceSelection(): void {
+    const key = this.#selection;
+    const at = key === undefined ? undefined : this.#index?.byKey.get(key);
+    if (key === undefined || at === undefined) {
+      return;
+    }
+    const node = nodeOf(this.#index!, at);
+    const detail: NxSelectDetail = { key, role: node.role, range: node.range };
+    this.dispatchEvent(new CustomEvent(NX_SELECT_EVENT, { detail, bubbles: true, composed: true }));
   }
 
   // ---- Editing ----------------------------------------------------------------------------
@@ -1902,7 +1926,7 @@ export class NxViewerElement extends ElementBase {
       if (value === this.#currentOf(target)) {
         return;
       }
-      live = { target, key: this.#editKeyOf(target), from: this.#currentOf(target), last: undefined, timer: undefined, settle: undefined };
+      live = { target, key: this.#editKeyOf(target), from: this.#currentOf(target), last: undefined, timer: undefined };
       this.#live = live;
     }
     const going = live;
@@ -1935,7 +1959,6 @@ export class NxViewerElement extends ElementBase {
     }
     this.#live = undefined;
     clearTimeout(live.timer);
-    clearTimeout(live.settle);
     if (live.last !== undefined) {
       this.#fire(NX_EDIT_EVENT, { key: live.key, edit: editOf(live.target, live.from) });
     }
@@ -1948,7 +1971,6 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     clearTimeout(live.timer);
-    clearTimeout(live.settle);
     if (live.last === undefined) {
       this.#live = undefined;
       return;
@@ -2113,9 +2135,13 @@ export class NxViewerElement extends ElementBase {
         this.#paintHighlights();
       }
     });
-    field.addEventListener("blur", () => {
+    field.addEventListener("blur", (event) => {
       if (!session.closed) {
-        this.#finishField(session, "key");
+        // Focus moving out of the viewer drops an entry it cannot take; focus moving within it, or
+        // leaving the window, keeps that entry open with its note.
+        const to = event.relatedTarget as Node | null;
+        const outside = to !== null && to !== this && !this.contains(to) && !this.#body.contains(to);
+        this.#finishField(session, outside ? "blur" : "key");
       }
     });
     this.#validate(session);
@@ -2415,8 +2441,7 @@ export class NxViewerElement extends ElementBase {
       }
       this.#live = undefined;
       clearTimeout(live.timer);
-      clearTimeout(live.settle);
-      this.#pending.set(target.key, value);
+        this.#pending.set(target.key, value);
       const span = this.#rendered.get(target.key);
       if (span !== undefined) {
         showValue(span, target, this.#writtenOf(target), value);
@@ -3469,7 +3494,7 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Shows the tools where they rest with no editor open: past the selected property's value, or
-   * nowhere. An editor open or a stepper pressed keeps the tools it has.
+   * nowhere. An editor open keeps the tools it has.
    */
   #restTools(): void {
     if (this.#session !== undefined || this.#scrub !== undefined) {
@@ -3608,15 +3633,16 @@ export class NxViewerElement extends ElementBase {
       if (Math.abs(event.clientX - scrub.x) < SCRUB_SLOP) {
         return true;
       }
-      // The drag counts from here, so it starts at the number pressed rather than a step on.
-      scrub.x = event.clientX;
       this.#body.classList.add("scrubbing");
     }
     const target = scrub.target;
+    // Steps count from the press, so a drag of 30 pixels is ten steps.
     const steps = Math.trunc((event.clientX - scrub.x) / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
     const step = target.hints?.step !== undefined && target.hints.step > 0 ? target.hints.step : 1;
-    const hints = event.altKey ? { ...target.hints, step: step / 10 } : target.hints;
-    const value = stepNumber(scrub.from, steps, target.signed !== false, hints) ?? scrub.from;
+    // Alt steps a tenth as far, though never below one for a whole number.
+    const fine = target.hints?.integer === true ? Math.max(1, Math.round(step / 10)) : step / 10;
+    const hints = event.altKey ? { ...target.hints, step: fine } : target.hints;
+    const value = steps === 0 ? scrub.from : stepNumber(scrub.from, steps, target.signed !== false, hints) ?? scrub.from;
     if (value !== scrub.value) {
       scrub.value = value;
       this.#showStepped(target, value);
@@ -4250,17 +4276,51 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /** Goes into `inspector`: opens the first value it can edit, or else selects its first field. */
+  #enterInspector(inspector: HTMLElement): boolean {
+    const value = this.#editable ? inspector.querySelector<HTMLElement>(".editable-value[data-key]") : null;
+    const first = inspector.querySelector<HTMLElement>(".sheet-row[data-key]");
+    if (value !== null) {
+      this.#openEditor(keyOf(value)!);
+      return true;
+    }
+    if (first !== null) {
+      this.#select(keyOf(first), true);
+      this.#body.focus({ preventScroll: true });
+      return true;
+    }
+    return false;
+  }
+
   #onKeyDown(event: KeyboardEvent): void {
     const target = event.target as Element;
     if (!this.#body.contains(target)) {
       return;
     }
-    if (target.closest("button") !== null) { return; }
-    // The host's undo and redo, pressed in the reading, see stepper clicks still settling committed.
+    const button = target.closest("button");
+    if (button !== null) {
+      // Up and Down on a focused button walk the rows, as they do from the reading.
+      if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        this.#body.focus({ preventScroll: true });
+        this.#stepUnit(event.key === "ArrowDown" ? "next" : "previous");
+        return;
+      }
+      // Tab from a pin goes into its open inspector.
+      if (event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && button.matches(".row-pin")) {
+        const row = button.closest<HTMLElement>(".row-element");
+        const inspector = row?.querySelector<HTMLElement>(":scope > .inspector") ?? null;
+        if (inspector !== null && this.#enterInspector(inspector)) {
+          event.preventDefault();
+        }
+      }
+      return;
+    }
+    // The host's undo and redo, pressed in the reading, see a value still going live committed.
     if (this.#session === undefined && this.#live !== undefined && (event.ctrlKey || event.metaKey) && /^[zy]$/i.test(event.key)) {
       this.#settleLive();
     }
-    const more = target.closest?.(".more, .more-block") as HTMLElement | null | undefined;
+    const more = target.closest?.(".more") as HTMLElement | null | undefined;
     if (more !== null && more !== undefined) {
       this.#onMoreKey(event, target as HTMLElement);
       return;
@@ -4311,22 +4371,20 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    // Tab from a selected row goes into its open inspector: the first value it can edit, or else its
-    // first field.
+    // Tab from a selected row goes to its pin, the row's own stop, and from there into its open
+    // inspector; a row without a pin goes straight into the inspector.
     if (event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && target === this.#body && this.#selection !== undefined) {
-      const inspector = this.#rendered.get(this.#selection)?.matches(".row-element") === true
-        ? this.#rendered.get(this.#selection)!.querySelector<HTMLElement>(":scope > .inspector")
-        : null;
-      if (inspector !== null) {
-        const value = this.#editable ? inspector.querySelector<HTMLElement>(".editable-value[data-key]") : null;
-        const first = inspector.querySelector<HTMLElement>(".sheet-row[data-key]");
-        if (value !== null || first !== null) {
+      const row = this.#rendered.get(this.#selection);
+      if (row?.matches(".row-element") === true) {
+        const pin = row.querySelector<HTMLElement>(":scope > .row-head > .row-pin");
+        const inspector = row.querySelector<HTMLElement>(":scope > .inspector");
+        if (pin !== null) {
           event.preventDefault();
-          if (value !== null) {
-            this.#openEditor(keyOf(value)!);
-          } else {
-            this.#select(keyOf(first!), true);
-          }
+          pin.focus();
+          return;
+        }
+        if (inspector !== null && this.#enterInspector(inspector)) {
+          event.preventDefault();
           return;
         }
       }

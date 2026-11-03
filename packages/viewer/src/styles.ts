@@ -672,17 +672,8 @@ export const styles = `
   color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
   pointer-events: none;
 }
-/* What a selected element does not write: a quiet row that opens a dimmed row to each property. */
+/* What an element does not write: an unset field in its inspector. */
 .source .more { font-weight: 400; }
-.source .more-toggle { cursor: pointer; user-select: none; outline: none; }
-.source .more-toggle > .more-label {
-  grid-column: 1 / -1;
-  color: var(--nx-viewer-more-color, light-dark(#6e7781, #8b949e));
-  font-family: var(--nx-viewer-prose-font-family, inherit);
-  font-size: 0.92em;
-}
-.source .more-toggle:hover > .more-label, .source .more-toggle:focus-visible > .more-label { color: var(--nx-viewer-foreground, CanvasText); }
-.source .more-toggle:focus-visible > .more-label { text-decoration: underline; }
 .source .dimmed-row { opacity: var(--nx-viewer-dimmed-opacity, 0.55); outline: none; }
 /* A row being set reads at full strength, its field as any other. */
 .source .dimmed-row:has(.field) { opacity: 1; }
@@ -716,28 +707,6 @@ export const styles = `
 }
 /* An empty field still reads as one, with room for the caret. */
 .source .field:empty { display: inline-block; min-width: 1ch; min-height: 1lh; vertical-align: top; }
-.source .more-filter-row > .more-filter {
-  grid-column: 1 / -1;
-  width: min(24ch, 100%);
-  margin: 1px 0;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 4px;
-  outline: none;
-  font: inherit;
-  color: inherit;
-  background: light-dark(#0000000a, #ffffff0f);
-}
-.source .more-filter-row > .more-filter:focus-visible { box-shadow: 0 0 0 1px var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
-/* Under a line, the list sets out as a group's rows do, from where the line's indentation ends. */
-.source .more-block {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 2ch;
-  justify-content: start;
-  padding-left: calc(var(--more-indent, 0) * 1ch);
-  white-space: pre;
-}
 /* A written row's menu: a quiet mark just past its value, or past the tools drawn there, under the
    pointer and when selected, from a point that takes no room, so it moves nothing. */
 .source .sheet-row[data-key] { position: relative; }

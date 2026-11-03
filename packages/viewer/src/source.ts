@@ -986,6 +986,19 @@ export function renderSource(
       .slice(0, DEFAULT_SUMMARY_LENGTH);
   };
 
+  /** The one attribute `at` writes, when it writes just one, on one line and not an element. */
+  const soleSetting = (at: number): number | undefined => {
+    const written = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && !isContent(child));
+    if (written.length !== 1) {
+      return undefined;
+    }
+    const value = soleValue(written[0]!);
+    if (value === undefined || tree.nodes[value]!.role === "element" || !onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!))) {
+      return undefined;
+    }
+    return written[0];
+  };
+
   /** One item of a row's summary: the property's lead and a copy of its value, as its field reads. */
   const summaryItem = (attribute: number, presentation: Presentation): HTMLElement => {
     const item = document.createElement("span");
@@ -1010,8 +1023,12 @@ export function renderSource(
     const value = document.createElement("span");
     value.className = "summary-value";
     const at = soleValue(attribute);
-    if (at !== undefined && tree.nodes[at]!.role === "element") {
-      // An element value reads by its kind, as its field does when folded.
+    const only = at !== undefined && tree.nodes[at]!.role === "element" ? soleSetting(at) : undefined;
+    if (only !== undefined) {
+      // An element value that sets one thing, as a paint its color, reads as that value.
+      writeValue(value, only);
+    } else if (at !== undefined && tree.nodes[at]!.role === "element") {
+      // Any other element value reads by its kind, as its field does when folded.
       value.textContent = tree.nodes[at]!.name ?? "";
     } else {
       writeValue(value, attribute);
