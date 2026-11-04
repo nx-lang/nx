@@ -4136,6 +4136,10 @@ export class NxViewerElement extends ElementBase {
       }
       item("open", "Show in Source");
     } else {
+      const goal = this.#referenceGoal(at);
+      if (goal !== undefined) {
+        item("goto", `Go to ${goal.name}`);
+      }
       const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
       if (removal === "reset") {
         item("remove", "Reset to default", this.#defaultShownFor(at));
@@ -4214,6 +4218,35 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /**
+   * Where a property whose value is a reference to a top-level `let` leads: the `let`'s key, its
+   * value's where the reading draws that, and its name; nothing for any other value.
+   */
+  #referenceGoal(at: number): { readonly key: string; readonly name: string } | undefined {
+    const tree = this.#index!.tree;
+    const attribute = tree.nodes[at]!;
+    if (attribute.role !== "attribute") {
+      return undefined;
+    }
+    const values = this.#index!.children[at] ?? [];
+    const value = values.length === 1 ? tree.nodes[values[0]!]! : undefined;
+    if (value?.role !== "reference" || value.name === undefined) {
+      return undefined;
+    }
+    const declaration = tree.nodes.find((node) => node.role === "declaration" && node.parent === undefined && node.name === value.name);
+    if (declaration === undefined) {
+      return undefined;
+    }
+    const drawn = (key: string): boolean => this.#drawnAt(key) !== undefined;
+    const key = drawn(`${declaration.key}.value`) ? `${declaration.key}.value` : declaration.key;
+    return drawn(key) ? { key, name: value.name } : undefined;
+  }
+
+  /** The element the reading draws the node with `key` as, if it draws it. */
+  #drawnAt(key: string): HTMLElement | undefined {
+    return [...this.#body.querySelectorAll<HTMLElement>("[data-key]")].find((element) => element.dataset["key"] === key);
+  }
+
   /** Does what the menu's `item` says to its row, and closes the menu. */
   #chooseMenuItem(item: HTMLElement): void {
     const key = this.#menuKey;
@@ -4238,6 +4271,15 @@ export class NxViewerElement extends ElementBase {
       case "delete":
         this.#removeItem(key);
         break;
+      case "goto": {
+        const at = this.#index?.byKey.get(key);
+        const goal = at === undefined ? undefined : this.#referenceGoal(at);
+        if (goal !== undefined) {
+          this.#select(goal.key, true);
+          this.#drawnAt(goal.key)?.scrollIntoView?.({ block: "nearest" });
+        }
+        break;
+      }
       case "open": {
         const at = this.#index?.byKey.get(key);
         if (at !== undefined) {

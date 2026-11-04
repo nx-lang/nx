@@ -107,7 +107,9 @@ rest in their places as dashed values with their default, and `Hide unset` hides
 the inspector next closes. Booleans read as checkboxes. A short element value, such as
 `<Rect x=0 y=0 width=400 height=240/>`, reads its properties on its label's line as
 `X 0  Y 0  Width 400  Height 240`, each edited there, with no kind where its property's type implies it;
-a visualizer's `inline=true` or `inline=false` decides instead. Element values unfold in place, under
+a visualizer's `inline=true` or `inline=false` decides instead. A value written in braces keeps them,
+quiet, so `{width / 2}` reads as computed; a reference to a color, as `{blue}`, leads with its swatch,
+and its `⋯` menu's Go to selects the `let` it names. Element values unfold in place, under
 their label. Dragging a number field's label scrubs its value: Shift steps ten
 times faster, Alt ten times finer, and the change commits once, as one undo step.
 

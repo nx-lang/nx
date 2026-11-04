@@ -338,6 +338,33 @@ describe("inspectors", () => {
     assert.deepEqual(edits, [{ key: "panel.value.badge.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "4" } } }]);
   });
 
+  it("keeps the braces source writes around an expression, quiet, and around a reference", async () => {
+    const source = ["type Box = { w:int name:string label?:string }", 'let title = "Hi"', 'let box = <Box w={1 + 2} name={ title } label="plain" />', ""].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///box.nx", identity: "box.nx", source }], { visualizers: { modules: [] } }));
+    element.selection = "box.value";
+    const cell = (name: string) => drawn(element, `box.value.${name}`).querySelector<HTMLElement>(":scope > .sheet-value")!;
+    assert.equal(cell("w").textContent, "{1 + 2}");
+    assert.equal(cell("name").textContent, "{title}", "the spaces inside go");
+    assert.equal(cell("label").textContent, "plain", "a literal has none");
+    assert.deepEqual([...cell("w").querySelectorAll(".value-brace")].map((brace) => brace.classList.contains("block-brace")), [true, true]);
+  });
+
+  it("leads a reference to a color with its swatch, and its menu goes to the let it names", async () => {
+    const source = ["type Tag = { name:string tint?:color }", "let blue = #2563eb", 'let tag = <Tag name="t" tint={blue} />', ""].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///tag.nx", identity: "tag.nx", source }], { visualizers: { modules: [] } }), true);
+    element.selection = "tag.value";
+    const tint = drawn(element, "tag.value.tint");
+    const cell = tint.querySelector<HTMLElement>(":scope > .sheet-value")!;
+    assert.ok(cell.firstElementChild!.matches(".swatch"), "the swatch comes first, before the brace");
+    assert.equal([...cell.childNodes].filter((node) => !(node as Element).matches?.(".row-anchor")).map((node) => node.textContent).join(""), "{blue}");
+    element.selection = "tag.value.tint";
+    drawn(element, "tag.value.tint").querySelector<HTMLElement>(":scope > * > .row-anchor > .row-menu")!.click();
+    const items = [...element.shadowRoot!.querySelectorAll<HTMLElement>(".menu-item")];
+    assert.deepEqual(items.map((item) => item.querySelector(".menu-label")!.textContent), ["Go to blue", "Remove", "Show in Source"]);
+    items[0]!.click();
+    assert.match(element.selection ?? "", /^blue/);
+  });
+
   it("keeps an element value folded when it is not short, or its visualizer says so", async () => {
     const source = [
       'import "@nx/visualizer"',

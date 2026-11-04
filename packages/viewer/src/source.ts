@@ -832,7 +832,86 @@ export function renderSource(
       cell.append(list);
       return;
     }
+    // An expression keeps the braces source writes around it, quiet, so it reads as computed.
+    const open = braceAround(attribute, start, -1);
+    const close = braceAround(attribute, end, 1);
+    if (open === undefined || close === undefined) {
+      writeNodes(cell, [at], start, end);
+      return;
+    }
+    const brace = (from: number): HTMLElement => {
+      const mark = document.createElement("span");
+      mark.className = "t block-brace value-brace";
+      mark.textContent = text[from]!;
+      return mark;
+    };
+    const opening = brace(open);
+    cell.append(opening);
     writeNodes(cell, [at], start, end);
+    cell.append(brace(close));
+    // A reference to a color leads with its swatch, before the brace, as a color literal does.
+    const named = value.role === "reference" ? referencedColor(value.name) : undefined;
+    if (named !== undefined) {
+      const square = document.createElement("span");
+      square.className = "swatch";
+      square.style.backgroundColor = named;
+      square.setAttribute("aria-hidden", "true");
+      if (square.style.backgroundColor !== "") {
+        cell.insertBefore(square, opening);
+      }
+    }
+  };
+
+  /**
+   * The color a top-level `let` named `name` holds: written as a color literal, or as an element
+   * one of whose properties is a color literal or a string its visualizer formats as a color.
+   */
+  const referencedColor = (name: string | undefined): string | undefined => {
+    const declaration = name === undefined ? -1 : tree.nodes.findIndex((node) => node.role === "declaration" && node.parent === undefined && node.name === name);
+    if (declaration < 0) {
+      return undefined;
+    }
+    const held = childrenOf(declaration).find((child) => tree.nodes[child]!.role === "literal" || tree.nodes[child]!.role === "element");
+    const colorOf = (at: number): string | undefined => {
+      const node = tree.nodes[at]!;
+      const raw = node.value ?? "";
+      if (node.color !== undefined) {
+        return node.color;
+      }
+      if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(raw)) {
+        return raw;
+      }
+      return formats.get(at) === "color" && raw.startsWith('"') ? raw.slice(1, -1).trim() : undefined;
+    };
+    if (held === undefined) {
+      return undefined;
+    }
+    if (tree.nodes[held]!.role === "literal") {
+      return colorOf(held);
+    }
+    for (const attribute of childrenOf(held)) {
+      const sole = soleValue(attribute);
+      const found = sole === undefined || tree.nodes[sole]!.role !== "literal" ? undefined : colorOf(sole);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return tree.nodes[held]!.color;
+  };
+
+  /**
+   * The offset of the brace source writes right before `from` (`step` -1) or at or after it (`step`
+   * 1), past spaces, inside the attribute at `attribute`, or nothing when there is none.
+   */
+  const braceAround = (attribute: number, from: number, step: -1 | 1): number | undefined => {
+    const node = tree.nodes[attribute]!;
+    const low = startOf(node);
+    const high = endOf(node);
+    let at = step < 0 ? from - 1 : from;
+    while (at >= low && at < high && /\s/.test(text[at]!)) {
+      at += step;
+    }
+    return at >= low && at < high && text[at] === (step < 0 ? "{" : "}") ? at : undefined;
   };
 
   /**

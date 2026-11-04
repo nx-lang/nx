@@ -35,3 +35,4 @@
 - [x] 4.7 Inspector shows what the element sets and its title; a last `Show N unset` line reveals the rest, `Hide unset` hides them, forgotten on close (Bret, 2026-11-04)
 - [x] 4.8 Colors in an inspector read in their parts, as in Figma (Bret, 2026-11-04): swatch, six-digit hex and opacity percent; the swatch opens the color picker, the hex and the opacity edit in place, dragging the `%` scrubs the opacity
 - [x] 4.9 Short element values read their set properties on their field's line, as editable, scrubbable fields; the kind their property's type implies is dropped; `ElementVisualizer inline=true|false` overrides (Bret, 2026-11-04)
+- [x] 4.10 Braced values keep their braces, quiet (Bret, 2026-11-04); a reference to a color leads with its swatch and its menu offers Go to, as the spec already said

@@ -205,9 +205,12 @@ label SHALL scrub and a tap SHALL focus the field.
   SHALL commit `outerRadius=46` on release
 
 ### Requirement: References and nested values read by what they name
-A property whose value is a reference to a top-level `let` SHALL read as a token with that name; when
+A value source writes in braces SHALL keep them, in the quiet color of an `if`'s braces and with the
+spaces inside them dropped, so that it reads as computed; a literal SHALL read without them. A
+property whose value is a reference to a top-level `let` SHALL read as a token with that name in its
+braces; when
 the `let` is written as a literal color, or as an element whose visualizer formats one property as a
-color, the token SHALL show that color's swatch. Opening the token SHALL offer Go to `blue` and
+color, the token SHALL show that color's swatch before its braces. Opening the token SHALL offer Go to `blue` and
 Show in Source. A property whose value is an element SHALL read as a field with the element's icon,
 kind and the value it is named by, and SHALL unfold into a nested group of that element's fields, edited the same
 way. A short element value SHALL instead read its set properties on its field's line, each its label
@@ -222,7 +225,13 @@ unfold it into the nested group, its kind in full, where the properties it does 
 
 #### Scenario: A shared paint
 - **WHEN** Star writes `fill={blue}` and `let blue: Paint = <Paint.color color=#2563eb/>`
-- **THEN** Star's `Fill` field SHALL read a `#2563eb` swatch and the token `blue`
+- **THEN** Star's `Fill` field SHALL read a `#2563eb` swatch and the token `{blue}`, and its `⋯`
+  menu's Go to `blue` SHALL select `blue`'s value
+
+#### Scenario: An expression keeps its braces
+- **WHEN** a Box writes `w={1 + 2}` and `label="plain"`
+- **THEN** its `W` field SHALL read `{1 + 2}`, its braces quiet and its tokens in their code colors,
+  and its `Label` field SHALL read `plain`
 
 #### Scenario: A short element value on its field's line
 - **WHEN** Drawing writes `viewBox=<Rect x=0 y=0 width=400 height=240/>` and
