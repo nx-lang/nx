@@ -304,6 +304,17 @@ export const styles = `
 .source .inline-props { display: inline-flex; flex-wrap: wrap; column-gap: 2ch; min-width: 0; }
 .source .inline-prop { display: inline-flex; align-items: baseline; gap: 0.8ch; white-space: nowrap; }
 .source .inline-prop > .field-lead.inline-label { font-size: inherit; }
+/* What an element's type is for, one quiet line over its inspector's fields, cut where it runs out. */
+.source .inspector > .inspector-doc {
+  display: block;
+  margin-bottom: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+}
 /* An id that names its element reads as the title does: plain, with no chip. */
 .source .row-title.row-id > .id-value { background: none; padding: 0; color: inherit; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
 .source .inspector.nested-inspector { margin: 2px 0 2px var(--inspector-inset, 0); padding: 0; }

@@ -36,3 +36,4 @@
 - [x] 4.8 Colors in an inspector read in their parts, as in Figma (Bret, 2026-11-04): swatch, six-digit hex and opacity percent; the swatch opens the color picker, the hex and the opacity edit in place, dragging the `%` scrubs the opacity
 - [x] 4.9 Short element values read their set properties on their field's line, as editable, scrubbable fields; the kind their property's type implies is dropped; `ElementVisualizer inline=true|false` overrides (Bret, 2026-11-04)
 - [x] 4.10 Braced values keep their braces, quiet (Bret, 2026-11-04); a reference to a color leads with its swatch and its menu offers Go to, as the spec already said
+- [x] 4.11 Quieter hover cards (Bret, 2026-11-04): first after 1 s, then at once while warm; none under a held button, after a press or a scroll until the pointer moves on; a row's card on its icon, not its name or value; the type's doc as a quiet line over the inspector; no browser tooltips that repeat a card

@@ -153,8 +153,17 @@ const SCRUB_STEP = 3;
 /** The tooltip of a value's choices chevron. */
 const CHOICES_TITLE = "Choices (Alt+\u2193)";
 
-/** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
-const CARD_DELAY = 500;
+/** How long the pointer rests on a name or a value before its first card opens, in milliseconds. */
+const CARD_DELAY = 1000;
+
+/**
+ * How long after a card was last shown the next opens at once, in milliseconds, as a design tool's
+ * tooltips do while the pointer moves from one to the next.
+ */
+const CARD_WARM = 1500;
+
+/** How long a card waits to open while the cards are warm, in milliseconds. */
+const CARD_WARM_DELAY = 80;
 
 /** How long a card stays once the pointer leaves it and what it describes, to reach it. */
 const CARD_GRACE = 300;
@@ -418,6 +427,13 @@ export class NxViewerElement extends ElementBase {
   #cardByKeyboard = false;
   #cardOpenTimer: ReturnType<typeof setTimeout> | undefined;
   #cardCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the cards cool, so the next card waits its full delay again. */
+  #cardWarmUntil = 0;
+  /**
+   * What the pointer was over when it pressed, scrolled or typed: it opens no card until the pointer
+   * moves onto something else.
+   */
+  #cardQuietKey: string | undefined;
   /** Whether the reader may edit values in place. */
   #editable = false;
   /** The values of the tree shown that the reading can edit, by key, while it may. */
@@ -481,7 +497,7 @@ export class NxViewerElement extends ElementBase {
   #problemTimer: ReturnType<typeof setTimeout> | undefined;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => {
-    this.#closeCard();
+    this.#quietCards();
   };
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
@@ -685,8 +701,10 @@ export class NxViewerElement extends ElementBase {
     // A focus ring is for a reader on the keyboard; after a click, the selection says where they are.
     this.#body.addEventListener("pointerdown", () => {
       this.#body.classList.add("by-pointer");
-      this.#closeCard();
+      this.#quietCards();
     });
+    // A wheel or a scroll moves the reading under the pointer: what passes under it is not hovered.
+    this.#body.addEventListener("wheel", () => this.#quietCards(), { passive: true });
     frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => {
@@ -695,7 +713,8 @@ export class NxViewerElement extends ElementBase {
         return;
       }
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
-      this.#point(this.#hoverTargetOf(event.target));
+      // A held button is a press or a drag on its way: what it passes over opens no card.
+      this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));
     });
     this.#body.addEventListener("pointerleave", () => {
       this.#setHoveredUnit(undefined);
@@ -4015,7 +4034,6 @@ export class NxViewerElement extends ElementBase {
       const value = lead.parentElement!.querySelector<HTMLElement>(":scope > .sheet-value > .editable-value");
       if (value !== null && this.#targets.get(keyOf(value)!)?.kind === "number") {
         lead.classList.add("scrubbable");
-        lead.title = `${lead.title}\nDrag sideways to change; Shift for 10 steps, Alt for a tenth`;
       }
     }
   }
@@ -4738,7 +4756,13 @@ export class NxViewerElement extends ElementBase {
     }
     this.#pointedKey = key;
     clearTimeout(this.#cardOpenTimer);
-    if (this.#session !== undefined) {
+    if (key !== this.#cardQuietKey) {
+      this.#cardQuietKey = undefined;
+    }
+    if (this.#session !== undefined || this.#cardQuietKey !== undefined) {
+      if (!this.#card.hidden && !this.#cardByKeyboard && key !== this.#cardKey) {
+        this.#closeCardSoon();
+      }
       return;
     }
     if (key !== undefined && key === this.#cardKey) {
@@ -4749,8 +4773,19 @@ export class NxViewerElement extends ElementBase {
       this.#closeCardSoon();
     }
     if (target !== undefined && key !== undefined) {
-      this.#cardOpenTimer = setTimeout(() => this.#openCard(key, target, false), CARD_DELAY);
+      const warm = !this.#card.hidden || Date.now() < this.#cardWarmUntil;
+      this.#cardOpenTimer = setTimeout(() => this.#openCard(key, target, false), warm ? CARD_WARM_DELAY : CARD_DELAY);
     }
+  }
+
+  /**
+   * Closes the card, and keeps one from opening for what the pointer is over until it moves onto
+   * something else: a press or a scroll means the reader is doing something, not asking what it is.
+   */
+  #quietCards(): void {
+    this.#closeCard();
+    this.#cardQuietKey = this.#pointedKey;
+    this.#cardWarmUntil = 0;
   }
 
   /**
@@ -4766,11 +4801,16 @@ export class NxViewerElement extends ElementBase {
     }
     clearTimeout(this.#cardCloseTimer);
     this.#fillCard(card);
-    if (anchor.classList.contains("drag-handle")) {
-      // The handle says what it does, quietly, after what the item is.
+    // A handle or a scrubbed label says what dragging it does, quietly, after what it is.
+    const hinted = anchor.classList.contains("drag-handle")
+      ? "Drag to reorder"
+      : anchor.classList.contains("scrubbable")
+        ? "Drag sideways to change; Shift for 10 steps, Alt for a tenth"
+        : undefined;
+    if (hinted !== undefined) {
       const hint = this.ownerDocument.createElement("div");
       hint.className = "card-hint";
-      hint.textContent = "Drag to reorder";
+      hint.textContent = hinted;
       this.#card.append(hint);
     }
     this.#cardKey = key;
@@ -4863,6 +4903,9 @@ export class NxViewerElement extends ElementBase {
 
   #hideCard(): void {
     clearTimeout(this.#cardCloseTimer);
+    if (this.#card !== undefined && !this.#card.hidden) {
+      this.#cardWarmUntil = Date.now() + CARD_WARM;
+    }
     this.#cardScroller?.removeEventListener("scroll", this.#onDocumentScroll);
     this.#cardScroller = undefined;
     this.#cardKey = undefined;

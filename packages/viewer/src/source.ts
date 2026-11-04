@@ -10,7 +10,7 @@ import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-l
 
 import { isComposition } from "./compact.js";
 import { isElementFunction, VALUE_ROLES } from "./card.js";
-import { isBooleanType, presentationOf, tooltipOf, type Presentation } from "./labels.js";
+import { isBooleanType, presentationOf, type Presentation } from "./labels.js";
 import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
 
 /** One colored range of the text, in UTF-16 offsets. Ranges are in text order and do not overlap. */
@@ -1019,12 +1019,11 @@ export function renderSource(
   };
 
   /**
-   * The lead of a property's field: its label, with the label and the name as source writes it as
-   * a tooltip.
+   * The lead of a property's field: its label. Its card, under a resting pointer, names the property
+   * as source writes it.
    */
   const leadOf = (presentation: Presentation): HTMLElement => {
     const lead = document.createElement("span");
-    lead.title = tooltipOf(presentation);
     lead.className = "field-lead lead-caption";
     lead.append(presentation.label);
     return lead;
@@ -1115,7 +1114,10 @@ export function renderSource(
     value.className = "row-title";
     // A click on it edits the property it shows, in the element's inspector.
     value.dataset["field"] = tree.nodes[shown]!.key;
-    hoverable(value, shown);
+    // On a row, what the pointer rests on to drag or select says nothing more; in a field, it does.
+    if (nested) {
+      hoverable(value, shown);
+    }
     if (shown === inline) {
       writeNodes(value, childrenOf(inline), ...itemsRange(inline));
     } else if (shown === title) {
@@ -1126,7 +1128,6 @@ export function renderSource(
     } else {
       writeValue(value, shown);
     }
-    value.title = tooltipOf(presentations(at)(tree.nodes[shown]!.name ?? ""));
     return unmarked(value);
   };
 
@@ -1138,7 +1139,6 @@ export function renderSource(
     hoverable(lead, attribute);
     const cell = document.createElement("span");
     cell.className = "sheet-value";
-    cell.title = tooltipOf(presentation);
     field.append(lead, cell);
     if (booleanOf(attribute) !== undefined) {
       // A checkbox beside its label.
@@ -1327,7 +1327,6 @@ export function renderSource(
       }
       const cell = document.createElement("span");
       cell.className = "sheet-value inline-value";
-      cell.title = tooltipOf(presentation);
       writeValue(cell, attribute);
       field.append(cell);
       properties.append(field);
@@ -1344,7 +1343,6 @@ export function renderSource(
     field.className = "sheet-row prop-field more dimmed-row";
     field.dataset["moreOf"] = key;
     field.dataset["name"] = presentation.name;
-    field.title = tooltipOf(presentation);
     const lead = leadOf(presentation);
     lead.classList.add("sheet-name");
     const cell = document.createElement("span");
@@ -1403,7 +1401,10 @@ export function renderSource(
     }
     const kind = document.createElement("span");
     kind.className = "sheet-kind";
-    hoverable(kind, at);
+    // The row's card is its icon's, so resting on its name to drag or select it opens nothing.
+    if (marker === undefined) {
+      hoverable(kind, at);
+    }
     writeText(kind, start + 1, nameEnd(text, node, start));
     head.append(kind);
     const value = headValue(at, false);
@@ -1434,13 +1435,22 @@ export function renderSource(
         hoverable(lead, inline);
         const cell = document.createElement("span");
         cell.className = "sheet-value held-text";
-        cell.title = tooltipOf(presentation);
         writeNodes(cell, childrenOf(inline), ...itemsRange(inline));
         field.append(lead, cell);
         inspector.querySelector(":scope > .inspector-fields")!.prepend(field);
       }
       // An element with no properties at all has nothing to inspect, so it takes no room.
       if (inspector.querySelector(":scope > .inspector-fields > *, :scope > .inspector-more") !== null) {
+        // What the element's type is for, in a quiet line over its fields, so it is found without
+        // a card; resting on it shows the whole doc.
+        const summary = docSummary(node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.doc);
+        if (summary !== undefined) {
+          const doc = document.createElement("span");
+          doc.className = "inspector-doc";
+          doc.textContent = summary;
+          hoverable(doc, at);
+          inspector.prepend(doc);
+        }
         row.append(inspector);
       }
     }
@@ -2310,4 +2320,18 @@ export function hexParts(hex: string): { readonly rgb: string; readonly alpha: s
   const rgb = alpha === "" ? hex : hex.slice(0, hex.length - alpha.length);
   const value = alpha === "" ? 255 : parseInt(alpha.length === 1 ? alpha + alpha : alpha, 16);
   return { rgb, alpha, percent: Math.round((value / 255) * 100) };
+}
+
+/**
+ * The first paragraph of a doc comment as plain words: its Markdown's links as their text, and its
+ * code and emphasis marks dropped; nothing for a doc with no words.
+ */
+export function docSummary(doc: string | undefined): string | undefined {
+  const first = (doc ?? "").trim().split(/\n\s*\n/)[0] ?? "";
+  const words = first
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words === "" ? undefined : words;
 }

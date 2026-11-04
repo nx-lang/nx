@@ -183,7 +183,7 @@ describe("rows", () => {
     const element = show(await panel());
     assert.equal(named(element, "panel.value.children[0]"), "Hello", "not its padding or tone");
     assert.equal(named(element, "panel.value.children[1]"), "Bye");
-    assert.equal(head(element, "panel.value.children[0]").querySelector<HTMLElement>(".row-title")!.title, "Title · title", "a tooltip with the label and the name as written");
+    assert.equal(head(element, "panel.value.children[0]").querySelector<HTMLElement>(".row-title")!.hasAttribute("title"), false, "no browser tooltip over a card's");
     for (const part of head(element, "panel.value.children[0]").querySelectorAll("[data-key]")) {
       assert.fail(`a row's value is a copy, without its keys: ${(part as HTMLElement).dataset["key"]}`);
     }
@@ -233,11 +233,11 @@ describe("inspectors", () => {
     const x = drawn(element, "panel.value.x");
     assert.deepEqual([...x.children].map((child) => child.className.split(" ")[0]), ["field-lead", "sheet-value"], "the label, then the value");
     assert.equal(x.querySelector(".field-lead")!.textContent, "X", "a label derived from its name");
-    assert.equal(x.querySelector<HTMLElement>(".field-lead")!.title, "X · x", "its tooltip names it as source writes it");
+    assert.equal(x.querySelector<HTMLElement>(".field-lead")!.hasAttribute("title"), false, "its card names it as source writes it, with no browser tooltip");
     const width = drawn(element, "panel.value.width");
     assert.equal(width.querySelector(".field-lead svg"), null, "a label alone, with no icon");
     assert.equal(width.querySelector(".field-lead")!.textContent, "Breadth");
-    assert.equal(width.querySelector<HTMLElement>(".field-lead")!.title, "Breadth · width");
+    assert.equal(width.querySelector<HTMLElement>(".field-lead")!.dataset["hover"], "panel.value.width", "its card names it as source writes it");
   });
 
   it("shows what an element sets, and a last line that reveals the rest as dashed fields", async () => {

@@ -96,7 +96,8 @@ edited in place SHALL select its property.
 Selecting a row, or any node inside its element's property values, SHALL open that element's
 inspector directly under its row; selecting another element SHALL close it unless it is pinned.
 Clicking the selected row again, or pressing Enter on it, SHALL close and reopen its inspector
-without changing the selection. The inspector SHALL lay its fields out in a grid of two columns
+without changing the selection. When the element's declaration has a doc, the inspector SHALL open
+with its first paragraph as one quiet line, as plain words, cut where it runs out. The inspector SHALL lay its fields out in a grid of two columns
 when the pane is wide enough and one when not, and its labels SHALL start under its row's kind,
 however deep the element is and whether or not it sits inside an `if` or a `for`. Opening or closing any inspector SHALL keep the row the
 reader acted on where it was on screen, where the scroll range allows; a selection made from
@@ -288,6 +289,89 @@ focus to its row. Opening, closing and pinning SHALL be announced briefly.
 - **THEN** both inspectors SHALL be open and the pin SHALL report pressed
 
 ## MODIFIED Requirements
+
+### Requirement: The reading shows hover cards
+The element SHALL show a card for what the pointer rests on, built from the source tree alone, in
+the form the editor's hover uses: a signature in NX, set in the reading's code face, then the doc
+comment, rendered from Markdown, in its prose face. It SHALL show:
+
+- over an element's icon, or its name where it has no icon, and over the line of doc its
+  inspector opens with: its declaration's signature (its kind, its name and the base it extends) and
+  the declaration's doc; over a row's name beside its icon, and over the value that names a row,
+  nothing, so that resting there to drag or select it opens nothing;
+- over a property's name, on a group's row or on a line: `(property) name: Type`, with `?` for an
+  optional property and ` = default` for one with a default, and the property's doc;
+- over a value the reading shows without its property's name in a field, as an element value's
+  title: that property's card;
+- over a union case written as a value, bare or qualified: `(case) Union.case` and the case's doc;
+- over a reference or a call written as a value: its name and type, and the doc of the declaration
+  it refers to when that has one;
+- nothing over a literal, a comment, punctuation, or anything for which the tree gives neither a
+  type nor a doc.
+
+The first card SHALL open after the pointer has rested for about a second; while a card is open, or
+for about a second and a half after one closed, the next SHALL open at once, as a design tool's
+tooltips do. No card SHALL open while a button is held, so none opens during a drag, nor for what
+the pointer was over when it pressed or when the reading scrolled, until it moves onto something
+else. A card SHALL stay open while the
+pointer moves from what it describes onto the card, so its text can be selected and its links
+followed, and SHALL close when the pointer leaves both, on a press, when the reading scrolls, when the reader
+presses Escape, or when the text or the tree changes. It SHALL NOT change the selection, the folds
+or the scroll position. With the reading focused, the `i` key SHALL show the card for the selected
+unit (the declaration of an element, the property of a row) and a screen reader SHALL hear its text.
+The card SHALL stay inside the element's box, below what it describes or above it where there is no
+room, never over it, and SHALL follow the page's light or dark scheme. What a card says SHALL NOT
+also show as the browser's tooltip.
+
+A doc's Markdown SHALL be rendered by the element's `markdown` function when the host sets one, and
+otherwise by a built-in renderer that SHALL create text and elements only, never parse HTML: it
+SHALL render paragraphs, inline and fenced code, emphasis, lists and links, a link only when its
+target is `http:` or `https:`, opening outside the page, and anything else, raw HTML included, as
+text.
+
+#### Scenario: An element's declaration
+- **WHEN** the pointer rests on the icon of `<Shape Type=Circle />`, whose component `Shape` extends
+  `Node` and is documented "A filled shape."
+- **THEN** a card SHALL open showing `component Shape extends Node` and `A filled shape.`
+
+#### Scenario: A property's type, default and doc
+- **WHEN** the pointer rests on `Type` in that element, and `Shape` declares
+  `Type:ShapeType = Rectangle` documented "What the shape draws."
+- **THEN** the card SHALL show `(property) Type: ShapeType = Rectangle` and `What the shape draws.`
+
+#### Scenario: A union case
+- **WHEN** the pointer rests on `Circle`, and the case `Circle` of `ShapeType` is documented
+  "Round."
+- **THEN** the card SHALL show `(case) ShapeType.Circle` and `Round.`
+
+#### Scenario: Nothing to say
+- **WHEN** the pointer rests on a string literal or on a comment
+- **THEN** no card SHALL open
+
+#### Scenario: Moving onto the card
+- **WHEN** a card is open and the pointer moves from the name onto the card, then off both
+- **THEN** the card SHALL stay open on the card, and close once the pointer has left both
+
+#### Scenario: From the keyboard
+- **WHEN** the reading is focused with a row `Type` selected and the reader presses `i`, then Escape
+- **THEN** the card for the property `Type` SHALL open and its text SHALL be announced, then it
+  SHALL close, the row still selected
+
+#### Scenario: A doc cannot inject markup
+- **WHEN** a declaration's doc holds `<img src=x onerror="alert(1)">` and a link to
+  `javascript:alert(1)`
+- **THEN** the card SHALL show the tag as text and the link's text without a link, and no script
+  SHALL run
+
+#### Scenario: A host's Markdown
+- **WHEN** the host sets `markdown` to a function and the pointer rests on a documented element
+- **THEN** the card SHALL show what that function returns for the doc
+
+#### Scenario: Cards wait, then follow the pointer, and keep out of a press
+- **WHEN** the pointer rests on the `Type` label for half a second, then presses there
+- **THEN** no card SHALL open, and none SHALL open for `Type` while the pointer stays on it
+- **WHEN** the pointer moves onto `Circle` and rests there for a second, then onto a label
+- **THEN** `Circle`'s card SHALL open, and the label's SHALL open at once after it
 
 ### Requirement: Values edit in place when the host allows it
 When the host sets `editable`, the element SHALL let the reader edit a value where it reads; otherwise

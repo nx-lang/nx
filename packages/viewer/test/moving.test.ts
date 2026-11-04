@@ -437,7 +437,7 @@ describe("moving and deleting in the reading", () => {
     const icon = root(element).querySelector<HTMLElement>('.element-icon.drag-handle[data-drag-key="flow.value.steps[1]"]')!;
     assert.ok(icon, "the icon is a handle");
     icon.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    t.mock.timers.tick(500);
+    t.mock.timers.tick(1000);
     const card = root(element).querySelector<HTMLElement>(".card")!;
     assert.equal(card.hidden, false);
     assert.equal(card.lastElementChild?.textContent, "Drag to reorder");

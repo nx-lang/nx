@@ -499,22 +499,26 @@ replace each other; one superseded before its turn is skipped, and an edit of an
 
 ## Hover cards
 
-Resting the pointer on a name or a value for half a second opens a card that says what it is, in the
+Resting the pointer on a name or a value for a second opens a card that says what it is, in the
 editor's hover's style, from the source tree alone, so a host wires nothing. It is shorter than the
 editor's where the reading shows the rest: a component reads as its name and base, not its tag with
 every property, and a property reads unqualified, with its default:
 
 | Under the pointer                                  | The card                                                 |
 | -------------------------------------------------- | -------------------------------------------------------- |
-| An element's name or icon                          | `component Shape extends Node` and the declaration's doc |
+| An element's icon (its name, with no icon), or its inspector's doc line | `component Shape extends Node` and the declaration's doc |
 | A property's name, on a row or a line              | `(property) Type: ShapeType = Rectangle` and its doc     |
-| An id or a title, shown without its property's name | That property's card                                    |
+| A title in a field, shown without its property's name | That property's card                                  |
 | A union case, bare or qualified                    | `(case) ShapeType.Circle` and the case's doc             |
 | A reference, a member or a call                    | `size: int`, or the function's `let twice(n:int): int`, and the doc of what it names |
 
-A literal, a comment, punctuation and a unit's room open nothing. The card stays while the pointer
+A literal, a comment, punctuation and a unit's room open nothing, and so do a row's name beside its
+icon and the value that names a row, so resting there to drag or select opens nothing. Once a card
+has shown, the next opens at once for a second and a half, as a design tool's tooltips do. None opens
+under a held button, as in a drag, nor for what the pointer pressed on or rested on as the reading
+scrolled, until it moves onto something else. The browser's own tooltips never repeat a card. The card stays while the pointer
 moves onto it, so its text can be selected and its links followed, and closes once the pointer has
-left both, when anything scrolls, on Escape, or when the text or the tree changes. It never moves the
+left both, on a press, when anything scrolls, on Escape, or when the text or the tree changes. It never moves the
 selection, the folds or the scroll. With the reading focused, `i` shows the card of the selected unit
 (an element's declaration, a row's property), and the live region reads it, or says "No information";
 that card stays while the pointer moves, until Escape or the selection moves.

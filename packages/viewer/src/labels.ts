@@ -51,11 +51,6 @@ export function presentationOf(
   };
 }
 
-/** The tooltip of a field and its lead: the label, and the name as source writes it. */
-export function tooltipOf(presentation: Presentation): string {
-  return presentation.label === presentation.name ? presentation.name : `${presentation.label} · ${presentation.name}`;
-}
-
 /** Whether a property's declared type, as spelled, is `boolean`. */
 export function isBooleanType(tree: SourceTree, spelled: string | undefined): boolean {
   let name = (spelled ?? "").replace(/[?+*]$/, "").trim();
