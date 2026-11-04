@@ -137,6 +137,9 @@ export const styles = `
   min-width: 0;
 }
 .source .row-element > .row-head > :is(.element-icon, .sheet-kind, .row-pin, button.fold) { flex-shrink: 0; }
+/* A row's chevron hangs left of its icon and takes none of the row's gap, so a row that holds
+   children starts its icon where its siblings and the lines of an if or a for do. */
+.source .row-element > .row-head > button.fold { margin-right: -0.8ch; }
 /* A row leads with what the element is: its kind reads in the prose font, then the one value it is
    named by, which a click edits in its inspector. */
 .source .row-element > .row-head > .sheet-kind,
@@ -349,6 +352,9 @@ export const styles = `
 /* Among rows, a block written as it is, as an \`if\` or a \`for\`, starts where the rows' icons do, and
    the rows it holds sit level with it, the block's first and last lines framing them. */
 .source .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc((4 - var(--column, 0)) * 1ch); }
+/* A row inside an if or a for starts its icon at the block's edge, not 4ch in, so a block it holds
+   starts a step in from that icon too. */
+.source .sheet-item.as-written .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc(-1ch * var(--column, 0)); }
 .source .sheet-item.as-written .row-element > .row-head { padding-left: 0; }
 /* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
    wherever it sits; and so does one written as its tags on one line inside such an item, as the item's
