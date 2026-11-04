@@ -294,8 +294,9 @@ focus to its row. Opening, closing and pinning SHALL be announced briefly.
 The element SHALL show a card for what the pointer rests on, built from the source tree alone, in
 the form the editor's hover uses: a signature in NX, set in the reading's code face, then the doc
 comment, rendered from Markdown, in its prose face. An element's card SHALL instead be titled by
-the element's name in the prose face, bold, followed quietly by the base it extends, with no
-keyword or element syntax. It SHALL show:
+the element's name in the prose face, bold, after a quiet chip naming its declaration's kind
+(`component`, `function`, `type`, `action` or `case`) and followed quietly by the base it extends,
+with no other keyword or element syntax. It SHALL show:
 
 - over an element's icon, or its name where it has no icon, and over the line of doc its
   inspector opens with: its name and the base its declaration extends, as a title, and the
@@ -336,7 +337,7 @@ text.
 #### Scenario: An element's declaration
 - **WHEN** the pointer rests on the icon of `<Shape Type=Circle />`, whose component `Shape` extends
   `Node` and is documented "A filled shape."
-- **THEN** a card SHALL open titled `Shape`, then `extends Node`, and showing `A filled shape.`
+- **THEN** a card SHALL open titled `Shape`, after a `component` chip and before `extends Node`, and showing `A filled shape.`
 
 #### Scenario: A property's type, default and doc
 - **WHEN** the pointer rests on `Type` in that element, and `Shape` declares

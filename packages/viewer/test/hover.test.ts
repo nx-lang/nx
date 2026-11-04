@@ -198,7 +198,8 @@ describe("hover cards", () => {
     assert.equal(card(element).hidden, true, "not yet: the pointer may be passing");
     t.mock.timers.tick(1);
     assert.equal(card(element).hidden, false);
-    assert.equal(card(element).querySelector(".card-title")!.textContent, "Shape extends Node", "titled by its name");
+    assert.equal(card(element).querySelector(".card-title")!.textContent, "component Shape extends Node", "titled by its name");
+    assert.equal(card(element).querySelector(".card-kind")!.textContent, "component", "after its kind's chip");
     assert.equal(card(element).querySelector(".card-detail")!.textContent, "extends Node", "its base, quietly");
     assert.equal(card(element).querySelector(".card-doc")!.textContent, "A filled shape.");
     assert.equal(card(element).style.top, "122px", "below what it describes");

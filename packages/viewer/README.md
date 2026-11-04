@@ -506,7 +506,7 @@ every property, and a property reads unqualified, with its default:
 
 | Under the pointer                                  | The card                                                 |
 | -------------------------------------------------- | -------------------------------------------------------- |
-| An element's icon (its name, with no icon), or its inspector's doc line | **Shape** `extends Node` as a title, and the declaration's doc |
+| An element's icon (its name, with no icon), or its inspector's doc line | a `component` chip, **Shape** `extends Node` as a title, and the declaration's doc |
 | A property's name, on a row or a line              | `(property) Type: ShapeType = Rectangle` and its doc     |
 | A title in a field, shown without its property's name | That property's card                                  |
 | A union case, bare or qualified                    | `(case) ShapeType.Circle` and the case's doc             |

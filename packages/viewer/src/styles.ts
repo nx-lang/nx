@@ -599,6 +599,19 @@ export const styles = `
 }
 /* An element's card is titled by its name, in prose, as the row names it. */
 .card-title { font-weight: 600; }
+/* The kind of declaration, as a quiet chip before the name. */
+.card-kind {
+  display: inline-block;
+  margin-right: 2px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  vertical-align: 1px;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #9d9d9d));
+  background: light-dark(#0000000d, #ffffff14);
+}
 .card-detail { font-weight: 400; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .card-doc {
   margin-top: 6px;

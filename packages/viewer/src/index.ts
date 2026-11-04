@@ -4834,7 +4834,8 @@ export class NxViewerElement extends ElementBase {
       scroller.addEventListener("scroll", this.#onDocumentScroll);
     }
     const doc = (this.#card.querySelector(".card-doc")?.textContent ?? "").trim();
-    const named = card.detail === undefined ? card.signature : `${card.signature}, ${card.detail}`;
+    const titled = card.kind === undefined ? card.signature : `${card.kind} ${card.signature}`;
+    const named = card.detail === undefined ? titled : `${titled}, ${card.detail}`;
     return `${named}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
   }
 
@@ -4844,6 +4845,12 @@ export class NxViewerElement extends ElementBase {
     const signature = document.createElement("div");
     signature.className = card.title === true ? "card-title" : "card-signature";
     signature.textContent = card.signature;
+    if (card.kind !== undefined) {
+      const chip = document.createElement("span");
+      chip.className = "card-kind";
+      chip.textContent = card.kind;
+      signature.prepend(chip, " ");
+    }
     if (card.detail !== undefined) {
       const detail = document.createElement("span");
       detail.className = "card-detail";

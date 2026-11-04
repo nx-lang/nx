@@ -25,12 +25,14 @@ describe("hover cards", () => {
       signature: "Shape",
       doc: "A filled shape.",
       title: true,
+      kind: "component",
       detail: "extends Node",
     });
     assert.deepEqual(await cardWhere((node) => inRoot(node) && node.role === "element" && node.name === "Glow"), {
       signature: "Glow",
       doc: "A glowing shape.",
       title: true,
+      kind: "function",
     }, "an element function's card, without `let` or brackets");
   });
 
