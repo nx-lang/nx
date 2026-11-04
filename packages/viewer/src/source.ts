@@ -1121,16 +1121,27 @@ export function renderSource(
     toggle.setAttribute("aria-expanded", String(open));
     toggle.setAttribute("aria-label", `${open ? "Collapse" : "Expand"} ${node.name ?? "value"}`);
     head.append(toggle);
-    const marker = elementIcon(at);
+    const inline = !open && inlineable(at);
+    // Inline, the kind reads only where the property's type leaves it open: a union's case alone,
+    // and nothing for the one record the type names.
+    const implied = inline ? impliedKind(at) : "none";
+    const marker = implied === "none" ? elementIcon(at) : undefined;
     if (marker !== undefined) {
       head.append(marker);
     }
-    const kind = document.createElement("span");
-    kind.className = "nested-kind";
-    hoverable(kind, at);
-    writeText(kind, start + 1, nameEnd(text, node, start));
-    head.append(kind);
-    if (!open) {
+    if (implied !== "all") {
+      const kind = document.createElement("span");
+      kind.className = "nested-kind";
+      hoverable(kind, at);
+      const end = nameEnd(text, node, start);
+      const caseAt = implied === "case" ? text.lastIndexOf(".", end - 1) + 1 : start + 1;
+      writeText(kind, Math.max(caseAt, start + 1), end);
+      head.append(kind);
+    }
+    if (inline) {
+      head.classList.add("inline-head");
+      head.append(writeInlineProperties(at));
+    } else if (!open) {
       const value = headValue(at, true);
       if (value !== undefined) {
         value.classList.add("nested-value");
@@ -1145,6 +1156,104 @@ export function renderSource(
       // The nested element's own node holds its fields, so selecting inside it selects in it.
       head.append(inspector);
     }
+  };
+
+  /**
+   * Whether an element value reads its set properties on its field's line, each editable there:
+   * as its visualizer says, and otherwise when it sets one to four, each one simple value on a line
+   * of its own, a string no longer than 24 characters.
+   */
+  const inlineable = (at: number): boolean => {
+    const node = tree.nodes[at]!;
+    const said = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer?.inline;
+    if (said === false) {
+      return false;
+    }
+    const attributes = childrenOf(at);
+    if (attributes.length === 0 || (said !== true && attributes.length > 4)) {
+      return false;
+    }
+    return attributes.every((attribute) => {
+      const value = soleValue(attribute);
+      if (value === undefined || spansLines(attribute)) {
+        return false;
+      }
+      const written = tree.nodes[value]!;
+      if (written.role === "case" || written.role === "reference") {
+        return true;
+      }
+      if (written.role !== "literal") {
+        return false;
+      }
+      const literal = written.value ?? "";
+      return said === true || !literal.startsWith('"') || literal.length <= 26;
+    });
+  };
+
+  /**
+   * How much of an element value's kind its property's type already says: `all` when the type names
+   * its record, `case` when it names the union whose case it is, and `none` otherwise.
+   */
+  const impliedKind = (at: number): "all" | "case" | "none" => {
+    const node = tree.nodes[at]!;
+    const owner = node.parent === undefined ? undefined : attributeElement(tree, node.parent);
+    const attribute = node.parent === undefined ? undefined : tree.nodes[node.parent];
+    if (owner === undefined || attribute === undefined) {
+      return "none";
+    }
+    const declared = (elementProperties(tree, tree.nodes[owner]!) ?? []).find((property) => property.name === attribute.name);
+    const type = (declared?.type ?? "").replace(/[?*+]$/, "").trim();
+    const last = (name: string): string => name.slice(name.lastIndexOf(".") + 1);
+    const name = node.name ?? "";
+    const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+    if (type === "") {
+      return "none";
+    }
+    if (declaration?.kind === "union") {
+      const union = name.slice(0, name.lastIndexOf("."));
+      return union !== "" && (type === union || last(type) === last(union) || last(type) === declaration.name) ? "case" : "none";
+    }
+    return type === name || last(type) === last(name) || last(type) === declaration?.name ? "all" : "none";
+  };
+
+  /**
+   * An element value's set properties on its field's line, each its label and its value, editable
+   * and scrubbed as an inspector's fields are, in the order its inspector lists them. A sole
+   * property, or its title, reads without its label.
+   */
+  const writeInlineProperties = (at: number): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
+    const order = (visualizer?.properties ?? []).map((property) => property.name);
+    const rank = (attribute: number): number => {
+      const found = order.indexOf(tree.nodes[attribute]!.name ?? "");
+      return found < 0 ? order.length : found;
+    };
+    const attributes = childrenOf(at)
+      .map((attribute, position) => ({ attribute, position }))
+      .sort((a, b) => rank(a.attribute) - rank(b.attribute) || a.position - b.position)
+      .map(({ attribute }) => attribute);
+    const title = titleOf(at);
+    const present = presentations(at);
+    const properties = document.createElement("span");
+    properties.className = "inline-props";
+    for (const attribute of attributes) {
+      const field = marked(attribute, "span", "inline-prop prop-field");
+      const presentation = present(tree.nodes[attribute]!.name ?? "");
+      if (attributes.length > 1 && attribute !== title) {
+        const lead = leadOf(presentation);
+        lead.classList.add("inline-label");
+        hoverable(lead, attribute);
+        field.append(lead);
+      }
+      const cell = document.createElement("span");
+      cell.className = "sheet-value inline-value";
+      cell.title = tooltipOf(presentation);
+      writeValue(cell, attribute);
+      field.append(cell);
+      properties.append(field);
+    }
+    return properties;
   };
 
   /**

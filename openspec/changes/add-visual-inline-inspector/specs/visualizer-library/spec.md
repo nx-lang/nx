@@ -3,7 +3,8 @@
 ### Requirement: `ElementVisualizer` and `PropertyVisualizer` describe an element
 `ElementVisualizer` SHALL be a record with the type parameter `Target`, optional fields `title` and
 `id`, each typed `Target.Property`, a field `idPosition:IdPosition` defaulting to `start`, an
-optional field `icon:string` naming an icon from the Lucide set, an optional field
+optional field `icon:string` naming an icon from the Lucide set, an optional field `inline:boolean`
+saying whether an element value reads its set properties on its field's line, an optional field
 `preview:PreviewVisualizer`, and an optional content field
 `properties` holding one or more `<PropertyVisualizer Target=Target/>`. `IdPosition` SHALL be the
 constant union `start | end`. `PropertyVisualizer` SHALL be a record with the type parameter

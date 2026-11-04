@@ -1567,6 +1567,37 @@ let items = { <Step id="a" title="A" /> <Choice value="b" label="B" /> <Note tex
 }
 
 #[test]
+fn inline_reaches_the_tree_as_written() {
+    let source = r#"import "@nx/visualizer"
+type Size = { width:int height:int }
+type Spot = { x:int y:int }
+type Plain = { a:int }
+visualizer Size = <ElementVisualizer inline=true />
+visualizer Spot = <ElementVisualizer inline=false />
+let items = { <Size width=1 height=2 /> <Spot x=1 y=2 /> <Plain a=1 /> }
+"#;
+    let tree = snapshot_for(source)
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                visualizers: Some(SourceTreeVisualizers::default()),
+            },
+        )
+        .expect("source tree");
+    assert_eq!(visualizer(&tree, "Size").inline, Some(true));
+    assert_eq!(visualizer(&tree, "Spot").inline, Some(false));
+    // Unset, a viewer decides by the value's size.
+    assert_eq!(
+        tree.declarations
+            .iter()
+            .find(|declaration| declaration.name == "Plain")
+            .and_then(|declaration| declaration.visualizer.as_ref())
+            .and_then(|visualizer| visualizer.inline),
+        None
+    );
+}
+
+#[test]
 fn an_icon_is_inherited_through_extends() {
     let tree = with_visualizers(&survey_snapshot(&[]), &[]);
     assert_eq!(

@@ -63,7 +63,7 @@ A union cannot have a visualizer yet.
 
 | Type | Fields | Notes |
 | --- | --- | --- |
-| `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, `preview?: PreviewVisualizer`, content `properties?: PropertyVisualizer+` | `title` and `id` name a property of the target. |
+| `ElementVisualizer` | `title?`, `id?`, `idPosition: IdPosition = start`, `icon?`, `inline?: boolean`, `preview?: PreviewVisualizer`, content `properties?: PropertyVisualizer+` | `title` and `id` name a property of the target. |
 | `PreviewVisualizer` | `renderer: string` | Nonempty literal host renderer ID; see [Preview descriptors](#preview-descriptors). |
 | `FunctionVisualizer` | `icon?: string`, content `properties?: PropertyVisualizer+` | Like `ElementVisualizer`, for element-style function invocations; its target is the function's props. |
 | `IdPosition` | `start`, `end` | Where the element's id reads. |
@@ -81,6 +81,11 @@ A union cannot have a visualizer yet.
   [Lucide](https://lucide.dev/icons) set, such as `"list-checks"`. Visual shows it at the start of the
   element's row; an element with none takes one for its kind of declaration. A kind that extends
   another inherits it.
+- `inline` says whether an element used as a property's value reads its set properties on that
+  property's line, each editable there, as a design tool shows a size or a position:
+  `View box  X 0  Y 0  Width 400  Height 240`. Unset, Visual does this for a short value: one to four
+  properties, each a number, boolean, color, case, reference or short string. `inline=true` does it
+  for any value whose properties fit on one line each, and `inline=false` keeps the value folded.
 - `properties` says how individual properties read and edit. Visual's inspector, which opens under a
   selected row, lists the element's properties one to a line, in the order the visualizer lists
   them and then in declaration order, each `label` beside its value. Properties have no icons. Without a

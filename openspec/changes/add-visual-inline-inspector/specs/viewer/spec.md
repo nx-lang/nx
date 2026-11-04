@@ -210,11 +210,25 @@ the `let` is written as a literal color, or as an element whose visualizer forma
 color, the token SHALL show that color's swatch. Opening the token SHALL offer Go to `blue` and
 Show in Source. A property whose value is an element SHALL read as a field with the element's icon,
 kind and the value it is named by, and SHALL unfold into a nested group of that element's fields, edited the same
-way. An action value, a component's `State.Update` included, SHALL show the action icon. Any other expression SHALL read as written, code-styled, and open in Source.
+way. A short element value SHALL instead read its set properties on its field's line, each its label
+and its value, edited and scrubbed there as an inspector's fields are, wrapping under the first where
+the line runs out: one that holds only properties, one to four of them, each one simple value on one
+line (a number, a boolean, a color, a bare case, a reference, or a string of at most 24 characters).
+Its visualizer's `inline` SHALL decide instead when it is set: `true` reads any such value of one-line
+properties on its line, `false` never does. A sole property, or the title, SHALL read without its
+label. On its line its kind SHALL read only what the property's type leaves open: nothing for the
+record the type names, and the case alone for a case of the union it names. Its chevron SHALL still
+unfold it into the nested group, its kind in full, where the properties it does not set are. An action value, a component's `State.Update` included, SHALL show the action icon. Any other expression SHALL read as written, code-styled, and open in Source.
 
 #### Scenario: A shared paint
 - **WHEN** Star writes `fill={blue}` and `let blue: Paint = <Paint.color color=#2563eb/>`
 - **THEN** Star's `Fill` field SHALL read a `#2563eb` swatch and the token `blue`
+
+#### Scenario: A short element value on its field's line
+- **WHEN** Drawing writes `viewBox=<Rect x=0 y=0 width=400 height=240/>` and
+  `background=<Paint.color color=#ffffff/>`
+- **THEN** View box SHALL read `X 0  Y 0  Width 400  Height 240`, with no `Rect`, and Background
+  SHALL read `color` and the color, and dragging the `Width` label SHALL scrub `width` in that Rect
 
 #### Scenario: A nested element value
 - **WHEN** Drawing writes `viewBox=<Rect x=0 y=0 width=400 height=240/>` and the reader unfolds it

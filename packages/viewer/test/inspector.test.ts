@@ -310,14 +310,50 @@ describe("inspectors", () => {
     element.selection = "panel.value";
     const badge = drawn(element, "panel.value.badge");
     assert.ok(badge.classList.contains("nested-field"));
-    assert.equal(badge.querySelector(".nested-kind")!.textContent, "Badge");
     badge.querySelector<HTMLElement>(".value-fold")!.click();
     assert.ok(drawn(element, "panel.value.badge").classList.contains("open"));
+    assert.equal(drawn(element, "panel.value.badge").querySelector(".nested-kind")!.textContent, "Badge", "open, its kind reads");
     drawn(element, "panel.value.badge.value.count.value").click();
     const field = element.shadowRoot!.querySelector<HTMLElement>(".field")!;
     field.textContent = "4";
     press(field, "Enter");
     assert.deepEqual(edits, [{ key: "panel.value.badge.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "4" } } }]);
+  });
+
+  it("reads a short element value's properties on its line, each edited and scrubbed there", async () => {
+    const element = show(await panel(), true);
+    const edits: NxEditDetail[] = [];
+    element.addEventListener(NX_EDIT_EVENT, (event) => edits.push((event as CustomEvent<NxEditDetail>).detail));
+    element.selection = "panel.value";
+    const badge = () => drawn(element, "panel.value.badge");
+    assert.equal(badge().querySelector(".nested-kind"), null, "the kind its type names reads no more");
+    const inline = [...badge().querySelectorAll<HTMLElement>(".inline-prop")];
+    assert.deepEqual(inline.map((field) => [field.querySelector(".inline-label")?.textContent, field.querySelector(".inline-value")?.textContent]), [["Label", "new"], ["Count", "3"]]);
+    assert.ok(inline[1]!.querySelector(".inline-label")!.classList.contains("scrubbable"), "a number's label scrubs it");
+    drawn(element, "panel.value.badge.value.count.value").click();
+    const field = element.shadowRoot!.querySelector<HTMLElement>(".field")!;
+    assert.ok(badge().contains(field), "the field opens in place, the value still folded");
+    field.textContent = "4";
+    press(field, "Enter");
+    assert.deepEqual(edits, [{ key: "panel.value.badge.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "4" } } }]);
+  });
+
+  it("keeps an element value folded when it is not short, or its visualizer says so", async () => {
+    const source = [
+      'import "@nx/visualizer"',
+      "type Badge = { label:string count:int = 0 }",
+      "type Box = { a:int b:int c:int d:int e:int }",
+      "type Holder = { badge?:Badge box?:Box }",
+      "visualizer Badge = <ElementVisualizer inline=false />",
+      'let holder = <Holder badge=<Badge label="new" count=3 /> box=<Box a=1 b=2 c=3 d=4 e=5 /> />',
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///holder.nx", identity: "holder.nx", source }], { visualizers: { modules: [] } }));
+    element.selection = "holder.value";
+    for (const key of ["holder.value.badge", "holder.value.box"]) {
+      assert.equal(drawn(element, key).querySelector(".inline-prop"), null, key);
+      assert.ok(drawn(element, key).querySelector(".nested-kind"), key);
+    }
   });
 
   it("closes and reopens the selected row's inspector on a click on its row or Enter, the selection kept", async () => {

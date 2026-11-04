@@ -533,6 +533,11 @@ export interface SourceVisualizer {
   idPosition?: "start" | "end";
   /** The name of the Lucide icon that marks the element where it starts. */
   icon?: string;
+  /**
+   * Whether an element value reads its set properties on its field's line: `true` always, `false`
+   * never. Absent, a viewer decides by the value's size.
+   */
+  inline?: boolean;
   /** Requested rendered presentation; the host decides whether its implementation is available. */
   preview?: { renderer: string };
   /** Every property, those the visualizer names first. */

@@ -296,6 +296,14 @@ export const styles = `
 .source .nested-head > .element-icon { margin-right: 0.5ch; }
 .source .nested-kind { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
 .source .nested-head > .nested-value { display: inline-block; vertical-align: bottom; max-width: 100%; margin-left: 1ch; }
+/* A short element value reads its set properties on its field's line, each label beside its value,
+   wrapping under the first where the line runs out. */
+.source .nested-field:not(.open) .nested-head.inline-head { display: inline-flex; align-items: baseline; max-width: 100%; vertical-align: top; }
+.source .nested-head.inline-head > .value-fold { align-self: flex-start; height: 1lh; margin-right: 0.3ch; flex: none; }
+.source .nested-head.inline-head > .nested-kind { flex: none; margin-right: 1ch; }
+.source .inline-props { display: inline-flex; flex-wrap: wrap; column-gap: 2ch; min-width: 0; }
+.source .inline-prop { display: inline-flex; align-items: baseline; gap: 0.8ch; white-space: nowrap; }
+.source .inline-prop > .field-lead.inline-label { font-size: inherit; }
 /* An id that names its element reads as the title does: plain, with no chip. */
 .source .row-title.row-id > .id-value { background: none; padding: 0; color: inherit; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
 .source .inspector.nested-inspector { margin: 2px 0 2px var(--inspector-inset, 0); padding: 0; }
