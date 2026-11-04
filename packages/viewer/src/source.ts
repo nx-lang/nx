@@ -6,7 +6,7 @@
  * read as marks. Colors come from the host, as ranges over the
  * text, so a host colors the reading with the highlighter and themes it colors its editor with.
  */
-import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
+import type { SourceDeclarationKind, SourceNode, SourceTree, SourceValueFormat } from "@nx-lang/language-protocol";
 
 import { isComposition } from "./compact.js";
 import { isElementFunction, VALUE_ROLES } from "./card.js";
@@ -780,7 +780,6 @@ export function renderSource(
       const unit = document.createElement("span");
       unit.className = "opacity-unit";
       unit.textContent = "%";
-      unit.title = "Drag to change the opacity";
       opacity.append(percent, unit);
       words.append(hex, digits, opacity);
       cell.append(words);
@@ -820,7 +819,6 @@ export function renderSource(
       // A mark, not a box: a check box looks like something to click, and this only reads.
       const box = marked(at, "span", `sheet-boolean ${written}`);
       box.textContent = written === "true" ? "\u2713" : "\u2717";
-      box.title = written;
       box.setAttribute("aria-label", written);
       cell.append(box);
       return;
@@ -850,7 +848,7 @@ export function renderSource(
     writeNodes(cell, [at], start, end);
     cell.append(brace(close));
     // A reference to a color leads with its swatch, before the brace, as a color literal does.
-    const named = value.role === "reference" ? referencedColor(value.name) : undefined;
+    const named = value.role === "reference" ? referencedColor(value) : undefined;
     if (named !== undefined) {
       const square = document.createElement("span");
       square.className = "swatch";
@@ -863,11 +861,12 @@ export function renderSource(
   };
 
   /**
-   * The color a top-level `let` named `name` holds: written as a color literal, or as an element
-   * one of whose properties is a color literal or a string its visualizer formats as a color.
+   * The color the top-level `let` a reference resolves to holds: written as a color literal, or as
+   * an element one of whose properties is a color literal or a string its visualizer formats as a
+   * color. A reference to a local, which the tree leaves without a declaration, has none.
    */
-  const referencedColor = (name: string | undefined): string | undefined => {
-    const declaration = name === undefined ? -1 : tree.nodes.findIndex((node) => node.role === "declaration" && node.parent === undefined && node.name === name);
+  const referencedColor = (reference: SourceNode): string | undefined => {
+    const declaration = topLevelLet(tree, reference);
     if (declaration < 0) {
       return undefined;
     }
@@ -2311,13 +2310,15 @@ export function decodeString(written: string): string | undefined {
 }
 
 /**
- * A hex color's parts as written: its color without its alpha, its alpha digits, and its opacity in
- * whole percent. `#2563eb80` is `#2563eb`, `80` and 50.
+ * A hex color's parts: its color without its alpha, in six digits, its alpha digits as written, and
+ * its opacity in whole percent. `#2563eb80` is `#2563eb`, `80` and 50; `#abcd` is `#aabbcc`, `d`
+ * and 87.
  */
 export function hexParts(hex: string): { readonly rgb: string; readonly alpha: string; readonly percent: number } {
   const digits = hex.length - 1;
   const alpha = digits === 4 ? hex.slice(4) : digits === 8 ? hex.slice(7) : "";
-  const rgb = alpha === "" ? hex : hex.slice(0, hex.length - alpha.length);
+  const written = alpha === "" ? hex : hex.slice(0, hex.length - alpha.length);
+  const rgb = written.length === 4 ? "#" + [...written.slice(1)].map((digit) => digit + digit).join("") : written;
   const value = alpha === "" ? 255 : parseInt(alpha.length === 1 ? alpha + alpha : alpha, 16);
   return { rgb, alpha, percent: Math.round((value / 255) * 100) };
 }
@@ -2334,4 +2335,17 @@ export function docSummary(doc: string | undefined): string | undefined {
     .replace(/\s+/g, " ")
     .trim();
   return words === "" ? undefined : words;
+}
+
+/**
+ * The index of the top-level `let` node `reference` resolves to, by the declaration the tree resolved
+ * it to rather than by its name, so a parameter or a local that shadows a `let` finds nothing; -1
+ * when there is none.
+ */
+export function topLevelLet(tree: SourceTree, reference: SourceNode): number {
+  const target = reference.declaration;
+  if (target === undefined) {
+    return -1;
+  }
+  return tree.nodes.findIndex((node) => node.role === "declaration" && node.parent === undefined && node.declaration === target);
 }

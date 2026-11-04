@@ -284,6 +284,10 @@ export type ElementVisualizer = {
   /// The name of the icon that marks the element where it starts, from the Lucide set
   /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
   icon?: string
+  /// Whether an element used as a property's value reads its set properties on that property's
+  /// line, each editable there: `true` whenever each property is one simple value on a line, `false`
+  /// never. Unset, a short element does.
+  inline?: boolean
   /// Host-rendered view, inherited and overridden like other hints. Unsupported renderer IDs leave
   /// structured Output available.
   preview?: PreviewVisualizer

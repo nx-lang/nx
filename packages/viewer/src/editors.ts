@@ -72,7 +72,6 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
     span.textContent = on ? BOOLEAN_MARKS.true : BOOLEAN_MARKS.false;
     span.classList.toggle("true", on);
     span.classList.toggle("false", !on);
-    span.title = value;
     span.setAttribute("aria-label", value);
     return;
   }
@@ -423,8 +422,6 @@ export function offsetAtPoint(element: HTMLElement, x: number, y: number): numbe
   return best;
 }
 
-/** Replace RGB while retaining an explicitly authored hex alpha channel. */
-/** A hex color written out in full: `#abc` reads `#aabbcc`, and `#abcd` reads `#aabbccdd`. */
 /**
  * The entry a color's hex field or opacity field holds, as the color it makes with the rest of `from`,
  * the color the field opened on: a new hex keeps `from`'s alpha, and a new percent its color. A field
@@ -456,6 +453,7 @@ export function colorFromPart(part: "hex" | "opacity", entry: string, from: stri
   return withOpacity(expandHex(parts.rgb), Math.round(percent));
 }
 
+/** A hex color written out in full: `#abc` reads `#aabbcc`, and `#abcd` reads `#aabbccdd`. */
 export function expandHex(hex: string): string {
   const digits = hex.slice(1);
   return digits.length === 3 || digits.length === 4 ? "#" + [...digits].map((digit) => digit + digit).join("") : hex;
@@ -477,6 +475,7 @@ export function withOpacity(color: string, percent: number): string {
   return expandHex(trimmed) + Math.round((percent / 100) * 255).toString(16).padStart(2, "0");
 }
 
+/** Replace RGB while retaining an explicitly authored hex alpha channel. */
 export function preserveHexAlpha(rgb: string, original: string): string {
   if (!isHexColor(original)) return rgb;
   const digits = original.slice(1);

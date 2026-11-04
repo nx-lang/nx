@@ -365,6 +365,87 @@ describe("inspectors", () => {
     assert.match(element.selection ?? "", /^blue/);
   });
 
+  it("finds a reference's swatch and Go to through what it resolves to, not its name", async () => {
+    const source = [
+      "type Tag = { name:string tint?:color }",
+      "let blue = #2563eb",
+      'let <Badge blue:color /> = <Tag name="t" tint={blue} />',
+      'let tag = <Tag name="u" tint={blue} />',
+      ""
+    ].join("\n");
+    const fixture = await treeOf([{ uri: "nx:///shadow.nx", identity: "shadow.nx", source }], { visualizers: { modules: [] } });
+    const element = show(fixture, true);
+    element.selection = "tag.value";
+    assert.ok(drawn(element, "tag.value.tint").querySelector(":scope > .sheet-value > .swatch"), "the top-level let's swatch");
+    const local = fixture.tree.nodes.find((node) => node.role === "reference" && node.name === "blue" && !node.key.startsWith("tag."))!;
+    assert.equal(local.declaration, undefined, "the tree resolves the parameter as a local");
+    const attribute = fixture.tree.nodes[local.parent!]!;
+    element.selection = attribute.key;
+    const drawnLocal = drawn(element, attribute.key);
+    assert.equal(drawnLocal.querySelector(".swatch"), null, "a parameter named like a let has no swatch");
+    const menu = drawnLocal.querySelector<HTMLElement>(".row-menu");
+    if (menu !== null) {
+      menu.click();
+      const labels = [...element.shadowRoot!.querySelectorAll<HTMLElement>(".menu-item .menu-label")].map((label) => label.textContent);
+      assert.ok(!labels.includes("Go to blue"), "and no Go to");
+    }
+  });
+
+  it("gives no label or value in an inspector a browser tooltip", async () => {
+    const source = ["type Fill = { tint:color on:boolean = false size:int = 1 }", "let fill = <Fill tint=#33669980 on=true size=2 />", ""].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///tips.nx", identity: "tips.nx", source }], { visualizers: { modules: [] } }), true);
+    element.selection = "fill.value";
+    const inspector = element.shadowRoot!.querySelector<HTMLElement>(".inspector")!;
+    assert.deepEqual([...inspector.querySelectorAll(".inspector-fields [title]")].map((node) => node.className), []);
+    drawn(element, "fill.value.on.value").click();
+    assert.deepEqual([...inspector.querySelectorAll(".inspector-fields [title]")].map((node) => node.className), [], "nor once toggled");
+  });
+
+  it("reads an element value inline past the size limits when its visualizer says inline=true", async () => {
+    const source = [
+      'import "@nx/visualizer"',
+      "type Box = { a:int b:int c:int d:int e:int }",
+      "type Holder = { box?:Box }",
+      "visualizer Box = <ElementVisualizer inline=true />",
+      "let holder = <Holder box=<Box a=1 b=2 c=3 d=4 e=5 /> />",
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///wide.nx", identity: "wide.nx", source }], { visualizers: { modules: [] } }));
+    element.selection = "holder.value";
+    const labels = [...drawn(element, "holder.value.box").querySelectorAll(".inline-label")].map((label) => label.textContent);
+    assert.deepEqual(labels, ["A", "B", "C", "D", "E"]);
+  });
+
+  it("reads only the case of an inline union value, and scrubs its numbers on their labels", async () => {
+    const source = [
+      "type Paint =",
+      "  | solid { color:color }",
+      "  | dashed { width:int gap:int }",
+      "type Shape = { fill?:Paint stroke?:Paint }",
+      "let shape = <Shape fill=<Paint.solid color=#ff0000 /> stroke=<Paint.dashed width=2 gap=4 /> />",
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///paint.nx", identity: "paint.nx", source }], { visualizers: { modules: [] } }), true);
+    const edits: NxEditDetail[] = [];
+    element.addEventListener(NX_EDIT_EVENT, (event) => edits.push((event as CustomEvent<NxEditDetail>).detail));
+    element.selection = "shape.value";
+    const stroke = drawn(element, "shape.value.stroke");
+    assert.equal(stroke.querySelector(".nested-kind")!.textContent, "dashed", "the case, not Paint.dashed");
+    const width = [...stroke.querySelectorAll<HTMLElement>(".inline-label")].find((label) => label.textContent === "Width")!;
+    const at = (type: string, clientX: number) =>
+      width.dispatchEvent(new window.MouseEvent(type, { bubbles: true, composed: true, cancelable: true, clientX }));
+    at("pointerdown", 0);
+    for (const x of [4, 7, 10]) {
+      at("pointermove", x);
+    }
+    at("pointerup", 10);
+    const commits = edits.filter((edit) => edit.live !== true);
+    assert.ok(edits.length > commits.length, "live while dragging");
+    assert.equal(commits.length, 1, "one commit on release");
+    assert.match(commits[0]!.key, /^shape\.value\.stroke\.value\.width/);
+    assert.deepEqual(commits[0]!.edit, { kind: "setValue", value: { kind: "number", text: "5" } }, "a step for every three pixels from the press");
+  });
+
   it("keeps an element value folded when it is not short, or its visualizer says so", async () => {
     const source = [
       'import "@nx/visualizer"',

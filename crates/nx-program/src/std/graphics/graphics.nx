@@ -736,8 +736,8 @@ export let <RingSector
 }
 
 // Presentation follows familiar design-tool layer symbols, using the host's Lucide icon set.
-// Labels, short labels and groups follow design-tool inspectors: Position, Size, Shape, Transform,
-// Appearance, Fill, Stroke and Text.
+// Labels and their order follow design-tool inspectors: position, size and shape first, then fill and
+// stroke, then transform, opacity, clipping and accessibility.
 
 visualizer GraphicsElement = <ElementVisualizer>
   <PropertyVisualizer property=transform label="Transform" />

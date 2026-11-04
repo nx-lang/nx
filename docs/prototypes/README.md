@@ -1,8 +1,9 @@
 # Visual UX interaction prototype
 
-The production implementation is in `packages/viewer` (`compact` and `detailsState`) and enabled in
-the playground's NX Visual view. See the [viewer API](../../packages/viewer/README.md#compact-authoring-view).
-This standalone prototype remains a sample-data reference for the interaction design.
+This is PR #71's prototype of a compact outline with Details and Pin buttons, kept as history. The
+production design that replaced it is the inline inspector in `packages/viewer` (see
+[Rows and inspectors](../../packages/viewer/README.md#rows-and-inspectors)), where selecting a row opens
+its inspector, a pin keeps it open, and there is no Details button.
 
 Open [visual-ux.html](visual-ux.html) directly in a browser. It is a self-contained HTML file with no
 build step, network dependencies, or changes to the NX viewer. Alternatively, from the repository root:

@@ -315,8 +315,8 @@ with no other keyword or element syntax. It SHALL show:
 The first card SHALL open after the pointer has rested for about a second; while a card is open, or
 for about a second and a half after one closed, the next SHALL open at once, as a design tool's
 tooltips do. No card SHALL open while a button is held, so none opens during a drag, nor for what
-the pointer was over when it pressed or when the reading scrolled, until it moves onto something
-else. A card SHALL stay open while the
+the pointer was over when it pressed, until it moves onto something else, nor for what the reading
+scrolls under a still pointer, until the pointer moves. A card SHALL stay open while the
 pointer moves from what it describes onto the card, so its text can be selected and its links
 followed, and SHALL close when the pointer leaves both, on a press, when the reading scrolls, when the reader
 presses Escape, or when the text or the tree changes. It SHALL NOT change the selection, the folds

@@ -205,3 +205,164 @@ the findings below.
   removed. It changes no behavior.
 - **Recommendation:** Re-indent it to match the surrounding lines.
 - **Fix:** Re-indented; whitespace only, so no separate verification pass.
+
+## New Findings Discovered During 2026-11-04 22:36 Review
+
+**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs/*/spec.md (as updated for the final state)  
+**Reviewed code:** `git diff origin/main...HEAD`, focused on `packages/viewer/src` (source.ts, index.ts,
+editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-service`, `crates/nx-hir`,
+`crates/nx-types`, `crates/nx-program/src/std/{visualizer,graphics}`, `packages/language-protocol`,
+`sites/playground`, the viewer README and the website's visualizer pages.  
+**Checks run:** viewer build and tests (234/234 pass), `pnpm run test:inspector-browser` (PASS),
+`cargo test -p nx-language-service` (331 pass), `openspec validate add-visual-inline-inspector --strict`
+(valid). Two throwaway probes against the real language host, removed afterwards, back RF11 and RF13.
+
+### 🟡 Fixed - RF11 A reference's swatch and Go to look the name up, so a parameter or local that shadows a top-level `let` shows the wrong color and goes to the wrong place
+- **Severity:** Medium (confidence: high)
+- **Evidence:** `referencedColor` (`packages/viewer/src/source.ts:869-871`) and `#referenceGoal`
+  (`packages/viewer/src/index.ts:4260-4263`) both find "the top-level declaration node whose `name`
+  equals the reference's name". They never check what the reference resolves to. The source tree
+  already resolves it: `source_tree.rs:1072-1078` leaves `declaration` unset for a local and sets it
+  through `visible_declaration` otherwise. A probe with
+  `let blue = #2563eb` / `let <Badge blue:color /> = <Tag name="t" tint={blue} />` got the reference
+  node `{"role":"reference","name":"blue"}` with no `declaration`, but `Badge.body.tint` still drew
+  the `#2563eb` swatch. Its `⋯` menu would also offer "Go to blue" and select the unrelated
+  top-level `let`. The same thing happens with a `for` item or a component parameter named like a
+  `let`.
+- **Recommendation:** Resolve the reference through the tree. Take the reference's `declaration`
+  (none means it's a local, so no swatch and no Go to), and find the `let` node that declaration
+  points to rather than matching by name. Add a test with a shadowing parameter.
+- **Fix:** `referencedColor` and `#referenceGoal` now go through the new `topLevelLet(tree, reference)` in `source.ts`. It matches the top-level `let` by the reference's resolved `declaration` instead of by name. A reference the tree leaves unresolved (a local) gets no swatch and no Go to. New test: "finds a reference's swatch and Go to through what it resolves to, not its name" (`inspector.test.ts`).
+
+### 🟡 Fixed - RF12 Fields still carry browser tooltips, against the spec and README
+- **Severity:** Low (confidence: high)
+- **Evidence:** The viewer spec's inspector requirement says "No label or field SHALL carry a browser
+  tooltip" (`specs/viewer/spec.md`, inspector requirement), and the README says "The browser's own
+  tooltips never repeat a card". Three places still set them:
+  - `source.ts:783` sets `unit.title = "Drag to change the opacity"` on every color field's `%`.
+    That repeats the scrub hint the label card gives (`index.ts:4818-4822`).
+  - `source.ts:823` sets `box.title = written` (`"true"`/`"false"`) on the boolean mark. In an
+    inspector that mark is the checkbox (`styles.ts:273-286`).
+  - `editors.ts:75` sets `span.title = value` again whenever a toggled boolean shows its pending
+    value.
+
+  No test checks the no-tooltip rule.
+- **Recommendation:** Drop these `title`s. `aria-label` already names the checkbox. Add a test that
+  no element inside `.inspector` has a `title` attribute.
+- **Fix:** Removed the `title` on the opacity `%` (`source.ts`), the boolean mark (`source.ts`) and `showValue`'s toggled boolean (`editors.ts`). `aria-label` stays. New test: no `[title]` inside `.inspector-fields`, before and after a toggle.
+
+### 🟡 Fixed - RF13 `@nx/graphics` property order contradicts the graphics-library spec
+- **Severity:** Low (confidence: high)
+- **Evidence:** The spec requires "position …, size …, shape …, transform (rotation), appearance
+  (opacity), fill, stroke and text (font, size), then accessibility". A probe of the resolved
+  visualizers got:
+  - Rectangle: `x, y, width, height, rx, ry, fill, fillRule, stroke, transform, opacity, clipPath, clipRule, accessibility`
+  - Star: `cx, cy, outerRadius, innerRadius, pointCount, rotation, fill, stroke, transform, opacity, …`
+  - Text: `text, x, y, fontFamily, fontSize, fontWeight, fontStyle, textAnchor, fill, transform, opacity, …`
+
+  So fill and stroke come before transform and opacity on every shape. Text's content comes before
+  its position, and its font comes before its fill. The cause is that `Shape`'s visualizer
+  (`graphics.nx:749-753`) is merged in ahead of `GraphicsElement`'s (`graphics.nx:741-747`). The
+  "every property has a label" test (`source_tree_tests.rs`) doesn't check order.
+- **Recommendation:** Either fix the order in `graphics.nx`, for example by having `Shape` list
+  `transform` and `opacity` before `fill`, or reword the spec to describe the order that ships. Then
+  pin one element's order in a test.
+- **Fix:** The spec now describes the order that ships, which matches Figma's inspector: position, size and shape (rotation included), then fill and stroke, then transform, opacity, clipping, accessibility and content. Text lists its text first, then position, font and fill. `graphics.nx`'s comment says the same. The graphics order was not changed, so nothing Bret has reviewed moves.
+
+### 🟡 Fixed - RF14 The website's copy of the `@nx/visualizer` source lacks `inline`
+- **Severity:** Low (confidence: high)
+- **Evidence:** Under "The library source", the code block in
+  `sites/website/src/content/docs/reference/libraries/visualizer.md` differs from
+  `crates/nx-program/src/std/visualizer/visualizer.nx` in one place only: the copy is missing the
+  `inline?: boolean` field and its doc comment (`visualizer.nx:30-32`). The page's own table
+  (line 66) does list `inline?: boolean`.
+- **Recommendation:** Paste in the current source. Consider adding a check that the copy matches the
+  file.
+- **Fix:** Added `inline?: boolean` and its doc comment to the website's copy of the library source. The copy now matches `visualizer.nx` byte for byte (checked by script).
+
+### 🟡 Fixed - RF15 Leftovers of the removed experiments in comments and docs
+- **Severity:** Low (confidence: high)
+- **Evidence:**
+  - `crates/nx-program/src/std/graphics/graphics.nx:739-740`: "Labels, short labels and groups follow
+    design-tool inspectors: Position, Size, Shape, …". `short` and `group` no longer exist, and
+    neither do group headings.
+  - `docs/prototypes/README.md:3-4` is added by this diff. It says "The production implementation is
+    in `packages/viewer` (`compact` and `detailsState`)" and links to
+    `packages/viewer/README.md#compact-authoring-view`, an anchor that doesn't exist. Its steps 3
+    and 8 (lines 22-27) describe the removed Details button. `docs/visual-ux-improvements.md` also
+    talks about "compact summary" rows (line 38). That is less of a problem if it is explicitly kept
+    as #71's history.
+  - `packages/viewer/README.md:372` still says a case's chevron is placed "room on a line included".
+    That is the stepper-era layout rule that design §6 says was deleted.
+- **Recommendation:** Reword the graphics comment. Point the prototype README at the inline
+  inspector (or mark it as #71's historical prototype) and fix the link. Drop "room on a line
+  included".
+- **Fix:** Reworded the `graphics.nx` comment. `docs/prototypes/README.md` now calls itself PR #71's historical prototype and links to the README's "Rows and inspectors" section. Dropped "room on a line included" from the viewer README. `docs/visual-ux-improvements.md` is #71's own write-up and is left as history.
+
+### 🟡 Fixed - RF16 `inline`'s doc comment and the proposal say more than the code does
+- **Severity:** Low (confidence: high)
+- **Evidence:**
+  - `ElementVisualizer.inline` (`visualizer.nx:30-31`; protocol `index.ts` `SourceVisualizer.inline`)
+    says "`true` always". The code doesn't do that. `inlineable` (`source.ts:1245-1270`) still
+    refuses an element value under `inline=true` when any property is an element, a list, an
+    expression or spans lines. Only the four-property and 24-character limits are lifted. The
+    viewer spec has it right: "`true` reads any such value of one-line properties".
+  - The proposal says derived labels split at "letter–digit edges". `derivedLabel` (`labels.ts:16-19`)
+    doesn't, and the spec's scenario expects `x1` → `X1`.
+- **Recommendation:** Make the doc comments say "`true` whenever each property is one simple value on
+  a line", and drop "letter–digit edges" from the proposal.
+- **Fix:** `inline`'s doc (`visualizer.nx`, the website copy, the protocol's `SourceVisualizer.inline`) now says "`true` whenever each property is one simple value on a line". Dropped "letter–digit edges" from the proposal.
+
+### 🟡 Fixed - RF17 Doc comments stacked onto the wrong functions in the color code
+- **Severity:** Low (confidence: high)
+- **Evidence:**
+  - `packages/viewer/src/editors.ts:426-433` has three JSDoc blocks in a row before `colorFromPart`:
+    `preserveHexAlpha`'s ("Replace RGB while retaining…"), `expandHex`'s ("A hex color written out in
+    full…"), and `colorFromPart`'s own. As a result `expandHex` (line 459) and `preserveHexAlpha`
+    (line 480) have no doc. This is the same pattern RF9 fixed in `edit.ts`.
+  - `packages/viewer/src/index.ts:2175` sits above `#openColorPart`'s doc. It is `#openField`'s doc
+    ("A field in the value's own place…"), and `#openField` at line 2238 now has none.
+- **Recommendation:** Move each comment back onto its own function.
+- **Fix:** Moved `expandHex`'s and `preserveHexAlpha`'s doc comments onto those functions, and `#openField`'s back onto `#openField`.
+
+### 🟡 Fixed - RF18 A shorthand color shows a three-digit hex where the spec says six digits
+- **Severity:** Low (confidence: high)
+- **Evidence:** The viewer spec says a color literal in an inspector reads as "its swatch, its
+  six-digit hex and its opacity". The proposal and design §11 say the same. `hexParts`
+  (`source.ts:2317-2320`) returns the literal as written for `#abc`, and only removes the alpha digit
+  for `#abcd` (giving `#abc`). So `.color-hex` shows `#abc`, and the hex field opens on `#abc`
+  (`index.ts:2181-2183`). The color tests only use `#33669980`
+  (`editing.test.ts:1604-1672`).
+- **Recommendation:** Either show `expandHex(rgb)` (writing back already expands when the hex
+  changes), or say in the spec that a shorthand reads as written. Add a shorthand case to the
+  tests.
+- **Fix:** `hexParts` now gives the color in six digits (`#abc` → `#aabbcc`, `#abcd` → `#aabbcc` at 87%), so the hex reads and opens in six digits. Writing back already expanded. New test: "reads a shorthand color's hex in six digits".
+
+### 🟡 Fixed - RF19 Risky new paths have no tests
+- **Severity:** Low (confidence: high)
+- **Evidence:** All 234 viewer tests pass, but nothing exercises the following:
+  - `inline=true` lifting the four-property or 24-character limit. Only `inline=false` is tested
+    (`inspector.test.ts:368`).
+  - An inline union case, where only the case is drawn (`impliedKind` "case", `source.ts:1281-1292`).
+  - An actual scrub on an inline label. `inspector.test.ts:332` only checks the `scrubbable` class.
+  - Hover cards under a held button, during a drag, or after a wheel (`#point` and `#quietCards`,
+    `index.ts:726`, `715`, `4758-4798`). `hover.test.ts:368` covers only a press.
+    Browsers can send a `pointerover` for whatever scrolls under a still pointer, and `#point` then
+    clears `#cardQuietKey` (`index.ts:4768-4770`). So after a wheel scroll a card can still open
+    for what scrolled underneath. That is worth checking against the spec's "nor for what the
+    pointer was over … when the reading scrolled". (Confidence on this point: medium.)
+  - The no-tooltip rule (RF12), shorthand colors (RF18) and shadowed references (RF11).
+- **Recommendation:** Add these unit tests. Add a wheel case to the browser check.
+- **Fix:** Added tests for `inline=true` past the four-property limit, an inline union value reading only its case, and a scrub on an inline label (live edits, one commit). Shadowed references, the no-tooltip rule and shorthand colors are covered above. The wheel case was a bug: `pointerover` for what scrolled under a still pointer cleared the quiet key. A wheel or scroll now records where the pointer stood, and no card opens until a `pointermove` leaves that spot (`#cardStillAt`, `#pointerMoved`). New test: "opens none for what a wheel scrolls under a still pointer, until the pointer moves". The spec and README now say so. Held-button cards were already tested.
+
+### Questions (2026-11-04 pass)
+- RF13: the spec was changed to match the shipped order (see its Fix).
+
+### Summary (2026-11-04 pass)
+- The language side is solid: `F.Props` for element functions, `FunctionVisualizer` property
+  visualizers, `label` and `inline` reaching the tree, and the graphics labels. The viewer passes its
+  unit and browser checks, and no `summary`, `short`, `group`, property `icon`, stepper or `compact`
+  code is left.
+- RF11 is the one behavioral bug: a shadowed reference gets another `let`'s swatch and Go to. The
+  rest are spec/code mismatches (tooltips, graphics order, six-digit hex), stale docs and comments,
+  and missing tests.

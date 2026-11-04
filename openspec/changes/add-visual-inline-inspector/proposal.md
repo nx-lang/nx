@@ -22,7 +22,7 @@ The agreed mockup is https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA.
   This replaces the width-dependent line/sheet reading for those elements; the `compact` opt-in goes
   away, since the playground is the viewer's only host.
 - **Friendly names.** A property shows its visualizer's `label`, else one derived from its name:
-  words split at case changes, `_`, `-` and letter–digit edges; known acronyms upper case; sentence
+  words split at case changes, `_` and `-`; known acronyms upper case; sentence
   case; `is`/`has` dropped from a boolean. The raw name stays in the label's hover card.
 - **No property icons.** Fields show labels only; element rows keep their icons.
 - **Scrubbing replaces steppers.** Dragging a number's label left and right changes

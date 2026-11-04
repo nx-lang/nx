@@ -46,7 +46,7 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.js";
 import { derivedLabel } from "./labels.js";
-import { defaultFolded, hexParts, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
+import { defaultFolded, hexParts, readingRuns, renderSource, topLevelLet, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
@@ -426,6 +426,8 @@ export class NxViewerElement extends ElementBase {
   #pointedKey: string | undefined;
   /** Where the pointer last stood across the page, for placing a card against a wide anchor. */
   #pointerX: number | undefined;
+  /** Where the pointer last moved to, to tell a pointer that moves from one the reading scrolls under. */
+  #pointerAt: { readonly x: number; readonly y: number } | undefined;
   /** The key of the node the open card describes. */
   #cardKey: string | undefined;
   /** What scrolls the reading while a card is open, which closes the card when it scrolls. */
@@ -441,6 +443,11 @@ export class NxViewerElement extends ElementBase {
    * moves onto something else.
    */
   #cardQuietKey: string | undefined;
+  /**
+   * Where the pointer stood when the reading scrolled under it; until it moves from there, what
+   * scrolls under it opens no card.
+   */
+  #cardStillAt: { readonly x: number; readonly y: number } | undefined;
   /** Whether the reader may edit values in place. */
   #editable = false;
   /** The values of the tree shown that the reading can edit, by key, while it may. */
@@ -504,7 +511,7 @@ export class NxViewerElement extends ElementBase {
   #problemTimer: ReturnType<typeof setTimeout> | undefined;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => {
-    this.#quietCards();
+    this.#quietCards(true);
   };
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
@@ -692,6 +699,7 @@ export class NxViewerElement extends ElementBase {
     });
     this.#body.addEventListener("pointermove", (event) => {
       this.#pointerX = event.clientX;
+      this.#pointerMoved(event);
       if (!this.#onScrubMove(event)) {
         this.#onPointerMove(event);
       }
@@ -712,7 +720,7 @@ export class NxViewerElement extends ElementBase {
       this.#quietCards();
     });
     // A wheel or a scroll moves the reading under the pointer: what passes under it is not hovered.
-    this.#body.addEventListener("wheel", () => this.#quietCards(), { passive: true });
+    this.#body.addEventListener("wheel", () => this.#quietCards(true), { passive: true });
     frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => {
@@ -721,6 +729,7 @@ export class NxViewerElement extends ElementBase {
         return;
       }
       this.#pointerX = event.clientX;
+      this.#pointerAt ??= { x: event.clientX, y: event.clientY };
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
       // A held button is a press or a drag on its way: what it passes over opens no card.
       this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));
@@ -2172,7 +2181,6 @@ export class NxViewerElement extends ElementBase {
     return withOpacity(raw, Number(alpha.value));
   }
 
-  /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
   /**
    * Opens a field in place on one part of a color shown in its parts, `part`: its hex, which keeps
    * the color's opacity, or its opacity in percent, which keeps its color. `entry` is the color to
@@ -2235,6 +2243,7 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
   #openField(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
     const { host, lead, trail, keep } = valueHost(span, this.#writtenOf(target));
     const restore = [...host.childNodes];
@@ -4247,7 +4256,8 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Where a property whose value is a reference to a top-level `let` leads: the `let`'s key, its
-   * value's where the reading draws that, and its name; nothing for any other value.
+   * value's where the reading draws that, and its name; nothing for any other value, nor for a
+   * reference to a local that shares a `let`'s name.
    */
   #referenceGoal(at: number): { readonly key: string; readonly name: string } | undefined {
     const tree = this.#index!.tree;
@@ -4260,7 +4270,7 @@ export class NxViewerElement extends ElementBase {
     if (value?.role !== "reference" || value.name === undefined) {
       return undefined;
     }
-    const declaration = tree.nodes.find((node) => node.role === "declaration" && node.parent === undefined && node.name === value.name);
+    const declaration = tree.nodes[topLevelLet(tree, value)];
     if (declaration === undefined) {
       return undefined;
     }
@@ -4768,7 +4778,7 @@ export class NxViewerElement extends ElementBase {
     if (key !== this.#cardQuietKey) {
       this.#cardQuietKey = undefined;
     }
-    if (this.#session !== undefined || this.#cardQuietKey !== undefined) {
+    if (this.#session !== undefined || this.#cardQuietKey !== undefined || this.#cardStillAt !== undefined) {
       if (!this.#card.hidden && !this.#cardByKeyboard && key !== this.#cardKey) {
         this.#closeCardSoon();
       }
@@ -4791,10 +4801,28 @@ export class NxViewerElement extends ElementBase {
    * Closes the card, and keeps one from opening for what the pointer is over until it moves onto
    * something else: a press or a scroll means the reader is doing something, not asking what it is.
    */
-  #quietCards(): void {
+  #quietCards(scrolled = false): void {
     this.#closeCard();
     this.#cardQuietKey = this.#pointedKey;
     this.#cardWarmUntil = 0;
+    if (scrolled && this.#pointerAt !== undefined) {
+      this.#cardStillAt = this.#pointerAt;
+    }
+  }
+
+  /**
+   * Notes where the pointer is, and once it moves from where it stood when the reading scrolled,
+   * lets what it is over open a card again, as if it had just arrived there.
+   */
+  #pointerMoved(event: PointerEvent): void {
+    this.#pointerAt = { x: event.clientX, y: event.clientY };
+    const still = this.#cardStillAt;
+    if (still === undefined || (still.x === event.clientX && still.y === event.clientY)) {
+      return;
+    }
+    this.#cardStillAt = undefined;
+    this.#pointedKey = undefined;
+    this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));
   }
 
   /**

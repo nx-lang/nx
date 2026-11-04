@@ -369,7 +369,7 @@ Only whole values edit: an attribute's value, an item of a braced list, or the v
 with no parameters. A click on a value edits it, as a form's field does, and selects its property,
 so its chevron and `⋯` stay once the editor closes: a field opens with the
 caret where the click fell, a boolean toggles, and a case or a color opens its popover. A selected case shows a
-chevron past it, drawn and placed as a value's choices chevron is, room on a line included; a click
+chevron past it, drawn and placed as a value's choices chevron is; a click
 on it opens the popover, or closes it. A click on
 anything else, as a property's name, selects. Enter or F2 opens the selected unit's first value
 with its text selected. Enter or leaving the field commits, Escape cancels, and Tab and Shift+Tab
@@ -515,8 +515,8 @@ every property, and a property reads unqualified, with its default:
 A literal, a comment, punctuation and a unit's room open nothing, and so do a row's name beside its
 icon and the value that names a row, so resting there to drag or select opens nothing. Once a card
 has shown, the next opens at once for a second and a half, as a design tool's tooltips do. None opens
-under a held button, as in a drag, nor for what the pointer pressed on or rested on as the reading
-scrolled, until it moves onto something else. The browser's own tooltips never repeat a card. The card stays while the pointer
+under a held button, as in a drag, nor for what the pointer pressed on, until it moves onto something else, nor
+for what a scroll brings under a still pointer, until the pointer moves. The browser's own tooltips never repeat a card. The card stays while the pointer
 moves onto it, so its text can be selected and its links followed, and closes once the pointer has
 left both, on a press, when anything scrolls, on Escape, or when the text or the tree changes. It never moves the
 selection, the folds or the scroll. With the reading focused, `i` shows the card of the selected unit

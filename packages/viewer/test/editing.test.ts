@@ -1619,6 +1619,17 @@ describe("colors in an inspector", () => {
     assert.ok(value().querySelector(":scope > .swatch"));
   });
 
+  it("reads a shorthand color's hex in six digits", async () => {
+    for (const [written, hex, percent] of [["#abc", "#aabbcc", "100"], ["#abcd", "#aabbcc", "87"]] as const) {
+      const item = await treeOf([{ uri: "nx:///short.nx", identity: "short.nx", source: `type Fill = { tint:color }\nlet fill = <Fill tint=${written} />\n` }]);
+      const node = item.tree.nodes.find((node) => node.value === written)!;
+      const element = show(item);
+      const value = rendered(element, node.key);
+      assert.equal(value.querySelector(".color-hex")?.textContent, hex, written);
+      assert.equal(value.querySelector(".opacity-value")?.textContent, percent, written);
+    }
+  });
+
   it("edits the hex in place, keeping the opacity, and the opacity, keeping the hex", async () => {
     const { element, key, value } = await fill();
     const { edits } = events(element);

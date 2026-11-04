@@ -272,10 +272,13 @@ describe("hover cards", () => {
     const hover = await fixture("hover");
     const element = show(hover);
     const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
+    let x = 0;
     const open = (): void => {
       pointAt(document.body);
       body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
       pointAt(drawn(element, circle));
+      // The pointer moves on, so a scroll before no longer keeps cards quiet.
+      drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: ++x }));
       t.mock.timers.tick(1000);
       assert.equal(card(element).hidden, false);
     };
@@ -386,6 +389,27 @@ describe("hover cards", () => {
     lead.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true, buttons: 1 }));
     t.mock.timers.tick(1000);
     assert.equal(signatureOf(element), undefined, "nor does one open under a held button, as in a drag");
+  });
+
+  it("opens none for what a wheel scrolls under a still pointer, until the pointer moves", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const hover = await fixture("hover");
+    const element = show(hover);
+    const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
+    const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
+    const lead = marksOf(element, type)[0]!;
+    pointAt(lead, 10);
+    body(element).dispatchEvent(new window.WheelEvent("wheel", { bubbles: true, composed: true }));
+    // The reading scrolls Circle under the pointer, which has not moved.
+    pointAt(drawn(element, circle), 10);
+    t.mock.timers.tick(2000);
+    assert.equal(signatureOf(element), undefined, "what scrolls under a still pointer opens nothing");
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: 10 }));
+    t.mock.timers.tick(2000);
+    assert.equal(signatureOf(element), undefined, "nor does a move event that goes nowhere");
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: 12 }));
+    t.mock.timers.tick(1000);
+    assert.equal(signatureOf(element), "(case) ShapeType.Circle", "once the pointer moves, cards open again");
   });
 
   it("closes on a new tree", async (t) => {
