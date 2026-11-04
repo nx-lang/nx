@@ -32,3 +32,4 @@
 - [x] 4.4 `if`/`for` among rows: lines start at the sibling icons, held rows level with siblings, quiet braces; State.Update reads with the action icon; UI text keeps its color where the highlighter reads a word as a keyword (Bret, 2026-11-03)
 - [x] 4.5 One value names a row (Bret, 2026-11-03): title, else text content, else id, with no label; a click on it opens the inspector with that field ready to edit; remove `summary` and `short` from `@nx/visualizer`, the compiler's braced name lists and checks, the source tree, `@nx/graphics`, the examples and the docs
 - [x] 4.6 No property icons (Bret, 2026-11-04): remove `icon` from `PropertyVisualizer`, the source tree, the viewer's field leads, `@nx/graphics`, the examples and the docs; element icons stay
+- [x] 4.7 Inspector shows what the element sets and its title; a last `N more` line reveals the rest, `Show fewer` hides them, forgotten on close (Bret, 2026-11-04)

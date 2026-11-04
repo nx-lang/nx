@@ -103,6 +103,21 @@ try {
   assert.equal(await head(circle).locator(".row-pin").getAttribute("aria-pressed"), "true");
   assert.equal(await head(circle).locator(".row-pin").evaluate((button) => getComputedStyle(button).outlineStyle), "solid");
 
+  // An inspector shows what its element sets; its last line, reached by Tab from the last field,
+  // shows the rest and hides them again.
+  const more = inspector(circle).locator(":scope > .inspector-more");
+  const shown = () => inspector(circle).locator(":scope > .inspector-fields > .prop-field").count();
+  const setCount = await shown();
+  assert.match(await more.textContent(), /^[0-9]+ more$/);
+  await inspector(circle).locator(".editable-value").last().click();
+  await page.keyboard.press("Tab");
+  assert.equal(await more.evaluate((button) => button.getRootNode().activeElement === button), true, "Tab from the last field reaches the last line");
+  await page.keyboard.press("Enter");
+  assert.equal(await more.textContent(), "Show fewer");
+  assert.ok(await shown() > setCount);
+  await more.click();
+  assert.equal(await shown(), setCount);
+
   // A new document drops the pins.
   await page.getByRole("combobox").first().selectOption("graphics");
   await page.waitForFunction(() => {
@@ -130,7 +145,7 @@ try {
     await page.screenshot({ path: process.env.NX_INSPECTOR_SCREENSHOT, fullPage: true });
   }
   assert.deepEqual(errors, []);
-  console.log("PASS: rows, inspectors, close and reopen, pins, anchoring, scrubbing with one undo step, invalid entries, view restoration, folds, keyboard focus and row rhythm.");
+  console.log("PASS: rows, inspectors, close and reopen, pins, anchoring, scrubbing with one undo step, invalid entries, view restoration, folds, keyboard focus, revealing unset properties and row rhythm.");
 } finally {
   await browser?.close();
   try { process.kill(-server.pid, "SIGTERM"); } catch {}

@@ -57,6 +57,12 @@ export interface SourceLayout {
   /** The keys of the element values unfolded into nested groups of fields in an inspector. */
   readonly valuesOpen?: ReadonlySet<string> | undefined;
   /**
+   * The keys of the elements whose inspectors also show the properties they do not set. Other
+   * inspectors show only what the element sets, its title property, and a last line that reveals
+   * the rest.
+   */
+  readonly allProperties?: ReadonlySet<string> | undefined;
+  /**
    * The keys of the elements whose properties do not fit on one line in the pane, which give each
    * property a row. The element measures which those are, from the reading drawn without them.
    */
@@ -1115,7 +1121,7 @@ export function renderSource(
     cell.append(head);
     if (open) {
       const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
-      const inspector = writeInspector(at, presentations(at), declaration?.visualizer?.properties?.map((property) => property.name) ?? []);
+      const inspector = writeInspector(at, presentations(at), declaration?.visualizer?.properties?.map((property) => property.name) ?? [], declaration?.visualizer?.title);
       inspector.classList.add("nested-inspector");
       // The nested element's own node holds its fields, so selecting inside it selects in it.
       head.append(inspector);
@@ -1211,7 +1217,7 @@ export function renderSource(
     row.append(head);
 
     if (open) {
-      const inspector = writeInspector(at, present, visualizer?.properties?.map((property) => property.name) ?? []);
+      const inspector = writeInspector(at, present, visualizer?.properties?.map((property) => property.name) ?? [], visualizer?.title);
       if (inline !== undefined) {
         // Inline content edits in the inspector, first, as the property it is.
         const presentation = present(tree.nodes[inline]!.name ?? "");
@@ -1227,7 +1233,7 @@ export function renderSource(
         inspector.querySelector(":scope > .inspector-fields")!.prepend(field);
       }
       // An element with no properties at all has nothing to inspect, so it takes no room.
-      if (inspector.querySelector(":scope > .inspector-fields > *") !== null) {
+      if (inspector.querySelector(":scope > .inspector-fields > *, :scope > .inspector-more") !== null) {
         row.append(inspector);
       }
     }
@@ -1257,11 +1263,18 @@ export function renderSource(
   };
 
   /**
-   * An element's inspector: a field to each property its type declares, in the order its
-   * visualizer lists them, then the rest in declaration order, then any it writes that its type
-   * does not declare, each its label beside its value.
+   * An element's inspector: a field to each property the element sets, and to its title property
+   * so a click on its row's value always has a field to open, in the order its visualizer lists
+   * them, then the rest in declaration order, then any it writes that its type does not declare,
+   * each its label beside its value. A last line reveals the properties it does not set, as empty
+   * fields in their places, and hides them again.
    */
-  const writeInspector = (at: number, present: (name: string) => Presentation, order: readonly string[]): HTMLElement => {
+  const writeInspector = (
+    at: number,
+    present: (name: string) => Presentation,
+    order: readonly string[],
+    title: string | undefined
+  ): HTMLElement => {
     const node = tree.nodes[at]!;
     const kindName = node.name ?? "";
     const declared = (elementProperties(tree, node) ?? []).filter((property) => property.flags?.includes("content") !== true);
@@ -1298,8 +1311,13 @@ export function renderSource(
     inspector.setAttribute("aria-label", `Properties of ${kindName}`);
     const fields = document.createElement("span");
     fields.className = "inspector-fields";
+    const all = layout.allProperties?.has(node.key) === true;
+    const unset = names.filter((name) => !written.has(name) && name !== title).length;
     for (const name of names) {
       const attribute = written.get(name);
+      if (attribute === undefined && name !== title && !all) {
+        continue;
+      }
       const property = declared.find((candidate) => candidate.name === name);
       fields.append(
         attribute !== undefined
@@ -1311,6 +1329,17 @@ export function renderSource(
       fields.append(writtenField(attribute, present(tree.nodes[attribute]!.name ?? "")));
     }
     inspector.append(fields);
+    if (unset > 0) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.tabIndex = -1;
+      more.className = "inspector-more";
+      more.dataset["moreKey"] = node.key;
+      more.setAttribute("aria-expanded", String(all));
+      more.textContent = all ? "Show fewer" : `${unset} more`;
+      more.title = all ? "Hide the properties it does not set" : `Show the ${unset === 1 ? "property" : `${unset} properties`} ${kindName} does not set`;
+      inspector.append(more);
+    }
     return inspector;
   };
 

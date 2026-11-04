@@ -138,8 +138,12 @@ SHALL change folds only.
 - **THEN** Drawing's inspector SHALL open with its children still hidden
 
 ### Requirement: The inspector shows properties as labeled fields
-An inspector SHALL show every property its element's type declares, written or not, as a field, one
-to a line, in the resolved property order. A field SHALL show the property's resolved label on the
+An inspector SHALL show, as a field, each property its element writes and its title property
+whether written or not, one to a line, in the resolved property order. When its element's type
+declares other properties, its last line SHALL read the number of them and `more`, as `3 more`;
+pressing it SHALL show them as fields in their places and turn the line into `Show fewer`, which
+hides them again, and the inspector SHALL forget the choice when it closes. Tab from the
+inspector's last field SHALL reach that line. A field SHALL show the property's resolved label on the
 left and its value on the right; a field SHALL show no icon; the labels SHALL share a
 column as wide as the longest, up to about 40% of the inspector, and a longer label SHALL wrap. A
 value over several lines, as a list of elements, or an unfolded element value SHALL read under its
@@ -153,9 +157,15 @@ the inspector as fields too.
 
 #### Scenario: Star's inspector
 - **WHEN** Star's visualizer lists `cx` and `cy` with the labels `Center X` and `Center Y`, then
-  `outerRadius`, `innerRadius` and `pointCount`, and Star writes no `stroke`
+  `outerRadius`, `innerRadius` and `pointCount`, and Star writes all five but no `stroke`
 - **THEN** the inspector SHALL show `Center X` beside `150` and `Center Y` beside `55` first, then the
-  three labels with no icons, and `Stroke` beside an empty dashed value
+  three labels with no icons, then a line counting the properties Star does not write
+- **AND WHEN** the reader presses that line
+- **THEN** `Stroke` SHALL read in its place beside an empty dashed value
+
+#### Scenario: Unset properties hide again
+- **WHEN** the reader shows a Card's unset properties, selects another row and selects the Card again
+- **THEN** its inspector SHALL show only what the Card writes and its title, and the `N more` line
 
 #### Scenario: A list of elements under its label
 - **WHEN** a Page writes `actions={ <Button label="Export" /> <Button label="Invite" /> }` and the

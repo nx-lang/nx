@@ -35,8 +35,20 @@ function show({ tree, text }: Fixture, editable = true): NxViewerElement {
   element.tree = tree;
   // Every row's inspector open, so every property reads.
   element.detailsState = { pinned: tree.nodes.filter((node) => node.role === "element").map((node) => node.key) };
+  showAll(element);
   created.push(element);
   return element;
+}
+
+/** Shows, in every open inspector, the properties its element does not set. */
+function showAll(element: NxViewerElement): void {
+  for (;;) {
+    const more = element.shadowRoot!.querySelector<HTMLElement>('.inspector-more[aria-expanded="false"]');
+    if (more === null) {
+      return;
+    }
+    more.click();
+  }
 }
 
 /**

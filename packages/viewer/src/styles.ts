@@ -202,6 +202,23 @@ export const styles = `
   white-space: normal;
   font-weight: 400;
 }
+/* The last line of an inspector: how many properties the element does not set, which a click shows
+   as empty fields in their places, and then hides again. Quiet, in the labels' column. */
+.source .inspector-more {
+  display: block;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  cursor: pointer;
+}
+.source .inspector-fields:empty + .inspector-more { margin-top: 0; }
+.source .inspector-more:hover { color: inherit; text-decoration: underline; }
+.source .inspector-more:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 1px; border-radius: 3px; }
 /* The inspector's fields, one to a line: the labels in a column as wide as the longest, up to 40%
    of the room, and the values beside them. */
 .source .inspector-fields {

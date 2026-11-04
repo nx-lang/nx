@@ -369,6 +369,8 @@ export class NxViewerElement extends ElementBase {
   #lastIndex: TreeIndex | undefined;
   /** The element values unfolded into nested groups of fields. */
   #valuesOpen = new Set<string>();
+  /** The elements whose open inspectors also show the properties they do not set. */
+  #allProperties = new Set<string>();
   #refreshingDetails = false;
   #tree: SourceTree | undefined;
   #text = "";
@@ -815,6 +817,31 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /**
+   * The elements whose inspectors show every property. An inspector that closes forgets it, so it
+   * opens again on what its element sets.
+   */
+  #shownAll(): Set<string> {
+    const open = this.#openDetailsKeys();
+    for (const key of this.#allProperties) {
+      if (!open.has(key) && !this.#valuesOpen.has(key)) {
+        this.#allProperties.delete(key);
+      }
+    }
+    return this.#allProperties;
+  }
+
+  /** Shows the properties an element does not set in its inspector, or hides them again. */
+  #toggleAllProperties(key: string): void {
+    if (!this.finishEditing()) { return; }
+    if (!this.#allProperties.delete(key)) {
+      this.#allProperties.add(key);
+    }
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, key);
+    this.#keepRow(owner, () => this.#render());
+    [...this.#body.querySelectorAll<HTMLElement>(".inspector-more")].find((candidate) => candidate.dataset["moreKey"] === key)?.focus({ preventScroll: true });
+  }
+
   /** Unfolds an element value into a nested group of its fields, or folds it back. */
   #toggleValue(key: string): void {
     if (!this.finishEditing()) { return; }
@@ -1158,7 +1185,7 @@ export class NxViewerElement extends ElementBase {
     const targets = editTargets(index);
     const draw = (wrapped?: ReadonlySet<string>): void => {
       this.#body.replaceChildren(
-        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, details: this.#openDetailsKeys(), pinned: this.#detailsState.pinned, valuesOpen: this.#valuesOpen })
+        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, details: this.#openDetailsKeys(), pinned: this.#detailsState.pinned, valuesOpen: this.#valuesOpen, allProperties: this.#shownAll() })
       );
     };
     try {
@@ -2481,6 +2508,13 @@ export class NxViewerElement extends ElementBase {
       at += direction;
     }
     const next = from < 0 ? undefined : values[at];
+    // Tab past an inspector's last field stops at its last line, which shows or hides the rest.
+    const inspector = from < 0 ? undefined : values[from]!.closest<HTMLElement>(".inspector");
+    const more = inspector?.querySelector<HTMLElement>(":scope > .inspector-more");
+    if (direction === 1 && more !== null && more !== undefined && (next === undefined || next.closest(".inspector") !== inspector)) {
+      more.focus({ preventScroll: true });
+      return;
+    }
     if (next === undefined) {
       return;
     }
@@ -4149,6 +4183,11 @@ export class NxViewerElement extends ElementBase {
       this.#toggleDetails(details.dataset["detailsKey"]!, details.dataset["detailsAction"] as "toggle" | "pin");
       return;
     }
+    const reveal = target.closest<HTMLElement>(".inspector-more[data-more-key]");
+    if (reveal !== null && this.#body.contains(reveal)) {
+      this.#toggleAllProperties(reveal.dataset["moreKey"]!);
+      return;
+    }
     const valueFold = target.closest<HTMLElement>(".value-fold[data-value-key]");
     if (valueFold !== null && this.#body.contains(valueFold)) {
       this.#toggleValue(valueFold.dataset["valueKey"]!);
@@ -4312,6 +4351,11 @@ export class NxViewerElement extends ElementBase {
     if (first !== null) {
       this.#select(keyOf(first), true);
       this.#body.focus({ preventScroll: true });
+      return true;
+    }
+    const more = inspector.querySelector<HTMLElement>(":scope > .inspector-more");
+    if (more !== null) {
+      more.focus({ preventScroll: true });
       return true;
     }
     return false;

@@ -240,15 +240,43 @@ describe("inspectors", () => {
     assert.equal(width.querySelector<HTMLElement>(".field-lead")!.title, "Breadth · width");
   });
 
-  it("shows a property the element does not write as a dashed field with its default", async () => {
+  it("shows what an element sets, and a last line that reveals the rest as dashed fields", async () => {
     const element = show(await panel());
     element.selection = "panel.value.children[1]";
-    const unset = [...drawn(element, "panel.value.children[1]").querySelectorAll<HTMLElement>(".dimmed-row")];
+    const row = (): HTMLElement => drawn(element, "panel.value.children[1]");
+    const names = (): (string | undefined)[] => [...row().querySelectorAll<HTMLElement>(":scope > .inspector .prop-field > .field-lead")].map((lead) => lead.textContent ?? undefined);
+    assert.deepEqual(names(), ["Title", "Elevated"], "only what the Card sets");
+    const more = (): HTMLButtonElement => row().querySelector<HTMLButtonElement>(":scope > .inspector > .inspector-more")!;
+    assert.equal(more().textContent, "3 more");
+    assert.equal(more().getAttribute("aria-expanded"), "false");
+    more().click();
+    const unset = [...row().querySelectorAll<HTMLElement>(":scope > .inspector .dimmed-row")];
     assert.deepEqual(unset.map((field) => field.dataset["name"]), ["padding", "tone", "imageURL"]);
+    assert.deepEqual(names(), ["Title", "Padding", "Tone", "Elevated", "Image URL"], "each in its place");
     assert.equal(unset[2]!.querySelector(".field-lead")!.textContent, "Image URL", "a caption derived from its name");
     assert.equal(unset[0]!.textContent!.replace(/\s+/g, " ").trim(), "Padding8");
-    const elevated = drawn(element, "panel.value.children[1].elevated");
-    assert.ok(elevated.classList.contains("boolean-field"), "a boolean reads as a checkbox");
+    assert.ok(drawn(element, "panel.value.children[1].elevated").classList.contains("boolean-field"), "a boolean reads as a checkbox");
+    assert.equal(more().textContent, "Show fewer");
+    assert.equal(more().getAttribute("aria-expanded"), "true");
+    // Closing the inspector forgets it: it opens again on what the Card sets.
+    element.selection = "panel.value.children[0]";
+    element.selection = "panel.value.children[1]";
+    assert.deepEqual(names(), ["Title", "Elevated"]);
+  });
+
+  it("always shows the title property, so a click on the row's value has a field to open", async () => {
+    const source = [
+      'import "@nx/visualizer"',
+      "type Note = { text?:string pinned:boolean = false }",
+      "visualizer Note = <ElementVisualizer title=text />",
+      "let note = <Note />",
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///note.nx", identity: "note.nx", source }], { visualizers: { modules: [] } }));
+    element.selection = "note.value";
+    const inspector = drawn(element, "note.value").querySelector(":scope > .inspector")!;
+    assert.deepEqual([...inspector.querySelectorAll<HTMLElement>(".prop-field > .field-lead")].map((lead) => lead.textContent), ["Text"]);
+    assert.equal(inspector.querySelector(".inspector-more")!.textContent, "1 more");
   });
 
   it("marks an action value, a component's State.Update included, with the action icon", async () => {
