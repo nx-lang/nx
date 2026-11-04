@@ -3044,6 +3044,7 @@ export class NxViewerElement extends ElementBase {
       this.#popover.replaceChildren(input, picker);
     }
     this.#popover.querySelector(".popover-alpha")?.remove();
+    this.#popover.querySelector(".popover-alpha-unit")?.remove();
     this.#popover.hidden = false;
     span.classList.add("editing");
     const session: EditSession = { target, span, input, picker, listening, closed: false };
@@ -3051,17 +3052,21 @@ export class NxViewerElement extends ElementBase {
       const alpha = document.createElement("input");
       alpha.className = "popover-alpha";
       alpha.type = "number";
+      // Opacity reads as a whole percent, as design tools show it, not as the raw fraction of 255.
       alpha.min = "0";
-      alpha.max = "1";
-      alpha.step = "0.01";
-      alpha.setAttribute("aria-label", `${this.#labelOf(target)}: alpha`);
+      alpha.max = "100";
+      alpha.step = "1";
+      alpha.setAttribute("aria-label", `${this.#labelOf(target)}: opacity, percent`);
       const hex = preserveHexAlpha("#000000", input.value);
-      alpha.value = String(hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1);
-      this.#popover.append(alpha);
+      alpha.value = String(Math.round((hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) * 100));
+      const unit = document.createElement("span");
+      unit.className = "popover-alpha-unit";
+      unit.textContent = "%";
+      this.#popover.append(alpha, unit);
       alpha.addEventListener("change", () => {
         const value = Number(alpha.value);
-        if (!Number.isFinite(value) || value < 0 || value > 1 || alpha.value.trim() === "") return;
-        input.value = picker.value + Math.round(value * 255).toString(16).padStart(2, "0");
+        if (!Number.isFinite(value) || value < 0 || value > 100 || alpha.value.trim() === "") return;
+        input.value = picker.value + Math.round((value / 100) * 255).toString(16).padStart(2, "0");
         this.#choose(session, input.value);
       }, { signal });
     }

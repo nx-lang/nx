@@ -678,6 +678,8 @@ export const styles = `
 .edit-problem[hidden] { display: none; }
 .popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
 .popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
+.popover .popover-alpha { width: 7ch; text-align: right; }
+.popover .popover-alpha-unit { margin-left: -2px; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
 .popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
 .popover .options { max-height: 16em; overflow: auto; margin-top: 4px; }
 .popover .option {

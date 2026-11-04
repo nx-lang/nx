@@ -1562,7 +1562,8 @@ describe("typed color editors", () => {
     const { edits } = events(element);
     rendered(element,node.key).click();
     const alpha=popover(element).querySelector<HTMLInputElement>(".popover-alpha")!;
-    alpha.value="0.25";
+    assert.equal(alpha.value,"50","opacity reads as a whole percent");
+    alpha.value="25";
     alpha.dispatchEvent(new window.Event("change",{bubbles:true}));
     assert.deepEqual(edits,[{key:node.key,edit:{kind:"setValue",value:{kind:"color",text:"#33669940"}}}]);
     const targets=editTargets(indexTree(item.tree,item.text));
