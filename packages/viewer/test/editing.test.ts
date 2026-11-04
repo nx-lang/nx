@@ -1601,6 +1601,75 @@ describe("typed color editors", () => {
   });
 });
 
+describe("colors in an inspector", () => {
+  const fill = async () => {
+    const item = await treeOf([{ uri: "nx:///fill.nx", identity: "fill.nx", source: "type Fill = { tint:color }\nlet fill = <Fill tint=#33669980 />\n" }]);
+    const node = item.tree.nodes.find((node) => node.value === "#33669980")!;
+    const element = show(item);
+    return { element, key: node.key, value: () => rendered(element, node.key) };
+  };
+  const color = (text: string) => ({ kind: "setValue", value: { kind: "color", text } });
+
+  it("reads a color in its parts, a six-digit hex and its opacity in percent", async () => {
+    const { value } = await fill();
+    assert.ok(value().closest(".inspector"), "in its element's inspector");
+    assert.equal(value().querySelector(".color-hex")?.textContent, "#336699");
+    assert.equal(value().querySelector(".opacity-value")?.textContent, "50");
+    assert.equal(value().querySelector(".opacity-unit")?.textContent, "%");
+    assert.ok(value().querySelector(":scope > .swatch"));
+  });
+
+  it("edits the hex in place, keeping the opacity, and the opacity, keeping the hex", async () => {
+    const { element, key, value } = await fill();
+    const { edits } = events(element);
+    value().querySelector<HTMLElement>(".color-hex")!.click();
+    let open = field(element)!;
+    assert.equal(open.textContent, "#336699");
+    open.textContent = "#ff0000";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key, edit: color("#ff000080") }]);
+    value().querySelector<HTMLElement>(".opacity-value")!.click();
+    open = field(element)!;
+    assert.equal(open.textContent, "50");
+    press(open, "Enter");
+    assert.equal(edits.length, 1, "an opacity left as it opened writes nothing");
+    value().querySelector<HTMLElement>(".opacity-value")!.click();
+    open = field(element)!;
+    open.textContent = "25";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(open, "Enter");
+    assert.deepEqual(edits.at(-1), { key, edit: color("#ff000040") }, "on the hex it committed");
+  });
+
+  it("opens the color picker from the swatch, live as it moves, committing once", async () => {
+    const { element, key, value } = await fill();
+    const { edits, lives } = events(element);
+    value().querySelector<HTMLElement>(":scope > .swatch")!.click();
+    assert.equal(popover(element).hidden || !popover(element).isConnected || popover(element).querySelector(".popover-hex") === null, true, "no popover");
+    const picker = root(element).querySelector<HTMLInputElement>(".swatch-picker")!;
+    assert.equal(picker.value, "#336699");
+    for (const next of ["#112233", "#445566"]) {
+      picker.value = next;
+      picker.dispatchEvent(new window.Event("input", { bubbles: true }));
+    }
+    assert.deepEqual(lives.map((detail) => detail.edit), [color("#11223380"), color("#44556680")]);
+    picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.deepEqual(edits, [{ key, edit: color("#44556680") }]);
+    assert.equal(root(element).querySelector(".swatch-picker"), null, "the picker goes once closed");
+  });
+
+  it("scrubs the opacity as its percent sign is dragged, committing once on release", async () => {
+    const { element, key, value } = await fill();
+    const { edits, lives } = events(element);
+    scrub(value().querySelector(".opacity-unit")!, [2, 6, 30]);
+    assert.deepEqual(lives.map((detail) => detail.edit), [color("#33669985"), color("#33669999")], "once past a few pixels");
+    assert.deepEqual(edits, [{ key, edit: color("#33669999") }]);
+    scrub(value().querySelector(".opacity-unit")!, [-3000]);
+    assert.deepEqual(edits.at(-1), { key, edit: color("#33669900") }, "no less than none");
+  });
+});
+
 describe("color editor revisions", () => {
   it("ignores a detached alpha control after the document tree changes", async () => {
     const before=await treeOf([{uri:"nx:///revision.nx",identity:"revision.nx",source:"let accent = #33669980\n"}]);

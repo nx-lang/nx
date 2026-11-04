@@ -336,6 +336,17 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
   vertical-align: -0.05em;
 }
+/* A color in an inspector reads in its parts, as a design tool shows one: its swatch, its six-digit
+   hex, and its opacity in percent, whose sign drags to change it. Elsewhere it reads as written. */
+.source .color-opacity { display: none; }
+.source .inspector .color-value > .color-alpha-digits { display: none; }
+.source .inspector .color-value > .color-opacity { display: inline; margin-left: 1.5ch; }
+.source .inspector .color-value.editable-value > .swatch { cursor: pointer; }
+.source .opacity-unit { color: var(--nx-viewer-unit-color, light-dark(#6e6e6e, #9a9a9a)); }
+.source .inspector .color-value.editable-value .opacity-unit { cursor: ew-resize; touch-action: pan-y; }
+.source .field.field-color-opacity { display: inline-block; min-width: 3ch; }
+/* The browser's color picker a swatch opens, kept out of sight at the swatch. */
+.swatch-picker { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 .source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }

@@ -281,6 +281,13 @@ an editor fits it:
 - a bare case of a union: a popover listing the union's cases that hold no properties, each with its
   doc, the current one marked, filtered as the reader types;
 - a string a visualizer formats as `color`: a popover with a hex field and the browser's color picker;
+- a color literal in an inspector: its parts in its value's place, as a design tool shows a color: its
+  swatch, its six-digit hex and its opacity in whole percent. A click on the swatch SHALL open the
+  browser's color picker, which keeps the opacity; a click on the hex SHALL edit it in place, keeping the
+  opacity; a click on the opacity SHALL edit its percent in place, keeping the hex; and dragging the `%`
+  sideways SHALL scrub the opacity by 1 percent for each 3 pixels, by 10 with Shift, between 0 and 100,
+  committed once on release. A part left as it opened SHALL write nothing. Elsewhere a color literal
+  SHALL read as written and open its popover;
 - a run of text: a text field that takes one line.
 
 The element SHALL find a value's type through its element's declaration and the aliases it names, in
@@ -470,6 +477,13 @@ across the host's newer tree.
 - **WHEN** the reader opens the field of `size=16` and presses Up twice
 - **THEN** the element SHALL fire `nx-edit` with `live: true` setting `17`, then `18`, and on Enter
   `nx-edit` without `live` setting `18`
+
+#### Scenario: Editing a color in its parts
+- **WHEN** an inspector shows `tint=#33669980` and the reader clicks its opacity, types `25` and
+  presses Enter
+- **THEN** the value reads `#336699` and `25%`, and the element fires one edit setting `#33669940`
+- **WHEN** the reader then drags the `%` 30 pixels to the right and releases
+- **THEN** the element fires a live edit for each new opacity and one edit setting `#33669999`
 
 #### Scenario: Dragging in the color picker
 - **WHEN** the reader opens a color's popover and the picker reports `#112233`, then `#445566`, then

@@ -760,10 +760,29 @@ export function renderSource(
     const end = endOf(value);
     const written = value.value ?? "";
     if (value.role === "literal" && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(written)) {
-      const words = marked(at, "span", "colored");
+      // A color literal reads in its parts, as a design tool's color field does: its swatch, its hex,
+      // and, in an inspector, its opacity in percent beside the hex in place of its alpha digits.
+      const words = marked(at, "span", "colored color-value");
       const square = swatch(at, start, end);
       if (square !== undefined) words.append(square);
-      writeText(words, start, end);
+      const parts = hexParts(written);
+      const hex = document.createElement("span");
+      hex.className = "color-hex";
+      hex.textContent = parts.rgb;
+      const digits = document.createElement("span");
+      digits.className = "color-alpha-digits";
+      digits.textContent = parts.alpha;
+      const opacity = document.createElement("span");
+      opacity.className = "color-opacity";
+      const percent = document.createElement("span");
+      percent.className = "opacity-value";
+      percent.textContent = String(parts.percent);
+      const unit = document.createElement("span");
+      unit.className = "opacity-unit";
+      unit.textContent = "%";
+      unit.title = "Drag to change the opacity";
+      opacity.append(percent, unit);
+      words.append(hex, digits, opacity);
       cell.append(words);
       return;
     }
@@ -2091,4 +2110,16 @@ export function decodeString(written: string): string | undefined {
     return undefined;
   }
   return inner.replace(/\\([\\"])/g, "$1");
+}
+
+/**
+ * A hex color's parts as written: its color without its alpha, its alpha digits, and its opacity in
+ * whole percent. `#2563eb80` is `#2563eb`, `80` and 50.
+ */
+export function hexParts(hex: string): { readonly rgb: string; readonly alpha: string; readonly percent: number } {
+  const digits = hex.length - 1;
+  const alpha = digits === 4 ? hex.slice(4) : digits === 8 ? hex.slice(7) : "";
+  const rgb = alpha === "" ? hex : hex.slice(0, hex.length - alpha.length);
+  const value = alpha === "" ? 255 : parseInt(alpha.length === 1 ? alpha + alpha : alpha, 16);
+  return { rgb, alpha, percent: Math.round((value / 255) * 100) };
 }

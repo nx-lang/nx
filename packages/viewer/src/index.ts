@@ -34,6 +34,7 @@ import {
   defaultValue,
   offsetAtPoint,
   pickerColor,
+  colorFromPart,
   expandHex,
   preserveHexAlpha,
   withOpacity,
@@ -45,7 +46,7 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.js";
 import { derivedLabel } from "./labels.js";
-import { defaultFolded, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
+import { defaultFolded, hexParts, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
 
@@ -252,6 +253,9 @@ interface EditSession {
   choiceActive?: HTMLElement | undefined;
   /** Whether a field's choices are listed under it; a color's always are. */
   choicesOpen?: boolean;
+  /** For a color edited in its parts: which part its field holds, and the color it opened on. */
+  colorPart?: "hex" | "opacity";
+  colorFrom?: string;
   closed: boolean;
 }
 
@@ -295,6 +299,8 @@ interface Scrub {
   readonly from: string;
   /** The number now, once the press became a drag. */
   value: string | undefined;
+  /** For a color's opacity scrubbed by its percent sign: its opacity when the press began. */
+  readonly percent?: number;
 }
 
 /** An item of a list pressed on its handle, and dragged once the press became a drag. */
@@ -438,6 +444,10 @@ export class NxViewerElement extends ElementBase {
   #closedOnPress: string | undefined;
   /** A number's lead pressed, and scrubbing it once the press became a drag. */
   #scrub: Scrub | undefined;
+  /** Which part of a color shown in its parts the next editor opens on. */
+  #colorPart: "hex" | "opacity" = "hex";
+  /** The color picker a color's swatch opened, while it is open. */
+  #swatchPicker: HTMLInputElement | undefined;
   /** The keys of the unwritten properties' values, which the reading edits as written ones. */
   #moreKeys: string[] = [];
   /** The cards of the unwritten properties' names, by the key their attribute would have. */
@@ -2030,9 +2040,18 @@ export class NxViewerElement extends ElementBase {
       case "case":
         this.#openCases(target, span, draft ?? "", caret);
         break;
-      case "color":
+      case "color": {
+        // A color literal in an inspector reads in its parts, and its hex or its opacity edits in place.
+        const part = span.querySelector<HTMLElement>(
+          this.#colorPart === "opacity" ? ":scope > .color-opacity > .opacity-value" : ":scope > .color-hex"
+        );
+        if (part !== null && span.closest(".inspector") !== null && isHexColor((draft ?? current).trim())) {
+          this.#openColorPart(target, part, this.#colorPart, (draft ?? current).trim(), current, caret);
+          break;
+        }
         this.#openColor(target, span, draft ?? current, caret);
         break;
+      }
       default:
         this.#openField(target, span, draft ?? current, caret);
     }
@@ -2110,7 +2129,8 @@ export class NxViewerElement extends ElementBase {
    */
   #draftOf(session: EditSession): string | undefined {
     if (session.field !== undefined) {
-      return fieldText(session.field);
+      const entry = fieldText(session.field);
+      return session.colorPart === undefined ? entry : colorFromPart(session.colorPart, entry, session.colorFrom!);
     }
     const raw = session.input?.value;
     const alpha = session.target.colorLiteral === true ? this.#popover.querySelector<HTMLInputElement>(".popover-alpha") : null;
@@ -2125,6 +2145,68 @@ export class NxViewerElement extends ElementBase {
   }
 
   /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
+  /**
+   * Opens a field in place on one part of a color shown in its parts, `part`: its hex, which keeps
+   * the color's opacity, or its opacity in percent, which keeps its color. `entry` is the color to
+   * show, and `from` the color the field changes.
+   */
+  #openColorPart(target: EditTarget, part: HTMLElement, which: "hex" | "opacity", entry: string, from: string, caret?: Caret): void {
+    const parts = hexParts(entry);
+    this.#openField(target, part, which === "hex" ? parts.rgb : String(parts.percent), caret);
+    const session = this.#session;
+    if (session !== undefined && session.target === target) {
+      session.colorPart = which;
+      session.colorFrom = from;
+      session.field?.classList.add(which === "hex" ? "field-color-hex" : "field-color-opacity");
+      session.field?.setAttribute("aria-label", `${this.#labelOf(target)}: ${which === "hex" ? "hex color" : "opacity, percent"}`);
+      this.#validate(session);
+    }
+  }
+
+  /**
+   * Opens the color picker on a color shown in its parts, from its swatch: the color goes live as it
+   * is picked and is committed once when the picker closes on it, keeping its opacity.
+   */
+  #pickSwatch(key: string, swatch: HTMLElement): void {
+    const target = this.#targets.get(key);
+    if (target === undefined || !this.finishEditing()) {
+      return;
+    }
+    const property = this.#propertyOf(key);
+    if (property !== undefined && property !== this.#selection) {
+      this.#select(property, true, false);
+    }
+    this.#swatchPicker?.remove();
+    const from = this.#currentOf(target);
+    const picker = this.ownerDocument.createElement("input");
+    picker.type = "color";
+    picker.className = "swatch-picker";
+    picker.tabIndex = -1;
+    picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
+    picker.value = pickerColor(from, swatch);
+    // Where the swatch is, so the browser opens its picker there.
+    const box = swatch.getBoundingClientRect();
+    const frame = this.#frame.getBoundingClientRect();
+    picker.style.left = `${box.left - frame.left}px`;
+    picker.style.top = `${box.bottom - frame.top}px`;
+    this.#frame.append(picker);
+    this.#swatchPicker = picker;
+    const color = (): string => colorFromPart("hex", picker.value, from);
+    picker.addEventListener("input", () => this.#showStepped(target, color()));
+    picker.addEventListener("change", () => {
+      picker.remove();
+      if (this.#swatchPicker === picker) {
+        this.#swatchPicker = undefined;
+      }
+      this.#endNumberDrag(target, from, color(), true);
+    });
+    try {
+      (picker as HTMLInputElement & { showPicker?(): void }).showPicker?.() ?? picker.click();
+    } catch {
+      picker.click();
+    }
+  }
+
   #openField(target: EditTarget, span: HTMLElement, text: string, caret?: Caret): void {
     const { host, lead, trail, keep } = valueHost(span, this.#writtenOf(target));
     const restore = [...host.childNodes];
@@ -2372,8 +2454,8 @@ export class NxViewerElement extends ElementBase {
    */
   #finishField(session: EditSession, how: "key" | "blur"): boolean {
     const target = session.target;
-    let value = fieldText(session.field!);
-    if (target.kind === "number") {
+    let value = this.#draftOf(session) ?? "";
+    if (target.kind === "number" || session.colorPart !== undefined) {
       value = value.trim();
     }
     if (value === this.#currentOf(target)) {
@@ -3658,6 +3740,24 @@ export class NxViewerElement extends ElementBase {
     if (!this.#editable || event.button !== 0 || this.#scrub !== undefined) {
       return;
     }
+    // A color's percent sign, in an inspector, scrubs its opacity as a number's lead scrubs it.
+    const sign = (event.target as Element).closest?.(".inspector .color-value.editable-value > .color-opacity > .opacity-unit") as HTMLElement | null;
+    if (sign !== null && sign !== undefined && this.#body.contains(sign)) {
+      const colorTarget = this.#targets.get(keyOf(sign.closest<HTMLElement>(".color-value")!)!);
+      if (colorTarget?.kind !== "color" || !this.finishEditing()) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const from = this.#shownOf(colorTarget);
+      this.#scrub = { target: colorTarget, pointer: event.pointerId, x: event.clientX, from, value: undefined, percent: hexParts(from).percent };
+      try {
+        this.#body.setPointerCapture?.(event.pointerId);
+      } catch {
+        // A pointer the element cannot capture still scrubs while it stays over the reading.
+      }
+      return;
+    }
     const lead = (event.target as Element).closest?.(".field-lead") as HTMLElement | null;
     const field = lead?.closest<HTMLElement>(".prop-field");
     if (lead === null || lead === undefined || field === null || field === undefined || !this.#body.contains(field)) {
@@ -3696,6 +3796,16 @@ export class NxViewerElement extends ElementBase {
     const target = scrub.target;
     // Steps count from the press, so a drag of 30 pixels is ten steps.
     const steps = Math.trunc((event.clientX - scrub.x) / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
+    if (scrub.percent !== undefined) {
+      // An opacity steps a percent at a time, ten with Shift, between none and full.
+      const percent = Math.max(0, Math.min(100, scrub.percent + steps));
+      const color = colorFromPart("opacity", String(percent), scrub.from);
+      if (color !== scrub.value) {
+        scrub.value = color;
+        this.#showStepped(target, color);
+      }
+      return true;
+    }
     const step = target.hints?.step !== undefined && target.hints.step > 0 ? target.hints.step : 1;
     // Alt steps a tenth as far, though never below one for a whole number.
     const fine = target.hints?.integer === true ? Math.max(1, Math.round(step / 10)) : step / 10;
@@ -3727,7 +3837,10 @@ export class NxViewerElement extends ElementBase {
     const target = scrub.target;
     if (scrub.value === undefined) {
       if (commit && this.#session?.target.key !== target.key) {
+        // A press on a color's percent sign that never moved edits its opacity.
+        this.#colorPart = scrub.percent !== undefined ? "opacity" : "hex";
         this.#openEditor(target.key);
+        this.#colorPart = "hex";
       }
       this.#ignoreClick = true;
       setTimeout(() => (this.#ignoreClick = false), 0);
@@ -4313,7 +4426,15 @@ export class NxViewerElement extends ElementBase {
       if (closed || (event.detail > 1 && this.#targets.get(key)?.kind === "boolean") || this.#session?.target.key === key) {
         return;
       }
+      // A color shown in its parts: its swatch opens the picker, its opacity edits its percent.
+      const colorParts = value.matches(".color-value") && value.closest(".inspector") !== null;
+      if (colorParts && target.closest?.(".swatch") != null) {
+        this.#pickSwatch(key, target.closest(".swatch") as HTMLElement);
+        return;
+      }
+      this.#colorPart = colorParts && target.closest?.(".color-opacity") != null ? "opacity" : "hex";
       this.#openEditor(key);
+      this.#colorPart = "hex";
       const field = this.#session?.target.key === key ? this.#session.field : undefined;
       if (field !== undefined) {
         const at = offsetAtPoint(field, event.clientX, event.clientY);

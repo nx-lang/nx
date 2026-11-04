@@ -326,7 +326,7 @@ A host that ignores live edits sees only the commits, as before.
 | A boolean                                          | Toggles: a click on its mark, or Space                         |
 | A bare case of a union                             | A popover of the union's cases that hold no properties, each with its doc, filtered as the reader types |
 | A string formatted as `color`                      | A popover with a hex field and the browser's color picker      |
-| A color literal, as `#2563eb` or `#2563ebcc`        | The same popover: a swatch, the hex of the color alone, and its opacity in whole percent; the value keeps all 8 digits |
+| A color literal, as `#2563eb` or `#2563ebcc`        | In an inspector, its parts in place, as a design tool shows them: a click on the swatch opens the color picker, a click on the hex or the opacity edits it, and dragging the `%` sideways scrubs the opacity. Elsewhere, the same popover, with the hex of the color alone and its opacity in whole percent |
 | A run of text on one line                          | A one-line field                                              |
 
 Editor hints from the tree's visualizers shape the editors:

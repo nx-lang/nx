@@ -5,7 +5,7 @@
 import type { SourceCase, SourceEditorHints, SourceValueFormat } from "@nx-lang/language-protocol";
 
 import { isHexColor, isNumericLiteral, type EditorHints, type EditTarget, type TypeEditor } from "./edit.js";
-import { decodeString } from "./source.js";
+import { decodeString, hexParts } from "./source.js";
 
 /** A boolean's mark, as the reading draws it. */
 export const BOOLEAN_MARKS = { true: "✓", false: "✗" } as const;
@@ -80,6 +80,22 @@ export function showValue(span: HTMLElement, target: EditTarget, written: string
     const shown = span.textContent ?? "";
     const dot = shown.lastIndexOf(".");
     span.replaceChildren(`${dot < 0 ? "" : shown.slice(0, dot + 1)}${value}`);
+    return;
+  }
+  // A color shown in its parts keeps them: its swatch, its hex, its alpha digits and its opacity.
+  const hex = span.querySelector<HTMLElement>(":scope > .color-hex");
+  if (target.kind === "color" && hex !== null && isHexColor(value.trim())) {
+    const parts = hexParts(value.trim());
+    span.querySelector<HTMLElement>(":scope > .swatch")?.style.setProperty("background-color", value.trim());
+    hex.textContent = parts.rgb;
+    const digits = span.querySelector<HTMLElement>(":scope > .color-alpha-digits");
+    if (digits !== null) {
+      digits.textContent = parts.alpha;
+    }
+    const percent = span.querySelector<HTMLElement>(":scope > .color-opacity > .opacity-value");
+    if (percent !== null) {
+      percent.textContent = String(parts.percent);
+    }
     return;
   }
   const { host, lead, trail, keep } = valueHost(span, written);
@@ -409,6 +425,37 @@ export function offsetAtPoint(element: HTMLElement, x: number, y: number): numbe
 
 /** Replace RGB while retaining an explicitly authored hex alpha channel. */
 /** A hex color written out in full: `#abc` reads `#aabbcc`, and `#abcd` reads `#aabbccdd`. */
+/**
+ * The entry a color's hex field or opacity field holds, as the color it makes with the rest of `from`,
+ * the color the field opened on: a new hex keeps `from`'s alpha, and a new percent its color. A field
+ * left as it opened gives `from` itself, so a percent that rounds its alpha changes nothing.
+ */
+export function colorFromPart(part: "hex" | "opacity", entry: string, from: string): string {
+  const parts = hexParts(from);
+  const trimmed = entry.trim();
+  if (part === "hex") {
+    if (trimmed === parts.rgb) {
+      return from;
+    }
+    if (!isHexColor(trimmed)) {
+      return entry;
+    }
+    const digits = trimmed.length - 1;
+    if (digits === 4 || digits === 8 || parts.alpha === "") {
+      return trimmed;
+    }
+    return expandHex(trimmed) + (parts.alpha.length === 1 ? parts.alpha + parts.alpha : parts.alpha);
+  }
+  if (trimmed === String(parts.percent)) {
+    return from;
+  }
+  const percent = Number(trimmed);
+  if (trimmed === "" || !Number.isFinite(percent) || percent < 0 || percent > 100) {
+    return `${entry}%`;
+  }
+  return withOpacity(expandHex(parts.rgb), Math.round(percent));
+}
+
 export function expandHex(hex: string): string {
   const digits = hex.slice(1);
   return digits.length === 3 || digits.length === 4 ? "#" + [...digits].map((digit) => digit + digit).join("") : hex;

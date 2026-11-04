@@ -33,3 +33,4 @@
 - [x] 4.5 One value names a row (Bret, 2026-11-03): title, else text content, else id, with no label; a click on it opens the inspector with that field ready to edit; remove `summary` and `short` from `@nx/visualizer`, the compiler's braced name lists and checks, the source tree, `@nx/graphics`, the examples and the docs
 - [x] 4.6 No property icons (Bret, 2026-11-04): remove `icon` from `PropertyVisualizer`, the source tree, the viewer's field leads, `@nx/graphics`, the examples and the docs; element icons stay
 - [x] 4.7 Inspector shows what the element sets and its title; a last `Show N unset` line reveals the rest, `Hide unset` hides them, forgotten on close (Bret, 2026-11-04)
+- [x] 4.8 Colors in an inspector read in their parts, as in Figma (Bret, 2026-11-04): swatch, six-digit hex and opacity percent; the swatch opens the color picker, the hex and the opacity edit in place, dragging the `%` scrubs the opacity
