@@ -320,7 +320,9 @@ presses Escape, or when the text or the tree changes. It SHALL NOT change the se
 or the scroll position. With the reading focused, the `i` key SHALL show the card for the selected
 unit (the declaration of an element, the property of a row) and a screen reader SHALL hear its text.
 The card SHALL stay inside the element's box, below what it describes or above it where there is no
-room, never over it, and SHALL follow the page's light or dark scheme. What a card says SHALL NOT
+room, never over it. It SHALL start a few pixels past the right end of what it describes, or past
+the pointer when that is wide, such as a doc line, so the labels below stay readable while the
+reader scans, and SHALL move left only as far as the box needs. It SHALL follow the page's light or dark scheme. What a card says SHALL NOT
 also show as the browser's tooltip.
 
 A doc's Markdown SHALL be rendered by the element's `markdown` function when the host sets one, and

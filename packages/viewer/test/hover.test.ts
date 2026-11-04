@@ -66,8 +66,8 @@ function body(element: NxViewerElement): HTMLElement {
 }
 
 /** Moves the pointer onto `target`. */
-function pointAt(target: Element): void {
-  target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+function pointAt(target: Element, clientX = 0): void {
+  target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true, clientX }));
 }
 
 function press(target: Element, key: string): void {
@@ -78,7 +78,11 @@ function press(target: Element, key: string): void {
  * Lays the reading out as jsdom does not, for the test `t`: the element and its frame fill 400 by
  * 300 pixels, the card is 200 by 60, and each node is a line 18 pixels high at `place(node)`.
  */
-function layOut(t: TestContext, element: NxViewerElement, place: (node: HTMLElement) => { top: number; left: number }): void {
+function layOut(
+  t: TestContext,
+  element: NxViewerElement,
+  place: (node: HTMLElement) => { top: number; left: number; width?: number }
+): void {
   const prototype = window.HTMLElement.prototype;
   const { getBoundingClientRect } = prototype;
   const rect = (left: number, top: number, width: number, height: number): DOMRect =>
@@ -90,8 +94,8 @@ function layOut(t: TestContext, element: NxViewerElement, place: (node: HTMLElem
     if (this.classList.contains("card")) {
       return rect(0, 0, 200, 60);
     }
-    const { top, left } = place(this);
-    return rect(left, top, 80, 18);
+    const { top, left, width } = place(this);
+    return rect(left, top, width ?? 80, 18);
   };
   t.after(() => {
     prototype.getBoundingClientRect = getBoundingClientRect;
@@ -197,7 +201,7 @@ describe("hover cards", () => {
     assert.equal(card(element).querySelector(".card-signature")!.textContent, "component Shape extends Node");
     assert.equal(card(element).querySelector(".card-doc")!.textContent, "A filled shape.");
     assert.equal(card(element).style.top, "122px", "below what it describes");
-    assert.equal(card(element).style.left, "50px");
+    assert.equal(card(element).style.left, "138px", "starting just past its right end, clear of the labels below");
     assert.equal(element.selection, undefined, "the selection is as it was");
     assert.deepEqual(element.folded, folded, "and so are the folds");
     assert.ok(!body(element).contains(card(element)), "the card is outside what scrolls the reading");
@@ -213,6 +217,18 @@ describe("hover cards", () => {
     t.mock.timers.tick(1000);
     assert.equal(card(element).style.top, "196px");
     assert.equal(card(element).style.left, "200px", "kept from running past the element's right edge");
+  });
+
+  it("starts just past the pointer when what it describes is wide, such as a doc line", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const hover = await fixture("hover");
+    const element = show(hover);
+    const doc = drawn(element, keyIn(hover, firstShape)).querySelector(".inspector-doc")!;
+    layOut(t, element, (node) => (node === doc ? { top: 100, left: 20, width: 300 } : { top: 0, left: 0 }));
+    pointAt(doc, 60);
+    t.mock.timers.tick(1000);
+    assert.equal(card(element).hidden, false);
+    assert.equal(card(element).style.left, "72px", "past the pointer, not past the line's far end");
   });
 
   it("stays while the pointer moves onto it, and closes once the pointer has left both", async (t) => {

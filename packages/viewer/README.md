@@ -523,6 +523,11 @@ selection, the folds or the scroll. With the reading focused, `i` shows the card
 (an element's declaration, a row's property), and the live region reads it, or says "No information";
 that card stays while the pointer moves, until Escape or the selection moves.
 
+A card opens below what it describes, or above it where there is no room. It starts 8 pixels past
+that thing's right end (12 past the pointer when the thing is wide, such as a doc line), so the
+names and icons down the left stay readable while the reader moves down the list; it moves left
+only as far as it must to stay inside the viewer.
+
 A doc's Markdown is rendered by a small built-in renderer that makes text and elements only:
 paragraphs, inline and fenced code, emphasis, lists, and links, a link only to an `http:` or `https:`
 address and opening in a new tab. Anything else, raw HTML included, reads as its text. A host that

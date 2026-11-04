@@ -170,6 +170,11 @@ const CARD_GRACE = 300;
 
 /** The room between a card and what it describes, in pixels. */
 const CARD_GAP = 4;
+/** How far right of what a hover card describes it starts, so the labels below stay readable. */
+const CARD_SHIFT = 8;
+/** How far right of the pointer a card starts when what it describes is wider than this. */
+const CARD_POINTER_SHIFT = 12;
+const CARD_WIDE = 160;
 /** How long typing pauses before an invalid entry says why, in milliseconds. */
 const PROBLEM_DELAY = 400;
 
@@ -419,6 +424,8 @@ export class NxViewerElement extends ElementBase {
    * A node marked on several spans, as a line's name and its `=`, is one target.
    */
   #pointedKey: string | undefined;
+  /** Where the pointer last stood across the page, for placing a card against a wide anchor. */
+  #pointerX: number | undefined;
   /** The key of the node the open card describes. */
   #cardKey: string | undefined;
   /** What scrolls the reading while a card is open, which closes the card when it scrolls. */
@@ -684,6 +691,7 @@ export class NxViewerElement extends ElementBase {
       }
     });
     this.#body.addEventListener("pointermove", (event) => {
+      this.#pointerX = event.clientX;
       if (!this.#onScrubMove(event)) {
         this.#onPointerMove(event);
       }
@@ -712,6 +720,7 @@ export class NxViewerElement extends ElementBase {
       if (this.#drag?.started === true) {
         return;
       }
+      this.#pointerX = event.clientX;
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
       // A held button is a press or a drag on its way: what it passes over opens no card.
       this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));
@@ -4880,7 +4889,19 @@ export class NxViewerElement extends ElementBase {
     }
     y = Math.max(top, Math.min(y, bottom - size.height));
     // An anchor wrapped over two lines starts where its first line does, not at the line's start.
-    const start = anchor.getClientRects()[0]?.left ?? target.left;
+    const first = anchor.getClientRects()[0] ?? target;
+    let start = first.left;
+    if (card === this.#card) {
+      // A hover card starts just past what it describes, so it covers the line below it only from
+      // there on and the labels down the left stay readable while the reader scans. Past a wide
+      // anchor, such as a doc line, it starts just past the pointer instead (a card opened from the
+      // keyboard has no pointer, so it starts past the anchor and is kept inside the box).
+      const pointer = this.#cardByKeyboard ? undefined : this.#pointerX;
+      start =
+        first.width > CARD_WIDE && pointer !== undefined && pointer >= first.left && pointer <= first.right
+          ? pointer + CARD_POINTER_SHIFT
+          : first.right + CARD_SHIFT;
+    }
     const x = Math.max(box.left, Math.min(start, box.right - size.width));
     card.style.left = `${x - frame.left}px`;
     card.style.top = `${y - frame.top}px`;
