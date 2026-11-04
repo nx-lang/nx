@@ -140,8 +140,8 @@ SHALL change folds only.
 ### Requirement: The inspector shows properties as labeled fields
 An inspector SHALL show, as a field, each property its element writes and its title property
 whether written or not, one to a line, in the resolved property order. When its element's type
-declares other properties, its last line SHALL read the number of them and `more`, as `3 more`;
-pressing it SHALL show them as fields in their places and turn the line into `Show fewer`, which
+declares other properties, its last line SHALL read `Show`, the number of them and `unset`, as `Show 3 unset`;
+pressing it SHALL show them as fields in their places and turn the line into `Hide unset`, which
 hides them again, and the inspector SHALL forget the choice when it closes. Tab from the
 inspector's last field SHALL reach that line. A field SHALL show the property's resolved label on the
 left and its value on the right; a field SHALL show no icon; the labels SHALL share a
@@ -165,7 +165,7 @@ the inspector as fields too.
 
 #### Scenario: Unset properties hide again
 - **WHEN** the reader shows a Card's unset properties, selects another row and selects the Card again
-- **THEN** its inspector SHALL show only what the Card writes and its title, and the `N more` line
+- **THEN** its inspector SHALL show only what the Card writes and its title, and the `Show N unset` line
 
 #### Scenario: A list of elements under its label
 - **WHEN** a Page writes `actions={ <Button label="Export" /> <Button label="Invite" /> }` and the

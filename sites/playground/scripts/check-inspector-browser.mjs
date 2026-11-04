@@ -108,12 +108,12 @@ try {
   const more = inspector(circle).locator(":scope > .inspector-more");
   const shown = () => inspector(circle).locator(":scope > .inspector-fields > .prop-field").count();
   const setCount = await shown();
-  assert.match(await more.textContent(), /^[0-9]+ more$/);
+  assert.match(await more.textContent(), /^Show [0-9]+ unset$/);
   await inspector(circle).locator(".editable-value").last().click();
   await page.keyboard.press("Tab");
   assert.equal(await more.evaluate((button) => button.getRootNode().activeElement === button), true, "Tab from the last field reaches the last line");
   await page.keyboard.press("Enter");
-  assert.equal(await more.textContent(), "Show fewer");
+  assert.equal(await more.textContent(), "Hide unset");
   assert.ok(await shown() > setCount);
   await more.click();
   assert.equal(await shown(), setCount);

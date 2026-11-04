@@ -1336,7 +1336,7 @@ export function renderSource(
       more.className = "inspector-more";
       more.dataset["moreKey"] = node.key;
       more.setAttribute("aria-expanded", String(all));
-      more.textContent = all ? "Show fewer" : `${unset} more`;
+      more.textContent = all ? "Hide unset" : `Show ${unset} unset`;
       more.title = all ? "Hide the properties it does not set" : `Show the ${unset === 1 ? "property" : `${unset} properties`} ${kindName} does not set`;
       inspector.append(more);
     }

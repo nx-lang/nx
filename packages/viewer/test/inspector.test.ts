@@ -247,7 +247,7 @@ describe("inspectors", () => {
     const names = (): (string | undefined)[] => [...row().querySelectorAll<HTMLElement>(":scope > .inspector .prop-field > .field-lead")].map((lead) => lead.textContent ?? undefined);
     assert.deepEqual(names(), ["Title", "Elevated"], "only what the Card sets");
     const more = (): HTMLButtonElement => row().querySelector<HTMLButtonElement>(":scope > .inspector > .inspector-more")!;
-    assert.equal(more().textContent, "3 more");
+    assert.equal(more().textContent, "Show 3 unset");
     assert.equal(more().getAttribute("aria-expanded"), "false");
     more().click();
     const unset = [...row().querySelectorAll<HTMLElement>(":scope > .inspector .dimmed-row")];
@@ -256,7 +256,7 @@ describe("inspectors", () => {
     assert.equal(unset[2]!.querySelector(".field-lead")!.textContent, "Image URL", "a caption derived from its name");
     assert.equal(unset[0]!.textContent!.replace(/\s+/g, " ").trim(), "Padding8");
     assert.ok(drawn(element, "panel.value.children[1].elevated").classList.contains("boolean-field"), "a boolean reads as a checkbox");
-    assert.equal(more().textContent, "Show fewer");
+    assert.equal(more().textContent, "Hide unset");
     assert.equal(more().getAttribute("aria-expanded"), "true");
     // Closing the inspector forgets it: it opens again on what the Card sets.
     element.selection = "panel.value.children[0]";
@@ -276,7 +276,7 @@ describe("inspectors", () => {
     element.selection = "note.value";
     const inspector = drawn(element, "note.value").querySelector(":scope > .inspector")!;
     assert.deepEqual([...inspector.querySelectorAll<HTMLElement>(".prop-field > .field-lead")].map((lead) => lead.textContent), ["Text"]);
-    assert.equal(inspector.querySelector(".inspector-more")!.textContent, "1 more");
+    assert.equal(inspector.querySelector(".inspector-more")!.textContent, "Show 1 unset");
   });
 
   it("marks an action value, a component's State.Update included, with the action icon", async () => {

@@ -50,7 +50,7 @@ declaration order), which is already what the source tree sends: the label on th
 as wide as the longest label up to 40% of the inspector, and the value on the right. Bret chose this
 over labels above values and over groups (2026-11-03): it takes less height and is simpler to read.
 A value that spans lines, such as a list of elements, and an unfolded element value go under their
-label, a step in. Only set properties and the title show; a last `N more` line reveals the unset ones (Bret,
+label, a step in. Only set properties and the title show; a last `Show N unset` line reveals the unset ones (Bret,
 2026-11-04), as dashed values with the default as placeholder. There are no
 group headings and no `group` hint.
 

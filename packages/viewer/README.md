@@ -102,8 +102,8 @@ compared. The inspector lists the element's properties one to a line, each label
 the label from its visualizer, or else one derived from its name, so
 `outerRadius` reads `Outer radius`. Labels share a column as wide as the longest, up to 40% of the
 inspector. A value over several lines, such as a list of elements, reads under its label. Only the
-properties the element sets show, and its title property; a last line such as `3 more` shows the
-rest in their places as dashed values with their default, and `Show fewer` hides them again until
+properties the element sets show, and its title property; a last line such as `Show 3 unset` shows the
+rest in their places as dashed values with their default, and `Hide unset` hides them again until
 the inspector next closes. Booleans read as checkboxes. Element values
 unfold in place, under their label. Dragging a number field's label scrubs its value: Shift steps ten
 times faster, Alt ten times finer, and the change commits once, as one undo step.
@@ -419,7 +419,7 @@ other lists' moves and deletes wait, so a host sets the tree again after an edit
 tree, as Alt+Down held, fire edits keyed as the text will be once the ones before are made, so a host
 that applies edits in order makes them all.
 
-An inspector's `N more` line lists the properties its element does not write as dashed fields among
+An inspector's `Show N unset` line lists the properties its element does not write as dashed fields among
 the written ones, each with its default or an optional one's type, quieter; one written under a
 property-list `if` or match counts as written, and an element of a union's case offers its case's
 properties. An unset field edits as a written value does, opening on its default; a commit fires
