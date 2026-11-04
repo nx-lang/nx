@@ -217,7 +217,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 `cargo test -p nx-language-service` (331 pass), `openspec validate add-visual-inline-inspector --strict`
 (valid). Two throwaway probes against the real language host, removed afterwards, back RF11 and RF13.
 
-### 🟡 Fixed - RF11 A reference's swatch and Go to look the name up, so a parameter or local that shadows a top-level `let` shows the wrong color and goes to the wrong place
+### ✅ Verified - RF11 A reference's swatch and Go to look the name up, so a parameter or local that shadows a top-level `let` shows the wrong color and goes to the wrong place
 - **Severity:** Medium (confidence: high)
 - **Evidence:** `referencedColor` (`packages/viewer/src/source.ts:869-871`) and `#referenceGoal`
   (`packages/viewer/src/index.ts:4260-4263`) both find "the top-level declaration node whose `name`
@@ -233,6 +233,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   (none means it's a local, so no swatch and no Go to), and find the `let` node that declaration
   points to rather than matching by name. Add a test with a shadowing parameter.
 - **Fix:** `referencedColor` and `#referenceGoal` now go through the new `topLevelLet(tree, reference)` in `source.ts`. It matches the top-level `let` by the reference's resolved `declaration` instead of by name. A reference the tree leaves unresolved (a local) gets no swatch and no Go to. New test: "finds a reference's swatch and Go to through what it resolves to, not its name" (`inspector.test.ts`).
+- **Verification:** Verified. `topLevelLet` (`source.ts`) matches a top-level declaration node by the reference's resolved `declaration`. Both `referencedColor` and `#referenceGoal` use it, and no name-based lookup is left in `packages/viewer/src`. The new test passes: the top-level `{blue}` keeps its swatch, and the shadowing parameter has a `declaration` of undefined and gets no swatch. One weakness: the test's Go to check sits inside `if (menu !== null)`, so it would pass silently if the menu were never drawn. The code path is the same lookup, so this is not a reason to reopen.
 
 ### 🟡 Fixed - RF12 Fields still carry browser tooltips, against the spec and README
 - **Severity:** Low (confidence: high)
@@ -250,8 +251,10 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 - **Recommendation:** Drop these `title`s. `aria-label` already names the checkbox. Add a test that
   no element inside `.inspector` has a `title` attribute.
 - **Fix:** Removed the `title` on the opacity `%` (`source.ts`), the boolean mark (`source.ts`) and `showValue`'s toggled boolean (`editors.ts`). `aria-label` stays. New test: no `[title]` inside `.inspector-fields`, before and after a toggle.
+- **Verification:** Reopened: the fix is incomplete. Unset fields still get a tooltip. `defaultShown` (`editors.ts:321`, `mark.title = text`) draws an unset boolean's default for every field revealed by `Show N unset` (`index.ts:4020`). A probe (`type Fill = { tint:color on:boolean = false … }`, `let fill = <Fill tint=#336699 />`, then a click on `Show N unset`) found `.inspector [title]` = `sheet-boolean false=false` and `inspector-more=Hide the properties it does not set`. The new test only looks at written fields, so it misses this. Drop `mark.title` in `defaultShown`, and either drop the `inspector-more` title (its text already says the same) or exempt it in the spec. Extend the test to cover the fields after `Show N unset`.
+- **Fix:** (second pass) Removed `defaultShown`'s `title` on an unset boolean (`editors.ts`). The `Show N unset` line now carries its longer wording as `aria-label` instead of `title`. The tooltip test now also reveals unset properties and checks that nothing in the inspector has a `title`.
 
-### 🟡 Fixed - RF13 `@nx/graphics` property order contradicts the graphics-library spec
+### ✅ Verified - RF13 `@nx/graphics` property order contradicts the graphics-library spec
 - **Severity:** Low (confidence: high)
 - **Evidence:** The spec requires "position …, size …, shape …, transform (rotation), appearance
   (opacity), fill, stroke and text (font, size), then accessibility". A probe of the resolved
@@ -268,8 +271,9 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   `transform` and `opacity` before `fill`, or reword the spec to describe the order that ships. Then
   pin one element's order in a test.
 - **Fix:** The spec now describes the order that ships, which matches Figma's inspector: position, size and shape (rotation included), then fill and stroke, then transform, opacity, clipping, accessibility and content. Text lists its text first, then position, font and fill. `graphics.nx`'s comment says the same. The graphics order was not changed, so nothing Bret has reviewed moves.
+- **Verification:** Verified. The graphics-library spec now describes the shipped order. I checked it against the resolved visualizers from my earlier probe. Rectangle and Star go position, size, shape (with `rotation`), then fill/stroke, then transform, opacity, clipping, accessibility. Text goes `text`, `x`, `y`, font, anchor, fill. The `graphics.nx` comment agrees.
 
-### 🟡 Fixed - RF14 The website's copy of the `@nx/visualizer` source lacks `inline`
+### ✅ Verified - RF14 The website's copy of the `@nx/visualizer` source lacks `inline`
 - **Severity:** Low (confidence: high)
 - **Evidence:** Under "The library source", the code block in
   `sites/website/src/content/docs/reference/libraries/visualizer.md` differs from
@@ -279,8 +283,9 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 - **Recommendation:** Paste in the current source. Consider adding a check that the copy matches the
   file.
 - **Fix:** Added `inline?: boolean` and its doc comment to the website's copy of the library source. The copy now matches `visualizer.nx` byte for byte (checked by script).
+- **Verification:** Verified. The website's "library source" block now matches `visualizer.nx` exactly; my own `diff` shows no differences.
 
-### 🟡 Fixed - RF15 Leftovers of the removed experiments in comments and docs
+### ✅ Verified - RF15 Leftovers of the removed experiments in comments and docs
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - `crates/nx-program/src/std/graphics/graphics.nx:739-740`: "Labels, short labels and groups follow
@@ -298,8 +303,9 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   inspector (or mark it as #71's historical prototype) and fix the link. Drop "room on a line
   included".
 - **Fix:** Reworded the `graphics.nx` comment. `docs/prototypes/README.md` now calls itself PR #71's historical prototype and links to the README's "Rows and inspectors" section. Dropped "room on a line included" from the viewer README. `docs/visual-ux-improvements.md` is #71's own write-up and is left as history.
+- **Verification:** Verified. `graphics.nx`, `docs/prototypes/README.md` and the README hold no `short labels`, `compact-authoring-view` or `room on a line` text. The prototype README now calls itself #71's history and links to `#rows-and-inspectors`, which exists. Its numbered steps still describe Details, which is acceptable for a page marked as history.
 
-### 🟡 Fixed - RF16 `inline`'s doc comment and the proposal say more than the code does
+### ✅ Verified - RF16 `inline`'s doc comment and the proposal say more than the code does
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - `ElementVisualizer.inline` (`visualizer.nx:30-31`; protocol `index.ts` `SourceVisualizer.inline`)
@@ -312,8 +318,9 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 - **Recommendation:** Make the doc comments say "`true` whenever each property is one simple value on
   a line", and drop "letter–digit edges" from the proposal.
 - **Fix:** `inline`'s doc (`visualizer.nx`, the website copy, the protocol's `SourceVisualizer.inline`) now says "`true` whenever each property is one simple value on a line". Dropped "letter–digit edges" from the proposal.
+- **Verification:** Verified. `visualizer.nx`, the website copy and `SourceVisualizer.inline` now say "`true` whenever each property is one simple value on a line", which matches `inlineable`. The proposal no longer mentions letter–digit splitting.
 
-### 🟡 Fixed - RF17 Doc comments stacked onto the wrong functions in the color code
+### ✅ Verified - RF17 Doc comments stacked onto the wrong functions in the color code
 - **Severity:** Low (confidence: high)
 - **Evidence:**
   - `packages/viewer/src/editors.ts:426-433` has three JSDoc blocks in a row before `colorFromPart`:
@@ -324,8 +331,9 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
     ("A field in the value's own place…"), and `#openField` at line 2238 now has none.
 - **Recommendation:** Move each comment back onto its own function.
 - **Fix:** Moved `expandHex`'s and `preserveHexAlpha`'s doc comments onto those functions, and `#openField`'s back onto `#openField`.
+- **Verification:** Verified. Each function now has its own doc comment: `colorFromPart`, `expandHex` and `preserveHexAlpha` in `editors.ts`, and `#openColorPart` and `#openField` in `index.ts`. No stacked blocks remain.
 
-### 🟡 Fixed - RF18 A shorthand color shows a three-digit hex where the spec says six digits
+### ✅ Verified - RF18 A shorthand color shows a three-digit hex where the spec says six digits
 - **Severity:** Low (confidence: high)
 - **Evidence:** The viewer spec says a color literal in an inspector reads as "its swatch, its
   six-digit hex and its opacity". The proposal and design §11 say the same. `hexParts`
@@ -337,8 +345,9 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   changes), or say in the spec that a shorthand reads as written. Add a shorthand case to the
   tests.
 - **Fix:** `hexParts` now gives the color in six digits (`#abc` → `#aabbcc`, `#abcd` → `#aabbcc` at 87%), so the hex reads and opens in six digits. Writing back already expanded. New test: "reads a shorthand color's hex in six digits".
+- **Verification:** Verified. `hexParts` expands a three-digit color, so `#abc` reads `#aabbcc` at 100% and `#abcd` reads `#aabbcc` at 87%. That is the new test. `colorFromPart` compares the entry against the six-digit `rgb`, so leaving the hex field unchanged still writes nothing. A new hex keeps the shorthand alpha doubled.
 
-### 🟡 Fixed - RF19 Risky new paths have no tests
+### ✅ Verified - RF19 Risky new paths have no tests
 - **Severity:** Low (confidence: high)
 - **Evidence:** All 234 viewer tests pass, but nothing exercises the following:
   - `inline=true` lifting the four-property or 24-character limit. Only `inline=false` is tested
@@ -354,6 +363,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   - The no-tooltip rule (RF12), shorthand colors (RF18) and shadowed references (RF11).
 - **Recommendation:** Add these unit tests. Add a wheel case to the browser check.
 - **Fix:** Added tests for `inline=true` past the four-property limit, an inline union value reading only its case, and a scrub on an inline label (live edits, one commit). Shadowed references, the no-tooltip rule and shorthand colors are covered above. The wheel case was a bug: `pointerover` for what scrolled under a still pointer cleared the quiet key. A wheel or scroll now records where the pointer stood, and no card opens until a `pointermove` leaves that spot (`#cardStillAt`, `#pointerMoved`). New test: "opens none for what a wheel scrolls under a still pointer, until the pointer moves". The spec and README now say so. Held-button cards were already tested.
+- **Verification:** Verified. The new tests pass: `inline=true` with five properties, an inline union showing only its case, a scrub on an inline label (live edits, then one commit of `5`), shadowed references, tooltips on written fields, shorthand colors, and the wheel case. The viewer suite passes 240/240. The wheel fix (`#cardStillAt`, `#pointerMoved`) works for a wheel. It does not cover other scrolls; see RF20.
 
 ### Questions (2026-11-04 pass)
 - RF13: the spec was changed to match the shipped order (see its Fix).
@@ -366,3 +376,23 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 - RF11 is the one behavioral bug: a shadowed reference gets another `let`'s swatch and Go to. The
   rest are spec/code mismatches (tooltips, graphics order, six-digit hex), stale docs and comments,
   and missing tests.
+
+## New Findings Discovered During 2026-11-04 22:50 Verification
+
+### 🟡 Fixed - RF20 Scrolls other than the wheel still let a card open for what scrolls under a still pointer
+- **Severity:** Low (confidence: medium)
+- **Evidence:** `#cardStillAt` is set only by `#quietCards(true)`, which runs in two places: on a
+  `wheel` (`index.ts:723`) and from `#onDocumentScroll`. `#onDocumentScroll` is attached to the
+  scroller only while a card is open; `#openCard` adds it and `#hideCard` removes it. With no card
+  open, other scrolls set nothing. That includes keyboard paging, arrow-key selection that
+  `scrollIntoView`s the next row, a preview click revealing a row, and a scrollbar drag. The
+  scrollbar case is a press, but its quiet key is cleared by the next `pointerover`. In each case,
+  the `pointerover` that browsers send for what moved under the pointer reaches `#point`, which
+  opens a card after a second. The spec now says no card opens "for what the reading scrolls under
+  a still pointer, until the pointer moves". The confidence is medium because it depends on the
+  browser sending boundary events after a scroll that doesn't come from the wheel. The new hover
+  test covers only a wheel.
+- **Recommendation:** Keep a `scroll` listener on the scroll port at all times, not only while a card
+  is open, and have it call `#quietCards(true)`. Then add a test that scrolls the port with no card
+  open.
+- **Fix:** Instead of listening for every kind of scroll, the viewer now notices when the pointer stays still. In a browser, a pointer that moves gets `pointerover` before it moves. So a `pointerover` at the exact spot of the last `pointermove` means something arrived under a pointer that did not move: a scroll of any kind, or a redraw. That sets `#cardStillAt`, and no card opens until the pointer moves (`index.ts`, pointerover handler). The test helper `pointAt` now sends a `pointerover` and then a `pointermove`, as browsers do. New test: "opens none for what scrolls under a still pointer however the reading scrolled". Checked in Chromium that cards still open on a real hover.

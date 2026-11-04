@@ -318,7 +318,6 @@ export function defaultShown(
     const mark = document.createElement("span");
     mark.className = `sheet-boolean ${text}`;
     mark.textContent = BOOLEAN_MARKS[text];
-    mark.title = text;
     mark.setAttribute("aria-label", text);
     return [mark];
   }

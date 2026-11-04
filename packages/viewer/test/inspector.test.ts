@@ -384,11 +384,10 @@ describe("inspectors", () => {
     const drawnLocal = drawn(element, attribute.key);
     assert.equal(drawnLocal.querySelector(".swatch"), null, "a parameter named like a let has no swatch");
     const menu = drawnLocal.querySelector<HTMLElement>(".row-menu");
-    if (menu !== null) {
-      menu.click();
-      const labels = [...element.shadowRoot!.querySelectorAll<HTMLElement>(".menu-item .menu-label")].map((label) => label.textContent);
-      assert.ok(!labels.includes("Go to blue"), "and no Go to");
-    }
+    assert.ok(menu !== null, "the parameter's property has a menu");
+    menu.click();
+    const labels = [...element.shadowRoot!.querySelectorAll<HTMLElement>(".menu-item .menu-label")].map((label) => label.textContent);
+    assert.ok(labels.length > 0 && !labels.includes("Go to blue"), "and no Go to");
   });
 
   it("gives no label or value in an inspector a browser tooltip", async () => {
@@ -399,6 +398,13 @@ describe("inspectors", () => {
     assert.deepEqual([...inspector.querySelectorAll(".inspector-fields [title]")].map((node) => node.className), []);
     drawn(element, "fill.value.on.value").click();
     assert.deepEqual([...inspector.querySelectorAll(".inspector-fields [title]")].map((node) => node.className), [], "nor once toggled");
+    const unset = ["type Flags = { on:boolean = false tint?:color size:int = 1 }", "let flags = <Flags size=2 />", ""].join("\n");
+    const other = show(await treeOf([{ uri: "nx:///flags.nx", identity: "flags.nx", source: unset }], { visualizers: { modules: [] } }), true);
+    other.selection = "flags.value";
+    other.shadowRoot!.querySelector<HTMLElement>(".inspector-more")!.click();
+    const shown = other.shadowRoot!.querySelector<HTMLElement>(".inspector")!;
+    assert.ok(shown.querySelector(".dimmed-row"), "the unset properties show");
+    assert.deepEqual([...shown.querySelectorAll("[title]")].map((node) => node.className), [], "nor on unset ones, or the line that shows them");
   });
 
   it("reads an element value inline past the size limits when its visualizer says inline=true", async () => {

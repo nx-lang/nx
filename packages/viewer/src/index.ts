@@ -729,7 +729,14 @@ export class NxViewerElement extends ElementBase {
         return;
       }
       this.#pointerX = event.clientX;
-      this.#pointerAt ??= { x: event.clientX, y: event.clientY };
+      // A pointer that moves meets something new before it moves over it, so one met where the
+      // pointer last moved to came to it: the reading scrolled, or redrew, under a still pointer.
+      const at = this.#pointerAt;
+      if (at === undefined) {
+        this.#pointerAt = { x: event.clientX, y: event.clientY };
+      } else if (at.x === event.clientX && at.y === event.clientY) {
+        this.#cardStillAt = at;
+      }
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
       // A held button is a press or a drag on its way: what it passes over opens no card.
       this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));

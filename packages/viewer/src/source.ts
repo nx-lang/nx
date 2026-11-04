@@ -1553,7 +1553,7 @@ export function renderSource(
       more.dataset["moreKey"] = node.key;
       more.setAttribute("aria-expanded", String(all));
       more.textContent = all ? "Hide unset" : `Show ${unset} unset`;
-      more.title = all ? "Hide the properties it does not set" : `Show the ${unset === 1 ? "property" : `${unset} properties`} ${kindName} does not set`;
+      more.setAttribute("aria-label", all ? "Hide the properties it does not set" : `Show the ${unset === 1 ? "property" : `${unset} properties`} ${kindName} does not set`);
       inspector.append(more);
     }
     return inspector;
