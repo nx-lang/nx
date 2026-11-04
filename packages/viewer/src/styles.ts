@@ -598,17 +598,17 @@ export const styles = `
   white-space: pre-wrap;
 }
 /* An element's card is titled by its name, in prose, as the row names it. */
-.card-title { font-weight: 600; }
+.card-title { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-weight: 600; }
 /* The kind of declaration, as a quiet chip before the name. */
 .card-kind {
-  display: inline-block;
-  margin-right: 2px;
   padding: 0 6px;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
-  vertical-align: 1px;
+  /* Centered on the name's capitals rather than its line box, which sits a pixel lower. */
+  position: relative;
+  top: -1px;
   color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #9d9d9d));
   background: light-dark(#0000000d, #ffffff14);
 }
