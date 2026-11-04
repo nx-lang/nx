@@ -186,10 +186,11 @@ export const styles = `
   outline: 2px solid light-dark(#0969da, #b8a4ff);
   outline-offset: 1px;
 }
-/* The inspector: a step in from the row's icon, whatever the depth, a field to a line. */
+/* The inspector: its labels under its element's kind, whatever the depth and wherever the row's
+   icon sits, as the element measures; a field to a line. */
 .source .inspector {
   display: block;
-  margin: 2px 0 4px 2ch;
+  margin: 2px 0 4px var(--inspector-inset, 2ch);
   padding: 2px 0 4px;
   white-space: normal;
   font-weight: 400;

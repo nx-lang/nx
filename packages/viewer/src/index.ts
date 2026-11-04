@@ -3837,10 +3837,24 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
-  /** Fades each row's value where its line cuts it. */
+  /**
+   * Fades each row's value where its line cuts it, and sets each open inspector in so its labels
+   * start under its element's kind, wherever the row's icon sits.
+   */
   #fitTitles(): void {
     for (const title of this.#body.querySelectorAll<HTMLElement>(".row-title")) {
       title.classList.toggle("clipped", title.scrollWidth > title.clientWidth + 1);
+    }
+    for (const inspector of this.#body.querySelectorAll<HTMLElement>(".row-element > .inspector")) {
+      const row = inspector.parentElement!;
+      const kind = row.querySelector<HTMLElement>(":scope > .row-head > .sheet-kind");
+      if (kind === null) {
+        continue;
+      }
+      const inset = kind.getBoundingClientRect().left - row.getBoundingClientRect().left;
+      if (inset > 0) {
+        inspector.style.setProperty("--inspector-inset", `${Math.round(inset)}px`);
+      }
     }
   }
 

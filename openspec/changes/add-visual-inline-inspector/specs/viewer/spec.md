@@ -85,8 +85,8 @@ Selecting a row, or any node inside its element's property values, SHALL open th
 inspector directly under its row; selecting another element SHALL close it unless it is pinned.
 Clicking the selected row again, or pressing Enter on it, SHALL close and reopen its inspector
 without changing the selection. The inspector SHALL lay its fields out in a grid of two columns
-when the pane is wide enough and one when not, and SHALL be indented at most one step from its
-row's icon, however deep the element is. Opening or closing any inspector SHALL keep the row the
+when the pane is wide enough and one when not, and its labels SHALL start under its row's kind,
+however deep the element is and whether or not it sits inside an `if` or a `for`. Opening or closing any inspector SHALL keep the row the
 reader acted on where it was on screen, where the scroll range allows; a selection made from
 outside the viewer SHALL scroll only when its row is off screen, just far enough to show it.
 
@@ -101,8 +101,12 @@ outside the viewer SHALL scroll only when its row is off screen, just far enough
 
 #### Scenario: A deep element
 - **WHEN** an element five levels deep is selected
-- **THEN** its inspector SHALL start one indent step past the element's icon and use the rest of the
-  pane's width
+- **THEN** its inspector's labels SHALL start under the element's kind and the inspector SHALL use
+  the rest of the pane's width
+
+#### Scenario: An element inside a condition
+- **WHEN** a Text inside `if order.note? { … }` and a Button after the block are each selected
+- **THEN** each inspector's labels SHALL start under its own row's kind
 
 ### Requirement: A pin keeps an inspector open
 Each row SHALL offer a pin, shown while the row is hovered or selected and always while pinned.
