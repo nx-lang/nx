@@ -3872,8 +3872,8 @@ export class NxViewerElement extends ElementBase {
   }
 
   /**
-   * Fades each row's value where its line cuts it, and sets each open inspector in so its labels
-   * start under its element's kind, wherever the row's icon sits.
+   * Fades each row's value where its line cuts it, and sets each open inspector, an unfolded element
+   * value's included, in so its labels start under its element's kind, wherever the icon sits.
    */
   #fitTitles(): void {
     for (const title of this.#body.querySelectorAll<HTMLElement>(".row-title")) {
@@ -3886,6 +3886,18 @@ export class NxViewerElement extends ElementBase {
         continue;
       }
       const inset = kind.getBoundingClientRect().left - row.getBoundingClientRect().left;
+      if (inset > 0) {
+        inspector.style.setProperty("--inspector-inset", `${Math.round(inset)}px`);
+      }
+    }
+    // An unfolded element value's fields start under its kind too, as a row's do.
+    for (const inspector of this.#body.querySelectorAll<HTMLElement>(".nested-head > .nested-inspector")) {
+      const head = inspector.parentElement!;
+      const kind = head.querySelector<HTMLElement>(":scope > .nested-kind");
+      if (kind === null) {
+        continue;
+      }
+      const inset = kind.getBoundingClientRect().left - head.getBoundingClientRect().left;
       if (inset > 0) {
         inspector.style.setProperty("--inspector-inset", `${Math.round(inset)}px`);
       }

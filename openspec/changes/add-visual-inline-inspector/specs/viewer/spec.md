@@ -152,7 +152,8 @@ inspector's last field SHALL reach that line. A field SHALL show the property's 
 left and its value on the right; a field SHALL show no icon; the labels SHALL share a
 column as wide as the longest, up to about 40% of the inspector, and a longer label SHALL wrap. A
 value over several lines, as a list of elements, or an unfolded element value SHALL read under its
-label, a step in. A boolean SHALL read as a checkbox beside its label. A property the element does
+label, a step in; an unfolded element value's own fields SHALL start under its kind, as a row's
+inspector starts under the row's kind, and its menu SHALL stay on its label's line. A boolean SHALL read as a checkbox beside its label. A property the element does
 not write SHALL show as an empty value with a dashed outline and its default, if any, as a quiet
 placeholder, else, for text, "Add" and its label, as `Add description`; setting it SHALL write it,
 and a menu on a written property SHALL offer Reset to default or Remove as the row menu does today.

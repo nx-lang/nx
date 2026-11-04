@@ -298,7 +298,11 @@ export const styles = `
 .source .nested-head > .nested-value { display: inline-block; vertical-align: bottom; max-width: 100%; margin-left: 1ch; }
 /* An id that names its element reads as the title does: plain, with no chip. */
 .source .row-title.row-id > .id-value { background: none; padding: 0; color: inherit; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
-.source .inspector.nested-inspector { margin: 2px 0 2px 0; padding: 0; }
+.source .inspector.nested-inspector { margin: 2px 0 2px var(--inspector-inset, 0); padding: 0; }
+/* An open element value keeps its menu on its label's line, at the end, where a closed one has it,
+   not on a line of its own under its fields. */
+.source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value { position: relative; }
+.source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value > .row-anchor { position: absolute; right: 0; bottom: calc(100% + 2px); }
 .source button.fold { border: 0; padding: 0; background: none; font: inherit; opacity: 1; flex-shrink: 0; }
 .source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
 .source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
