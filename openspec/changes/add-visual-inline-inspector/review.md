@@ -235,7 +235,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 - **Fix:** `referencedColor` and `#referenceGoal` now go through the new `topLevelLet(tree, reference)` in `source.ts`. It matches the top-level `let` by the reference's resolved `declaration` instead of by name. A reference the tree leaves unresolved (a local) gets no swatch and no Go to. New test: "finds a reference's swatch and Go to through what it resolves to, not its name" (`inspector.test.ts`).
 - **Verification:** Verified. `topLevelLet` (`source.ts`) matches a top-level declaration node by the reference's resolved `declaration`. Both `referencedColor` and `#referenceGoal` use it, and no name-based lookup is left in `packages/viewer/src`. The new test passes: the top-level `{blue}` keeps its swatch, and the shadowing parameter has a `declaration` of undefined and gets no swatch. One weakness: the test's Go to check sits inside `if (menu !== null)`, so it would pass silently if the menu were never drawn. The code path is the same lookup, so this is not a reason to reopen.
 
-### 🟡 Fixed - RF12 Fields still carry browser tooltips, against the spec and README
+### ✅ Verified - RF12 Fields still carry browser tooltips, against the spec and README
 - **Severity:** Low (confidence: high)
 - **Evidence:** The viewer spec's inspector requirement says "No label or field SHALL carry a browser
   tooltip" (`specs/viewer/spec.md`, inspector requirement), and the README says "The browser's own
@@ -253,6 +253,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 - **Fix:** Removed the `title` on the opacity `%` (`source.ts`), the boolean mark (`source.ts`) and `showValue`'s toggled boolean (`editors.ts`). `aria-label` stays. New test: no `[title]` inside `.inspector-fields`, before and after a toggle.
 - **Verification:** Reopened: the fix is incomplete. Unset fields still get a tooltip. `defaultShown` (`editors.ts:321`, `mark.title = text`) draws an unset boolean's default for every field revealed by `Show N unset` (`index.ts:4020`). A probe (`type Fill = { tint:color on:boolean = false … }`, `let fill = <Fill tint=#336699 />`, then a click on `Show N unset`) found `.inspector [title]` = `sheet-boolean false=false` and `inspector-more=Hide the properties it does not set`. The new test only looks at written fields, so it misses this. Drop `mark.title` in `defaultShown`, and either drop the `inspector-more` title (its text already says the same) or exempt it in the spec. Extend the test to cover the fields after `Show N unset`.
 - **Fix:** (second pass) Removed `defaultShown`'s `title` on an unset boolean (`editors.ts`). The `Show N unset` line now carries its longer wording as `aria-label` instead of `title`. The tooltip test now also reveals unset properties and checks that nothing in the inspector has a `title`.
+- **Verification:** (second pass) Verified. No `title` remains on anything an inspector draws. The only `title`s left in `packages/viewer/src` are on the pin button and the choices chevron, and both are controls, not labels or fields. My earlier probe's case (an unset boolean and the `Show N unset` line) is now in the test, and it passes (241/241). The `aria-label` this fix puts on the `Show N unset` line raises a separate problem, filed as RF21.
 
 ### ✅ Verified - RF13 `@nx/graphics` property order contradicts the graphics-library spec
 - **Severity:** Low (confidence: high)
@@ -379,7 +380,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 
 ## New Findings Discovered During 2026-11-04 22:50 Verification
 
-### 🟡 Fixed - RF20 Scrolls other than the wheel still let a card open for what scrolls under a still pointer
+### ✅ Verified - RF20 Scrolls other than the wheel still let a card open for what scrolls under a still pointer
 - **Severity:** Low (confidence: medium)
 - **Evidence:** `#cardStillAt` is set only by `#quietCards(true)`, which runs in two places: on a
   `wheel` (`index.ts:723`) and from `#onDocumentScroll`. `#onDocumentScroll` is attached to the
@@ -396,3 +397,30 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   is open, and have it call `#quietCards(true)`. Then add a test that scrolls the port with no card
   open.
 - **Fix:** Instead of listening for every kind of scroll, the viewer now notices when the pointer stays still. In a browser, a pointer that moves gets `pointerover` before it moves. So a `pointerover` at the exact spot of the last `pointermove` means something arrived under a pointer that did not move: a scroll of any kind, or a redraw. That sets `#cardStillAt`, and no card opens until the pointer moves (`index.ts`, pointerover handler). The test helper `pointAt` now sends a `pointerover` and then a `pointermove`, as browsers do. New test: "opens none for what scrolls under a still pointer however the reading scrolled". Checked in Chromium that cards still open on a real hover.
+- **Verification:** Verified. The approach is sound.
+  - **Real hovers aren't suppressed.** Per UI Events and Pointer Events, a move onto a new element fires `pointerover` at the new position before the `pointermove` there. The `pointerover` therefore never equals the previous `pointermove`, so `#cardStillAt` is not set.
+  - **Still pointer.** A scroll or redraw under a still pointer sends boundary events at the last known position, which matches and sets it.
+  - **Nothing gets stuck.** The next `pointermove` to a different position clears it and points again through `#pointerMoved`.
+  - **Edge cases, all harmless:**
+    - With no `pointermove` ever seen, the first `pointerover` only records the position. A viewer that first renders under a resting pointer can still open one card there.
+    - On touch, `pointerover` comes before `pointerdown`, and `pointerdown`'s quieting already applies.
+    - After a scrub releases its capture, the `pointerover` at the release point keeps cards quiet until the next move, which is desirable.
+    - A suppressed real hover needs the pointer to come back into `.body` at exactly the pixel of the last `pointermove` there, for example after crossing the card, which lies outside `.body`. That is negligible, and the next one-pixel move recovers.
+
+  The new test fails without the fix: a `pointerover` at the last move's coordinates opens Circle's card. With the fix it passes.
+  - **Helper change.** `pointAt` now sends `pointerover` then `pointermove`, with x incremented by default. That matches browser order and hides nothing. Each call is a real move, and the two still-pointer tests dispatch their still `pointerover` and same-coordinate `pointermove` by hand. Other suites dispatch a bare `pointerover` at `(0,0)` (`editing.test.ts:1090-1135`, `moving.test.ts:439`). A second such event would set `#cardStillAt`, but none of those tests needs a card after its first `pointerover`; the `moving.test.ts` card opens on the first.
+
+## New Findings Discovered During 2026-11-04 22:56 Verification
+
+### 🟡 Fixed - RF21 The `Show N unset` line's `aria-label` drops its visible words from its accessible name
+- **Severity:** Low (confidence: medium)
+- **Evidence:** `source.ts:1556` now gives the button `aria-label="Show the 3 properties Card does not
+  set"`. Its visible text is `Show 3 unset`. An `aria-label` replaces the visible text as the
+  accessible name, and that name doesn't contain the visible words `Show 3 unset`. WCAG 2.5.3
+  (Label in Name) asks that it does, so a speech-input user who says "click Show 3 unset" may not
+  reach it. Before this fix the button's name was its text, and the longer wording was only a
+  tooltip.
+- **Recommendation:** Let the visible text be the name: drop the `aria-label`, or start it with the
+  visible text (`Show 3 unset: the properties Card does not set`). Another option is to put the
+  longer wording in `aria-description`.
+- **Fix:** Dropped the `aria-label`: the visible text, `Show 3 unset` or `Hide unset`, is the button's name again, and `aria-expanded` already says whether the unset properties show.
