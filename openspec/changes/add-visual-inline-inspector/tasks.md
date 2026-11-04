@@ -38,3 +38,4 @@
 - [x] 4.10 Braced values keep their braces, quiet (Bret, 2026-11-04); a reference to a color leads with its swatch and its menu offers Go to, as the spec already said
 - [x] 4.11 Quieter hover cards (Bret, 2026-11-04): first after 1 s, then at once while warm; none under a held button, after a press or a scroll until the pointer moves on; a row's card on its icon, not its name or value; the type's doc as a quiet line over the inspector; no browser tooltips that repeat a card
 - [x] 4.12 Hover cards start just past what they describe (8 px past its right end, or 12 px past the pointer on a wide anchor such as a doc line), so they do not cover the labels below; slide left only to stay inside the box (Bret, 2026-11-04)
+- [x] 4.13 An element's hover card is titled by its name in bold prose, then its base quietly (`extends Node`), with no `let`, `component` or element syntax (Bret, 2026-11-04)

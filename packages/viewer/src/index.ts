@@ -4834,15 +4834,22 @@ export class NxViewerElement extends ElementBase {
       scroller.addEventListener("scroll", this.#onDocumentScroll);
     }
     const doc = (this.#card.querySelector(".card-doc")?.textContent ?? "").trim();
-    return `${card.signature}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
+    const named = card.detail === undefined ? card.signature : `${card.signature}, ${card.detail}`;
+    return `${named}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
   }
 
-  /** Puts `card`'s signature and doc in the hover card. */
+  /** Puts `card`'s signature, or its title, and its doc in the hover card. */
   #fillCard(card: Card): void {
     const document = this.ownerDocument;
     const signature = document.createElement("div");
-    signature.className = "card-signature";
+    signature.className = card.title === true ? "card-title" : "card-signature";
     signature.textContent = card.signature;
+    if (card.detail !== undefined) {
+      const detail = document.createElement("span");
+      detail.className = "card-detail";
+      detail.textContent = card.detail;
+      signature.append(" ", detail);
+    }
     this.#card.replaceChildren(signature);
     if (card.doc !== undefined) {
       const doc = document.createElement("div");

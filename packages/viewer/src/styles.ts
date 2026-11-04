@@ -597,6 +597,9 @@ export const styles = `
   font-size: var(--nx-viewer-source-font-size, 13px);
   white-space: pre-wrap;
 }
+/* An element's card is titled by its name, in prose, as the row names it. */
+.card-title { font-weight: 600; }
+.card-detail { font-weight: 400; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .card-doc {
   margin-top: 6px;
   padding-top: 6px;

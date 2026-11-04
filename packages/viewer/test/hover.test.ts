@@ -123,7 +123,7 @@ function narrow(t: TestContext, columns: number): void {
 const firstShape = (node: SourceNode): boolean => node.role === "element" && node.name === "Shape";
 
 function signatureOf(element: NxViewerElement): string | undefined {
-  return card(element).hidden ? undefined : (card(element).querySelector(".card-signature")?.textContent ?? undefined);
+  return card(element).hidden ? undefined : (card(element).querySelector(":is(.card-signature, .card-title)")?.textContent ?? undefined);
 }
 
 describe("hover targets", () => {
@@ -198,7 +198,8 @@ describe("hover cards", () => {
     assert.equal(card(element).hidden, true, "not yet: the pointer may be passing");
     t.mock.timers.tick(1);
     assert.equal(card(element).hidden, false);
-    assert.equal(card(element).querySelector(".card-signature")!.textContent, "component Shape extends Node");
+    assert.equal(card(element).querySelector(".card-title")!.textContent, "Shape extends Node", "titled by its name");
+    assert.equal(card(element).querySelector(".card-detail")!.textContent, "extends Node", "its base, quietly");
     assert.equal(card(element).querySelector(".card-doc")!.textContent, "A filled shape.");
     assert.equal(card(element).style.top, "122px", "below what it describes");
     assert.equal(card(element).style.left, "138px", "starting just past its right end, clear of the labels below");
