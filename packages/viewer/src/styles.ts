@@ -678,9 +678,49 @@ export const styles = `
 .edit-problem[hidden] { display: none; }
 .popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
 .popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
-.popover .popover-alpha { width: 7ch; text-align: right; }
-.popover .popover-alpha-unit { margin-left: -2px; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
-.popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+/* A color row as design tools draw it: a square swatch, the hex, and the opacity in percent. */
+.popover.colors { min-width: 0; }
+.popover.colors > input.popover-hex { flex: 1 1 auto; width: 10ch; min-width: 0; }
+.popover .popover-picker {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.popover .popover-picker::-webkit-color-swatch-wrapper { padding: 0; }
+.popover .popover-picker::-webkit-color-swatch {
+  border: 1px solid light-dark(#0000002e, #ffffff3d);
+  border-radius: 4px;
+}
+.popover .popover-picker::-moz-color-swatch {
+  border: 1px solid light-dark(#0000002e, #ffffff3d);
+  border-radius: 4px;
+}
+.popover .popover-opacity {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  padding: 2px 6px 2px 0;
+  border-radius: 4px;
+  background: light-dark(#0000000a, #ffffff0f);
+  cursor: text;
+}
+.popover .popover-opacity > input.popover-alpha {
+  width: 5ch;
+  padding: 0 1px 0 6px;
+  background: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.popover .popover-opacity > input.popover-alpha::-webkit-inner-spin-button,
+.popover .popover-opacity > input.popover-alpha::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.popover .popover-opacity:focus-within { box-shadow: inset 0 0 0 1px light-dark(#0969da, #007fd4); }
+.popover .popover-alpha-unit { color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
 .popover .options { max-height: 16em; overflow: auto; margin-top: 4px; }
 .popover .option {
   display: flex;

@@ -3041,10 +3041,10 @@ export class NxViewerElement extends ElementBase {
       picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
       picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
       this.#popover.className = "popover colors";
-      this.#popover.replaceChildren(input, picker);
+      // The swatch leads, as a design tool's color row does, then the hex it shows.
+      this.#popover.replaceChildren(picker, input);
     }
-    this.#popover.querySelector(".popover-alpha")?.remove();
-    this.#popover.querySelector(".popover-alpha-unit")?.remove();
+    this.#popover.querySelector(".popover-opacity")?.remove();
     this.#popover.hidden = false;
     span.classList.add("editing");
     const session: EditSession = { target, span, input, picker, listening, closed: false };
@@ -3059,10 +3059,14 @@ export class NxViewerElement extends ElementBase {
       alpha.setAttribute("aria-label", `${this.#labelOf(target)}: opacity, percent`);
       const hex = preserveHexAlpha("#000000", input.value);
       alpha.value = String(Math.round((hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) * 100));
+      // The field and its unit read as one box, the unit quiet inside it at the end.
       const unit = document.createElement("span");
       unit.className = "popover-alpha-unit";
       unit.textContent = "%";
-      this.#popover.append(alpha, unit);
+      const opacity = document.createElement("label");
+      opacity.className = "popover-opacity";
+      opacity.append(alpha, unit);
+      this.#popover.append(opacity);
       alpha.addEventListener("change", () => {
         const value = Number(alpha.value);
         if (!Number.isFinite(value) || value < 0 || value > 100 || alpha.value.trim() === "") return;
