@@ -23,16 +23,26 @@ The agreed mockup is https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA.
   away, since the playground is the viewer's only host.
 - **Friendly names.** A property shows its visualizer's `label`, else one derived from its name:
   words split at case changes, `_`, `-` and letter–digit edges; known acronyms upper case; sentence
-  case; `is`/`has` dropped from a boolean. The raw name stays in the tooltip and the hover card.
+  case; `is`/`has` dropped from a boolean. The raw name stays in the label's hover card.
 - **No property icons.** Fields show labels only; element rows keep their icons.
 - **Scrubbing replaces steppers.** Dragging a number's label left and right changes
   it (Shift ×10, Alt ×0.1), live, as one edit and one undo step. Up and Down step a focused field.
   The stepper buttons are removed.
 - **Order and unset properties.** Fields follow the visualizer's order, then declaration order, with
-  no groups. Unset properties show as quiet empty fields, replacing "Show N unset properties".
-- **References and nested values.** `{blue}` reads as a token chip with the swatch of the `let` it
-  names when that `let` is written as a literal; a nested element value reads as its kind and the value
-  that names it, and opens into a nested group.
+  no groups. An inspector shows what its element sets and its title; a last `Show N unset` line
+  reveals the rest as quiet empty fields.
+- **Colors in parts.** A color reads as swatch, six-digit hex and opacity percent, as in Figma: the
+  swatch opens the picker, the hex and the percent edit in place, and dragging `%` scrubs opacity.
+- **References, expressions and nested values.** A braced value keeps its quiet braces, so it reads
+  as computed; `{blue}` leads with the swatch of the color the `let` it names holds, and its menu
+  offers Go to. A short element value (up to four simple properties) reads its properties on its
+  field's line as editable, scrubbable fields, without the kind its property's type implies;
+  `ElementVisualizer inline=true|false` overrides that. Any other element value reads as its kind and
+  the value that names it, and unfolds into a nested group.
+- **Quieter hover cards.** Cards wait a second, then open at once while warm; none open during a
+  press, a drag or a scroll; a row's card is on its icon; they sit just right of what they describe
+  so the labels below stay readable. An element's card is titled by its name after a kind chip. The
+  type's doc reads as one quiet line at the top of its inspector. No browser tooltips repeat a card.
 - **Visualizers for element functions' properties.** Element-style functions get a derived
   `F.Props` record, as components have, so `FunctionVisualizer` can carry property visualizers
   checked against `F.Props.Property`. `@nx/graphics` helpers such as `Star` use this.
@@ -49,13 +59,14 @@ None.
 ### Modified Capabilities
 
 - `viewer`: element rows named by one value, the inline inspector, labels,
-  scrubbing instead of steppers, pins and restorable state.
-- `visualizer-library`: `label` on `PropertyVisualizer`; `Target` and property
-  visualizers on `FunctionVisualizer`.
+  scrubbing instead of steppers, colors in parts, inline element values, pins and restorable state,
+  and quieter hover cards.
+- `visualizer-library`: `label` on `PropertyVisualizer`; `inline` on `ElementVisualizer`; `Target`
+  and property visualizers on `FunctionVisualizer`.
 - `visualizer-declarations`: `Target` binding for function visualizers; labels resolve like other
   hints.
 - `component-props-type`: element-style functions derive `F.Props` as components do.
-- `source-tree`: visualizer values carry labels, and
+- `source-tree`: visualizer values carry labels and `inline`, and
   function entries carry their property visualizers.
 - `graphics-library`: visualizers with labels.
 - `fiddle-nx-visual-view`: the inline inspector, its state across switches, scrubbing.

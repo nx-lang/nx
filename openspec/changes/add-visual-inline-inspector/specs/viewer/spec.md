@@ -97,8 +97,7 @@ Selecting a row, or any node inside its element's property values, SHALL open th
 inspector directly under its row; selecting another element SHALL close it unless it is pinned.
 Clicking the selected row again, or pressing Enter on it, SHALL close and reopen its inspector
 without changing the selection. When the element's declaration has a doc, the inspector SHALL open
-with its first paragraph as one quiet line, as plain words, cut where it runs out. The inspector SHALL lay its fields out in a grid of two columns
-when the pane is wide enough and one when not, and its labels SHALL start under its row's kind,
+with its first paragraph as one quiet line, as plain words, cut where it runs out. Its labels SHALL start under its row's kind,
 however deep the element is and whether or not it sits inside an `if` or a `for`. Opening or closing any inspector SHALL keep the row the
 reader acted on where it was on screen, where the scroll range allows; a selection made from
 outside the viewer SHALL scroll only when its row is off screen, just far enough to show it.
@@ -158,9 +157,9 @@ inspector starts under the row's kind, and its menu SHALL stay on its label's li
 not write SHALL show as an empty value with a dashed outline and its default, if any, as a quiet
 placeholder, else, for text, "Add" and its label, as `Add description`; setting it SHALL write it,
 and a menu on a written property SHALL offer Reset to default or Remove as the row menu does today.
-The inspector SHALL have no group headings. Every field and label SHALL carry a tooltip with the
-property's label and its name as written in source. The `title` and `id` properties SHALL read in
-the inspector as fields too.
+The inspector SHALL have no group headings. No label or field SHALL carry a browser tooltip; a
+label's hover card SHALL give the property's name as written in source. The `title` and `id`
+properties SHALL read in the inspector as fields too.
 
 #### Scenario: Star's inspector
 - **WHEN** Star's visualizer lists `cx` and `cy` with the labels `Center X` and `Center Y`, then
@@ -192,13 +191,14 @@ property's name when other words follow.
 - **THEN** their labels SHALL be `Outer radius`, `Image URL`, `Max length`, `Required` and `X1`
 
 ### Requirement: Numbers change by dragging their label
-Pressing a number field's label, with its icon, and dragging left or right SHALL change the
+Pressing a number field's label and dragging left or right SHALL change the
 number by one `step` (or one) for every three pixels, ten steps with Shift and a tenth with Alt,
 within `min` and `max`, showing it in the field and going live as it changes, and SHALL commit once
 on release as one undo step. The pointer SHALL read as a horizontal resize over it. A press that
 moves less than four pixels SHALL focus the field instead. In a focused number field, Up and Down
 SHALL step it, Shift by ten steps. The viewer SHALL NOT show stepper buttons. On touch, a drag on the
-label SHALL scrub and a tap SHALL focus the field.
+label SHALL scrub and a tap SHALL focus the field. The label's hover card SHALL end with a quiet
+`Drag sideways to change; Shift for 10 steps, Alt for a tenth`.
 
 #### Scenario: Scrubbing a radius
 - **WHEN** the reader drags Star's `Outer radius` label 30 pixels to the right
@@ -302,7 +302,7 @@ with no other keyword or element syntax. It SHALL show:
   inspector opens with: its name and the base its declaration extends, as a title, and the
   declaration's doc; over a row's name beside its icon, and over the value that names a row,
   nothing, so that resting there to drag or select it opens nothing;
-- over a property's name, on a group's row or on a line: `(property) name: Type`, with `?` for an
+- over a field's label, or a property's name where the reading writes one: `(property) name: Type`, with `?` for an
   optional property and ` = default` for one with a default, and the property's doc;
 - over a value the reading shows without its property's name in a field, as an element value's
   title: that property's card;
@@ -488,8 +488,8 @@ is selected its `⋯` SHALL show right after it, taking room in the line, and De
 - **THEN** the menu SHALL list Remove and Show in Source, and Remove SHALL fire `nx-edit` removing
   that attribute
 
-#### Scenario: Clicking a caption selects
-- **WHEN** the reader clicks the caption of `size=16` without dragging
+#### Scenario: Clicking a label selects
+- **WHEN** the reader clicks the label of `size=16` without dragging
 - **THEN** the property SHALL be selected and its field SHALL take focus, and Up SHALL make it `17`
 
 ### Requirement: Editor hints choose and shape a value's editor
@@ -608,7 +608,7 @@ across the host's newer tree.
 - **THEN** the element SHALL fire one live edit setting `Mocha`, and none for the letters before it
 
 #### Scenario: Scrubbing
-- **WHEN** the reader drags the caption of `size=16` nine pixels to the right and releases
+- **WHEN** the reader drags the label of `size=16` nine pixels to the right and releases
 - **THEN** the element SHALL fire live edits setting `17`, `18` and `19`, then one `nx-edit` without
   `live` setting `19`
 
@@ -702,5 +702,5 @@ requirement says.
 **Migration**: None.
 
 ### Requirement: A selected element offers the properties it does not write
-**Reason**: The inspector shows unwritten properties as empty fields.
+**Reason**: The inspector's last line, `Show N unset`, reveals the properties an element does not write as empty fields.
 **Migration**: None.

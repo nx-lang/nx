@@ -7,8 +7,8 @@ playground, reconciliation of state across tree updates and list moves, and brow
 reviewed it against the existing view and a mockup
 (https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA, source in
 `/mnt/project-files/reviews/pr-71-ux/visual-inspector-mockup.html`) and chose a design-tool
-direction: friendly names, icons and letters, groups (later dropped), scrubbing, curated summaries, and an inline
-(not docked) inspector, which is the view's distinctive idea. This change replaces #71's change and
+direction: friendly names, scrubbing, quiet layer-list rows and an inline (not docked) inspector,
+which is the view's distinctive idea. This change replaces #71's change and
 builds on its code.
 
 ## Goals / Non-Goals
@@ -56,8 +56,9 @@ group headings and no `group` hint.
 
 ### 4. Field labels
 A field always shows its label and no icon: good, recognizable icons exist for few properties, and
-icons on some fields but not others look uneven (Bret, 2026-11-04). Every lead has a tooltip `Label · name`. Booleans are checkboxes beside their label. Dragging a number's label scrubs
-it.
+icons on some fields but not others look uneven (Bret, 2026-11-04). The label's hover card gives the
+property's name as written; there are no browser tooltips. Booleans are checkboxes beside their
+label. Dragging a number's label scrubs it.
 
 ### 5. Labels
 Visualizer `label` (a string) wins. The derived label follows the common conversion (Rails
@@ -78,10 +79,8 @@ same for rows (2026-11-03): a row shows its icon, its kind and one value: the vi
 when the element writes it on one line (a string, or an expression as written), else its text
 content, else its `id`. Nothing else it sets reads on the row. A row of several values was busy, and
 it invited clicks on values that could not be edited there; now a click on the one value opens the
-inspector with that field ready to edit. This replaced curated `summary` lists and one- or
-two-character `short` labels, which existed only for summaries; both are gone from `@nx/visualizer`,
-with the braced bare-name lists (`summary={points fill}`) the compiler accepted for them. An image
-names itself by its file name when its visualizer makes its source the title.
+inspector with that field ready to edit. An image names itself by its file name when its visualizer
+makes its source the title.
 
 ### 8. References and nested elements
 A reference to a top-level `let` is a token. The swatch comes from the `let`'s written value when it
@@ -104,12 +103,43 @@ host state and reset rules, and the browser-check harness. Replace #71's row ren
 `source.ts` with the row and inspector renderers, and delete the Details button, status line and the
 prototype's one-line rows.
 
+### 11. Colors read in their parts
+Design tools show a color as a swatch, a six-digit hex and an opacity percent, each editable on its
+own (Bret, 2026-11-04). An inspector does the same for a color literal: the swatch opens the
+browser's picker (which keeps the opacity), the hex and the percent edit in place, and dragging the
+`%` scrubs the opacity as a label scrubs a number. Writing back keeps the literal's form: a color at
+full opacity stays six digits.
+
+### 12. Short element values read on their field's line
+`viewBox=<Rect x=0 y=0 width=400 height=240/>` is four numbers; folding it behind a chevron hides
+what a designer edits most (Bret, 2026-11-04). A value that holds only properties, one to four, each
+one simple value on one line, reads them on its field's line as labeled, scrubbable fields, Figma's
+X/Y/W/H. The kind is dropped where the property's type implies it (a `Rect` for a `Rect`); a union
+keeps its case. The rule is static, not width-based, so a value never switches form as the pane
+resizes; it wraps instead. `ElementVisualizer inline=true|false` overrides it for a type. The chevron
+still unfolds the full nested group, which holds the unset properties.
+
+### 13. Braced values keep their braces
+A value written in braces is computed; showing `{1 + 2}` and `{blue}` with their braces, quiet, tells
+a reader it isn't a literal they can scrub (Bret, 2026-11-04). Literals read without them. A
+reference to a color `let` leads with that color's swatch.
+
+### 14. Quieter hover cards
+Cards were distracting while scanning (Bret, 2026-11-04). Following design tools' tooltips: the first
+waits a second, later ones open at once for a second and a half; none opens under a held button or
+after a press or scroll until the pointer moves on. A row's card is on its icon, not its name or
+value, which a reader rests on to select or drag. The type's doc reads as a quiet line atop its
+inspector instead. A card sits below what it describes, starting just past its right end (or the
+pointer, on a wide anchor) so labels below stay readable. An element's card is titled by its name
+after a kind chip (`component`, `function`, `type`, `action`, `case`) instead of an NX signature
+such as `let <Star />`; property and value cards keep their signatures.
+
 ## Risks / Trade-offs
 
 - [Rows hide values that lines showed, such as a shape's size and fill] → the preview shows them, the
   inspector opens on selection, and Source is one click away; design tools make the same trade.
 - [Layout shift when inspectors open] → anchoring the acted-on row; scroll only for off-screen
-  selections; dense two-column fields.
+  selections; one short line per field.
 - [Big elements bury the tree] → one line per field keeps inspectors short; the pin and closing the
   selected row put them away.
 - [Remaining editing requirements still speak of lines] → they apply to fields in the inspector;

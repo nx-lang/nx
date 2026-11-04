@@ -55,7 +55,7 @@ Showing either view SHALL NOT run, re-run or stop the snippet.
 - **THEN** the editor's text SHALL read `FontSize=32` and the snippet SHALL run once, as after typing it
 
 #### Scenario: The canvas follows scrubbing
-- **WHEN** HotReload is on and the visitor drags the icon of `FontSize=26` in Visual to the right
+- **WHEN** HotReload is on and the visitor drags the label of `FontSize=26` in Visual to the right
 - **THEN** the editor's text SHALL follow the drag and the snippet SHALL run before the drag ends, and
   one Undo SHALL take the text back to `FontSize=26`
 
@@ -96,10 +96,10 @@ SHALL be kept while they switch between Visual and Source and between engines, a
 another preset or share is loaded or another language is selected.
 
 #### Scenario: Folds survive a trip to Source
-- **WHEN** the visitor folds a group in Visual, switches to Source, edits a line outside the group and
-  switches back
-- **THEN** the group SHALL still be folded
+- **WHEN** the visitor folds a row's children in Visual, switches to Source, edits a line outside that
+  element and switches back
+- **THEN** the row SHALL still be folded
 
 #### Scenario: A new preset starts from the defaults
-- **WHEN** the visitor folds a group and then loads another preset
+- **WHEN** the visitor folds a row and then loads another preset
 - **THEN** the new preset's reading SHALL be folded as the viewer folds by default

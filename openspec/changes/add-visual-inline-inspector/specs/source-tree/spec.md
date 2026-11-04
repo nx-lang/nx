@@ -7,7 +7,7 @@ unchanged from an answer without this feature. When it is present, the answer SH
 program's visualizer declarations and the named host visualizer modules, as the visualizer-declarations capability defines, and
 SHALL attach to each declaration entry with a resolved visualizer a `visualizer` value:
 
-- for a record, an action or a component: its `title`, `id`, `icon` and `preview` descriptor when set, its `idPosition`
+- for a record, an action or a component: its `title`, `id`, `icon`, `inline` and `preview` descriptor when set, its `idPosition`
   when it has an `id`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the visualizer lists, then the rest in declaration order), each with
   its name and its resolved `format` and `label` when set;

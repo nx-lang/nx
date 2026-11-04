@@ -3,8 +3,8 @@
 ### Requirement: Graphics visualizers label every element's properties
 The graphics library's visualizers SHALL give every property of Drawing, Group, the basic shapes,
 paths, text and the element-style shape helpers a label, and SHALL list them in the order design
-tools do: position (`X`, `Y`, for `x`/`y` and centers `cx`/`cy`), size (width, height), shape
-(radii as `R`, points, sides, angles), transform (rotation), appearance (opacity), fill,
+tools do: position (`X` and `Y` for `x`/`y`, `Center X` and `Center Y` for `cx`/`cy`), size (width,
+height), shape (radii, points, sides, angles), transform (rotation), appearance (opacity), fill,
 stroke and text (font, size), then accessibility and a container's content where an element has
 them.
 Element icons SHALL be Lucide names; properties SHALL have no icons. These SHALL be presentation only and SHALL NOT change evaluation.

@@ -42,5 +42,5 @@ value.
 - **THEN** its invocation SHALL receive the star icon without changing the returned Polygon
 
 #### Scenario: A graphics helper labels its properties
-- **WHEN** `let <Star cx:float64 cy:float64 points:int = 5 /> = …` has `visualizer Star = <FunctionVisualizer icon="star"><PropertyVisualizer property=points label="Points" icon="star" /></FunctionVisualizer>`
+- **WHEN** `let <Star cx:float64 cy:float64 points:int = 5 /> = …` has `visualizer Star = <FunctionVisualizer icon="star"><PropertyVisualizer property=points label="Points" /></FunctionVisualizer>`
 - **THEN** analysis SHALL accept the visualizer, checking `points` against `Star.Props.Property`
