@@ -1234,7 +1234,10 @@ export function renderSource(
         field.append(lead, cell);
         inspector.querySelector(":scope > .inspector-fields")!.prepend(field);
       }
-      row.append(inspector);
+      // An element with no properties at all has nothing to inspect, so it takes no room.
+      if (inspector.querySelector(":scope > .inspector-fields > *") !== null) {
+        row.append(inspector);
+      }
     }
     if (!folded) {
       for (const child of content) {
