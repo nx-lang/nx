@@ -5,7 +5,8 @@ The viewer SHALL read each element in the composition as one row whatever the pa
 element outside the value of another element's non-content property, content children included
 (inside `if`, `for` and braced lists too). The row SHALL show, on one line, the child fold chevron
 when the element holds content, its icon, its kind and the one value it is named by, and SHALL be
-exactly one source line tall, its icon centered on the line. Rows, and the lines of an `if` or a `for`
+exactly one source line tall, its icon centered on the line and starting at the element's column in
+the source, its chevron hanging to the left. Rows, and the lines of an `if` or a `for`
 among them, SHALL follow one another a source line apart with no extra room between them, as a design
 tool's layers do; an open inspector SHALL bring its own margins. As the line fills, that value SHALL be cut and faded. An element inside a property's
 value SHALL read inside its owner's inspector, not as a row. Comments, `if` and `for` SHALL read as
@@ -13,6 +14,10 @@ written between rows, and an element whose syntax a row cannot show losslessly S
 as-written reading. Declarations other than `let` values (types, functions' and components'
 signatures, visualizers) SHALL keep their existing reading. The viewer SHALL NOT evaluate anything
 to draw a row.
+
+#### Scenario: A root element starts under the lets before it
+- **WHEN** a module's root `<Drawing>` follows `let blue: Paint = …`
+- **THEN** Drawing's icon SHALL start where `let` does, its chevron to the left of it
 
 #### Scenario: Rows keep a steady rhythm
 - **WHEN** a Row holds two Text rows and then `if customer.returning { <Badge /> }`

@@ -362,13 +362,12 @@ export const styles = `
   text-indent: calc((var(--column, 0) + 4) * 1ch) hanging each-line;
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
-/* Among rows, a block written as it is, as an \`if\` or a \`for\`, starts where the rows' icons do, and
-   the rows it holds sit level with it, the block's first and last lines framing them. */
-.source .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc((4 - var(--column, 0)) * 1ch); }
-/* A row inside an if or a for starts its icon at the block's edge, not 4ch in, so a block it holds
-   starts a step in from that icon too. */
-.source .sheet-item.as-written .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc(-1ch * var(--column, 0)); }
-.source .sheet-item.as-written .row-element > .row-head { padding-left: 0; }
+/* A row starts its icon where it starts in the source, as a root element's icon starts under the
+   lets before it, its chevron hanging in the gutter to its left. A block written as it is among
+   rows, as an \`if\` or a \`for\`, starts where the rows' icons do, and the rows it holds sit level
+   with it, the block's first and last lines framing them. */
+.source .sheet.row-element > .sheet-head.row-head { padding-left: 0; text-indent: 0; }
+.source .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc(-1ch * var(--column, 0)); }
 /* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
    wherever it sits; and so does one written as its tags on one line inside such an item, as the item's
    other lines wrap from the item's start. One written as its tags over several lines stays inline, its

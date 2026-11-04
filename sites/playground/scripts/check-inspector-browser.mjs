@@ -124,6 +124,15 @@ try {
     const viewer = document.querySelector("nx-viewer");
     return viewer?.text.includes("RegularPolygon") && viewer.detailsState.pinned.length === 0;
   });
+  await viewer.locator(".row-element").first().waitFor();
+  // A root element's icon starts where the lets before it do.
+  const [rootIcon, letStart] = await viewer.evaluate((element) => {
+    const root = element.shadowRoot;
+    const drawingRow = [...root.querySelectorAll(".row-element")].find((row) => row.querySelector(":scope > .row-head > .sheet-kind")?.textContent === "Drawing");
+    const keyword = [...root.querySelectorAll(".t")].find((token) => token.textContent === "let");
+    return [drawingRow.querySelector(":scope > .row-head > .element-icon").getBoundingClientRect().left, keyword.getBoundingClientRect().left];
+  });
+  assert.ok(Math.abs(rootIcon - letStart) < 0.5, `Drawing's icon starts ${rootIcon - letStart}px from let`);
   // Rows, and the if lines among them, keep a steady rhythm: each starts one source line below the last.
   await page.getByRole("combobox").first().selectOption("orders-dashboard");
   await page.waitForFunction(() => document.querySelector("nx-viewer")?.text.includes("CustomerLine"));
