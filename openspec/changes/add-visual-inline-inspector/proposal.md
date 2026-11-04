@@ -24,7 +24,7 @@ The agreed mockup is https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA.
 - **Friendly names.** A property shows its visualizer's `label`, else one derived from its name:
   words split at case changes, `_`, `-` and letter–digit edges; known acronyms upper case; sentence
   case; `is`/`has` dropped from a boolean. The raw name stays in the tooltip and the hover card.
-- **Icons.** A property visualizer can name a Lucide `icon`, drawn before the field's label.
+- **No property icons.** Fields show labels only; element rows keep their icons.
 - **Scrubbing replaces steppers.** Dragging a number's label left and right changes
   it (Shift ×10, Alt ×0.1), live, as one edit and one undo step. Up and Down step a focused field.
   The stepper buttons are removed.
@@ -36,7 +36,7 @@ The agreed mockup is https://claude.ai/artifact/1tRgw7QraUeS485JmPuMDA.
 - **Visualizers for element functions' properties.** Element-style functions get a derived
   `F.Props` record, as components have, so `FunctionVisualizer` can carry property visualizers
   checked against `F.Props.Property`. `@nx/graphics` helpers such as `Star` use this.
-- `@nx/graphics` and the playground examples ship visualizers with labels and icons.
+- `@nx/graphics` and the playground examples ship visualizers with labels.
 - **BREAKING (unstable API):** the viewer's `compact` property and PR #71's Details button,
   "kept open" state and status line are removed; `detailsState` keeps `pinned` and `suppressed`.
 
@@ -48,16 +48,16 @@ None.
 
 ### Modified Capabilities
 
-- `viewer`: element rows named by one value, the inline inspector, labels, icons,
+- `viewer`: element rows named by one value, the inline inspector, labels,
   scrubbing instead of steppers, pins and restorable state.
-- `visualizer-library`: `label` and `icon` on `PropertyVisualizer`; `Target` and property
+- `visualizer-library`: `label` on `PropertyVisualizer`; `Target` and property
   visualizers on `FunctionVisualizer`.
-- `visualizer-declarations`: `Target` binding for function visualizers; labels and icons resolve
-  like other hints.
+- `visualizer-declarations`: `Target` binding for function visualizers; labels resolve like other
+  hints.
 - `component-props-type`: element-style functions derive `F.Props` as components do.
-- `source-tree`: visualizer values carry labels and icons, and
+- `source-tree`: visualizer values carry labels, and
   function entries carry their property visualizers.
-- `graphics-library`: visualizers with labels and icons.
+- `graphics-library`: visualizers with labels.
 - `fiddle-nx-visual-view`: the inline inspector, its state across switches, scrubbing.
 
 ## Impact

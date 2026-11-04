@@ -64,8 +64,6 @@ export type PropertyVisualizer = {
   property: Target.Property       /// The property this describes.
   label?: string                  /// The name a viewer shows for the property, such as `"Corner radius"`. Without it,
                                   /// a viewer derives one from the property's name.
-  icon?: string                   /// A Lucide icon that stands for the property beside its field, such as
-                                  /// `"paint-bucket"`.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.

@@ -236,14 +236,6 @@ export const styles = `
   font-family: var(--nx-viewer-prose-font-family, inherit);
   font-size: 0.85em;
 }
-.source .field-lead > .lead-glyph { display: inline-flex; vertical-align: -2px; margin-right: 0.5ch; }
-.source .field-lead > .lead-glyph > svg { width: 13px; height: 13px; }
-/* Where any label has an icon, the others keep its room, so the labels start in line. */
-.source .inspector-fields:has(> .prop-field > .field-lead > .lead-glyph) > .prop-field > .field-lead:not(:has(> .lead-glyph))::before {
-  content: "";
-  display: inline-block;
-  width: calc(13px + 0.5ch);
-}
 /* Inline content reads as prose: the line breaks and indent around it in source collapse. */
 .source .content-field > .sheet-value, .source .content-field > .sheet-value * { white-space: normal; }
 .source .field-lead.scrubbable { cursor: ew-resize; touch-action: pan-y; }

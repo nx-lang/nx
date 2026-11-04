@@ -589,8 +589,6 @@ export interface SourcePropertyVisualizer {
   name: string;
   /** The name a viewer shows for the property. Without it, a viewer derives one from `name`. */
   label?: string;
-  /** The Lucide icon that stands for the property beside its field. */
-  icon?: string;
   /**
    * How the property's string value is shown: from its property visualizer, or else from the
    * visualizer of the alias its type names.

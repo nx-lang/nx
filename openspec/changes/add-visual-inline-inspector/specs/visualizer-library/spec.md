@@ -8,8 +8,7 @@ optional field `icon:string` naming an icon from the Lucide set, an optional fie
 `properties` holding one or more `<PropertyVisualizer Target=Target/>`. `IdPosition` SHALL be the
 constant union `start | end`. `PropertyVisualizer` SHALL be a record with the type parameter
 `Target`, a required field `property:Target.Property`, an optional field `label:string` (the name a
-viewer shows for the property), an optional field `icon:string` naming a Lucide icon, an optional field `format:ValueFormat`, the
-editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float64` and
+viewer shows for the property), an optional field `format:ValueFormat`, the editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float64` and
 `step:float64`, a field `multiline:boolean` defaulting to `false`, an optional field
 `placeholder:string`, and an optional content field `choices` holding one or more `ValueChoice`.
 
@@ -25,8 +24,8 @@ editor hints as optional fields `editor:ValueEditor`, `min:float64`, `max:float6
 - **WHEN** a module declares `type Card = { title:string padding:int = 8 body?:string }` and `visualizer Card = <ElementVisualizer><PropertyVisualizer property=padding min=0 max=48><ValueChoice value=8 label="md" /></PropertyVisualizer><PropertyVisualizer property=body multiline=true placeholder="What it says" /></ElementVisualizer>`
 - **THEN** analysis SHALL accept the visualizer
 
-#### Scenario: Labels and icons
-- **WHEN** a module declares `type Box = { x:float64 y:float64 width:float64 fill?:string }` and `visualizer Box = <ElementVisualizer icon="square"><PropertyVisualizer property=x label="X" /><PropertyVisualizer property=width label="Width" /><PropertyVisualizer property=fill label="Fill" icon="paint-bucket" /></ElementVisualizer>`
+#### Scenario: Labels
+- **WHEN** a module declares `type Box = { x:float64 y:float64 width:float64 fill?:string }` and `visualizer Box = <ElementVisualizer icon="square"><PropertyVisualizer property=x label="X" /><PropertyVisualizer property=width label="Width" /><PropertyVisualizer property=fill label="Fill" /></ElementVisualizer>`
 - **THEN** analysis SHALL accept the visualizer
 
 ### Requirement: Function visualizers mark element invocations

@@ -99,7 +99,7 @@ edit; every other property is edited in the inspector.
 Selecting a row opens its inspector under it. Clicking the selected row, or pressing Enter, closes
 and reopens it. **Pin** keeps an inspector open while another row is selected, so two elements can be
 compared. The inspector lists the element's properties one to a line, each label beside its value:
-the label from its visualizer, after its icon if it has one, or else one derived from its name, so
+the label from its visualizer, or else one derived from its name, so
 `outerRadius` reads `Outer radius`. Labels share a column as wide as the longest, up to 40% of the
 inspector. A value over several lines, such as a list of elements, reads under its label. Unset
 properties show as dashed values with their default; booleans read as checkboxes. Element values

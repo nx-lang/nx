@@ -1,6 +1,6 @@
 /**
- * How a property is presented in an inspector: its label and the icon its field starts with, from
- * its resolved visualizer or derived from its name.
+ * How a property is presented in an inspector: its label, from its resolved visualizer or derived
+ * from its name.
  */
 import type { SourcePropertyVisualizer, SourceTree, SourceVisualizer } from "@nx-lang/language-protocol";
 
@@ -36,7 +36,6 @@ export function derivedLabel(name: string, boolean = false): string {
 export interface Presentation {
   readonly name: string;
   readonly label: string;
-  readonly icon?: string | undefined;
 }
 
 /** The presentation of `name` under `visualizer`, its label derived when the visualizer gives none. */
@@ -49,7 +48,6 @@ export function presentationOf(
   return {
     name,
     label: found?.label ?? derivedLabel(name, boolean),
-    icon: found?.icon,
   };
 }
 

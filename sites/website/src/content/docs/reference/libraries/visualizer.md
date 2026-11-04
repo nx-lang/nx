@@ -67,7 +67,7 @@ A union cannot have a visualizer yet.
 | `PreviewVisualizer` | `renderer: string` | Nonempty literal host renderer ID; see [Preview descriptors](#preview-descriptors). |
 | `FunctionVisualizer` | `icon?: string`, content `properties?: PropertyVisualizer+` | Like `ElementVisualizer`, for element-style function invocations; its target is the function's props. |
 | `IdPosition` | `start`, `end` | Where the element's id reads. |
-| `PropertyVisualizer` | `property`, `label?`, `icon?`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
+| `PropertyVisualizer` | `property`, `label?`, `format?: ValueFormat`, the [editor hints](#editor-hints), `multiline: boolean = false`, `placeholder?: string` | `property` names the property it describes. |
 
 - `title` is the property whose value is the element's title: the display text that names it, such
   as a button's label. The playground's Visual view names each row by one value, with no label, as
@@ -83,9 +83,8 @@ A union cannot have a visualizer yet.
   another inherits it.
 - `properties` says how individual properties read and edit. Visual's inspector, which opens under a
   selected row, lists the element's properties one to a line, in the order the visualizer lists
-  them and then in declaration order, each `label` beside its value, after the property's `icon`
-  when it has one. Without a `label`, Visual derives one
-  from the name: `outerRadius` reads `Outer radius`, and a boolean's leading `is` or `has` is
+  them and then in declaration order, each `label` beside its value. Properties have no icons. Without a
+  `label`, Visual derives one from the name: `outerRadius` reads `Outer radius`, and a boolean's leading `is` or `has` is
   dropped. A `PropertyVisualizer`'s `format` says how the property's string value is shown, in place
   of the format its type gives it, and its [editor hints](#editor-hints) how the value is edited.
 
@@ -95,7 +94,7 @@ import "@nx/visualizer"
 export abstract component <Question id:string label:string help?:string required:boolean = true />
 
 visualizer Question = <ElementVisualizer title=label id=id icon="circle-help">
-  <PropertyVisualizer property=help label="Help text" icon="circle-question-mark" />
+  <PropertyVisualizer property=help label="Help text" />
   <PropertyVisualizer property=required />
 </ElementVisualizer>
 ```
@@ -317,8 +316,6 @@ export type PropertyVisualizer = {
   property: Target.Property       /// The property this describes.
   label?: string                  /// The name a viewer shows for the property, such as `"Corner radius"`. Without it,
                                   /// a viewer derives one from the property's name.
-  icon?: string                   /// A Lucide icon that stands for the property beside its field, such as
-                                  /// `"paint-bucket"`.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.

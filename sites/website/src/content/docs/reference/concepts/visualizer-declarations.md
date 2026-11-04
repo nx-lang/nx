@@ -20,7 +20,7 @@ visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon=
 
 Now each `<Choice value="eng" label="Engineering" />` in a list of choices reads as one row: a
 circle-dot icon, "Engineering", and `eng` as a quiet identifier after it. A visualizer can also give each
-property a label and an icon for the inspector; see [`@nx/visualizer`](/reference/libraries/visualizer).
+property a label for the inspector; see [`@nx/visualizer`](/reference/libraries/visualizer).
 
 A visualizer declaration is applied, not weighed. The compiler resolves every visualizer declaration that
 applies to a declaration into one result, the same for every reader, and a viewer presents the

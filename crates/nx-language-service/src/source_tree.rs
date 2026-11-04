@@ -338,9 +338,6 @@ pub struct SourcePropertyVisualizer {
     /// The name a viewer shows for the property.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// The Lucide icon that stands for the property beside its field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
     /// How the property's string value is shown: from its property visualizer, or else from the
     /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2339,7 +2336,6 @@ impl<'a> TreeBuilder<'a> {
             .map(|merged| SourcePropertyVisualizer {
                 name: merged.property.clone(),
                 label: merged.get("label").map(str::to_string),
-                icon: merged.get("icon").map(str::to_string),
                 format: merged
                     .get("format")
                     .map(str::to_string)

@@ -10,10 +10,10 @@ SHALL attach to each declaration entry with a resolved visualizer a `visualizer`
 - for a record, an action or a component: its `title`, `id`, `icon` and `preview` descriptor when set, its `idPosition`
   when it has an `id`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the visualizer lists, then the rest in declaration order), each with
-  its name and its resolved `format`, `label` and `icon` when set;
+  its name and its resolved `format` and `label` when set;
 - for an element function (`let <Name … />`): its FunctionVisualizer icon when set and a
   `properties` list holding each of its properties once, in the same resolved order, each with its
-  name and its resolved `format`, `label` and `icon` when set;
+  name and its resolved `format` and `label` when set;
 - for an alias: its `format`.
 
 An entry for a record, action, component or element function that has no visualizer but has a
@@ -63,8 +63,8 @@ and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through J
 by the document, including derived kinds that only inherit a visualizer, with the same resolved inheritance/override metadata
 - **AND** the default query SHALL retain its existing bounded declaration-table behavior
 
-#### Scenario: Labels and icons reach the reader
+#### Scenario: Labels reach the reader
 - **WHEN** a client asks with `visualizers` and `Box`'s visualizer gives `width` the label `Width` and
-  `fill` the icon `paint-bucket`
+  `fill` the label `Fill`
 - **THEN** the entry for `Box` SHALL carry a `width` property with the label `Width` and a `fill`
-  property with the icon `paint-bucket`
+  property with the label `Fill`, and neither SHALL carry an icon

@@ -54,8 +54,8 @@ label, a step in. Unset properties are dashed values with the default as placeho
 group headings and no `group` hint.
 
 ### 4. Field labels
-A field always shows its label, after its icon when it has one; where any label in an inspector has
-an icon, the others keep its room so labels start in line. Every lead has a tooltip `Label · name`. Booleans are checkboxes beside their label. Dragging a number's label scrubs
+A field always shows its label and no icon: good, recognizable icons exist for few properties, and
+icons on some fields but not others look uneven (Bret, 2026-11-04). Every lead has a tooltip `Label · name`. Booleans are checkboxes beside their label. Dragging a number's label scrubs
 it.
 
 ### 5. Labels

@@ -850,9 +850,9 @@ fn element_function_visualizers_only_describe_invocation_icons() {
 }
 
 #[test]
-fn labels_and_icons() {
+fn labels_and_an_element_icon() {
     assert_clean(
-        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\"><PropertyVisualizer property=x label=\"X\" /><PropertyVisualizer property=width label=\"Width\" /><PropertyVisualizer property=fill label=\"Fill\" icon=\"paint-bucket\" /></ElementVisualizer>",
+        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\"><PropertyVisualizer property=x label=\"X\" /><PropertyVisualizer property=width label=\"Width\" /><PropertyVisualizer property=fill label=\"Fill\" /></ElementVisualizer>",
     );
     assert_error(
         "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer><PropertyVisualizer property=height label=\"Height\" /></ElementVisualizer>",

@@ -33,7 +33,7 @@ const PANEL = [
   "visualizer Panel = <ElementVisualizer>",
   "  <PropertyVisualizer property=x />",
   "  <PropertyVisualizer property=y />",
-  '  <PropertyVisualizer property=width label="Breadth" icon="ruler" />',
+  '  <PropertyVisualizer property=width label="Breadth" />',
   "</ElementVisualizer>",
   "visualizer Card = <ElementVisualizer title=title />",
   'let panel = <Panel x=1 y=2 width=30 badge=<Badge label="new" count=3 />>',
@@ -235,7 +235,7 @@ describe("inspectors", () => {
     assert.equal(x.querySelector(".field-lead")!.textContent, "X", "a label derived from its name");
     assert.equal(x.querySelector<HTMLElement>(".field-lead")!.title, "X · x", "its tooltip names it as source writes it");
     const width = drawn(element, "panel.value.width");
-    assert.equal(width.querySelector<HTMLElement>(".field-lead svg")!.dataset["icon"], "ruler", "an icon before the label");
+    assert.equal(width.querySelector(".field-lead svg"), null, "a label alone, with no icon");
     assert.equal(width.querySelector(".field-lead")!.textContent, "Breadth");
     assert.equal(width.querySelector<HTMLElement>(".field-lead")!.title, "Breadth · width");
   });

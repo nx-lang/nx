@@ -4,10 +4,10 @@
 The graphics library's visualizers SHALL give every property of Drawing, Group, the basic shapes,
 paths, text and the element-style shape helpers a label, and SHALL list them in the order design
 tools do: position (`X`, `Y`, for `x`/`y` and centers `cx`/`cy`), size (width, height), shape
-(radii as `R` or icons, points, sides, angles), transform (rotation), appearance (opacity), fill,
+(radii as `R`, points, sides, angles), transform (rotation), appearance (opacity), fill,
 stroke and text (font, size), then accessibility and a container's content where an element has
 them.
-Icons SHALL be Lucide names. These SHALL be presentation only and SHALL NOT change evaluation.
+Element icons SHALL be Lucide names; properties SHALL have no icons. These SHALL be presentation only and SHALL NOT change evaluation.
 
 #### Scenario: Star reads like a design tool
 - **WHEN** the graphics example is opened in Visual and Star is selected

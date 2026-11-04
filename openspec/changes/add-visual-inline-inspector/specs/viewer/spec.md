@@ -133,7 +133,7 @@ SHALL change folds only.
 ### Requirement: The inspector shows properties as labeled fields
 An inspector SHALL show every property its element's type declares, written or not, as a field, one
 to a line, in the resolved property order. A field SHALL show the property's resolved label on the
-left, after its resolved icon when it has one, and its value on the right; the labels SHALL share a
+left and its value on the right; a field SHALL show no icon; the labels SHALL share a
 column as wide as the longest, up to about 40% of the inspector, and a longer label SHALL wrap. A
 value over several lines, as a list of elements, or an unfolded element value SHALL read under its
 label, a step in. A boolean SHALL read as a checkbox beside its label. A property the element does
@@ -146,9 +146,9 @@ the inspector as fields too.
 
 #### Scenario: Star's inspector
 - **WHEN** Star's visualizer lists `cx` and `cy` with the labels `Center X` and `Center Y`, then
-  `outerRadius`, `innerRadius` and `pointCount` with icons, and Star writes no `stroke`
+  `outerRadius`, `innerRadius` and `pointCount`, and Star writes no `stroke`
 - **THEN** the inspector SHALL show `Center X` beside `150` and `Center Y` beside `55` first, then the
-  three labels with their icons, and `Stroke` beside an empty dashed value
+  three labels with no icons, and `Stroke` beside an empty dashed value
 
 #### Scenario: A list of elements under its label
 - **WHEN** a Page writes `actions={ <Button label="Export" /> <Button label="Invite" /> }` and the

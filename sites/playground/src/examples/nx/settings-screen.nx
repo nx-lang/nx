@@ -72,42 +72,42 @@ visualizer Section = <ElementVisualizer title=title icon="panel-top" />
 visualizer Stack = <ElementVisualizer icon="rows-3" />
 visualizer Row = <ElementVisualizer icon="columns-3" />
 visualizer Text = <ElementVisualizer icon="type">
-  <PropertyVisualizer property=style label="Style" icon="heading" />
-  <PropertyVisualizer property=tone label="Tone" icon="palette" />
+  <PropertyVisualizer property=style label="Style" />
+  <PropertyVisualizer property=tone label="Tone" />
 </ElementVisualizer>
 visualizer Badge = <ElementVisualizer title=label icon="badge">
-  <PropertyVisualizer property=tone label="Tone" icon="palette" />
+  <PropertyVisualizer property=tone label="Tone" />
 </ElementVisualizer>
 visualizer Avatar = <ElementVisualizer title=name icon="circle-user-round">
-  <PropertyVisualizer property=imageUrl label="Image" icon="image" />
+  <PropertyVisualizer property=imageUrl label="Image" />
 </ElementVisualizer>
 visualizer Banner = <ElementVisualizer title=title icon="megaphone">
-  <PropertyVisualizer property=tone label="Tone" icon="palette" />
+  <PropertyVisualizer property=tone label="Tone" />
 </ElementVisualizer>
 visualizer TextField = <ElementVisualizer title=label icon="text-cursor-input">
   <PropertyVisualizer property=value label="Value" />
   <PropertyVisualizer property=placeholder label="Placeholder" />
-  <PropertyVisualizer property=help label="Help" icon="circle-help" />
-  <PropertyVisualizer property=error label="Error" icon="circle-alert" />
+  <PropertyVisualizer property=help label="Help" />
+  <PropertyVisualizer property=error label="Error" />
 </ElementVisualizer>
 visualizer Toggle = <ElementVisualizer title=label icon="toggle-right">
   <PropertyVisualizer property=on label="On" />
-  <PropertyVisualizer property=help label="Help" icon="circle-help" />
+  <PropertyVisualizer property=help label="Help" />
 </ElementVisualizer>
 visualizer Button = <ElementVisualizer title=label icon="mouse-pointer-click">
-  <PropertyVisualizer property=kind label="Kind" icon="shapes" />
+  <PropertyVisualizer property=kind label="Kind" />
   <PropertyVisualizer property=disabled label="Disabled" />
 </ElementVisualizer>
 visualizer Divider = <ElementVisualizer icon="minus" />
 visualizer Workspace = <ElementVisualizer title=name id=slug icon="building">
-  <PropertyVisualizer property=plan label="Plan" icon="credit-card" />
-  <PropertyVisualizer property=seats label="Seats" icon="armchair" />
-  <PropertyVisualizer property=seatsUsed label="Seats used" icon="users" />
+  <PropertyVisualizer property=plan label="Plan" />
+  <PropertyVisualizer property=seats label="Seats" />
+  <PropertyVisualizer property=seatsUsed label="Seats used" />
 </ElementVisualizer>
 visualizer Member = <ElementVisualizer title=name icon="user-round">
-  <PropertyVisualizer property=email label="Email" icon="mail" />
-  <PropertyVisualizer property=role label="Role" icon="shield" />
-  <PropertyVisualizer property=lastSeen label="Last seen" icon="clock" />
+  <PropertyVisualizer property=email label="Email" />
+  <PropertyVisualizer property=role label="Role" />
+  <PropertyVisualizer property=lastSeen label="Last seen" />
   <PropertyVisualizer property=twoFactor label="Two-factor" />
 </ElementVisualizer>
 

@@ -1,13 +1,13 @@
 ## ADDED Requirements
 
-### Requirement: Labels and icons resolve like other hints
-A property's `label` and `icon` SHALL each resolve on its own, as the editor hints do: to what its
+### Requirement: Labels resolve like other hints
+A property's `label` SHALL resolve on its own, as the editor hints do: to what its
 resolved `PropertyVisualizer` sets, the derived or later visualizer winning, and otherwise to none.
 A viewer SHALL derive a label for a property without one from its name.
 
 #### Scenario: A derived visualizer relabels one property
-- **WHEN** a base element's visualizer gives `x` the label `"X"` and the icon `"move-horizontal"`, and a derived element's visualizer gives `x` only the label `"Left"`
-- **THEN** the derived element's `x` SHALL resolve to the label `Left` and the icon `move-horizontal`
+- **WHEN** a base element's visualizer gives `x` the label `"X"` and the editor hint `min=0`, and a derived element's visualizer gives `x` only the label `"Left"`
+- **THEN** the derived element's `x` SHALL resolve to the label `Left` and keep `min` 0
 
 ## MODIFIED Requirements
 

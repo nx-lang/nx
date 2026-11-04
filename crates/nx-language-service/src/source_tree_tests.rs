@@ -2661,10 +2661,10 @@ fn property<'t>(visualizer: &'t SourceVisualizer, name: &str) -> &'t SourcePrope
 }
 
 #[test]
-fn labels_and_icons_reach_the_reader() {
+fn labels_reach_the_reader() {
     let source = r#"import "@nx/visualizer"
 type Box = { x:float64 width:float64 fill?:string }
-visualizer Box = <ElementVisualizer><PropertyVisualizer property=width label="Width" /><PropertyVisualizer property=fill icon="paint-bucket" /></ElementVisualizer>
+visualizer Box = <ElementVisualizer><PropertyVisualizer property=width label="Width" /><PropertyVisualizer property=fill label="Fill" /></ElementVisualizer>
 let root() = { <Box x=1 width=2 /> }
 "#;
     let tree = single_document_tree(source);
@@ -2672,7 +2672,7 @@ let root() = { <Box x=1 width=2 /> }
     let width = property(box_, "width");
     assert_eq!(width.label.as_deref(), Some("Width"));
     let fill = property(box_, "fill");
-    assert_eq!(fill.icon.as_deref(), Some("paint-bucket"));
+    assert_eq!(fill.label.as_deref(), Some("Fill"));
     assert_eq!(property(box_, "x").label, None);
 }
 
@@ -2696,7 +2696,7 @@ fn a_derived_visualizer_relabels_one_property() {
     let source = r#"import "@nx/visualizer"
 abstract type Base = { x:float64 }
 type Derived extends Base = { y:float64 }
-visualizer Base = <ElementVisualizer><PropertyVisualizer property=x label="X" icon="move-horizontal" /></ElementVisualizer>
+visualizer Base = <ElementVisualizer><PropertyVisualizer property=x label="X" /></ElementVisualizer>
 visualizer Derived = <ElementVisualizer><PropertyVisualizer property=x label="Left" /></ElementVisualizer>
 let root() = { <Derived x=1 y=2 /> }
 "#;
@@ -2704,11 +2704,6 @@ let root() = { <Derived x=1 y=2 /> }
     let derived = visualizer(&tree, "Derived");
     let x = property(derived, "x");
     assert_eq!(x.label.as_deref(), Some("Left"));
-    assert_eq!(
-        x.icon.as_deref(),
-        Some("move-horizontal"),
-        "the base's icon stays"
-    );
 }
 
 #[test]

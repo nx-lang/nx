@@ -915,21 +915,13 @@ export function renderSource(
   };
 
   /**
-   * The lead of a property's field: its label, after its icon when it has one, with the label and
-   * the name as source writes it as a tooltip.
+   * The lead of a property's field: its label, with the label and the name as source writes it as
+   * a tooltip.
    */
   const leadOf = (presentation: Presentation): HTMLElement => {
     const lead = document.createElement("span");
     lead.title = tooltipOf(presentation);
     lead.className = "field-lead lead-caption";
-    const drawn = presentation.icon === undefined ? undefined : layout.icons?.(presentation.icon);
-    if (drawn !== undefined) {
-      const glyph = document.createElement("span");
-      glyph.className = "lead-glyph";
-      glyph.setAttribute("aria-hidden", "true");
-      glyph.append(drawn.cloneNode(true));
-      lead.append(glyph);
-    }
     lead.append(presentation.label);
     return lead;
   };
