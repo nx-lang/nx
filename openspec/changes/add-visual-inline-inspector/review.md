@@ -412,7 +412,7 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
 
 ## New Findings Discovered During 2026-11-04 22:56 Verification
 
-### 🟡 Fixed - RF21 The `Show N unset` line's `aria-label` drops its visible words from its accessible name
+### ✅ Verified - RF21 The `Show N unset` line's `aria-label` drops its visible words from its accessible name
 - **Severity:** Low (confidence: medium)
 - **Evidence:** `source.ts:1556` now gives the button `aria-label="Show the 3 properties Card does not
   set"`. Its visible text is `Show 3 unset`. An `aria-label` replaces the visible text as the
@@ -424,3 +424,4 @@ editors.ts, card.ts, styles.ts, labels.ts, compact.ts), `crates/nx-language-serv
   visible text (`Show 3 unset: the properties Card does not set`). Another option is to put the
   longer wording in `aria-description`.
 - **Fix:** Dropped the `aria-label`: the visible text, `Show 3 unset` or `Hide unset`, is the button's name again, and `aria-expanded` already says whether the unset properties show.
+- **Verification:** Verified. `source.ts:1548-1557` gives the `inspector-more` button no `aria-label` and no `title`. Its name is its visible text, and `aria-expanded` carries its state. `kindName` is still used for the inspector's own `aria-label` (`source.ts:1527`), so nothing is left dead. Viewer tests pass 241/241, and no new issues were found.
