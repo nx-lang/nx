@@ -4275,7 +4275,13 @@ export class NxViewerElement extends ElementBase {
     const drawn = this.#rendered.get(field);
     const value = drawn?.closest(".inspector") == null ? undefined : drawn.querySelector<HTMLElement>(".editable-value[data-key]");
     if (value !== null && value !== undefined) {
-      this.#openEditor(keyOf(value)!);
+      // The caret starts at the beginning, so typing adds to the value rather than replacing it.
+      const key = keyOf(value)!;
+      this.#openEditor(key);
+      const opened = this.#session?.target.key === key ? this.#session.field : undefined;
+      if (opened !== undefined) {
+        this.#placeCaret(opened, { start: 0, end: 0 });
+      }
     } else if (drawn !== undefined) {
       this.#select(field, true);
     }

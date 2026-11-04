@@ -198,6 +198,10 @@ describe("rows", () => {
     assert.equal(isOpen(element, "panel.value.children[1]"), true, "in its element's open inspector");
     const field = element.shadowRoot!.querySelector<HTMLElement>(".field")!;
     assert.ok(field.closest(".inspector"), "its field opens in the inspector");
+    const selection = element.shadowRoot!.ownerDocument.getSelection?.();
+    if (selection !== null && selection !== undefined && selection.rangeCount > 0) {
+      assert.ok(selection.isCollapsed, "nothing is selected, so typing adds to the value");
+    }
     field.textContent = "Later";
     press(field, "Enter");
     assert.deepEqual(edits, [{ key: "panel.value.children[1].title.value", edit: { kind: "setValue", value: { kind: "string", value: "Later" } } }]);
