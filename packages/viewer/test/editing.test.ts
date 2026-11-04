@@ -1563,12 +1563,30 @@ describe("typed color editors", () => {
     rendered(element,node.key).click();
     const alpha=popover(element).querySelector<HTMLInputElement>(".popover-alpha")!;
     assert.equal(alpha.value,"50","opacity reads as a whole percent");
+    assert.equal(popover(element).querySelector<HTMLInputElement>(".popover-hex")!.value,"#336699","the hex shows the color alone");
     alpha.value="25";
     alpha.dispatchEvent(new window.Event("change",{bubbles:true}));
     assert.deepEqual(edits,[{key:node.key,edit:{kind:"setValue",value:{kind:"color",text:"#33669940"}}}]);
     const targets=editTargets(indexTree(item.tree,item.text));
     const computed=item.tree.nodes.find(node=>node.role==="call")!;
     assert.equal(targets.has(computed.key),false);
+  });
+  it("commits a new hex with the opacity beside it, and a color left as it opened unchanged", async () => {
+    const item = await fromSource("let accent = #f008\n");
+    const node = item.tree.nodes.find(node => node.value === "#f008")!;
+    const element = show(item);
+    const { edits } = events(element);
+    rendered(element,node.key).click();
+    const hex=popover(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    assert.equal(hex.value,"#ff0000");
+    press(hex,"Enter");
+    assert.deepEqual(edits,[],"a percent that rounds the alpha writes nothing");
+    rendered(element,node.key).click();
+    const again=popover(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    again.value="#00ff00";
+    again.dispatchEvent(new window.Event("input",{bubbles:true}));
+    press(again,"Enter");
+    assert.deepEqual(edits,[{key:node.key,edit:{kind:"setValue",value:{kind:"color",text:"#00ff0087"}}}]);
   });
   it("keeps legacy CSS string color editors free of the typed alpha control", async () => {
     const item=await fromSource('import "@nx/visualizer"\ntype Swatch = string\nvisualizer Swatch = <ValueVisualizer format=color/>\nlet accent:Swatch = "rgba(0, 0, 0, 0.5)"\n');

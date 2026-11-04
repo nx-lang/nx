@@ -34,7 +34,9 @@ import {
   defaultValue,
   offsetAtPoint,
   pickerColor,
+  expandHex,
   preserveHexAlpha,
+  withOpacity,
   rangeProblem,
   showValue,
   stepNumber,
@@ -2102,9 +2104,24 @@ export class NxViewerElement extends ElementBase {
     return root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
   }
 
-  /** What an open editor holds now, to open it again with. */
+  /**
+   * What an open editor holds now, to open it again with. A color literal's hex field holds its
+   * color alone and its opacity field the rest, so the two together are the entry.
+   */
   #draftOf(session: EditSession): string | undefined {
-    return session.field !== undefined ? fieldText(session.field) : session.input?.value;
+    if (session.field !== undefined) {
+      return fieldText(session.field);
+    }
+    const raw = session.input?.value;
+    const alpha = session.target.colorLiteral === true ? this.#popover.querySelector<HTMLInputElement>(".popover-alpha") : null;
+    if (raw === undefined || alpha === null) {
+      return raw;
+    }
+    // Left as they opened, the two read the color as written, not as a percent rounds its alpha.
+    if (raw === alpha.dataset["color"] && alpha.value === alpha.dataset["percent"]) {
+      return alpha.dataset["written"];
+    }
+    return withOpacity(raw, Number(alpha.value));
   }
 
   /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
@@ -2387,7 +2404,7 @@ export class NxViewerElement extends ElementBase {
    * commits it, as leaving a field does; anything else is cancelled.
    */
   #closeElsewhere(session: EditSession): void {
-    const value = session.target.kind === "color" ? (session.input?.value ?? "").trim() : undefined;
+    const value = session.target.kind === "color" ? (this.#draftOf(session) ?? "").trim() : undefined;
     if (value !== undefined && value !== this.#currentOf(session.target) && this.#problemOf(session.target, value) === undefined) {
       this.#endSession(session, false);
       this.#commitValue(session.target, value);
@@ -3057,8 +3074,16 @@ export class NxViewerElement extends ElementBase {
       alpha.max = "100";
       alpha.step = "1";
       alpha.setAttribute("aria-label", `${this.#labelOf(target)}: opacity, percent`);
-      const hex = preserveHexAlpha("#000000", input.value);
+      const hex = preserveHexAlpha("#000000", text);
       alpha.value = String(Math.round((hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) * 100));
+      // The hex field shows the color alone, as design tools do; its opacity is the field beside it.
+      if (isHexColor(input.value.trim())) {
+        const written = input.value;
+        input.value = preserveHexAlpha(expandHex(input.value.trim()), "#000000");
+        alpha.dataset["written"] = written;
+        alpha.dataset["color"] = input.value;
+        alpha.dataset["percent"] = alpha.value;
+      }
       // The field and its unit read as one box, the unit quiet inside it at the end.
       const unit = document.createElement("span");
       unit.className = "popover-alpha-unit";
@@ -3070,8 +3095,7 @@ export class NxViewerElement extends ElementBase {
       alpha.addEventListener("change", () => {
         const value = Number(alpha.value);
         if (!Number.isFinite(value) || value < 0 || value > 100 || alpha.value.trim() === "") return;
-        input.value = picker.value + Math.round((value / 100) * 255).toString(16).padStart(2, "0");
-        this.#choose(session, input.value);
+        this.#choose(session, withOpacity(input.value.trim(), value));
       }, { signal });
     }
     this.#session = session;
@@ -3091,7 +3115,10 @@ export class NxViewerElement extends ElementBase {
       },
       { signal }
     );
-    picker.addEventListener("change", () => this.#choose(session, preserveHexAlpha(picker.value, input.value)), { signal });
+    picker.addEventListener("change", () => {
+      input.value = preserveHexAlpha(picker.value, input.value);
+      this.#choose(session, this.#draftOf(session) ?? input.value);
+    }, { signal });
     this.#validate(session);
     this.#placeCard(span, this.#popover);
     if (kept !== undefined) {
@@ -3151,7 +3178,7 @@ export class NxViewerElement extends ElementBase {
         this.#pickChoice(session, session.choiceActive);
         return;
       }
-      const raw = session.input?.value ?? "";
+      const raw = this.#draftOf(session) ?? "";
       const value = raw.trim();
       // A popover left as it was leaves the value as it is.
       if (value === this.#currentOf(target)) {

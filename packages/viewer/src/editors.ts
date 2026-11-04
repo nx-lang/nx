@@ -408,6 +408,28 @@ export function offsetAtPoint(element: HTMLElement, x: number, y: number): numbe
 }
 
 /** Replace RGB while retaining an explicitly authored hex alpha channel. */
+/** A hex color written out in full: `#abc` reads `#aabbcc`, and `#abcd` reads `#aabbccdd`. */
+export function expandHex(hex: string): string {
+  const digits = hex.slice(1);
+  return digits.length === 3 || digits.length === 4 ? "#" + [...digits].map((digit) => digit + digit).join("") : hex;
+}
+
+/**
+ * A hex color with the opacity `percent` as its alpha: a color with an alpha of its own keeps it, and
+ * a color at full opacity takes none. Anything not a hex color is returned as it is.
+ */
+export function withOpacity(color: string, percent: number): string {
+  const trimmed = color.trim();
+  if (!isHexColor(trimmed) || !Number.isFinite(percent) || percent < 0 || percent > 100) {
+    return color;
+  }
+  const digits = trimmed.length - 1;
+  if (digits === 4 || digits === 8 || percent === 100) {
+    return color;
+  }
+  return expandHex(trimmed) + Math.round((percent / 100) * 255).toString(16).padStart(2, "0");
+}
+
 export function preserveHexAlpha(rgb: string, original: string): string {
   if (!isHexColor(original)) return rgb;
   const digits = original.slice(1);
