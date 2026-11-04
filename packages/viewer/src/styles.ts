@@ -137,6 +137,10 @@ export const styles = `
   min-width: 0;
 }
 .source .row-element > .row-head > :is(.element-icon, .sheet-kind, .row-pin, button.fold) { flex-shrink: 0; }
+/* A row's icon centers on its line, and its menu's anchor sits at the line's top, so neither moves
+   the text off the baseline every row shares; a row is exactly one source line tall. */
+.source .row-element > .row-head > .element-icon { align-self: center; }
+.source .row-element > .row-head > .item-menu { align-self: flex-start; }
 /* A row's chevron hangs left of its icon and takes none of the row's gap, so a row that holds
    children starts its icon where its siblings and the lines of an if or a for do. */
 .source .row-element > .row-head > button.fold { margin-right: -0.8ch; }
@@ -370,11 +374,11 @@ export const styles = `
 .source .sheet > .sheet-head * { text-indent: 0; }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
-   another, and around a row whose value is a sheet under its name. Not between one-line elements,
-   which read as one list, nor between a sheet's own rows. */
-.source .sheet-item:has(> .sheet) + .sheet-item,
-.source .sheet-item + .sheet-item:has(> .sheet),
-.source .sheet ~ .sheet,
+   another, and around a row whose value is a sheet under its name. Not between one-line elements or
+   rows, which read as one list as a design tool's layers do, nor between a sheet's own rows. */
+.source .sheet-item:has(> .sheet:not(.row-element)) + .sheet-item,
+.source .sheet-item + .sheet-item:has(> .sheet:not(.row-element)),
+.source .sheet:not(.row-element) ~ .sheet:not(.row-element),
 .source .sheet-row:has(> .sheet-below > .sheet) + :is(.sheet-row, .sheet-held),
 .source .sheet-row + .sheet-row:has(> .sheet-below > .sheet),
 .source .sheet-item.after-blank {

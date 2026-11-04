@@ -5,12 +5,19 @@ The viewer SHALL read each element in the composition as one row whatever the pa
 element outside the value of another element's non-content property, content children included
 (inside `if`, `for` and braced lists too). The row SHALL show, on one line, the child fold chevron
 when the element holds content, its icon, its kind and the one value it is named by, and SHALL be
-no taller than a source line. As the line fills, that value SHALL be cut and faded. An element inside a property's
+exactly one source line tall, its icon centered on the line. Rows, and the lines of an `if` or a `for`
+among them, SHALL follow one another a source line apart with no extra room between them, as a design
+tool's layers do; an open inspector SHALL bring its own margins. As the line fills, that value SHALL be cut and faded. An element inside a property's
 value SHALL read inside its owner's inspector, not as a row. Comments, `if` and `for` SHALL read as
 written between rows, and an element whose syntax a row cannot show losslessly SHALL keep its
 as-written reading. Declarations other than `let` values (types, functions' and components'
 signatures, visualizers) SHALL keep their existing reading. The viewer SHALL NOT evaluate anything
 to draw a row.
+
+#### Scenario: Rows keep a steady rhythm
+- **WHEN** a Row holds two Text rows and then `if customer.returning { <Badge /> }`
+- **THEN** the Row, the two Texts, the `if` line, the Badge and the closing brace SHALL each start one
+  source line below the one before
 
 #### Scenario: A narrow pane keeps the structure
 - **WHEN** the pane holding `<Text x=250 y=165 fontSize=18>NX graphics</Text>` is narrowed until

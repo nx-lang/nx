@@ -177,7 +177,8 @@ every step of a dragged divider) or its fonts load, keeping what is at the top w
 - **What a group holds** reads an item to a line. An `if` or a `for` block reads as written, its
   later lines indented from its own start, and so does an element a group cannot show, such as one
   with a comment inside an attribute. A blank line between two items, and the space between two
-  siblings where either is a group, becomes a little room.
+  siblings where either is a group, becomes a little room. Rows have no room between them: each is one
+  source line tall, so a list of rows and the `if` and `for` lines among them keep a steady rhythm.
 - **Values**: strings lose their quotes, and booleans read ✓ and ✗. A string typed `uitext` (an alias
   `type uitext = string`, or any alias that leads to it) reads as text shown to people, in the prose
   font. A string a visualizer names as an element's `id`, or formats as `id`, reads as one quiet token; a

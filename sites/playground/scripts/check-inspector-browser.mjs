@@ -109,11 +109,28 @@ try {
     const viewer = document.querySelector("nx-viewer");
     return viewer?.text.includes("RegularPolygon") && viewer.detailsState.pinned.length === 0;
   });
+  // Rows, and the if lines among them, keep a steady rhythm: each starts one source line below the last.
+  await page.getByRole("combobox").first().selectOption("orders-dashboard");
+  await page.waitForFunction(() => document.querySelector("nx-viewer")?.text.includes("CustomerLine"));
+  await viewer.locator(".row-element").first().waitFor();
+  const tops = await viewer.evaluate((element) => {
+    const declaration = [...element.shadowRoot.querySelectorAll(".fold-declaration")].find((node) => node.textContent.startsWith("let <CustomerLine"));
+    const top = (node) => node.getBoundingClientRect().top;
+    const rows = [...declaration.querySelectorAll(".row-head")].map(top);
+    const lines = [...declaration.querySelectorAll(".block-line > .t")].filter((node) => /^(if|})$/.test(node.textContent.trim())).map(top);
+    const line = parseFloat(getComputedStyle(declaration).lineHeight);
+    return { line, all: [...rows, ...lines].sort((a, b) => a - b) };
+  });
+  assert.equal(tops.all.length, 6, "Row, two Texts, if, Badge and the closing brace");
+  for (let index = 1; index < tops.all.length; index++) {
+    assert.ok(Math.abs(tops.all[index] - tops.all[index - 1] - tops.line) < 0.5, `line ${index} is ${tops.all[index] - tops.all[index - 1]}px below the last`);
+  }
+
   if (process.env.NX_INSPECTOR_SCREENSHOT) {
     await page.screenshot({ path: process.env.NX_INSPECTOR_SCREENSHOT, fullPage: true });
   }
   assert.deepEqual(errors, []);
-  console.log("PASS: rows, inspectors, close and reopen, pins, anchoring, scrubbing with one undo step, invalid entries, view restoration, folds and keyboard focus.");
+  console.log("PASS: rows, inspectors, close and reopen, pins, anchoring, scrubbing with one undo step, invalid entries, view restoration, folds, keyboard focus and row rhythm.");
 } finally {
   await browser?.close();
   try { process.kill(-server.pid, "SIGTERM"); } catch {}
