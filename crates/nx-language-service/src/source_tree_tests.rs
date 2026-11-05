@@ -1567,6 +1567,37 @@ let items = { <Step id="a" title="A" /> <Choice value="b" label="B" /> <Note tex
 }
 
 #[test]
+fn inline_reaches_the_tree_as_written() {
+    let source = r#"import "@nx/visualizer"
+type Size = { width:int height:int }
+type Spot = { x:int y:int }
+type Plain = { a:int }
+visualizer Size = <ElementVisualizer inline=true />
+visualizer Spot = <ElementVisualizer inline=false />
+let items = { <Size width=1 height=2 /> <Spot x=1 y=2 /> <Plain a=1 /> }
+"#;
+    let tree = snapshot_for(source)
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                visualizers: Some(SourceTreeVisualizers::default()),
+            },
+        )
+        .expect("source tree");
+    assert_eq!(visualizer(&tree, "Size").inline, Some(true));
+    assert_eq!(visualizer(&tree, "Spot").inline, Some(false));
+    // Unset, a viewer decides by the value's size.
+    assert_eq!(
+        tree.declarations
+            .iter()
+            .find(|declaration| declaration.name == "Plain")
+            .and_then(|declaration| declaration.visualizer.as_ref())
+            .and_then(|visualizer| visualizer.inline),
+        None
+    );
+}
+
+#[test]
 fn an_icon_is_inherited_through_extends() {
     let tree = with_visualizers(&survey_snapshot(&[]), &[]);
     assert_eq!(
@@ -2641,4 +2672,110 @@ fn a_numeric_pattern_is_one_literal_spelled_as_written() {
         .map(|node| node.value.clone().unwrap_or_default())
         .collect::<Vec<_>>();
     assert_eq!(values, ["in 0.0..0.5", "> 0.5 && <= 1.0"]);
+}
+
+fn single_document_tree(source: &str) -> SourceTree {
+    let snapshot = WorkspaceSnapshot::from_documents(
+        Option::<PathBuf>::None,
+        vec![DocumentInput::new(URI, source).with_version(1)],
+    )
+    .expect("snapshot");
+    with_visualizers(&snapshot, &[])
+}
+
+fn property<'t>(visualizer: &'t SourceVisualizer, name: &str) -> &'t SourcePropertyVisualizer {
+    visualizer
+        .properties
+        .iter()
+        .find(|candidate| candidate.name == name)
+        .unwrap_or_else(|| panic!("no property {name}"))
+}
+
+#[test]
+fn labels_reach_the_reader() {
+    let source = r#"import "@nx/visualizer"
+type Box = { x:float64 width:float64 fill?:string }
+visualizer Box = <ElementVisualizer><PropertyVisualizer property=width label="Width" /><PropertyVisualizer property=fill label="Fill" /></ElementVisualizer>
+let root() = { <Box x=1 width=2 /> }
+"#;
+    let tree = single_document_tree(source);
+    let box_ = visualizer(&tree, "Box");
+    let width = property(box_, "width");
+    assert_eq!(width.label.as_deref(), Some("Width"));
+    let fill = property(box_, "fill");
+    assert_eq!(fill.label.as_deref(), Some("Fill"));
+    assert_eq!(property(box_, "x").label, None);
+}
+
+#[test]
+fn an_element_functions_visualizer_reaches_the_reader() {
+    let source = r#"import "@nx/visualizer"
+type Shape = { points:int }
+let <Star cx:float64 points:int = 5 /> = <Shape points={points} />
+visualizer Star = <FunctionVisualizer icon="star"><PropertyVisualizer property=points label="Points" /><PropertyVisualizer property=cx label="Center X" /></FunctionVisualizer>
+let root() = { <Star cx=1 /> }
+"#;
+    let tree = single_document_tree(source);
+    let star = visualizer(&tree, "Star");
+    assert_eq!(star.icon.as_deref(), Some("star"));
+    assert_eq!(property_names(star), vec!["points", "cx"]);
+    assert_eq!(property(star, "cx").label.as_deref(), Some("Center X"));
+}
+
+#[test]
+fn a_derived_visualizer_relabels_one_property() {
+    let source = r#"import "@nx/visualizer"
+abstract type Base = { x:float64 }
+type Derived extends Base = { y:float64 }
+visualizer Base = <ElementVisualizer><PropertyVisualizer property=x label="X" /></ElementVisualizer>
+visualizer Derived = <ElementVisualizer><PropertyVisualizer property=x label="Left" /></ElementVisualizer>
+let root() = { <Derived x=1 y=2 /> }
+"#;
+    let tree = single_document_tree(source);
+    let derived = visualizer(&tree, "Derived");
+    let x = property(derived, "x");
+    assert_eq!(x.label.as_deref(), Some("Left"));
+}
+
+#[test]
+fn every_graphics_property_has_a_label() {
+    let snapshot = snapshot_for("import \"@nx/graphics\" as g\nlet root() = 42");
+    let tree = snapshot
+        .source_tree_with_options(
+            &DocumentUri::from(URI),
+            &SourceTreeOptions {
+                visualizers: Some(SourceTreeVisualizers {
+                    include_unreferenced_declarations: true,
+                    ..SourceTreeVisualizers::default()
+                }),
+            },
+        )
+        .unwrap();
+    let elements = [
+        "Drawing",
+        "Group",
+        "Rectangle",
+        "Circle",
+        "Ellipse",
+        "Line",
+        "Polyline",
+        "Polygon",
+        "Path",
+        "Text",
+        "RegularPolygon",
+        "Star",
+        "Arrow",
+        "Arc",
+        "RingSector",
+    ];
+    for name in elements {
+        let visualizer = visualizer(&tree, name);
+        for property in &visualizer.properties {
+            assert!(
+                property.label.is_some(),
+                "{name}.{} has no label: {property:#?}",
+                property.name
+            );
+        }
+    }
 }

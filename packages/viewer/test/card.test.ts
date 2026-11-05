@@ -20,15 +20,20 @@ async function cardWhere(test: (node: SourceNode) => boolean): Promise<ReturnTyp
 const inRoot = (node: SourceNode): boolean => node.key.startsWith("root.");
 
 describe("hover cards", () => {
-  it("says what an element is: its declaration's kind, name, base and doc", async () => {
+  it("titles an element's card with its name, then its base and its declaration's doc", async () => {
     assert.deepEqual(await cardWhere((node) => inRoot(node) && node.role === "element" && node.name === "Shape"), {
-      signature: "component Shape extends Node",
+      signature: "Shape",
       doc: "A filled shape.",
+      title: true,
+      kind: "component",
+      detail: "extends Node",
     });
     assert.deepEqual(await cardWhere((node) => inRoot(node) && node.role === "element" && node.name === "Glow"), {
-      signature: "let <Glow />",
+      signature: "Glow",
       doc: "A glowing shape.",
-    });
+      title: true,
+      kind: "function",
+    }, "an element function's card, without `let` or brackets");
   });
 
   it("spells each kind of declaration as the editor's hover begins it", async () => {

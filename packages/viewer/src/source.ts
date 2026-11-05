@@ -6,9 +6,11 @@
  * read as marks. Colors come from the host, as ranges over the
  * text, so a host colors the reading with the highlighter and themes it colors its editor with.
  */
-import type { SourceDeclarationKind, SourceNode, SourceValueFormat } from "@nx-lang/language-protocol";
+import type { SourceDeclarationKind, SourceNode, SourceTree, SourceValueFormat } from "@nx-lang/language-protocol";
 
+import { isComposition } from "./compact.js";
 import { isElementFunction, VALUE_ROLES } from "./card.js";
+import { isBooleanType, presentationOf, type Presentation } from "./labels.js";
 import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
 
 /** One colored range of the text, in UTF-16 offsets. Ranges are in text order and do not overlap. */
@@ -41,8 +43,25 @@ function utf16Offsets(text: string, byteLength: number): Uint32Array {
   return offsets;
 }
 
+/** The Lucide pin a row's pin button draws. */
+const PIN_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+
+
 /** What the reading draws with, beyond the text and its colors. */
 export interface SourceLayout {
+  /** The keys of the composition elements whose inspectors are open. */
+  readonly details?: ReadonlySet<string> | undefined;
+  /** The keys of the composition elements whose inspectors are pinned open. */
+  readonly pinned?: readonly string[] | undefined;
+  /** The keys of the element values unfolded into nested groups of fields in an inspector. */
+  readonly valuesOpen?: ReadonlySet<string> | undefined;
+  /**
+   * The keys of the elements whose inspectors also show the properties they do not set. Other
+   * inspectors show only what the element sets, its title property, and a last line that reveals
+   * the rest.
+   */
+  readonly allProperties?: ReadonlySet<string> | undefined;
   /**
    * The keys of the elements whose properties do not fit on one line in the pane, which give each
    * property a row. The element measures which those are, from the reading drawn without them.
@@ -524,7 +543,9 @@ export function renderSource(
     const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
     const draw = (name: string | undefined): Element | undefined => (name === undefined ? undefined : layout.icons?.(name));
     // An icon the host cannot draw, as a name Lucide does not have, gives way to the kind's.
-    const drawn = draw(declaration?.visualizer?.icon) ?? draw(declaration === undefined ? undefined : KIND_ICONS[declaration.kind]);
+    // A component's `State.Update` is an action too, so it reads with an action's icon.
+    const kind = declaration?.kind === "record" && declaration.name.endsWith(".State.Update") ? "action" : declaration?.kind;
+    const drawn = draw(declaration?.visualizer?.icon) ?? draw(kind === undefined ? undefined : KIND_ICONS[kind]);
     if (drawn === undefined) {
       return undefined;
     }
@@ -579,7 +600,29 @@ export function renderSource(
    * the header is cut rather than wrapped, folded, or when that property is an element, which a row
    * lets fit on its own line.
    */
+  const rows = new Map<number, boolean>();
+  /** Whether an element in the composition reads as a row: its tag holds no comment a row would lose. */
+  const rowAt = (at: number): boolean => {
+    let row = rows.get(at);
+    if (row === undefined) {
+      row =
+        isComposition(index, at) &&
+        childrenOf(at).every((child) => {
+          const node = tree.nodes[child]!;
+          if (isNote(child)) {
+            return true;
+          }
+          return node.role === "attribute" && (isContent(child) || !childrenOf(child).some(isNote));
+        });
+      rows.set(at, row);
+    }
+    return row;
+  };
+
   const markFit = (element: HTMLElement, at: number): void => {
+    if (rowAt(at)) {
+      return;
+    }
     const elementValue = (attribute: number): boolean => childrenOf(attribute).some((value) => tree.nodes[value]!.role === "element");
     const group = element.classList.contains("sheet");
     const least = group && (layout.folded?.has(tree.nodes[at]!.key) === true || shownOf(at).some(elementValue)) ? 1 : 2;
@@ -599,7 +642,7 @@ export function renderSource(
   const shapeOf = (at: number): "group" | "line" | "written" => {
     let shape = shapes.get(at);
     if (shape === undefined) {
-      shape = lineable(at) ? "line" : sheetable(at) ? "group" : "written";
+      shape = rowAt(at) ? "group" : lineable(at) ? "line" : sheetable(at) ? "group" : "written";
       shapes.set(at, shape);
     }
     return shape;
@@ -622,7 +665,7 @@ export function renderSource(
   };
 
   /** Whether an attribute of a group reads on its header, after the name: its properties fit there. */
-  const inHeader = (element: number, attribute: number): boolean => !isWrapped(element) && inlineValue(attribute);
+  const inHeader = (element: number, attribute: number): boolean => !rowAt(element) && !isWrapped(element) && inlineValue(attribute);
 
   /**
    * Whether an element reads as a line: each property's value fits on a line, it holds no element
@@ -717,10 +760,28 @@ export function renderSource(
     const end = endOf(value);
     const written = value.value ?? "";
     if (value.role === "literal" && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(written)) {
-      const words = marked(at, "span", "colored");
+      // A color literal reads in its parts, as a design tool's color field does: its swatch, its hex,
+      // and, in an inspector, its opacity in percent beside the hex in place of its alpha digits.
+      const words = marked(at, "span", "colored color-value");
       const square = swatch(at, start, end);
       if (square !== undefined) words.append(square);
-      writeText(words, start, end);
+      const parts = hexParts(written);
+      const hex = document.createElement("span");
+      hex.className = "color-hex";
+      hex.textContent = parts.rgb;
+      const digits = document.createElement("span");
+      digits.className = "color-alpha-digits";
+      digits.textContent = parts.alpha;
+      const opacity = document.createElement("span");
+      opacity.className = "color-opacity";
+      const percent = document.createElement("span");
+      percent.className = "opacity-value";
+      percent.textContent = String(parts.percent);
+      const unit = document.createElement("span");
+      unit.className = "opacity-unit";
+      unit.textContent = "%";
+      opacity.append(percent, unit);
+      words.append(hex, digits, opacity);
       cell.append(words);
       return;
     }
@@ -758,7 +819,6 @@ export function renderSource(
       // A mark, not a box: a check box looks like something to click, and this only reads.
       const box = marked(at, "span", `sheet-boolean ${written}`);
       box.textContent = written === "true" ? "\u2713" : "\u2717";
-      box.title = written;
       box.setAttribute("aria-label", written);
       cell.append(box);
       return;
@@ -770,7 +830,87 @@ export function renderSource(
       cell.append(list);
       return;
     }
+    // An expression keeps the braces source writes around it, quiet, so it reads as computed.
+    const open = braceAround(attribute, start, -1);
+    const close = braceAround(attribute, end, 1);
+    if (open === undefined || close === undefined) {
+      writeNodes(cell, [at], start, end);
+      return;
+    }
+    const brace = (from: number): HTMLElement => {
+      const mark = document.createElement("span");
+      mark.className = "t block-brace value-brace";
+      mark.textContent = text[from]!;
+      return mark;
+    };
+    const opening = brace(open);
+    cell.append(opening);
     writeNodes(cell, [at], start, end);
+    cell.append(brace(close));
+    // A reference to a color leads with its swatch, before the brace, as a color literal does.
+    const named = value.role === "reference" ? referencedColor(value) : undefined;
+    if (named !== undefined) {
+      const square = document.createElement("span");
+      square.className = "swatch";
+      square.style.backgroundColor = named;
+      square.setAttribute("aria-hidden", "true");
+      if (square.style.backgroundColor !== "") {
+        cell.insertBefore(square, opening);
+      }
+    }
+  };
+
+  /**
+   * The color the top-level `let` a reference resolves to holds: written as a color literal, or as
+   * an element one of whose properties is a color literal or a string its visualizer formats as a
+   * color. A reference to a local, which the tree leaves without a declaration, has none.
+   */
+  const referencedColor = (reference: SourceNode): string | undefined => {
+    const declaration = topLevelLet(tree, reference);
+    if (declaration < 0) {
+      return undefined;
+    }
+    const held = childrenOf(declaration).find((child) => tree.nodes[child]!.role === "literal" || tree.nodes[child]!.role === "element");
+    const colorOf = (at: number): string | undefined => {
+      const node = tree.nodes[at]!;
+      const raw = node.value ?? "";
+      if (node.color !== undefined) {
+        return node.color;
+      }
+      if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(raw)) {
+        return raw;
+      }
+      return formats.get(at) === "color" && raw.startsWith('"') ? raw.slice(1, -1).trim() : undefined;
+    };
+    if (held === undefined) {
+      return undefined;
+    }
+    if (tree.nodes[held]!.role === "literal") {
+      return colorOf(held);
+    }
+    for (const attribute of childrenOf(held)) {
+      const sole = soleValue(attribute);
+      const found = sole === undefined || tree.nodes[sole]!.role !== "literal" ? undefined : colorOf(sole);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return tree.nodes[held]!.color;
+  };
+
+  /**
+   * The offset of the brace source writes right before `from` (`step` -1) or at or after it (`step`
+   * 1), past spaces, inside the attribute at `attribute`, or nothing when there is none.
+   */
+  const braceAround = (attribute: number, from: number, step: -1 | 1): number | undefined => {
+    const node = tree.nodes[attribute]!;
+    const low = startOf(node);
+    const high = endOf(node);
+    let at = step < 0 ? from - 1 : from;
+    while (at >= low && at < high && /\s/.test(text[at]!)) {
+      at += step;
+    }
+    return at >= low && at < high && text[at] === (step < 0 ? "{" : "}") ? at : undefined;
   };
 
   /**
@@ -794,8 +934,12 @@ export function renderSource(
    * The control that folds or unfolds the unit with `key`: a chevron that hangs to the left of
    * where the unit starts, so it moves nothing.
    */
-  const foldToggle = (key: string, folded: boolean): HTMLElement => {
-    const toggle = document.createElement("span");
+  const foldToggle = (key: string, folded: boolean, button = false): HTMLElement => {
+    const toggle = document.createElement(button ? "button" : "span");
+    if (button) {
+      toggle.setAttribute("type", "button");
+      toggle.tabIndex = -1;
+    }
     toggle.className = folded ? "fold folded" : "fold";
     if (layout.turning?.key === key) {
       toggle.classList.add(layout.turning.wasFolded ? "was-folded" : "was-open");
@@ -843,10 +987,584 @@ export function renderSource(
   /** "1 property", "3 children": a count and its noun. */
   const counted = (count: number, noun: string, nouns: string): string => `${count} ${count === 1 ? noun : nouns}`;
 
+  // ---- Rows and inspectors -------------------------------------------------------------------
+
+  /** A copy of a part of the reading, to show again: it marks no node, so each node is drawn once. */
+  const unmarked = (element: HTMLElement): HTMLElement => {
+    for (const marked of [element, ...element.querySelectorAll<HTMLElement>("[data-key]")]) {
+      delete marked.dataset["key"];
+      delete marked.dataset["role"];
+      marked.classList.remove("n", "fit-check");
+      marked.removeAttribute("id");
+    }
+    return element;
+  };
+
+  /** The presentation of each property an element's row and inspector name. */
+  const presentations = (at: number): ((name: string) => Presentation) => {
+    const node = tree.nodes[at]!;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
+    const declared = elementProperties(tree, node) ?? [];
+    const found = new Map<string, Presentation>();
+    return (name) => {
+      let presentation = found.get(name);
+      if (presentation === undefined) {
+        const property = declared.find((candidate) => candidate.name === name);
+        presentation = presentationOf(visualizer, name, isBooleanType(tree, property?.type));
+        found.set(name, presentation);
+      }
+      return presentation;
+    };
+  };
+
+  /**
+   * The lead of a property's field: its label. Its card, under a resting pointer, names the property
+   * as source writes it.
+   */
+  const leadOf = (presentation: Presentation): HTMLElement => {
+    const lead = document.createElement("span");
+    lead.className = "field-lead lead-caption";
+    lead.append(presentation.label);
+    return lead;
+  };
+
+  /** The one value an attribute holds, or nothing when it holds several or a comment. */
+  const soleValue = (attribute: number): number | undefined => {
+    const values = childrenOf(attribute);
+    return values.length === 1 && !isNote(values[0]!) ? values[0] : undefined;
+  };
+
+  /** Whether an attribute's value is the boolean `true` or `false`, and which. */
+  const booleanOf = (attribute: number): boolean | undefined => {
+    const value = soleValue(attribute);
+    const written = value === undefined ? undefined : tree.nodes[value]!;
+    return written?.role === "literal" && (written.value === "true" || written.value === "false") ? written.value === "true" : undefined;
+  };
+
+  /**
+   * The content of `at` that reads inline, as a property does: text and embedded values, as
+   * `<Text>NX graphics</Text>` holds, with no element or block in it. However long, its row shows
+   * its first words, where it has no title.
+   */
+  const inlineContent = (at: number): number | undefined => {
+    const content = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child));
+    if (content.length !== 1) {
+      return undefined;
+    }
+    const child = content[0]!;
+    const items = childrenOf(child);
+    const blocks = new Set(["element", "condition", "match", "matchArm", "loop", "sequence", "binding"]);
+    if (items.length === 0 || items.some((item) => blocks.has(tree.nodes[item]!.role))) {
+      return undefined;
+    }
+    const [from, to] = inlineRange(child);
+    return from < to ? child : undefined;
+  };
+
+  /** Where content's items run, blank space they hold included; it reads collapsed, as in prose. */
+  const itemsRange = (content: number): [number, number] => {
+    const items = childrenOf(content);
+    // An embedded value's closing brace is the content's, past its last item.
+    // So is an embedded value's opening brace, before its first.
+    return [Math.min(startOf(tree.nodes[items[0]!]!), startOf(tree.nodes[content]!)), Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!))];
+  };
+
+  /** Where inline content's text runs, without the blank space around it. */
+  const inlineRange = (content: number): [number, number] => {
+    const items = childrenOf(content);
+    let from = Math.min(startOf(tree.nodes[items[0]!]!), startOf(tree.nodes[content]!));
+    let to = Math.max(endOf(tree.nodes[items[items.length - 1]!]!), endOf(tree.nodes[content]!));
+    while (from < to && /\s/.test(text[from]!)) {
+      from++;
+    }
+    while (to > from && /\s/.test(text[to - 1]!)) {
+      to--;
+    }
+    return [from, to];
+  };
+
+  /** The one attribute `at` writes, when it writes just one, on one line and not an element. */
+  const soleSetting = (at: number): number | undefined => {
+    const written = childrenOf(at).filter((child) => tree.nodes[child]!.role === "attribute" && !isContent(child));
+    if (written.length !== 1) {
+      return undefined;
+    }
+    const value = soleValue(written[0]!);
+    if (value === undefined || tree.nodes[value]!.role === "element" || !onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!))) {
+      return undefined;
+    }
+    return written[0];
+  };
+
+  /**
+   * The one value a row or a folded element value names its element by, as a layer list does: its
+   * title, else the text it holds, else its id. A folded element value with none of these reads as
+   * what it sets when it sets one thing, as a paint its color.
+   */
+  const headValue = (at: number, nested: boolean): HTMLElement | undefined => {
+    const title = titleOf(at) ?? computedTitleOf(at);
+    const inline = inlineContent(at);
+    const plan = idPlans.get(at);
+    const shown = title ?? inline ?? plan?.attribute ?? (nested ? soleSetting(at) : undefined);
+    if (shown === undefined) {
+      return undefined;
+    }
+    const value = document.createElement("span");
+    value.className = "row-title";
+    // A click on it edits the property it shows, in the element's inspector.
+    value.dataset["field"] = tree.nodes[shown]!.key;
+    // On a row, what the pointer rests on to drag or select says nothing more; in a field, it does.
+    if (nested) {
+      hoverable(value, shown);
+    }
+    if (shown === inline) {
+      writeNodes(value, childrenOf(inline), ...itemsRange(inline));
+    } else if (shown === title) {
+      writeValue(value, shown);
+    } else if (plan !== undefined && shown === plan.attribute) {
+      value.classList.add("row-id");
+      value.append(idChip(plan));
+    } else {
+      writeValue(value, shown);
+    }
+    return unmarked(value);
+  };
+
+  /** A field of an inspector for an attribute the element writes, its value editable in place. */
+  const writtenField = (attribute: number, presentation: Presentation): HTMLElement => {
+    const field = marked(attribute, "span", "sheet-row prop-field");
+    const lead = leadOf(presentation);
+    lead.classList.add("sheet-name");
+    hoverable(lead, attribute);
+    const cell = document.createElement("span");
+    cell.className = "sheet-value";
+    field.append(lead, cell);
+    if (booleanOf(attribute) !== undefined) {
+      // A checkbox beside its label.
+      field.classList.add("boolean-field");
+      writeValue(cell, attribute);
+      return field;
+    }
+    const nested = soleValue(attribute);
+    if (nested !== undefined && tree.nodes[nested]!.role === "element" && nestable(nested)) {
+      writeNested(field, cell, nested);
+      return field;
+    }
+    if (spansLines(attribute)) {
+      field.classList.add("field-below");
+      const below = document.createElement("span");
+      below.className = "sheet-below";
+      writeValue(below, attribute);
+      field.append(below);
+    } else {
+      const value = soleValue(attribute);
+      writeValue(cell, attribute);
+      if (value !== undefined && tree.nodes[value]!.role === "reference") {
+        cell.classList.add("reference-token");
+      }
+    }
+    return field;
+  };
+
+  /**
+   * Whether an element value reads as a nested group of fields: its tag holds properties alone, with
+   * no comment a field would lose and nothing it holds.
+   */
+  const nestable = (at: number): boolean =>
+    childrenOf(at).every((child) => {
+      const node = tree.nodes[child]!;
+      return node.role === "attribute" && !isContent(child) && !childrenOf(child).some(isNote);
+    });
+
+  /**
+   * An element value in its property's field: its icon, kind and the value it is named by, which unfold into a
+   * nested group of its own fields, edited as any others.
+   */
+  const writeNested = (field: HTMLElement, cell: HTMLElement, at: number): void => {
+    const node = tree.nodes[at]!;
+    const start = startOf(node);
+    const plan = idPlans.get(at);
+    if (plan !== undefined) {
+      plan.written = true;
+    }
+    const open = layout.valuesOpen?.has(node.key) === true;
+    field.classList.add("nested-field");
+    field.classList.toggle("open", open);
+    const head = marked(at, "span", "nested-head");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.tabIndex = -1;
+    toggle.className = open ? "fold value-fold" : "fold value-fold folded";
+    toggle.dataset["valueKey"] = node.key;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", `${open ? "Collapse" : "Expand"} ${node.name ?? "value"}`);
+    head.append(toggle);
+    const inline = !open && inlineable(at);
+    // Inline, the kind reads only where the property's type leaves it open: a union's case alone,
+    // and nothing for the one record the type names.
+    const implied = inline ? impliedKind(at) : "none";
+    const marker = implied === "none" ? elementIcon(at) : undefined;
+    if (marker !== undefined) {
+      head.append(marker);
+    }
+    if (implied !== "all") {
+      const kind = document.createElement("span");
+      kind.className = "nested-kind";
+      hoverable(kind, at);
+      const end = nameEnd(text, node, start);
+      const caseAt = implied === "case" ? text.lastIndexOf(".", end - 1) + 1 : start + 1;
+      writeText(kind, Math.max(caseAt, start + 1), end);
+      head.append(kind);
+    }
+    if (inline) {
+      head.classList.add("inline-head");
+      head.append(writeInlineProperties(at));
+    } else if (!open) {
+      const value = headValue(at, true);
+      if (value !== undefined) {
+        value.classList.add("nested-value");
+        head.append(value);
+      }
+    }
+    cell.append(head);
+    if (open) {
+      const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+      const inspector = writeInspector(at, presentations(at), declaration?.visualizer?.properties?.map((property) => property.name) ?? [], declaration?.visualizer?.title);
+      inspector.classList.add("nested-inspector");
+      // The nested element's own node holds its fields, so selecting inside it selects in it.
+      head.append(inspector);
+    }
+  };
+
+  /**
+   * Whether an element value reads its set properties on its field's line, each editable there:
+   * as its visualizer says, and otherwise when it sets one to four, each one simple value on a line
+   * of its own, a string no longer than 24 characters.
+   */
+  const inlineable = (at: number): boolean => {
+    const node = tree.nodes[at]!;
+    const said = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer?.inline;
+    if (said === false) {
+      return false;
+    }
+    const attributes = childrenOf(at);
+    if (attributes.length === 0 || (said !== true && attributes.length > 4)) {
+      return false;
+    }
+    return attributes.every((attribute) => {
+      const value = soleValue(attribute);
+      if (value === undefined || spansLines(attribute)) {
+        return false;
+      }
+      const written = tree.nodes[value]!;
+      if (written.role === "case" || written.role === "reference") {
+        return true;
+      }
+      if (written.role !== "literal") {
+        return false;
+      }
+      const literal = written.value ?? "";
+      return said === true || !literal.startsWith('"') || literal.length <= 26;
+    });
+  };
+
+  /**
+   * How much of an element value's kind its property's type already says: `all` when the type names
+   * its record, `case` when it names the union whose case it is, and `none` otherwise.
+   */
+  const impliedKind = (at: number): "all" | "case" | "none" => {
+    const node = tree.nodes[at]!;
+    const owner = node.parent === undefined ? undefined : attributeElement(tree, node.parent);
+    const attribute = node.parent === undefined ? undefined : tree.nodes[node.parent];
+    if (owner === undefined || attribute === undefined) {
+      return "none";
+    }
+    const declared = (elementProperties(tree, tree.nodes[owner]!) ?? []).find((property) => property.name === attribute.name);
+    const type = (declared?.type ?? "").replace(/[?*+]$/, "").trim();
+    const last = (name: string): string => name.slice(name.lastIndexOf(".") + 1);
+    const name = node.name ?? "";
+    const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+    if (type === "") {
+      return "none";
+    }
+    if (declaration?.kind === "union") {
+      const union = name.slice(0, name.lastIndexOf("."));
+      return union !== "" && (type === union || last(type) === last(union) || last(type) === declaration.name) ? "case" : "none";
+    }
+    return type === name || last(type) === last(name) || last(type) === declaration?.name ? "all" : "none";
+  };
+
+  /**
+   * An element value's set properties on its field's line, each its label and its value, editable
+   * and scrubbed as an inspector's fields are, in the order its inspector lists them. A sole
+   * property, or its title, reads without its label.
+   */
+  const writeInlineProperties = (at: number): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
+    const order = (visualizer?.properties ?? []).map((property) => property.name);
+    const rank = (attribute: number): number => {
+      const found = order.indexOf(tree.nodes[attribute]!.name ?? "");
+      return found < 0 ? order.length : found;
+    };
+    const attributes = childrenOf(at)
+      .map((attribute, position) => ({ attribute, position }))
+      .sort((a, b) => rank(a.attribute) - rank(b.attribute) || a.position - b.position)
+      .map(({ attribute }) => attribute);
+    const title = titleOf(at);
+    const present = presentations(at);
+    const properties = document.createElement("span");
+    properties.className = "inline-props";
+    for (const attribute of attributes) {
+      const field = marked(attribute, "span", "inline-prop prop-field");
+      const presentation = present(tree.nodes[attribute]!.name ?? "");
+      if (attributes.length > 1 && attribute !== title) {
+        const lead = leadOf(presentation);
+        lead.classList.add("inline-label");
+        hoverable(lead, attribute);
+        field.append(lead);
+      }
+      const cell = document.createElement("span");
+      cell.className = "sheet-value inline-value";
+      writeValue(cell, attribute);
+      field.append(cell);
+      properties.append(field);
+    }
+    return properties;
+  };
+
+  /**
+   * The empty field of a property the element does not write: dashed, with its lead, and a value
+   * cell the element fills with the property's default and its editor.
+   */
+  const unwrittenField = (key: string, presentation: Presentation, boolean: boolean): HTMLElement => {
+    const field = document.createElement("span");
+    field.className = "sheet-row prop-field more dimmed-row";
+    field.dataset["moreOf"] = key;
+    field.dataset["name"] = presentation.name;
+    const lead = leadOf(presentation);
+    lead.classList.add("sheet-name");
+    const cell = document.createElement("span");
+    cell.className = "sheet-value";
+    if (boolean) {
+      field.classList.add("boolean-field");
+    }
+    field.append(lead, cell);
+    return field;
+  };
+
+  /**
+   * An element of the composition as one row: its children's chevron when it holds content, its
+   * icon, kind and the one value it is named by, and its pin. Under it,
+   * while open, its inspector: a field to each property it declares, written or not;
+   * then, unless folded, what it holds.
+   */
+  const writeRow = (at: number, start: number): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const plan = idPlans.get(at);
+    const folded = layout.folded?.has(node.key) === true;
+    const open = layout.details?.has(node.key) === true;
+    const pinned = layout.pinned?.includes(node.key) === true;
+    const declaration = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+    const visualizer = declaration?.visualizer;
+    const present = presentations(at);
+    const children = childrenOf(at);
+    const inline = inlineContent(at);
+    const content = children.filter((child) => tree.nodes[child]!.role === "attribute" && isContent(child) && child !== inline);
+    const hasContent = content.some((child) => childrenOf(child).length > 0);
+    const row = marked(at, "span", "sheet row-element");
+    row.classList.toggle("folded", folded && hasContent);
+    row.classList.toggle("open", open);
+    row.classList.toggle("pinned", pinned);
+    row.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-selected", "false");
+    row.setAttribute("aria-label", node.name ?? "element");
+    if (hasContent) {
+      row.setAttribute("aria-expanded", String(!folded));
+    }
+    if (plan !== undefined) {
+      plan.written = true;
+    }
+
+    const head = document.createElement("span");
+    head.className = "sheet-head row-head";
+    if (hasContent) {
+      const toggle = foldToggle(node.key, folded, true);
+      toggle.setAttribute("aria-label", `${folded ? "Expand" : "Collapse"} children of ${node.name}`);
+      head.append(toggle);
+    }
+    const marker = elementIcon(at);
+    if (marker !== undefined) {
+      head.append(marker);
+    }
+    const kind = document.createElement("span");
+    kind.className = "sheet-kind";
+    // The row's card is its icon's, so resting on its name to drag or select it opens nothing.
+    if (marker === undefined) {
+      hoverable(kind, at);
+    }
+    writeText(kind, start + 1, nameEnd(text, node, start));
+    head.append(kind);
+    const value = headValue(at, false);
+    if (value !== undefined) {
+      head.append(value);
+    }
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.tabIndex = -1;
+    pin.className = "row-pin";
+    pin.dataset["detailsKey"] = node.key;
+    pin.dataset["detailsAction"] = "pin";
+    pin.title = pinned ? "Unpin" : "Pin open";
+    pin.setAttribute("aria-label", `${pinned ? "Unpin" : "Pin"} ${node.name ?? "element"}`);
+    pin.setAttribute("aria-pressed", String(pinned));
+    pin.innerHTML = PIN_ICON;
+    head.append(pin);
+    row.append(head);
+
+    if (open) {
+      const inspector = writeInspector(at, present, visualizer?.properties?.map((property) => property.name) ?? [], visualizer?.title);
+      if (inline !== undefined) {
+        // Inline content edits in the inspector, first, as the property it is.
+        const presentation = present(tree.nodes[inline]!.name ?? "");
+        const field = marked(inline, "span", "sheet-row prop-field content-field");
+        const lead = leadOf(presentation);
+        lead.classList.add("sheet-name");
+        hoverable(lead, inline);
+        const cell = document.createElement("span");
+        cell.className = "sheet-value held-text";
+        writeNodes(cell, childrenOf(inline), ...itemsRange(inline));
+        field.append(lead, cell);
+        inspector.querySelector(":scope > .inspector-fields")!.prepend(field);
+      }
+      // An element with no properties at all has nothing to inspect, so it takes no room.
+      if (inspector.querySelector(":scope > .inspector-fields > *, :scope > .inspector-more") !== null) {
+        // What the element's type is for, in a quiet line over its fields, so it is found without
+        // a card; resting on it shows the whole doc.
+        const summary = docSummary(node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.doc);
+        if (summary !== undefined) {
+          const doc = document.createElement("span");
+          doc.className = "inspector-doc";
+          doc.textContent = summary;
+          hoverable(doc, at);
+          inspector.prepend(doc);
+        }
+        row.append(inspector);
+      }
+    }
+    if (!folded) {
+      for (const child of content) {
+        const held = marked(child, "span", "sheet-held");
+        const items = childrenOf(child);
+        if (items.some((item) => tree.nodes[item]!.role === "text") && onOneLine(startOf(tree.nodes[child]!), endOf(tree.nodes[child]!))) {
+          // A line of text reads as written, its embedded values in their braces.
+          held.classList.add("held-text");
+          writeNodes(held, items, startOf(tree.nodes[child]!), endOf(tree.nodes[child]!));
+        } else {
+          writeItems(held, items);
+        }
+        row.append(held);
+      }
+    }
+    for (const child of children) {
+      if (isNote(child)) {
+        const line = document.createElement("span");
+        line.className = "sheet-note";
+        writeNodes(line, [child], startOf(tree.nodes[child]!), endOf(tree.nodes[child]!));
+        row.append(line);
+      }
+    }
+    return row;
+  };
+
+  /**
+   * An element's inspector: a field to each property the element sets, and to its title property
+   * so a click on its row's value always has a field to open, in the order its visualizer lists
+   * them, then the rest in declaration order, then any it writes that its type does not declare,
+   * each its label beside its value. A last line reveals the properties it does not set, as empty
+   * fields in their places, and hides them again.
+   */
+  const writeInspector = (
+    at: number,
+    present: (name: string) => Presentation,
+    order: readonly string[],
+    title: string | undefined
+  ): HTMLElement => {
+    const node = tree.nodes[at]!;
+    const kindName = node.name ?? "";
+    const declared = (elementProperties(tree, node) ?? []).filter((property) => property.flags?.includes("content") !== true);
+    // A property written twice, as an error leaves it, reads its first in its place, and the rest
+    // after the element's properties.
+    const written = new Map<string, number>();
+    const repeated: number[] = [];
+    for (const child of childrenOf(at)) {
+      if (tree.nodes[child]!.role === "attribute" && !isContent(child)) {
+        const name = tree.nodes[child]!.name ?? "";
+        if (written.has(name)) {
+          repeated.push(child);
+        } else {
+          written.set(name, child);
+        }
+      }
+    }
+    const rank = (name: string): number => {
+      const found = order.indexOf(name);
+      return found < 0 ? order.length : found;
+    };
+    const names = declared
+      .map((property, position) => ({ name: property.name, position }))
+      .sort((a, b) => rank(a.name) - rank(b.name) || a.position - b.position)
+      .map(({ name }) => name);
+    for (const name of written.keys()) {
+      if (!names.includes(name)) {
+        names.push(name);
+      }
+    }
+    const inspector = document.createElement("span");
+    inspector.className = "inspector";
+    inspector.setAttribute("role", "group");
+    inspector.setAttribute("aria-label", `Properties of ${kindName}`);
+    const fields = document.createElement("span");
+    fields.className = "inspector-fields";
+    const all = layout.allProperties?.has(node.key) === true;
+    const unset = names.filter((name) => !written.has(name) && name !== title).length;
+    for (const name of names) {
+      const attribute = written.get(name);
+      if (attribute === undefined && name !== title && !all) {
+        continue;
+      }
+      const property = declared.find((candidate) => candidate.name === name);
+      fields.append(
+        attribute !== undefined
+          ? writtenField(attribute, present(name))
+          : unwrittenField(node.key, present(name), isBooleanType(tree, property?.type))
+      );
+    }
+    for (const attribute of repeated) {
+      fields.append(writtenField(attribute, present(tree.nodes[attribute]!.name ?? "")));
+    }
+    inspector.append(fields);
+    if (unset > 0) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.tabIndex = -1;
+      more.className = "inspector-more";
+      more.dataset["moreKey"] = node.key;
+      more.setAttribute("aria-expanded", String(all));
+      more.textContent = all ? "Hide unset" : `Show ${unset} unset`;
+      inspector.append(more);
+    }
+    return inspector;
+  };
+
   const writeSheet = (at: number, start: number, end: number): HTMLElement => {
     const node = tree.nodes[at]!;
     const plan = idPlans.get(at);
     const folded = layout.folded?.has(node.key) === true;
+    if (rowAt(at)) {
+      return writeRow(at, start);
+    }
     const sheet = marked(at, "span", folded ? "sheet folded" : "sheet");
     markFit(sheet, at);
     sheet.style.setProperty("--indent", String(start - (text.lastIndexOf("\n", start - 1) + 1)));
@@ -1005,6 +1723,28 @@ export function renderSource(
         values.length === 1 &&
         tree.nodes[values[0]!]!.role === "literal" &&
         (tree.nodes[values[0]!]!.value ?? "").startsWith('"')
+      );
+    });
+  };
+
+  /**
+   * The attribute the element's visualizer names as its title when its value is not a string but
+   * reads on one line, as `name={member.name}` does: a row names its element by it as written.
+   */
+  const computedTitleOf = (at: number): number | undefined => {
+    const node = tree.nodes[at]!;
+    const visualizer = node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.visualizer;
+    if (visualizer?.title === undefined) {
+      return undefined;
+    }
+    return childrenOf(at).find((child) => {
+      const value = soleValue(child);
+      return (
+        tree.nodes[child]!.name === visualizer.title &&
+        tree.nodes[child]!.role === "attribute" &&
+        value !== undefined &&
+        tree.nodes[value]!.role !== "element" &&
+        onOneLine(startOf(tree.nodes[value]!), endOf(tree.nodes[value]!))
       );
     });
   };
@@ -1253,6 +1993,45 @@ export function renderSource(
   }
   writeNodes(root, top.slice(next), from, text.length);
   markIndentation(document, root);
+  // Among rows, an `if` or a `for` holds children of the row it sits in, so every line of it, its own
+  // and those of the blocks inside it, starts where its first line does: the rows it holds read level
+  // with their siblings, framed by its lines.
+  for (const item of root.querySelectorAll<HTMLElement>(".row-element > .sheet-held > .sheet-item.as-written")) {
+    const block = item.querySelector<HTMLElement>(':scope > .n:is([data-role="condition"], [data-role="loop"])');
+    if (block === null) {
+      continue;
+    }
+    const lead = " ".repeat(Number(item.style.getPropertyValue("--column")) || 0);
+    const walker = document.createTreeWalker(block, 4 /* NodeFilter.SHOW_TEXT */);
+    // A line's indentation may run over several text runs; each run at a line's start loses it.
+    let lineStart = false;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const owner = node.parentElement?.closest(".n");
+      if (owner?.matches('[data-role="condition"], [data-role="loop"]') !== true) {
+        lineStart = lineStart && node.textContent!.trim() === "";
+        continue;
+      }
+      let written = node.textContent!;
+      if (lineStart) {
+        written = written.replace(/^[ \t]*/, "");
+      }
+      written = written.replace(/\n[ \t]*/g, `\n${lead}`);
+      lineStart = /\n[ \t]*$/.test(written) || (lineStart && written === "");
+      if (written !== node.textContent) {
+        node.textContent = written;
+      }
+    }
+  }
+  // The braces of an `if` or a `for` read quieter than the code they hold.
+  for (const token of root.querySelectorAll<HTMLElement>(':is(.n[data-role="condition"], .n[data-role="loop"]) > .t')) {
+    if (/^\s*[{}]\s*$/.test(token.textContent ?? "")) {
+      token.classList.add("block-brace");
+    }
+  }
+  if (root.querySelector(".row-element") !== null) {
+    root.setAttribute("role", "tree");
+    root.setAttribute("aria-label", "Composition");
+  }
   return root;
 }
 
@@ -1527,4 +2306,45 @@ export function decodeString(written: string): string | undefined {
     return undefined;
   }
   return inner.replace(/\\([\\"])/g, "$1");
+}
+
+/**
+ * A hex color's parts: its color without its alpha, in six digits, its alpha digits as written, and
+ * its opacity in whole percent. `#2563eb80` is `#2563eb`, `80` and 50; `#abcd` is `#aabbcc`, `d`
+ * and 87.
+ */
+export function hexParts(hex: string): { readonly rgb: string; readonly alpha: string; readonly percent: number } {
+  const digits = hex.length - 1;
+  const alpha = digits === 4 ? hex.slice(4) : digits === 8 ? hex.slice(7) : "";
+  const written = alpha === "" ? hex : hex.slice(0, hex.length - alpha.length);
+  const rgb = written.length === 4 ? "#" + [...written.slice(1)].map((digit) => digit + digit).join("") : written;
+  const value = alpha === "" ? 255 : parseInt(alpha.length === 1 ? alpha + alpha : alpha, 16);
+  return { rgb, alpha, percent: Math.round((value / 255) * 100) };
+}
+
+/**
+ * The first paragraph of a doc comment as plain words: its Markdown's links as their text, and its
+ * code and emphasis marks dropped; nothing for a doc with no words.
+ */
+export function docSummary(doc: string | undefined): string | undefined {
+  const first = (doc ?? "").trim().split(/\n\s*\n/)[0] ?? "";
+  const words = first
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words === "" ? undefined : words;
+}
+
+/**
+ * The index of the top-level `let` node `reference` resolves to, by the declaration the tree resolved
+ * it to rather than by its name, so a parameter or a local that shadows a `let` finds nothing; -1
+ * when there is none.
+ */
+export function topLevelLet(tree: SourceTree, reference: SourceNode): number {
+  const target = reference.declaration;
+  if (target === undefined) {
+    return -1;
+  }
+  return tree.nodes.findIndex((node) => node.role === "declaration" && node.parent === undefined && node.declaration === target);
 }

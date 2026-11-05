@@ -848,3 +848,48 @@ fn element_function_visualizers_only_describe_invocation_icons() {
         &["title"],
     );
 }
+
+#[test]
+fn labels_and_an_element_icon() {
+    assert_clean(
+        "type Box = { x:float64 y:float64 width:float64 fill?:string }\nvisualizer Box = <ElementVisualizer icon=\"square\"><PropertyVisualizer property=x label=\"X\" /><PropertyVisualizer property=width label=\"Width\" /><PropertyVisualizer property=fill label=\"Fill\" /></ElementVisualizer>",
+    );
+    assert_error(
+        "type Box = { width:float64 }\nvisualizer Box = <ElementVisualizer><PropertyVisualizer property=height label=\"Height\" /></ElementVisualizer>",
+        None,
+        &["height"],
+    );
+}
+
+#[test]
+fn an_element_function_has_a_props_record() {
+    assert_clean(
+        "let <Badge label:string tone:string = \"neutral\" /> = <Label text={label} />\nlet k: Badge.Props.Property = {Badge.Props.Property.tone}\nlet p = <Badge.Props label=\"a\" tone=\"b\" />",
+    );
+    assert_error(
+        "let double(x:int) = x * 2\nlet p: double.Props = <double.Props x=1 />",
+        None,
+        &[],
+    );
+}
+
+#[test]
+fn an_element_functions_visualizer_names_its_properties() {
+    assert_clean(
+        "let <Badge label:string tone:string = \"neutral\" /> = <Label text={label} />\nvisualizer Badge = <FunctionVisualizer icon=\"badge\"><PropertyVisualizer property=tone label=\"Tone\" /></FunctionVisualizer>",
+    );
+    assert_error(
+        "let <Badge label:string /> = <Label text={label} />\nvisualizer Badge = <FunctionVisualizer><PropertyVisualizer property=tone /></FunctionVisualizer>",
+        None,
+        &["tone"],
+    );
+}
+
+#[test]
+fn an_element_functions_property_hints_are_checked() {
+    let warnings = warnings_of(
+        "let <Badge label:string /> = <Label text={label} />\nvisualizer Badge = <FunctionVisualizer><PropertyVisualizer property=label min=0 /></FunctionVisualizer>",
+        "editor-hint-mismatch",
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+}

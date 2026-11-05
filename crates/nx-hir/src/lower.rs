@@ -171,7 +171,7 @@ pub struct LoweringContext {
     update_records: FxHashMap<Name, RecordDef>,
     /// Derived state records keyed by the name of their component.
     state_records: FxHashMap<Name, RecordDef>,
-    /// Derived props records keyed by the name of their component.
+    /// Derived props records keyed by the name of their component or element-style function.
     props_records: FxHashMap<Name, RecordDef>,
     /// Update records to add once every declared item has been added, in declaration order.
     pending_update_items: Vec<RecordDef>,
@@ -1429,6 +1429,36 @@ impl LoweringContext {
                 finalized: false,
             },
         );
+    }
+
+    /// Predeclares the derived `<F>.Props` record of every element-style function
+    /// (`let <F … />`), so a visualizer can name the function's properties through
+    /// `F.Props.Property` as it names a component's props.
+    fn predeclare_function_props_records(&mut self, root: SyntaxNode) {
+        for child in root.children() {
+            if child.kind() != SyntaxKind::FUNCTION_DEFINITION {
+                continue;
+            }
+            let Some(name_node) = child.child_by_field("name") else {
+                continue;
+            };
+            if name_node.kind() == SyntaxKind::IDENTIFIER {
+                continue;
+            }
+            let name = Name::new(name_node.text());
+            if self.props_records.contains_key(&name) {
+                continue;
+            }
+            let fields = self.lower_field_signatures(child);
+            self.predeclare_props_record(
+                &name,
+                Self::lower_visibility(child),
+                None,
+                &[],
+                &fields,
+                child.span(),
+            );
+        }
     }
 
     fn predeclare_components(&mut self, root: SyntaxNode) {
@@ -3279,6 +3309,7 @@ impl LoweringContext {
     pub fn lower_module(&mut self, root: SyntaxNode) {
         self.predeclare_record_update_records(root);
         self.predeclare_components(root);
+        self.predeclare_function_props_records(root);
 
         // Process all top-level items
         for child in root.children() {
@@ -3301,7 +3332,9 @@ impl LoweringContext {
                         continue;
                     }
                     let func = self.lower_function(child);
+                    let func_name = func.name.clone();
                     self.module.add_item(Item::Function(func));
+                    self.add_props_items(&func_name);
                 }
                 SyntaxKind::VALUE_DEFINITION => {
                     let value = self.lower_value_definition(child);
@@ -3723,6 +3756,20 @@ type Mode = light | dark"#;
         assert_eq!(value.visibility, Visibility::Export);
     }
 
+    /// The items the source declares, leaving out the derived records and unions lowering adds,
+    /// such as an element function's `F.Props`.
+    fn authored_item_count(module: &LoweredModule) -> usize {
+        module
+            .items()
+            .iter()
+            .filter(|item| match item {
+                Item::Record(record) => !record.is_derived(),
+                Item::Union(union_def) => union_def.property_target().is_none(),
+                _ => true,
+            })
+            .count()
+    }
+
     #[test]
     fn test_lower_simple_function() {
         // Parse a simple function definition
@@ -3737,7 +3784,7 @@ type Mode = light | dark"#;
         let module = lower(root, SourceId::new(0));
 
         // Should have one function item
-        assert_eq!(module.items().len(), 1);
+        assert_eq!(authored_item_count(&module), 1);
 
         match &module.items()[0] {
             Item::Function(func) => {
@@ -3758,7 +3805,7 @@ type Mode = light | dark"#;
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        assert_eq!(module.items().len(), 1);
+        assert_eq!(authored_item_count(&module), 1);
 
         match &module.items()[0] {
             Item::Function(func) => {
@@ -3811,7 +3858,7 @@ type Mode = light | dark"#;
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        assert_eq!(module.items().len(), 1);
+        assert_eq!(authored_item_count(&module), 1);
 
         match &module.items()[0] {
             Item::Function(func) => {
@@ -5581,7 +5628,7 @@ type Mode = light | dark"#;
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        assert_eq!(module.items().len(), 1);
+        assert_eq!(authored_item_count(&module), 1);
         let func = match &module.items()[0] {
             Item::Function(f) => f,
             _ => panic!("expected function item"),
@@ -5618,7 +5665,7 @@ type Mode = light | dark"#;
         let module = lower(root, SourceId::new(0));
 
         // Should have one function item
-        assert_eq!(module.items().len(), 1);
+        assert_eq!(authored_item_count(&module), 1);
 
         match &module.items()[0] {
             Item::Function(func) => {
@@ -5681,7 +5728,7 @@ type Mode = light | dark"#;
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        assert_eq!(module.items().len(), 1);
+        assert_eq!(authored_item_count(&module), 1);
 
         match &module.items()[0] {
             Item::Function(func) => {

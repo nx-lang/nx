@@ -80,99 +80,6 @@ line's indentation as indentation, so a host can set prose in a proportional fon
 - **WHEN** the host gives a range over `Task` with a light color, a dark color and bold
 - **THEN** the reading SHALL show `Task` in those colors, bold, and its text SHALL not change
 
-### Requirement: An element reads as a group where its properties do not fit on a line
-An element SHALL read as a group when it holds an element, or when it shows more than one property and
-they do not fit after its name on one line in the pane, however the document breaks its lines. The
-element SHALL measure which elements those are as it draws, and again once a change in the pane's
-width settles or its fonts load, keeping the node at the top of what scrolls it where it was, so a
-divider dragged across it does not draw it on every step; a reading drawn hidden SHALL be measured
-once it is shown. A group SHALL show a header holding its icon, its name and its id;
-when its properties fit on that line, they SHALL follow on it as `name=value`, the id after them when
-its visualizer puts it at the end, and when they do not, each property SHALL have a row, with the
-property's name in one column and its value in another. A property whose value needs lines of its
-own, such as a list, an element that holds elements, or an element too long for its row, SHALL have a
-row either way. Under them SHALL
-come what the element holds, indented. The group SHALL show no angle brackets and no closing tag. A
-bracket SHALL run down the group from under its name and turn right at its end. A value of several
-lines SHALL read under its name rather than in the value column, and in a pane narrower than about 64
-characters every value SHALL read under its name. A property's element value SHALL read in its row or
-on its line as a line when it fits there, and otherwise, or when it holds elements, under the
-property's name as a group, measured where the group holding it shows it, on its header or its row. What the
-element holds SHALL read an item to a line: an element in its own form, and anything else, such as an
-`if` or a `for` block, or an element written as its tags because a group cannot show it, as written,
-its later lines keeping their indentation relative to its own start, set in once. A blank line the
-document leaves between two held items SHALL become a little room, and so SHALL the space between two
-siblings where either is a group. A line too long for the pane SHALL wrap a step in from where its
-unit starts in a row's value, a line that shows one property, and an item a group holds as written;
-code read as written elsewhere SHALL keep its lines.
-
-#### Scenario: Attributes a line each
-- **WHEN** a document holds `<Step` with `id="welcome"`, `title="Welcome"` and `note="First"` each on
-  a line of its own, the visualizer of `Step` names `id` as its id, and the pane is too narrow for
-  `Step welcome title=Welcome note=First` on one line
-- **THEN** the reading SHALL show a group headed `Step welcome` with a row `title` and `Welcome` and a
-  row `note` and `First`, and no `<`, `/>` or quotes
-
-#### Scenario: Content under a header
-- **WHEN** a document holds `<Row gap="wide">` on one line, two `<Item />` elements on the lines after
-  it with a blank line between them, and `</Row>`
-- **THEN** the reading SHALL show the header `Row  gap=wide`, the two items under it with a little
-  room between them, and no closing tag
-
-#### Scenario: Several attributes on a wrapped line
-- **WHEN** a document holds `<Shape kind="circle" width=52` on one line, `color="#6652AD" stroke=1>`
-  on the next, an `<Item name="a" />` and `</Shape>`, in a wide pane
-- **THEN** the reading SHALL show the header `Shape  kind=circle  width=52  color=#6652AD  stroke=1`,
-  no rows, the item under it, and no closing tag
-
-#### Scenario: A pane narrowed past a header
-- **WHEN** the pane showing that `Shape` narrows until its header no longer fits on one line
-- **THEN** the reading SHALL show the header `Shape`, a row each for `kind`, `width`, `color` and
-  `stroke`, and the item still as the line `Item  name=a`
-
-#### Scenario: An element value too long for its row
-- **WHEN** a `Card` too long for the pane has `padding=<Thickness left=1 top=2 />` and
-  `style=<Style color="red" font="Inter" size=12 />`, and the `Style` line does not fit in its row
-- **THEN** the reading SHALL show the row `padding` with the line `<Thickness  left=1  top=2/>`, and
-  under the row `style` a group headed `Style` with a row each for `color`, `font` and `size`
-
-#### Scenario: An item written as its tags over several lines
-- **WHEN** a group holds an element with a comment inside an attribute, written over two lines with
-  its second line indented two spaces past its `<`
-- **THEN** the reading SHALL show the element as written, its second line two spaces in from its `<`
-
-### Requirement: An element reads as a line where its properties fit
-An element SHALL read as a line, however the document breaks its lines, when it holds no element and
-no more than a line of text and its properties fit after its name on one line in the pane, and so
-SHALL one that shows one property at most, which a row would not shorten, wrapping where it must. A
-line SHALL show its icon and name, its id where its visualizer puts it, the value of the attribute
-its visualizer names as its title alone, each other attribute as `name=value`, and then what it
-holds as written, with no tags of its own. When the element shares its line with other text, such as
-a property's name in a group or a `let` before it, the line SHALL keep the `<` before its name and a
-`/>` after it, so its extent stays clear; alone on its line, it SHALL show neither. An element alone
-on its line whose type is exactly the type its place declares, through any list, SHALL leave out its
-name when it has an icon, which then names it.
-
-#### Scenario: A list of choices
-- **WHEN** a property typed `Choice+` holds `<Choice value="yes-one" label="Yes, one" />` on a line
-  of its own, and the visualizer of `Choice` names `label` as its title, `value` as its id at the end and
-  an icon
-- **THEN** the reading SHALL show the icon, `Yes, one` and the id `yes-one`, without the name
-  `Choice`
-
-#### Scenario: An element sharing its line
-- **WHEN** a group's row `status` holds `<OrderStatus.shipped carrier="Royal Mail" />`
-- **THEN** the row's value SHALL read `<OrderStatus.shipped  carrier=Royal Mail />`
-
-#### Scenario: Content on one line
-- **WHEN** a document holds `<Label tone="quiet">Hello {who}</Label>` alone on its line
-- **THEN** the reading SHALL show `Label  tone=quiet  Hello {who}` and no closing tag
-
-#### Scenario: Attributes on lines of their own that fit on one
-- **WHEN** a document holds `<Step` with `id="welcome"` and `title="Welcome"` each on a line of its
-  own, the visualizer of `Step` names `id` as its id and `title` as its title, and the pane is wide
-- **THEN** the reading SHALL show the line `Step welcome Welcome`, with no `<`, `/>` or quotes
-
 ### Requirement: Values lose their quotes and keep a style
 In a group or a line, a string SHALL read without its quotes, and a boolean SHALL read as a check for
 `true` and a cross for `false`. A string that a property, a field, a parameter or a declaration typed
@@ -311,28 +218,40 @@ unit is a run, which is not a node. `nx-fold` SHALL carry the selection that res
 ### Requirement: The reading shows hover cards
 The element SHALL show a card for what the pointer rests on, built from the source tree alone, in
 the form the editor's hover uses: a signature in NX, set in the reading's code face, then the doc
-comment, rendered from Markdown, in its prose face. It SHALL show:
+comment, rendered from Markdown, in its prose face. An element's card SHALL instead be titled by
+the element's name in the prose face, bold, after a quiet chip naming its declaration's kind
+(`component`, `function`, `type`, `action` or `case`) and followed quietly by the base it extends,
+with no other keyword or element syntax. It SHALL show:
 
-- over an element's name or icon: its declaration's signature (its kind, its name and the base it
-  extends) and the declaration's doc;
-- over a property's name, on a group's row or on a line: `(property) name: Type`, with `?` for an
+- over an element's icon, or its name where it has no icon, and over the line of doc its
+  inspector opens with: its name and the base its declaration extends, as a title, and the
+  declaration's doc; over a row's name beside its icon, and over the value that names a row,
+  nothing, so that resting there to drag or select it opens nothing;
+- over a field's label, or a property's name where the reading writes one: `(property) name: Type`, with `?` for an
   optional property and ` = default` for one with a default, and the property's doc;
-- over a value the reading shows without its property's name, as an id or a title: that property's
-  card;
+- over a value the reading shows without its property's name in a field, as an element value's
+  title: that property's card;
 - over a union case written as a value, bare or qualified: `(case) Union.case` and the case's doc;
 - over a reference or a call written as a value: its name and type, and the doc of the declaration
   it refers to when that has one;
 - nothing over a literal, a comment, punctuation, or anything for which the tree gives neither a
   type nor a doc.
 
-The card SHALL open after the pointer has rested for about half a second, SHALL stay open while the
+The first card SHALL open after the pointer has rested for about a second; while a card is open, or
+for about a second and a half after one closed, the next SHALL open at once, as a design tool's
+tooltips do. No card SHALL open while a button is held, so none opens during a drag, nor for what
+the pointer was over when it pressed, until it moves onto something else, nor for what the reading
+scrolls under a still pointer, until the pointer moves. A card SHALL stay open while the
 pointer moves from what it describes onto the card, so its text can be selected and its links
-followed, and SHALL close when the pointer leaves both, when the reading scrolls, when the reader
+followed, and SHALL close when the pointer leaves both, on a press, when the reading scrolls, when the reader
 presses Escape, or when the text or the tree changes. It SHALL NOT change the selection, the folds
 or the scroll position. With the reading focused, the `i` key SHALL show the card for the selected
 unit (the declaration of an element, the property of a row) and a screen reader SHALL hear its text.
 The card SHALL stay inside the element's box, below what it describes or above it where there is no
-room, and SHALL follow the page's light or dark scheme.
+room, never over it. It SHALL start a few pixels past the right end of what it describes, or past
+the pointer when that is wide, such as a doc line, so the labels below stay readable while the
+reader scans, and SHALL move left only as far as the box needs. It SHALL follow the page's light or dark scheme. What a card says SHALL NOT
+also show as the browser's tooltip.
 
 A doc's Markdown SHALL be rendered by the element's `markdown` function when the host sets one, and
 otherwise by a built-in renderer that SHALL create text and elements only, never parse HTML: it
@@ -341,9 +260,9 @@ target is `http:` or `https:`, opening outside the page, and anything else, raw 
 text.
 
 #### Scenario: An element's declaration
-- **WHEN** the pointer rests on the name of `<Shape Type=Circle />`, whose component `Shape` extends
+- **WHEN** the pointer rests on the icon of `<Shape Type=Circle />`, whose component `Shape` extends
   `Node` and is documented "A filled shape."
-- **THEN** a card SHALL open showing `component Shape extends Node` and `A filled shape.`
+- **THEN** a card SHALL open titled `Shape`, after a `component` chip and before `extends Node`, and showing `A filled shape.`
 
 #### Scenario: A property's type, default and doc
 - **WHEN** the pointer rests on `Type` in that element, and `Shape` declares
@@ -377,6 +296,12 @@ text.
 #### Scenario: A host's Markdown
 - **WHEN** the host sets `markdown` to a function and the pointer rests on a documented element
 - **THEN** the card SHALL show what that function returns for the doc
+
+#### Scenario: Cards wait, then follow the pointer, and keep out of a press
+- **WHEN** the pointer rests on the `Type` label for half a second, then presses there
+- **THEN** no card SHALL open, and none SHALL open for `Type` while the pointer stays on it
+- **WHEN** the pointer moves onto `Circle` and rests there for a second, then onto a label
+- **THEN** `Circle`'s card SHALL open, and the label's SHALL open at once after it
 
 ### Requirement: A host can carry a selection and a place to its editor
 The package SHALL export `keyAtRange(tree, text, start, end?)`, the key of the smallest node holding
@@ -412,12 +337,19 @@ an editor fits it:
 
 - a string, a `uitext` string or an id: a text field holding the value without quotes or escapes;
 - a number, typed `int`, `float32` or `float64` or by an alias of one, or a numeric literal where no
-  type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and whose
-  steppers step it on a click and change it as they are dragged up or down;
+  type is declared: a number field whose up and down arrows step by 1, by 10 with Shift, and that
+  changes as its label is dragged left or right;
 - a boolean: a toggle, with no field;
 - a bare case of a union: a popover listing the union's cases that hold no properties, each with its
   doc, the current one marked, filtered as the reader types;
 - a string a visualizer formats as `color`: a popover with a hex field and the browser's color picker;
+- a color literal in an inspector: its parts in its value's place, as a design tool shows a color: its
+  swatch, its six-digit hex and its opacity in whole percent. A click on the swatch SHALL open the
+  browser's color picker, which keeps the opacity; a click on the hex SHALL edit it in place, keeping the
+  opacity; a click on the opacity SHALL edit its percent in place, keeping the hex; and dragging the `%`
+  sideways SHALL scrub the opacity by 1 percent for each 3 pixels, by 10 with Shift, between 0 and 100,
+  committed once on release. A part left as it opened SHALL write nothing. Elsewhere a color literal
+  SHALL read as written and open its popover;
 - a run of text: a text field that takes one line.
 
 The element SHALL find a value's type through its element's declaration and the aliases it names, in
@@ -531,39 +463,6 @@ SHALL fire `nx-open` with the node's key, role and range. The element SHALL fire
 - **WHEN** the host has set `editable` and the reader double-clicks the value of `count={total + 1}`
 - **THEN** the element SHALL fire `nx-open` with the key of that value
 
-### Requirement: A selected element offers the properties it does not write
-When the host has set `editable` and an element is selected, the element SHALL end it with a quiet
-row reading `Show N unset properties` (`property` for one), and `Hide unset properties` while open,
-N being how many of the element's declared properties it does not write,
-content properties left out; for an element of a union's case, its declared properties are the
-union's shared ones and the case's, and a property written in any branch of a property-list
-condition or match counts as written; an element that writes all of them SHALL show no such row, and only the
-selected element SHALL show one. Opening the row, by a click or Enter, SHALL draw each unwritten
-property under it as a dimmed row, in the order its resolved visualizer lists properties, else in
-declaration order: its name, and its default read as the reading reads values, followed by a quiet
-`default`, or, for an optional property, its type, quieter, in a place for the value wide enough to
-click and type in, which a field opened there SHALL keep, its type shown until something is typed.
-The rows SHALL be drawn under the element, where it starts on its line, inside its highlight. A dimmed row's name SHALL show its property's hover
-card. With more than 12 such rows a filter field SHALL lead them, narrowing them as the reader types.
-A dimmed row whose type has an editor SHALL edit as a written value does, opening on its default; a
-commit SHALL fire `nx-edit` with the element's key and `addProperty`, the property's name and the
-value, and the row SHALL then read as written, where it stands, until the host's newer tree places
-it. A dimmed row whose type has no editor, such as a record or an element, SHALL fire `nx-open` with
-the element's key on Enter or a double-click. Selecting another unit, or Escape on the open list,
-SHALL close it.
-
-#### Scenario: Seeing what else a drink can set
-- **WHEN** the reader selects `<Drink code="LAT" name="Latte" size=small />`, whose type declares
-  `code`, `name`, `note?`, `size`, `iced` (default `false`), `shots` (default `1`) and `color?`
-- **THEN** the element SHALL end with `Show 4 unset properties`, and opening it SHALL show the rows
-  `note` reading `string`, quieter, `iced` reading `✗ default`, `shots` reading `1 default` and
-  `color` reading its type
-
-#### Scenario: Setting one
-- **WHEN** the reader clicks the cross of the dimmed row `iced`
-- **THEN** the element SHALL fire `nx-edit` with the drink's key and `addProperty` for `iced` with the
-  boolean `true`
-
 ### Requirement: A selected row has a menu
 When the host has set `editable`, a written row SHALL show a quiet `⋯` just past its value, or past the
 value's tools when they show, while the pointer is over it and while it is selected. Opening it SHALL list Reset to default for a property with a
@@ -587,16 +486,15 @@ is selected its `⋯` SHALL show right after it, taking room in the line, and De
 - **THEN** the menu SHALL list Remove and Show in Source, and Remove SHALL fire `nx-edit` removing
   that attribute
 
-#### Scenario: A selected property shows its tools
-- **WHEN** the reader clicks the name of `size=16` on a line
-- **THEN** the steppers SHALL show past `16`, no field SHALL open, and a click on the up stepper
-  SHALL make it `17`
+#### Scenario: Clicking a label selects
+- **WHEN** the reader clicks the label of `size=16` without dragging
+- **THEN** the property SHALL be selected and its field SHALL take focus, and Up SHALL make it `17`
 
 ### Requirement: Editor hints choose and shape a value's editor
 The element SHALL edit a value as its property's resolved editor hints, from the tree's visualizer
 values, say:
 
-- a number's field, arrows, steppers and drag SHALL stay within `min` and `max` and step by `step`,
+- a number's field, arrows and scrubbing SHALL stay within `min` and `max` and step by `step`,
   Shift by ten steps, and a typed number outside them SHALL stay in the field with a note saying the
   bound, such as `At most 64`, and SHALL NOT be committed; `editor=field` asks for the number field,
   which every number has;
@@ -613,8 +511,7 @@ each choice reading its label, and its value after it, quieter, in a second colu
 label reads its value alone, in one column when none has a label. When the property has a default, a
 row of its own above the choices, set off by a rule, SHALL read `Default` and the default. The choice
 equal to the current value SHALL be marked. While the field is open, a chevron past it SHALL show
-that the list is there, and so SHALL one past the value while its property is selected, as the
-steppers below do; a click on it, or Alt+Down, SHALL open the list (a
+that the list is there, and so SHALL one past the value while its property is selected; a click on it, or Alt+Down, SHALL open the list (a
 click on the selected property's chevron opening the field with it), and so SHALL typing, the list
 then holding the choices whose label or value holds what was typed. While the list is closed, Up and
 Down SHALL step a number; while it is open, they SHALL move through it, from the current value's row
@@ -625,22 +522,8 @@ field's note. Choosing the default's row SHALL leave the attribute out, as the r
 default does, or, on a dimmed row, add nothing. The field SHALL stay typeable: the choices suggest
 and never restrict, and any entry the field takes SHALL commit.
 
-A number SHALL show steppers, an up and a down button drawn over the space just past the value so
-that nothing moves, while its field is open and while its property, or the value itself, is
-selected, when the host has set `editable`; the pointer over a value SHALL show no tools. On a one-line element, or a group's header, where more of the
-line follows the value, its closing `/>` included, the steppers and the chevron SHALL NOT cover it:
-they SHALL take room in the line, moving what follows along, as a field does when it grows, and
-SHALL give it back when they go. So SHALL an earlier item of a braced list, and an unset property's
-value, whose quiet `default` moves aside. Where taking room would wrap a line that only just fits,
-the tools SHALL cover the gap instead, so nothing below moves. A selected property, as a row or on
-a line, SHALL show its value's tools without opening its editor, wherever the pointer is. A click SHALL step the number once by `step`, or by one, and
-Shift+click by ten steps, within `min` and `max`: into the field while it is open, else applied at once as a live edit and
-committed once the reader pauses, so a run of clicks is one commit. Pressing a stepper and dragging
-up or down SHALL change the number by a step for every few pixels and show it in place, each step
-going live: on release, into the field while it is open, else committed once. The steppers' tooltip SHALL name the arrow
-keys, Shift and dragging. A property's name SHALL NOT drag: a click on it selects the property. A
-case's chevron SHALL show past the value as the choices chevron does, under the same rules for
-selection and for room on a line, and a click on it SHALL open the case's popover, as a click on
+A
+case's chevron SHALL show inside its field, as the choices chevron does, and a click on it SHALL open the case's popover, as a click on
 the value does, or close it when open.
 
 In any string field, Shift+Enter SHALL make a line break. A string literal written over several lines
@@ -661,33 +544,15 @@ SHALL still fire `nx-open`.
 - **WHEN** the reader types `17` in that field and presses Enter
 - **THEN** the element SHALL fire `nx-edit` setting the number `17`
 
-#### Scenario: A stepper
-- **WHEN** the reader selects `padding=8` and clicks the up stepper past its value, and then
-  Shift-clicks it
+#### Scenario: Stepping with the keyboard
+- **WHEN** the reader focuses the field of `padding=8` and presses Up, and then Shift+Up
 - **THEN** the element SHALL fire `nx-edit` setting the number `9`, and then the number `19`
 
-#### Scenario: A stepper dragged
-- **WHEN** the reader presses the up stepper of `gap=4` on its selected row, drags up, and lets go
-  at `14`
-- **THEN** the number SHALL read `14` in place while dragging, and the element SHALL fire `nx-edit`
-  setting the number `14` once, on release
-
-#### Scenario: Room on a line
-- **WHEN** the reader selects `<Banner title="Fresh" titleSize=20 align=start badge="New" />`, on one
-  line, with `titleSize` and `badge` hinted with choices, and selects `titleSize`, then `badge`
-- **THEN** the steppers and chevron past `titleSize` SHALL sit in the line, before `align`, and the
-  chevron past `badge` SHALL sit before the closing `/>`, covering neither
-
 #### Scenario: A case's chevron
-- **WHEN** the reader selects `size=large` in `<Drink code="SPC" size=large />`, on one line, and
-  clicks the chevron past it
-- **THEN** the chevron SHALL sit before the closing `/>`, covering nothing, SHALL stay shown, and the
-  popover of `Size`'s cases SHALL open
-
-#### Scenario: Resting before making room
-- **WHEN** the reader, with nothing selected, moves the pointer across `titleSize` on that line and
-  rests on it
-- **THEN** nothing in the line SHALL move and no steppers SHALL show
+- **WHEN** the reader opens the inspector of `<Drink code="SPC" size=large />`, selects the field of
+  `size=large` and clicks the chevron past its value
+- **THEN** the chevron SHALL sit inside the field, covering nothing, SHALL stay shown, and the popover
+  of `Size`'s cases SHALL open
 
 #### Scenario: A refused choice
 - **WHEN** the reader opens a number hinted `max=10` with the choices `5` and `99`, and chooses `99`
@@ -708,8 +573,9 @@ When the host has set `editable`, the element SHALL let the reader move an item 
 element that is an item of a sequence or of element content, not an item of a condition's branch or a loop's body, in a list of two or more items that holds no text. Where the reading draws such a list
 an item to a line, the item's handle SHALL be its icon, with the element's name beside it where the
 reading shows one, or its name alone where the host draws no icons; the element SHALL add no mark of
-its own for it. Over the handle the pointer SHALL show a grab cursor, and the hover card the icon or
-name shows SHALL end with a quiet `Drag to reorder`. A click on the handle SHALL select the item, as
+its own for it. Over the handle the pointer SHALL keep its usual cursor, showing a grabbing hand only
+while a drag is under way, and the hover card the icon or name shows SHALL end with a quiet `Drag to
+reorder`. A click on the handle SHALL select the item, as
 today; pressing it and moving the pointer 4 pixels or more SHALL instead start a drag and close any
 hover card. While dragging, the item SHALL be drawn muted where it stands, a copy of one line holding
 its icon and its title, or its name, SHALL follow the pointer, and a line in the selection colour SHALL
@@ -736,9 +602,9 @@ requirement says.
 - **THEN** the step SHALL be selected and no drag SHALL start
 
 #### Scenario: Nothing to drag
-- **WHEN** the pointer is over the icon of the only choice of a question, or of an element inside an
+- **WHEN** the reader presses and moves the icon of the only choice of a question, or of an element inside an
   `if` block
-- **THEN** the cursor SHALL not show a grab hand, and pressing and moving SHALL start no drag
+- **THEN** no drag SHALL start
 
 ### Requirement: An item of a list moves up and down
 With the reading focused, no editor open and an item that moves selected, Alt+Up and Alt+Down SHALL
@@ -803,24 +669,29 @@ they were.
 ### Requirement: Edits go live while the reader changes a value
 While the host has set `editable`, the element SHALL fire `nx-edit` with `live: true` for each value
 the reader gives a value before committing it, so the host can show it at once: an open field's entry
-once typing pauses for 300 ms, at once when a stepper, an arrow key or a drag changes a number, and at
+once typing pauses for 300 ms, at once when an arrow key or scrubbing changes a number, and at
 once when the color picker or a color's hex field changes a color. A live edit SHALL fire only for an
 entry the editor can take and that differs from the last value fired, and an entry the editor cannot
 take SHALL fire nothing until it can. A live edit SHALL carry the same key and edit as the commit of
 that value would, and the reader's next value of the same value SHALL replace it. The value's commit
 SHALL end its live edits with `nx-edit` without `live`: on commit, with the value committed, even when
 the host's tree already reads it; on cancel, as Escape or leaving a field holding an entry it cannot
-take does, with the value the editor opened on, when a live edit has fired. A click on a stepper with
-the field closed SHALL fire a live edit and commit 500 ms after the last such click on that value, or
-at once when the reader edits, selects or opens anything else. Closing a color's popover by a press
+take does, with the value the editor opened on, when a live edit has fired. Scrubbing SHALL fire a live edit for each new value and commit once on release. Closing a color's popover by a press
 elsewhere SHALL commit the entry it holds when the entry can be taken and differs from the value, as
 leaving a field does, and Escape SHALL cancel it. An editor SHALL stay open, with its entry and caret,
 across the host's newer tree.
 
-#### Scenario: Steppers in an open field
-- **WHEN** the reader opens the field of `size=16` and clicks its up stepper twice
+#### Scenario: Arrow keys in an open field
+- **WHEN** the reader opens the field of `size=16` and presses Up twice
 - **THEN** the element SHALL fire `nx-edit` with `live: true` setting `17`, then `18`, and on Enter
   `nx-edit` without `live` setting `18`
+
+#### Scenario: Editing a color in its parts
+- **WHEN** an inspector shows `tint=#33669980` and the reader clicks its opacity, types `25` and
+  presses Enter
+- **THEN** the value reads `#336699` and `25%`, and the element fires one edit setting `#33669940`
+- **WHEN** the reader then drags the `%` 30 pixels to the right and releases
+- **THEN** the element fires a live edit for each new opacity and one edit setting `#33669999`
 
 #### Scenario: Dragging in the color picker
 - **WHEN** the reader opens a color's popover and the picker reports `#112233`, then `#445566`, then
@@ -832,8 +703,8 @@ across the host's newer tree.
 - **WHEN** the reader types `Mocha` into a string field and pauses
 - **THEN** the element SHALL fire one live edit setting `Mocha`, and none for the letters before it
 
-#### Scenario: Clicks with the field closed
-- **WHEN** the reader clicks the up stepper of `size=16` three times, a moment apart, and waits
+#### Scenario: Scrubbing
+- **WHEN** the reader drags the label of `size=16` nine pixels to the right and releases
 - **THEN** the element SHALL fire live edits setting `17`, `18` and `19`, then one `nx-edit` without
   `live` setting `19`
 
@@ -882,12 +753,12 @@ and SHALL edit a value as a number when its declared type is a constrained numer
 spelling now carries a `where` clause, as it does for the base type. These rules add to "Editor hints
 choose and shape a value's editor" for a property with `bounds`, and, but for the step below, change
 nothing for one without:
-the field, arrows, steppers and drag SHALL stay within the bounds, and a typed number outside them
+the field, arrows and scrubbing SHALL stay within the bounds, and a typed number outside them
 SHALL stay in the field with a note and SHALL NOT be committed. The note SHALL read `At least N` or
 `At most N` for an inclusive end and `Above N` or `Below N` for an exclusive end. When the property
 also has `min` or `max` hints, the editor SHALL keep within the intersection of the hints and the
 bounds, so a hint can narrow the range the editor offers but not widen it; a hint range that does not
-overlap the bounds SHALL be ignored and the bounds used alone. Steppers and arrows SHALL
+overlap the bounds SHALL be ignored and the bounds used alone. Arrows and scrubbing SHALL
 NOT step onto or past an exclusive end: a step that would SHALL leave the value where it is. Bounds
 arrive with an integer's ends already inclusive. A choice outside the bounds SHALL be refused as a choice outside the hints is. When a
 floating-point property has no `step` hint and the range the editor offers (the intersection, the
@@ -895,7 +766,7 @@ bounds alone, or with no bounds the hints alone) has both ends, its step SHALL b
 that range's span, so a `0.0..=1.0` number steps by `0.1`, as does a `0.0..=1000.0` number hinted
 `max=1`; an integer's step SHALL stay `1`.
 
-#### Scenario: A constraint alone bounds the steppers
+#### Scenario: A constraint alone bounds the arrows
 - **WHEN** the reader steps up `opacity=0.9` twice, where `opacity` is `float64 where in 0.0..=1.0` with no visualizer
 - **THEN** the first step SHALL commit `1.0` and the second SHALL leave the value at `1.0`
 
@@ -916,4 +787,292 @@ that range's span, so a `0.0..=1.0` number steps by `0.1`, as does a `0.0..=1000
 - **WHEN** `dim` is `float64 where in 0.0..=1000.0`, hinted `max=1` with no `step`
 - **THEN** the editor SHALL offer `0..=1` and step by `0.1`
 - **AND** a plain `float64`, or a `float64 where >= 0.0`, hinted `min=0 max=1` SHALL step by `0.1` too
+
+### Requirement: An element in the composition reads as one row
+The viewer SHALL read each element in the composition as one row whatever the pane's width: an
+element outside the value of another element's non-content property, content children included
+(inside `if`, `for` and braced lists too). The row SHALL show, on one line, the child fold chevron
+when the element holds content, its icon, its kind and the one value it is named by, and SHALL be
+exactly one source line tall, its icon centered on the line and starting at the element's column in
+the source, its chevron hanging to the left. Rows, and the lines of an `if` or a `for`
+among them, SHALL follow one another a source line apart with no extra room between them, as a design
+tool's layers do; an open inspector SHALL bring its own margins. As the line fills, that value SHALL be cut and faded. An element inside a property's
+value SHALL read inside its owner's inspector, not as a row. Comments, `if` and `for` SHALL read as
+written between rows, and an element whose syntax a row cannot show losslessly SHALL keep its
+as-written reading. Declarations other than `let` values (types, functions' and components'
+signatures, visualizers) SHALL keep their existing reading. The viewer SHALL NOT evaluate anything
+to draw a row.
+
+#### Scenario: A root element starts under the lets before it
+- **WHEN** a module's root `<Drawing>` follows `let blue: Paint = …`
+- **THEN** Drawing's icon SHALL start where `let` does, its chevron to the left of it
+
+#### Scenario: Rows keep a steady rhythm
+- **WHEN** a Row holds two Text rows and then `if customer.returning { <Badge /> }`
+- **THEN** the Row, the two Texts, the `if` line, the Badge and the closing brace SHALL each start one
+  source line below the one before
+
+#### Scenario: A narrow pane keeps the structure
+- **WHEN** the pane holding `<Text x=250 y=165 fontSize=18>NX graphics</Text>` is narrowed until
+  its text does not fit
+- **THEN** Text SHALL still read as one row, its text cut and faded, and nothing SHALL wrap
+
+#### Scenario: A long title stays on its line
+- **WHEN** a `SelectQuestion` row's title is a question longer than the room left on its line
+- **THEN** the row SHALL read its kind and the question's first words, faded where cut, on one line
+
+#### Scenario: A paint is not a row
+- **WHEN** a `Circle` has `fill=<Paint.radial …/>`
+- **THEN** Circle SHALL have a row and the paint SHALL read in Circle's inspector, not as a row
+
+### Requirement: An `if` or a `for` among rows frames rows level with their siblings
+Among an element's rows, an `if` or a `for` SHALL read as written, with every one of its lines, its
+first, its `else`, its closing brace and those of the blocks inside it, starting where the icons of
+its sibling rows do. The rows it holds SHALL read level with those siblings, as children of the same
+element, framed by the block's lines. Its braces SHALL read in the quiet color, and its condition and
+keywords in their code colors.
+
+#### Scenario: A condition among rows
+- **WHEN** a Section holds a Toggle and then `if requireTwoFactor { <Banner …/> }`
+- **THEN** `if`, the Banner's icon, the closing brace and the Toggle's icon SHALL start at the same
+  place, and the braces SHALL be gray
+
+#### Scenario: A condition inside a loop
+- **WHEN** a Stack holds `for member in members { <MemberRow …/> if !member.twoFactor { <Text …/> } }`
+- **THEN** `for`, MemberRow, the inner `if`, the Text and both closing braces SHALL start at the same
+  place
+
+### Requirement: A row names its element by one value
+A row SHALL show, after its kind, at most one value and no label, as a design tool's layer list
+shows a layer's name: the element's title when its visualizer names one and the element writes it on
+one line; else the text content it holds, with no element or block in it, however many lines it
+runs; else its id when its visualizer names one. An element with none of these SHALL show its icon
+and kind alone. The value SHALL read on one line, as its inspector field would, faded where it is
+cut, and SHALL stay while the inspector is open. No other property SHALL read on the row. A row SHALL
+have no fold for its text content; open, the inspector SHALL show that text as its first field.
+Content that holds elements SHALL read as the row's children. A folded element value in an
+inspector SHALL be named by the same rule, or else, when it sets just one thing on one line, by
+that value, as a paint by its color.
+
+A click on that value SHALL select its property, open the element's inspector if it is closed, and
+open the property's field for editing, as a click on the field's value does; a value that cannot be
+edited in place SHALL select its property.
+
+#### Scenario: A title names the row
+- **WHEN** a `Button` whose visualizer has `title=label` writes `<Button label="Save changes" kind=primary />`
+- **THEN** its row SHALL read its icon, `Button` and `Save changes`, and not `primary`
+
+#### Scenario: Text content names the row
+- **WHEN** a document writes `<Text x=250 y=165 fontSize=18>` and `NX graphics` on its own line before `</Text>`
+- **THEN** Text's row SHALL read `NX graphics` after its name, with no fold, no closing tag and no font
+  size, and its inspector SHALL show `NX graphics` as its first field
+
+#### Scenario: An id names the row only without a title
+- **WHEN** `Workspace`'s visualizer has `title=name id=slug` and a document writes
+  `<Workspace name="Hive5 Tools" slug="hive5-tools" … />`
+- **THEN** its row SHALL read `Hive5 Tools` and not `hive5-tools`, which SHALL read in its inspector
+
+#### Scenario: Nothing names the row
+- **WHEN** a `Star` with no title, text or id writes `pointCount=5 fill={blue}`
+- **THEN** its row SHALL read its icon and `Star` alone
+
+#### Scenario: Editing the row's value
+- **WHEN** a closed row reads `Hive5 Tools` and the reader clicks it
+- **THEN** Workspace SHALL be selected with its inspector open and its Name field open for editing
+
+### Requirement: Selecting an element opens its inspector under its row
+Selecting a row, or any node inside its element's property values, SHALL open that element's
+inspector directly under its row; selecting another element SHALL close it unless it is pinned.
+Clicking the selected row again, or pressing Enter on it, SHALL close and reopen its inspector
+without changing the selection. When the element's declaration has a doc, the inspector SHALL open
+with its first paragraph as one quiet line, as plain words, cut where it runs out. Its labels SHALL start under its row's kind,
+however deep the element is and whether or not it sits inside an `if` or a `for`. Opening or closing any inspector SHALL keep the row the
+reader acted on where it was on screen, where the scroll range allows; a selection made from
+outside the viewer SHALL scroll only when its row is off screen, just far enough to show it.
+
+#### Scenario: Selecting a sibling below
+- **WHEN** Star's inspector is open and the reader clicks Circle's row lower down
+- **THEN** Star's inspector SHALL close, Circle's SHALL open, and Circle's row SHALL stay where it was
+  on screen
+
+#### Scenario: Closing the selected element's inspector
+- **WHEN** Star is selected with its inspector open and the reader clicks Star's row
+- **THEN** Star SHALL stay selected and its inspector SHALL close; a second click SHALL reopen it
+
+#### Scenario: A deep element
+- **WHEN** an element five levels deep is selected
+- **THEN** its inspector's labels SHALL start under the element's kind and the inspector SHALL use
+  the rest of the pane's width
+
+#### Scenario: An element inside a condition
+- **WHEN** a Text inside `if order.note? { … }` and a Button after the block are each selected
+- **THEN** each inspector's labels SHALL start under its own row's kind
+
+### Requirement: A pin keeps an inspector open
+Each row SHALL offer a pin, shown while the row is hovered or selected and always while pinned.
+Pinning SHALL keep the element's inspector open when the selection moves elsewhere; unpinning SHALL
+close it unless the element is selected. Pins SHALL not change the selection or folds. Several
+elements MAY be pinned at once. Read-only documents SHALL allow pinning.
+
+#### Scenario: Comparing two elements
+- **WHEN** the reader selects Star, pins it, and selects Circle
+- **THEN** both inspectors SHALL be open, Star's pin shown as on
+
+### Requirement: Folding children is separate from the inspector
+A row whose element holds content SHALL fold and unfold its children with its chevron, Left and
+Right, and Alt+click for the subtree, as groups fold today; a row without content SHALL show no
+chevron. Folding SHALL NOT open, close or unpin an inspector, and opening an inspector SHALL NOT
+fold or unfold children. Folding over the selection SHALL select the folded element without
+unfolding it, keeping a selection in that element's own properties. `collapseAll` and `expandAll`
+SHALL change folds only.
+
+#### Scenario: Inspecting a folded container
+- **WHEN** the reader folds Drawing's children and selects Drawing
+- **THEN** Drawing's inspector SHALL open with its children still hidden
+
+### Requirement: The inspector shows properties as labeled fields
+An inspector SHALL show, as a field, each property its element writes and its title property
+whether written or not, one to a line, in the resolved property order. When its element's type
+declares other properties, its last line SHALL read `Show`, the number of them and `unset`, as `Show 3 unset`;
+pressing it SHALL show them as fields in their places and turn the line into `Hide unset`, which
+hides them again, and the inspector SHALL forget the choice when it closes. Tab from the
+inspector's last field SHALL reach that line. A field SHALL show the property's resolved label on the
+left and its value on the right; a field SHALL show no icon; the labels SHALL share a
+column as wide as the longest, up to about 40% of the inspector, and a longer label SHALL wrap. A
+value over several lines, as a list of elements, or an unfolded element value SHALL read under its
+label, a step in; an unfolded element value's own fields SHALL start under its kind, as a row's
+inspector starts under the row's kind, and its menu SHALL stay on its label's line. A boolean SHALL read as a checkbox beside its label. A property the element does
+not write SHALL show as an empty value with a dashed outline and its default, if any, as a quiet
+placeholder, else, for text, "Add" and its label, as `Add description`; setting it SHALL write it,
+and a menu on a written property SHALL offer Reset to default or Remove as the row menu does today.
+The inspector SHALL have no group headings. No label or field SHALL carry a browser tooltip; a
+label's hover card SHALL give the property's name as written in source. The `title` and `id`
+properties SHALL read in the inspector as fields too.
+
+#### Scenario: Star's inspector
+- **WHEN** Star's visualizer lists `cx` and `cy` with the labels `Center X` and `Center Y`, then
+  `outerRadius`, `innerRadius` and `pointCount`, and Star writes all five but no `stroke`
+- **THEN** the inspector SHALL show `Center X` beside `150` and `Center Y` beside `55` first, then the
+  three labels with no icons, then a line counting the properties Star does not write
+- **AND WHEN** the reader presses that line
+- **THEN** `Stroke` SHALL read in its place beside an empty dashed value
+
+#### Scenario: Unset properties hide again
+- **WHEN** the reader shows a Card's unset properties, selects another row and selects the Card again
+- **THEN** its inspector SHALL show only what the Card writes and its title, and the `Show N unset` line
+
+#### Scenario: A list of elements under its label
+- **WHEN** a Page writes `actions={ <Button label="Export" /> <Button label="Invite" /> }` and the
+  reader opens Page's inspector
+- **THEN** `Actions` SHALL read on its own line, with the two Buttons under it, a step in
+
+### Requirement: A property without a label is named from its name
+Where a property has no resolved label, the viewer SHALL derive one from its name: split it into
+words at a lowercase or digit followed by an uppercase letter, at an uppercase letter followed by an
+uppercase and a lowercase letter, and at `_`, `-` and spaces; write a word that is a known acronym
+(`id`, `url`, `uri`, `ui`, `api`, `html`, `css`, `json`) in upper case; write the first word
+capitalized and the rest in lower case; and drop a leading `is` or `has` word from a boolean
+property's name when other words follow.
+
+#### Scenario: Derived labels
+- **WHEN** properties are named `outerRadius`, `imageURL`, `max_length`, `isRequired` and `x1`
+- **THEN** their labels SHALL be `Outer radius`, `Image URL`, `Max length`, `Required` and `X1`
+
+### Requirement: Numbers change by dragging their label
+Pressing a number field's label and dragging left or right SHALL change the
+number by one `step` (or one) for every three pixels, ten steps with Shift and a tenth with Alt,
+within `min` and `max`, showing it in the field and going live as it changes, and SHALL commit once
+on release as one undo step. The pointer SHALL read as a horizontal resize over it. A press that
+moves less than four pixels SHALL focus the field instead. In a focused number field, Up and Down
+SHALL step it, Shift by ten steps. The viewer SHALL NOT show stepper buttons. On touch, a drag on the
+label SHALL scrub and a tap SHALL focus the field. The label's hover card SHALL end with a quiet
+`Drag sideways to change; Shift for 10 steps, Alt for a tenth`.
+
+#### Scenario: Scrubbing a radius
+- **WHEN** the reader drags Star's `Outer radius` label 30 pixels to the right
+- **THEN** the field SHALL read `46` during the drag, the preview SHALL follow, and one `nx-edit`
+  SHALL commit `outerRadius=46` on release
+
+### Requirement: References and nested values read by what they name
+A value source writes in braces SHALL keep them, in the quiet color of an `if`'s braces and with the
+spaces inside them dropped, so that it reads as computed; a literal SHALL read without them. A
+property whose value is a reference to a top-level `let` SHALL read as a token with that name in its
+braces; when
+the `let` is written as a literal color, or as an element whose visualizer formats one property as a
+color, the token SHALL show that color's swatch before its braces. Opening the token SHALL offer Go to `blue` and
+Show in Source. A property whose value is an element SHALL read as a field with the element's icon,
+kind and the value it is named by, and SHALL unfold into a nested group of that element's fields, edited the same
+way. A short element value SHALL instead read its set properties on its field's line, each its label
+and its value, edited and scrubbed there as an inspector's fields are, wrapping under the first where
+the line runs out: one that holds only properties, one to four of them, each one simple value on one
+line (a number, a boolean, a color, a bare case, a reference, or a string of at most 24 characters).
+Its visualizer's `inline` SHALL decide instead when it is set: `true` reads any such value of one-line
+properties on its line, `false` never does. A sole property, or the title, SHALL read without its
+label. On its line its kind SHALL read only what the property's type leaves open: nothing for the
+record the type names, and the case alone for a case of the union it names. Its chevron SHALL still
+unfold it into the nested group, its kind in full, where the properties it does not set are. An action value, a component's `State.Update` included, SHALL show the action icon. Any other expression SHALL read as written, code-styled, and open in Source.
+
+#### Scenario: A shared paint
+- **WHEN** Star writes `fill={blue}` and `let blue: Paint = <Paint.color color=#2563eb/>`
+- **THEN** Star's `Fill` field SHALL read a `#2563eb` swatch and the token `{blue}`, and its `⋯`
+  menu's Go to `blue` SHALL select `blue`'s value
+
+#### Scenario: An expression keeps its braces
+- **WHEN** a Box writes `w={1 + 2}` and `label="plain"`
+- **THEN** its `W` field SHALL read `{1 + 2}`, its braces quiet and its tokens in their code colors,
+  and its `Label` field SHALL read `plain`
+
+#### Scenario: A short element value on its field's line
+- **WHEN** Drawing writes `viewBox=<Rect x=0 y=0 width=400 height=240/>` and
+  `background=<Paint.color color=#ffffff/>`
+- **THEN** View box SHALL read `X 0  Y 0  Width 400  Height 240`, with no `Rect`, and Background
+  SHALL read `color` and the color, and dragging the `Width` label SHALL scrub `width` in that Rect
+
+#### Scenario: A nested element value
+- **WHEN** Drawing writes `viewBox=<Rect x=0 y=0 width=400 height=240/>` and the reader unfolds it
+- **THEN** a nested group SHALL show the Rect's fields, and changing its width SHALL edit `width` in
+  that Rect
+
+### Requirement: A host can restore pins and closed inspectors
+The viewer SHALL expose `detailsState` with `pinned`, the pinned elements' keys, and `suppressed`,
+the key of a selected element whose inspector the reader closed. Assigning undefined SHALL clear it.
+A reader's change SHALL fire `nx-details` with the complete state and the selection; assigning state
+SHALL NOT fire it, and assigning equal state SHALL do nothing. While the tree is briefly absent the
+state SHALL be kept. A new tree SHALL drop keys it no longer has, keep unchanged ones, and follow
+items the viewer moved; where source edits make an item's identity uncertain, the pins inside that
+list SHALL be dropped rather than moved to another item, and a dropped pin SHALL NOT come back on
+undo. A change the viewer makes this way SHALL fire `nx-details`.
+
+#### Scenario: Restoring without an echo
+- **WHEN** the host assigns the state an earlier `nx-details` reported
+- **THEN** the same inspectors SHALL be open and no `nx-details` SHALL fire
+
+#### Scenario: A pinned item moves
+- **WHEN** the reader moves a pinned item down with Alt+Down
+- **THEN** the pin SHALL follow the item and SHALL NOT pass to the item now in its old place
+
+### Requirement: The inspector keeps editing whole
+Fields SHALL edit through the existing in-place editing, `nx-edit` and undo, including choices,
+colors, multiline strings and invalid-entry notes. Closing an inspector, or a selection that would
+close it, while one of its fields holds an invalid entry SHALL keep the inspector and the field open
+and show the field's note. `finishEditing()` SHALL settle an open field, returning false and keeping
+it open when its entry is invalid. Opening, closing and pinning SHALL NOT enter undo history or
+re-run the document, and a new tree SHALL keep an open field, its caret and the selection.
+
+#### Scenario: Closing over an invalid entry
+- **WHEN** the reader types `abc` into Star's `X` and clicks Circle's row
+- **THEN** Star's inspector SHALL stay open with the field and its note, and Circle SHALL NOT be
+  selected
+
+### Requirement: Rows and inspectors are keyboard accessible
+Rows SHALL be tree items with their selection and expansion exposed; Up and Down SHALL move between
+rows, Left and Right fold as today, and Enter SHALL close and reopen the selected row's inspector.
+Tab SHALL move from a row into its open inspector's fields and pin. The pin SHALL be a button with
+an element-specific name and a pressed state, reachable without hover and with a visible focus ring.
+Arrow keys in a field SHALL NOT move between rows. Closing an inspector that holds focus SHALL move
+focus to its row. Opening, closing and pinning SHALL be announced briefly.
+
+#### Scenario: Keyboard comparison
+- **WHEN** a keyboard user selects Star, tabs to its pin, presses Space and moves down to Circle
+- **THEN** both inspectors SHALL be open and the pin SHALL report pressed
 

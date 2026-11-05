@@ -8,9 +8,7 @@ Graphics evaluation targets the Rust and TypeScript IR runtimes. The legacy HIR 
 is outside this graphics profile; its import/type-matching limitations are accepted.
 Native preview compiles with nx-api/nx-codegen and evaluates linked images with nx-ir-runtime.
 Runtime acceptance and negative tests use IR, with no HIR parity requirement.
-
 ## Requirements
-
 ### Requirement: Graphics declarations are available as an unstable standard library
 The system SHALL carry `@nx/graphics` as ordinary NX standard-library source with Drawing, Group, Rectangle, Circle, Ellipse, Line, Polyline, Polygon, Path, and Text contracts. It SHALL declare an unstable `graphics-core-v4` profile and require no UI library/renderer. Imports, analysis, IR emission/linking and evaluation SHALL follow existing standard-library and external-component contracts. Alias spelling SHALL NOT change component identity. Generic value and IR encodings SHALL remain unchanged.
 
@@ -223,3 +221,21 @@ retain defensive checking for raw host values that bypass constrained NX binding
 - **WHEN** a Star has individually valid radii but innerRadius exceeds outerRadius, or an Arrow has coincident endpoints
 - **THEN** existing helper validation SHALL reject the invalid relationship
 - **AND** scalar constraints SHALL NOT be treated as proving the relationship valid
+
+### Requirement: Graphics visualizers label every element's properties
+The graphics library's visualizers SHALL give every property of Drawing, Group, the basic shapes,
+paths, text and the element-style shape helpers a label, and SHALL list them in the order design
+tools do: position (`X` and `Y` for `x`/`y`, `Center X` and `Center Y` for `cx`/`cy`), size (width,
+height) and shape (radii, points, sides, angles, rotation), then fill and stroke, then transform,
+opacity, clipping, accessibility and a container's content where an element has them. Text SHALL
+list its text first, then its position, its font and its fill.
+Element icons SHALL be Lucide names; properties SHALL have no icons. These SHALL be presentation only and SHALL NOT change evaluation.
+
+#### Scenario: Star reads like a design tool
+- **WHEN** the graphics example is opened in Visual and Star is selected
+- **THEN** Star's inspector SHALL show `Center X` and `Center Y` first, then outer radius, inner radius and points
+
+#### Scenario: Every property is labeled
+- **WHEN** the graphics library is analyzed with visualizers
+- **THEN** every property of every graphics element and element-style helper SHALL resolve a label
+

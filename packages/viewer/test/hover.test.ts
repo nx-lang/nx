@@ -28,6 +28,8 @@ function show({ tree, text }: { tree: SourceTree; text: string }, parent: Node =
   element.icons = () => document.createElementNS("http://www.w3.org/2000/svg", "svg");
   element.text = text;
   element.tree = tree;
+  // Every row's inspector open, so every property reads.
+  element.detailsState = { pinned: tree.nodes.filter((node) => node.role === "element").map((node) => node.key) };
   created.push(element);
   return element;
 }
@@ -64,8 +66,16 @@ function body(element: NxViewerElement): HTMLElement {
 }
 
 /** Moves the pointer onto `target`. */
-function pointAt(target: Element): void {
-  target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
+let pointerX = 0;
+
+/**
+ * Moves the pointer onto `target`, as a browser does: over it, then a move on it, at `clientX`, or a
+ * little past where it last was.
+ */
+function pointAt(target: Element, clientX = (pointerX += 1)): void {
+  pointerX = clientX;
+  target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true, clientX }));
+  target.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX }));
 }
 
 function press(target: Element, key: string): void {
@@ -76,7 +86,11 @@ function press(target: Element, key: string): void {
  * Lays the reading out as jsdom does not, for the test `t`: the element and its frame fill 400 by
  * 300 pixels, the card is 200 by 60, and each node is a line 18 pixels high at `place(node)`.
  */
-function layOut(t: TestContext, element: NxViewerElement, place: (node: HTMLElement) => { top: number; left: number }): void {
+function layOut(
+  t: TestContext,
+  element: NxViewerElement,
+  place: (node: HTMLElement) => { top: number; left: number; width?: number }
+): void {
   const prototype = window.HTMLElement.prototype;
   const { getBoundingClientRect } = prototype;
   const rect = (left: number, top: number, width: number, height: number): DOMRect =>
@@ -88,8 +102,8 @@ function layOut(t: TestContext, element: NxViewerElement, place: (node: HTMLElem
     if (this.classList.contains("card")) {
       return rect(0, 0, 200, 60);
     }
-    const { top, left } = place(this);
-    return rect(left, top, 80, 18);
+    const { top, left, width } = place(this);
+    return rect(left, top, width ?? 80, 18);
   };
   t.after(() => {
     prototype.getBoundingClientRect = getBoundingClientRect;
@@ -117,23 +131,27 @@ function narrow(t: TestContext, columns: number): void {
 const firstShape = (node: SourceNode): boolean => node.role === "element" && node.name === "Shape";
 
 function signatureOf(element: NxViewerElement): string | undefined {
-  return card(element).hidden ? undefined : (card(element).querySelector(".card-signature")?.textContent ?? undefined);
+  return card(element).hidden ? undefined : (card(element).querySelector(":is(.card-signature, .card-title)")?.textContent ?? undefined);
 }
 
 describe("hover targets", () => {
-  it("are an element's name and icon, a property's name, an id or a title, and a value", async () => {
+  it("are an element's icon, a property's name, an id, and a value", async () => {
     const hover = await fixture("hover");
     const element = show(hover);
     const shape = keyIn(hover, firstShape);
     const line = drawn(element, shape);
     assert.deepEqual(
       marksOf(element, shape).map((mark) => mark.className),
-      ["element-icon", "line-kind"],
-      "the element's icon and name"
+      ["element-icon", "inspector-doc"],
+      "the element's icon and its doc's line: its name, rested on to drag or select it, opens nothing"
     );
     assert.equal(line.querySelector(".element-icon")!.hasAttribute("title"), false, "the card names it, not a tooltip");
     const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
-    assert.deepEqual(marksOf(element, type).map((mark) => mark.className), ["line-name", "line-equals"], "a line's name=");
+    assert.deepEqual(
+      marksOf(element, type).map((mark) => mark.className),
+      ["field-lead lead-caption sheet-name"],
+      "its field's lead"
+    );
     const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
     assert.deepEqual(marksOf(element, circle).map((mark) => mark.dataset["key"]), [circle], "a case marks itself");
     for (const value of [
@@ -146,11 +164,12 @@ describe("hover targets", () => {
     }
     const union = keyIn(hover, (node) => node.role === "reference" && node.name === "ShapeType");
     assert.equal(drawn(element, union).dataset["hover"], undefined, "a qualified case's union is the case's");
-    // A task's id and title read without their names, and show their properties' cards.
+    // A task's title reads without its name on its row, and opens no card there; its field's lead
+    // does. Its id, with a title to name the task, reads only in its inspector.
     const id = keyIn(hover, (node) => node.role === "attribute" && node.name === "id");
     const title = keyIn(hover, (node) => node.role === "attribute" && node.name === "title");
-    assert.deepEqual(marksOf(element, id).map((mark) => mark.textContent), ["ship"]);
-    assert.deepEqual(marksOf(element, title).map((mark) => mark.textContent), ["Ship it"]);
+    assert.deepEqual(marksOf(element, id).map((mark) => mark.textContent), ["ID"]);
+    assert.deepEqual(marksOf(element, title).map((mark) => mark.textContent), ["Title"]);
     // Nothing else is marked: a literal, a comment, or a unit's room.
     const hi = keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"');
     const note = keyIn(hover, (node) => node.role === "comment");
@@ -159,16 +178,16 @@ describe("hover targets", () => {
     assert.equal(root(element).querySelectorAll(":is(.line-element, .sheet, .sheet-row, .sheet-head)[data-hover]").length, 0);
   });
 
-  it("are a group's name and its rows' names", async (t) => {
-    narrow(t, 30);
+  it("are a row's icon and its fields' leads", async () => {
     const wrapped = await fixture("wrappedAttributes");
     const element = show(wrapped);
-    const sheet = root(element).querySelector<HTMLElement>(".sheet")!;
-    assert.equal(sheet.querySelector(":scope > .sheet-head > .sheet-kind")!.getAttribute("data-hover"), sheet.dataset["key"]);
-    const rows = [...sheet.querySelectorAll<HTMLElement>(":scope > .sheet-row")];
-    assert.ok(rows.length > 0);
-    for (const row of rows) {
-      assert.equal(row.querySelector(".sheet-name")!.getAttribute("data-hover"), row.dataset["key"]);
+    const row = root(element).querySelector<HTMLElement>(".row-element")!;
+    assert.equal(row.querySelector(":scope > .row-head > .element-icon")!.getAttribute("data-hover"), row.dataset["key"]);
+    assert.equal(row.querySelector(":scope > .row-head > .sheet-kind")!.getAttribute("data-hover"), null);
+    const fields = [...row.querySelectorAll<HTMLElement>(":scope > .inspector .prop-field[data-key]")];
+    assert.ok(fields.length > 0);
+    for (const field of fields) {
+      assert.equal(field.querySelector(".field-lead")!.getAttribute("data-hover"), field.dataset["key"]);
     }
   });
 });
@@ -179,18 +198,20 @@ describe("hover cards", () => {
     const hover = await fixture("hover");
     const element = show(hover);
     const shape = keyIn(hover, firstShape);
-    const name = drawn(element, shape).querySelector(".line-kind")!;
+    const name = drawn(element, shape).querySelector(".element-icon")!;
     layOut(t, element, (node) => (node === name ? { top: 100, left: 50 } : { top: 0, left: 0 }));
     const folded = element.folded;
     pointAt(name);
-    t.mock.timers.tick(499);
+    t.mock.timers.tick(999);
     assert.equal(card(element).hidden, true, "not yet: the pointer may be passing");
     t.mock.timers.tick(1);
     assert.equal(card(element).hidden, false);
-    assert.equal(card(element).querySelector(".card-signature")!.textContent, "component Shape extends Node");
+    assert.equal(card(element).querySelector(".card-title")!.textContent, "component Shape extends Node", "titled by its name");
+    assert.equal(card(element).querySelector(".card-kind")!.textContent, "component", "after its kind's chip");
+    assert.equal(card(element).querySelector(".card-detail")!.textContent, "extends Node", "its base, quietly");
     assert.equal(card(element).querySelector(".card-doc")!.textContent, "A filled shape.");
     assert.equal(card(element).style.top, "122px", "below what it describes");
-    assert.equal(card(element).style.left, "50px");
+    assert.equal(card(element).style.left, "138px", "starting just past its right end, clear of the labels below");
     assert.equal(element.selection, undefined, "the selection is as it was");
     assert.deepEqual(element.folded, folded, "and so are the folds");
     assert.ok(!body(element).contains(card(element)), "the card is outside what scrolls the reading");
@@ -200,12 +221,24 @@ describe("hover cards", () => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    const name = drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!;
+    const name = drawn(element, keyIn(hover, firstShape)).querySelector(".element-icon")!;
     layOut(t, element, (node) => (node === name ? { top: 260, left: 350 } : { top: 0, left: 0 }));
     pointAt(name);
-    t.mock.timers.tick(500);
+    t.mock.timers.tick(1000);
     assert.equal(card(element).style.top, "196px");
     assert.equal(card(element).style.left, "200px", "kept from running past the element's right edge");
+  });
+
+  it("starts just past the pointer when what it describes is wide, such as a doc line", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const hover = await fixture("hover");
+    const element = show(hover);
+    const doc = drawn(element, keyIn(hover, firstShape)).querySelector(".inspector-doc")!;
+    layOut(t, element, (node) => (node === doc ? { top: 100, left: 20, width: 300 } : { top: 0, left: 0 }));
+    pointAt(doc, 60);
+    t.mock.timers.tick(1000);
+    assert.equal(card(element).hidden, false);
+    assert.equal(card(element).style.left, "72px", "past the pointer, not past the line's far end");
   });
 
   it("stays while the pointer moves onto it, and closes once the pointer has left both", async (t) => {
@@ -214,7 +247,7 @@ describe("hover cards", () => {
     const element = show(hover);
     const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
     pointAt(marksOf(element, type)[0]!);
-    t.mock.timers.tick(500);
+    t.mock.timers.tick(1000);
     assert.equal(card(element).querySelector(".card-signature")!.textContent, "(property) Type: ShapeType = Rectangle");
     body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
     t.mock.timers.tick(200);
@@ -234,7 +267,7 @@ describe("hover cards", () => {
     const element = show(hover);
     const hi = drawn(element, keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"'));
     const note = drawn(element, keyIn(hover, (node) => node.role === "comment"));
-    const room = drawn(element, keyIn(hover, firstShape)).querySelector(".line-gap")!;
+    const room = drawn(element, keyIn(hover, firstShape)).querySelector(".row-head")!;
     for (const target of [hi, note, room]) {
       pointAt(target);
       t.mock.timers.tick(1000);
@@ -247,11 +280,14 @@ describe("hover cards", () => {
     const hover = await fixture("hover");
     const element = show(hover);
     const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
+    let x = 0;
     const open = (): void => {
       pointAt(document.body);
       body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
       pointAt(drawn(element, circle));
-      t.mock.timers.tick(500);
+      // The pointer moves on, so a scroll before no longer keeps cards quiet.
+      drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: ++x }));
+      t.mock.timers.tick(1000);
       assert.equal(card(element).hidden, false);
     };
     open();
@@ -300,8 +336,9 @@ describe("hover cards", () => {
     customElements.define(tag, class extends ViewerClass {});
     created.push(element);
     assert.equal(element.markdown, markdown);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
-    t.mock.timers.tick(500);
+    // With no icons, the row's card is its name's.
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".row-head > [data-hover]")!);
+    t.mock.timers.tick(1000);
     assert.equal(card(element).querySelector(".card-doc > b")!.textContent, "A FILLED SHAPE.");
   });
 
@@ -312,8 +349,8 @@ describe("hover cards", () => {
     const shape = tree.declarations.find((declaration) => declaration.name === "Shape")!;
     shape.doc = 'Draws <img src=x onerror="alert(1)"> and [runs](javascript:alert(1)).';
     const element = show({ tree, text: hover.text });
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
-    t.mock.timers.tick(500);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".element-icon")!);
+    t.mock.timers.tick(1000);
     const doc = card(element).querySelector(".card-doc")!;
     assert.equal(doc.querySelector("img, a"), null);
     assert.equal(doc.textContent, 'Draws <img src=x onerror="alert(1)"> and runs.');
@@ -326,43 +363,90 @@ describe("hover cards", () => {
     const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
     const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
     pointAt(marksOf(element, type)[0]!);
-    t.mock.timers.tick(500);
+    t.mock.timers.tick(1000);
     pointAt(drawn(element, circle));
-    t.mock.timers.tick(300);
-    assert.equal(signatureOf(element), undefined, "the first closes after its grace");
-    t.mock.timers.tick(200);
-    assert.equal(signatureOf(element), "(case) ShapeType.Circle", "and the next opens");
+    t.mock.timers.tick(100);
+    assert.equal(signatureOf(element), "(case) ShapeType.Circle", "the next opens at once while the cards are warm");
     // From the card onto another target, and across a gap, the same.
     card(element).dispatchEvent(new window.MouseEvent("pointerenter"));
     card(element).dispatchEvent(new window.MouseEvent("pointerleave"));
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-gap")!);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".row-head")!);
     pointAt(marksOf(element, type)[0]!);
-    t.mock.timers.tick(500);
+    t.mock.timers.tick(1000);
     assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle");
   });
 
-  it("takes the spans of one node for one target: a line's name and its =", async (t) => {
+  it("waits a second for the first card, and opens none after a press until the pointer moves on", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
     const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
-    const [name, equals] = marksOf(element, type);
-    pointAt(name!);
-    t.mock.timers.tick(300);
-    pointAt(equals!);
-    t.mock.timers.tick(200);
-    assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle", "the rest is not restarted");
-    pointAt(name!);
+    const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
+    const lead = marksOf(element, type)[0]!;
+    pointAt(lead);
+    t.mock.timers.tick(999);
+    assert.equal(signatureOf(element), undefined, "not yet: the pointer may be passing");
+    lead.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
     t.mock.timers.tick(1000);
-    assert.equal(signatureOf(element), "(property) Type: ShapeType = Rectangle", "and it stays open");
+    assert.equal(signatureOf(element), undefined, "a press means the reader is doing something");
+    pointAt(drawn(element, circle));
+    t.mock.timers.tick(1000);
+    assert.equal(signatureOf(element), "(case) ShapeType.Circle", "once the pointer moves on, cards open again");
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
+    assert.equal(signatureOf(element), undefined, "a press closes the card");
+    lead.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true, buttons: 1 }));
+    t.mock.timers.tick(1000);
+    assert.equal(signatureOf(element), undefined, "nor does one open under a held button, as in a drag");
+  });
+
+  it("opens none for what a wheel scrolls under a still pointer, until the pointer moves", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const hover = await fixture("hover");
+    const element = show(hover);
+    const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
+    const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
+    const lead = marksOf(element, type)[0]!;
+    pointAt(lead, 10);
+    body(element).dispatchEvent(new window.WheelEvent("wheel", { bubbles: true, composed: true }));
+    // The reading scrolls Circle under the pointer, which has not moved.
+    pointAt(drawn(element, circle), 10);
+    t.mock.timers.tick(2000);
+    assert.equal(signatureOf(element), undefined, "what scrolls under a still pointer opens nothing");
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: 10 }));
+    t.mock.timers.tick(2000);
+    assert.equal(signatureOf(element), undefined, "nor does a move event that goes nowhere");
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: 12 }));
+    t.mock.timers.tick(1000);
+    assert.equal(signatureOf(element), "(case) ShapeType.Circle", "once the pointer moves, cards open again");
+  });
+
+  it("opens none for what scrolls under a still pointer however the reading scrolled", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const hover = await fixture("hover");
+    const element = show(hover);
+    const type = keyIn(hover, (node) => node.role === "attribute" && node.name === "Type");
+    const circle = keyIn(hover, (node) => node.role === "case" && node.name === "Circle");
+    pointAt(marksOf(element, type)[0]!, 40);
+    t.mock.timers.tick(1000);
+    pointAt(document.body, 50);
+    body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
+    pointAt(marksOf(element, type)[0]!, 60);
+    // Keyboard paging, or a selection brought into view, moves Circle under the pointer: no wheel,
+    // no scroll the viewer heard, just the browser saying the pointer is over it now.
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true, clientX: 60 }));
+    t.mock.timers.tick(2000);
+    assert.notEqual(signatureOf(element), "(case) ShapeType.Circle", "what came under a still pointer opens nothing");
+    drawn(element, circle).dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientX: 61 }));
+    t.mock.timers.tick(1000);
+    assert.equal(signatureOf(element), "(case) ShapeType.Circle", "once the pointer moves, it does");
   });
 
   it("closes on a new tree", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
-    t.mock.timers.tick(500);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".element-icon")!);
+    t.mock.timers.tick(1000);
     assert.notEqual(signatureOf(element), undefined);
     element.tree = structuredClone(hover.tree);
     assert.equal(card(element).hidden, true);
@@ -378,8 +462,8 @@ describe("hover cards", () => {
     scroller.style.overflowY = "auto";
     host.attachShadow({ mode: "open" }).append(scroller);
     const element = show(hover, scroller);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
-    t.mock.timers.tick(500);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".element-icon")!);
+    t.mock.timers.tick(1000);
     assert.equal(card(element).hidden, false);
     scroller.dispatchEvent(new window.Event("scroll"));
     assert.equal(card(element).hidden, true, "a scroll the document does not hear of");
@@ -406,8 +490,8 @@ describe("hover cards", () => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const hover = await fixture("hover");
     const element = show(hover);
-    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
-    t.mock.timers.tick(500);
+    pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".element-icon")!);
+    t.mock.timers.tick(1000);
     assert.equal(card(element).hidden, false);
     element.selection = keyIn(hover, (node) => node.role === "literal" && node.value === '"hi"');
     press(body(element), "i");
@@ -426,8 +510,8 @@ describe("hover cards", () => {
     ]) {
       const element = show(hover);
       element.markdown = markdown;
-      pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".line-kind")!);
-      t.mock.timers.tick(500);
+      pointAt(drawn(element, keyIn(hover, firstShape)).querySelector(".element-icon")!);
+      t.mock.timers.tick(1000);
       assert.equal(card(element).querySelector(".card-doc > p")!.textContent, "A filled shape.");
     }
   });

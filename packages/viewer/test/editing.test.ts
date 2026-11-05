@@ -1,7 +1,7 @@
 import { document } from "./dom.js";
 
 import assert from "node:assert/strict";
-import { after, describe, it, type TestContext } from "node:test";
+import { after, afterEach, describe, it, type TestContext } from "node:test";
 
 import { fixture, nxHost, treeOf, type Fixture } from "./fixtures.js";
 import { editTargets, isRemovable, unwrittenProperties } from "../src/edit.js";
@@ -15,12 +15,15 @@ const { NX_DRAFT_EVENT, NX_EDIT_EVENT, NX_OPEN_EVENT } = await import("../src/in
 const window = document.defaultView!;
 const created: NxViewerElement[] = [];
 
-after(async () => {
-  for (const element of created) {
+// Each test's elements leave the page with it, so none still listening to the document, as one
+// keeping an invalid entry does, takes a later test's presses.
+afterEach(() => {
+  for (const element of created.splice(0)) {
     element.remove();
   }
-  (await nxHost()).dispose();
 });
+
+after(async () => (await nxHost()).dispose());
 
 /** The element showing `fixture`, everything unfolded, editable unless `editable` says otherwise. */
 function show({ tree, text }: Fixture, editable = true): NxViewerElement {
@@ -30,8 +33,22 @@ function show({ tree, text }: Fixture, editable = true): NxViewerElement {
   element.editable = editable;
   element.text = text;
   element.tree = tree;
+  // Every row's inspector open, so every property reads.
+  element.detailsState = { pinned: tree.nodes.filter((node) => node.role === "element").map((node) => node.key) };
+  showAll(element);
   created.push(element);
   return element;
+}
+
+/** Shows, in every open inspector, the properties its element does not set. */
+function showAll(element: NxViewerElement): void {
+  for (;;) {
+    const more = element.shadowRoot!.querySelector<HTMLElement>('.inspector-more[aria-expanded="false"]');
+    if (more === null) {
+      return;
+    }
+    more.click();
+  }
 }
 
 /**
@@ -638,21 +655,6 @@ describe("editing in place", () => {
     assert.deepEqual(edits, [{ key: "latte.value.shots.value", edit: { kind: "setValue", value: { kind: "number", text: "12" } } }]);
   });
 
-  it("does not drag a number's name: a press and a move on it select the property and change nothing", async (t) => {
-    narrow(t, 40);
-    const element = show(await fixture("editing"));
-    const { edits } = events(element);
-    const name = root(element).querySelector<HTMLElement>('.sheet-name[data-hover="latte.value.shots"]')!;
-    assert.ok(!name.classList.contains("scrub"));
-    name.dispatchEvent(pointer("pointerdown", 100));
-    name.dispatchEvent(pointer("pointermove", 120));
-    assert.equal(rendered(element, "latte.value.shots.value").textContent, "2", "the number stays");
-    name.dispatchEvent(pointer("pointerup", 120));
-    name.click();
-    assert.equal(element.selection, "latte.value.shots");
-    assert.deepEqual(edits, []);
-  });
-
   it("sets a color from a hex field", async (t) => {
     narrow(t, 40);
     const element = show(await fixture("editing"));
@@ -760,12 +762,9 @@ describe("editing in place", () => {
 });
 
 /** The rows listing the selected element's unwritten properties, as drawn. */
-function moreRows(element: NxViewerElement): HTMLElement[] {
-  return Array.from(root(element).querySelectorAll<HTMLElement>(".dimmed-row, .added-row"));
-}
-
-function moreToggle(element: NxViewerElement): HTMLElement | null {
-  return root(element).querySelector<HTMLElement>(".more-toggle");
+/** The fields of the properties the element with `key` does not write, in its inspector. */
+function unset(element: NxViewerElement, key: string): HTMLElement[] {
+  return Array.from(rendered(element, key).querySelectorAll<HTMLElement>(":scope > .inspector .dimmed-row, :scope > .inspector .added-row"));
 }
 
 /** What a row reads, its spaces run together. */
@@ -792,99 +791,56 @@ describe("what an element does not write", () => {
     assert.deepEqual(listed("latte.value.code"), [], "an attribute is no element");
   });
 
-  it("ends the selected element with Show N unset properties, and only the selected one, only when editable", async () => {
+  it("shows every unwritten property in the inspector as a dashed field, editable only when the reading is", async () => {
     const element = show(await fixture("adding"));
-    assert.equal(moreToggle(element), null, "nothing is selected");
-    element.selection = "latte.value";
-    assert.equal(moreToggle(element)?.textContent, "Show 4 unset properties");
-    assert.equal(root(element).querySelectorAll(".more-toggle").length, 1);
-    element.selection = "latte.value.code";
-    assert.equal(moreToggle(element), null, "a row is not an element");
-    element.selection = "wide.value";
-    assert.equal(moreToggle(element)?.textContent, "Show 14 unset properties");
+    assert.deepEqual(unset(element, "latte.value").map((row) => row.dataset["name"]), ["note", "iced", "shots", "color"]);
+    assert.equal(unset(element, "wide.value").length, 14);
+    assert.ok(rendered(element, "latte.value.shots.value").classList.contains("editable-value"));
     const reading = show(await fixture("adding"), false);
-    reading.selection = "latte.value";
-    assert.equal(moreToggle(reading), null, "not when the reading only reads");
+    assert.equal(unset(reading, "latte.value").length, 4, "a reading that only reads shows them too");
+    assert.equal(unset(reading, "latte.value")[2]!.querySelector(".editable-value"), null, "but edits none");
   });
 
-  it("opens to dimmed rows reading each default, and closes on Escape or another selection", async () => {
+  it("reads each default, or a placeholder, in its place", async () => {
     const element = show(await fixture("adding"));
-    element.selection = "latte.value";
-    moreToggle(element)!.click();
-    assert.deepEqual(moreRows(element).map(reads), ["note", "iced ✗ default", "shots 1 default", "color"]);
-    assert.equal(element.selection, "latte.value", "the element stays selected");
-    press(moreRows(element)[0]!, "Escape");
-    assert.deepEqual(moreRows(element), [], "Escape closes the list");
-    assert.ok(moreToggle(element), "and keeps the row");
-    moreToggle(element)!.click();
-    element.selection = "mocha.value";
-    assert.deepEqual(moreRows(element), [], "another selection closes it");
+    assert.deepEqual(unset(element, "latte.value").map(reads), ["Note", "Iced \u2717", "Shots 1", "Color"]);
+    const note = rendered(element, "latte.value.note.value");
+    assert.equal(note.textContent, "", "nothing is written there");
+    assert.equal(note.dataset["placeholder"], "Add note", "text asks for itself by its label");
+    assert.equal(rendered(element, "latte.value.iced.value").dataset["placeholder"], undefined, "a default reads instead");
+    note.click();
+    assert.equal(field(element)!.dataset["placeholder"], "Add note", "the field keeps it until something is typed");
   });
 
-  it("opens with Enter on the row, and keeps open across a newer tree", async () => {
-    const fixed = await fixture("adding");
-    const element = show(fixed);
-    element.selection = "latte.value";
-    press(moreToggle(element)!, "Enter");
-    assert.equal(moreRows(element).length, 4);
-    element.tree = fixed.tree;
-    assert.equal(moreRows(element).length, 4, "still open on the same element");
-  });
-
-  it("adds a property from its dimmed row, which then reads as written", async () => {
+  it("adds a property from its field, which then reads as written", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     element.selection = "latte.value";
-    moreToggle(element)!.click();
     rendered(element, "latte.value.iced.value").click();
     assert.deepEqual(edits, [
       { key: "latte.value", edit: { kind: "addProperty", name: "iced", value: { kind: "boolean", value: true } } }
     ]);
-    const row = moreRows(element)[1]!;
+    const row = unset(element, "latte.value").find((candidate) => candidate.dataset["name"] === "iced")!;
     assert.ok(row.classList.contains("added-row"), "no longer dimmed");
-    assert.equal(reads(row), "iced ✓", "without its default note");
     assert.equal(element.selection, "latte.value", "the selection is kept");
   });
 
-  it("names the toggle for what it lists, and reads an unset value's type in its place", async () => {
-    const element = show(await fixture("adding"));
-    element.selection = "latte.value";
-    assert.equal(moreToggle(element)!.getAttribute("aria-label"), "4 unset properties");
-    moreToggle(element)!.click();
-    assert.equal(moreToggle(element)!.textContent, "Hide unset properties");
-    assert.equal(moreToggle(element)!.getAttribute("aria-expanded"), "true");
-    const note = rendered(element, "latte.value.note.value");
-    assert.equal(note.textContent, "", "nothing is written there");
-    assert.equal(note.dataset["placeholder"], "string", "its type, as a placeholder");
-    assert.equal(rendered(element, "latte.value.iced.value").dataset["placeholder"], undefined, "a default reads instead");
-    note.click();
-    assert.equal(field(element)!.dataset["placeholder"], "string", "the field keeps it until something is typed");
-  });
-
-  it("moves nothing when the newer tree writes the added property", async () => {
+  it("reads an added property as written once the newer tree writes it", async () => {
     const fixed = await fixture("adding");
     const element = show(fixed);
     element.selection = "latte.value";
-    moreToggle(element)!.click();
     rendered(element, "latte.value.iced.value").click();
     const text = fixed.text.replace('size=small />', "size=small iced=true />");
     assert.notEqual(text, fixed.text);
     element.tree = (await treeOf([{ uri: "nx:///adding.nx", identity: "adding.nx", source: text }], { visualizers: { modules: [] } })).tree;
     assert.equal(element.selection, "latte.value", "the selection is kept");
     assert.ok(rendered(element, "latte.value.iced"), "the property reads as written");
-    assert.equal(moreToggle(element)?.textContent, "Hide unset properties");
-    assert.deepEqual(
-      moreRows(element).map((row) => row.dataset["name"]),
-      ["note", "shots", "color"],
-      "the list stays open on the rest"
-    );
+    assert.deepEqual(unset(element, "latte.value").map((row) => row.dataset["name"]), ["note", "shots", "color"]);
   });
 
-  it("opens a dimmed number on its default and adds what is typed", async () => {
+  it("opens an unset number on its default and adds what is typed", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
-    element.selection = "latte.value";
-    moreToggle(element)!.click();
     rendered(element, "latte.value.shots.value").click();
     const open = field(element)!;
     assert.equal(open.textContent, "1", "its default");
@@ -896,9 +852,8 @@ describe("what an element does not write", () => {
   it("opens Source for a property no editor takes", async () => {
     const element = show(await fixture("adding"));
     const { edits, opens } = events(element);
-    element.selection = "bare.value";
-    moreToggle(element)!.click();
-    const theme = moreRows(element).find((row) => row.dataset["name"] === "theme")!;
+    const theme = unset(element, "bare.value").find((row) => row.dataset["name"] === "theme")!;
+    theme.focus();
     press(theme, "Enter");
     assert.deepEqual(edits, []);
     assert.deepEqual(opens.map((open) => open.key), ["bare.value"]);
@@ -906,26 +861,10 @@ describe("what an element does not write", () => {
     assert.equal(opens.length, 2);
   });
 
-  it("filters past twelve", async () => {
+  it("shows an unset property's card on its lead", async () => {
     const element = show(await fixture("adding"));
-    element.selection = "wide.value";
-    moreToggle(element)!.click();
-    const filter = root(element).querySelector<HTMLInputElement>(".more-filter");
-    assert.ok(filter, "a filter leads the rows");
-    filter.value = "c";
-    filter.dispatchEvent(new window.Event("input", { bubbles: true }));
-    assert.deepEqual(moreRows(element).filter((row) => !row.hidden).map((row) => row.dataset["name"]), ["c"]);
-    element.selection = "latte.value";
-    moreToggle(element)!.click();
-    assert.equal(root(element).querySelector(".more-filter"), null, "four rows need no filter");
-  });
-
-  it("shows a dimmed name's property card", async () => {
-    const element = show(await fixture("adding"));
-    element.selection = "latte.value";
-    moreToggle(element)!.click();
-    const name = moreRows(element)[0]!.querySelector<HTMLElement>(".sheet-name")!;
-    assert.equal(name.dataset["hover"], "latte.value.note");
+    const lead = unset(element, "latte.value")[0]!.querySelector<HTMLElement>(".sheet-name")!;
+    assert.equal(lead.dataset["hover"], "latte.value.note");
   });
 });
 
@@ -977,26 +916,6 @@ describe("a row's menu", () => {
     assert.ok(!(element.getAttribute("aria-label") ?? "").includes("\u22EF"));
     const status = root(element).querySelector("[aria-live]")?.textContent ?? "";
     assert.ok(!status.includes("\u22EF"), status);
-  });
-
-  it("is a property's on a line too: its name selects it, the mark follows it, and Delete removes it", async () => {
-    const element = show(await fixture("adding"));
-    const { edits } = events(element);
-    const property = rendered(element, "mocha.value.color");
-    assert.ok(property.matches(".line-property"), "the drink reads as a line");
-    const mark = Array.from(body(element).querySelectorAll<HTMLElement>(".row-menu.shared")).find((candidate) => candidate.dataset["menuKey"] === "mocha.value.color")!;
-    assert.ok(mark, "a mark for the property");
-    assert.equal(property.nextElementSibling, mark.parentElement, "right after the property, not inside it");
-    assert.ok(!mark.classList.contains("selected"), "hidden until the property is selected");
-    property.querySelector<HTMLElement>(".line-name")!.click();
-    assert.equal(element.selection, "mocha.value.color", "a click on its name selects the property");
-    assert.ok(mark.classList.contains("selected"), "and shows its mark");
-    mark.click();
-    assert.deepEqual(Array.from(root(element).querySelectorAll(".menu-item")).map(reads), ["Remove", "Show in Source"]);
-    press(root(element).querySelector(".menu-item")!, "Escape");
-    element.selection = "mocha.value.color";
-    press(body(element), "Delete");
-    assert.deepEqual(edits, [{ key: "mocha.value.color", edit: { kind: "remove" } }]);
   });
 
   it("opens from the keyboard on the selected row", async (t) => {
@@ -1173,30 +1092,12 @@ describe("choices", () => {
     over(rendered(element, "base.value.tone.value"));
     const shown = tools(element)!;
     assert.ok(shown.classList.contains("with-choices"), "a string's choices");
-    assert.ok(!shown.classList.contains("with-steppers"));
-    element.selection = "base.value.size";
-    over(rendered(element, "base.value.size.value"));
-    assert.ok(tools(element)!.classList.contains("in-line"), "taking room in the line, so tone, which follows, moves along");
     element.selection = "big.value.size";
     over(rendered(element, "big.value.size.value"));
     assert.ok(tools(element)!.classList.contains("with-choices"), "a number's choices");
-    assert.ok(tools(element)!.classList.contains("with-steppers"), "and its steppers");
     pressTool(tools(element)!.querySelector(".choices-toggle")!);
     assert.ok(field(element), "the field opens");
     assert.deepEqual(shownChoices(element), ["Default 16", "sm 12", "base 16", "lg 20"], "with its list");
-  });
-
-  it("makes room in the line for an open field's tools when more of the line follows", async (t) => {
-    const element = show(await fixture("adding"));
-    rendered(element, "card.value.count.value").click();
-    assert.ok(tools(element)!.classList.contains("in-line"), "mode follows count on the card's line");
-    press(field(element)!, "Escape");
-    element.selection = "big.value.size";
-    assert.ok(tools(element)!.classList.contains("in-line"), "before the line's closing mark alone");
-    narrow(t, 30);
-    const sheet = show(await fixture("adding"));
-    rendered(sheet, "card.value.count.value").click();
-    assert.ok(!tools(sheet)!.classList.contains("in-line"), "nothing follows in a sheet's row: drawn over the gap");
   });
 
   it("shows no tools under the pointer, only for the selected property", async () => {
@@ -1205,54 +1106,36 @@ describe("choices", () => {
     over(rendered(element, "big.value.size.value"));
     assert.equal(tools(element), null, "a pointer over a value moves nothing");
     element.selection = "big.value.size";
-    assert.ok(tools(element)!.classList.contains("in-line"), "selected, they take room in the line");
+    assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "selected, they show");
     over(rendered(element, "base.value.size.value"));
     assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "and stay with the selection");
   });
 
-  it("shows a case's chevron as the tools, taking room before />, which opens and closes its popover", async (t) => {
+  it("shows a case's chevron as the tools, which opens and closes its popover", async () => {
     const element = show(await fixture("adding"));
     const size = rendered(element, "latte.value.size.value");
     element.selection = "latte.value.size";
     const shown = tools(element)!;
-    assert.ok(shown.classList.contains("with-choices") && !shown.classList.contains("with-steppers"));
-    assert.ok(shown.classList.contains("in-line"), "room before the closing />");
-    assert.equal(shown.previousElementSibling, size);
+    assert.ok(shown.classList.contains("with-choices"));
+    assert.equal(shown.previousElementSibling, size, "inside its field, past the value");
     pressTool(shown.querySelector(".choices-toggle")!);
     assert.ok(!popover(element).hidden, "the chevron opens the cases");
     assert.ok(tools(element)!.classList.contains("open"));
     pressTool(tools(element)!.querySelector(".choices-toggle")!);
     assert.ok(popover(element).hidden, "and closes them");
-    assert.ok(tools(element)?.classList.contains("in-line"), "staying with the selection, its room kept");
+    assert.equal(tools(element)?.dataset["toolsFor"], "latte.value.size.value", "staying with the selection");
     pressTool(tools(element)!.querySelector(".choices-toggle")!);
     assert.ok(!popover(element).hidden, "so the next press opens them again");
   });
 
-  it("covers the gap rather than wrap a line that only just fits", async () => {
-    const element = show(await fixture("adding"));
-    const line = rendered(element, "big.value");
-    assert.ok(line.matches(".line-element"));
-    // The line wraps to two once the tools take room in it.
-    line.getBoundingClientRect = () => {
-      const height = line.querySelector(".value-tools.in-line") === null ? 18 : 36;
-      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
-    };
-    element.selection = "big.value.size";
-    const shown = tools(element)!;
-    assert.ok(shown.classList.contains("with-steppers"));
-    assert.ok(!shown.classList.contains("in-line"), "drawn over the gap");
-  });
-
-  it("shows an unset property's tools once its field opens, under a one-line element selected", async () => {
+  it("shows an unset property's tools once its field opens", async () => {
     const element = show(await fixture("adding"));
     element.selection = "plain.value";
-    moreToggle(element)!.click();
-    // size reads its quiet default past it, which the tools move aside.
     const size = rendered(element, "plain.value.size.value");
     size.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
     assert.equal(tools(element), null, "not under the pointer");
     size.click();
-    assert.ok(tools(element)?.classList.contains("with-steppers"), "with its field");
+    assert.ok(tools(element)?.classList.contains("with-choices"), "with its field");
   });
 
   it("opens from its chevron, and picks with the pointer", async () => {
@@ -1274,7 +1157,6 @@ describe("choices", () => {
     choices(element)[0]!.click();
     assert.deepEqual(edits, [{ key: "big.value.size", edit: { kind: "remove" } }]);
     element.selection = "plain.value";
-    moreToggle(element)!.click();
     rendered(element, "plain.value.size.value").click();
     press(field(element)!, "ArrowDown", { altKey: true });
     assert.ok(choices(element)[0]!.classList.contains("current"), "a dimmed row reads its default");
@@ -1355,240 +1237,101 @@ describe("choices", () => {
   });
 });
 
-describe("steppers", () => {
-  it("steps a number on a click, and ten steps on Shift+click, live at once and committed once the reader pauses", async (t) => {
-    // As a sheet, where the steppers cover nothing past the value.
-    narrow(t, 30);
+/** Presses `lead` and drags it sideways through `to`, letting go at the last, as a scrub does. */
+function scrub(lead: Element, to: readonly number[], init: { shiftKey?: boolean; altKey?: boolean; cancel?: boolean } = {}): void {
+  const at = (type: string, clientX: number) =>
+    lead.dispatchEvent(
+      new window.MouseEvent(type, { bubbles: true, composed: true, cancelable: true, clientX, shiftKey: init.shiftKey === true, altKey: init.altKey === true })
+    );
+  at("pointerdown", 0);
+  for (const x of to) {
+    at("pointermove", x);
+  }
+  at(init.cancel === true ? "pointercancel" : "pointerup", to.at(-1) ?? 0);
+}
+
+/** The lead of the field of the property with `key`: its icon, short label or caption. */
+function lead(element: NxViewerElement, key: string): HTMLElement {
+  return rendered(element, key).querySelector<HTMLElement>(":scope > .field-lead")!;
+}
+
+describe("scrubbing", () => {
+  it("changes a number as its lead is dragged sideways, live as it changes, and commits once on release", async () => {
     const element = show(await fixture("adding"));
     const { edits, lives } = events(element);
-    t.mock.timers.enable({ apis: ["setTimeout"] });
-    const value = rendered(element, "card.value.padding.value");
-    element.selection = "card.value.padding";
-    const shown = tools(element)!;
-    assert.ok(shown !== null, "on the selected row");
-    assert.ok(shown.classList.contains("with-steppers"));
-    assert.ok(!shown.classList.contains("with-choices"));
-    assert.equal(shown.previousElementSibling, value, "just past the value");
-    const up = shown.querySelector<HTMLElement>(".stepper.up")!;
-    assert.match(up.title, /\u2191/);
-    assert.match(up.title, /Shift/);
-    assert.match(up.title, /[Dd]rag/);
-    pressTool(up);
-    pressTool(up, { shiftKey: true });
-    assert.deepEqual(lives, [
-      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } }, live: true },
-      { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } }, live: true }
-    ]);
-    assert.deepEqual(edits, [], "not committed while the reader is still clicking");
-    t.mock.timers.tick(499);
-    assert.deepEqual(edits, []);
-    t.mock.timers.tick(1);
-    assert.deepEqual(edits, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "19" } } }]);
-    element.selection = "card.value";
-    assert.equal(tools(element), null, "gone once another unit is selected");
+    const caption = lead(element, "base.value.size");
+    assert.ok(caption.classList.contains("scrubbable"), "a number's lead scrubs");
+    assert.ok(!lead(element, "base.value.tone").classList.contains("scrubbable"), "a string's does not");
+    // Past the four pixels a press may wander, one step for every three from the press.
+    scrub(caption, [4, 7, 10, 13]);
+    assert.deepEqual(lives.map((live) => (live.edit as { value: { text: string } }).value.text), ["17", "18", "19", "20"]);
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "20" } } }]);
+    assert.equal(field(element), null, "no field opens");
   });
 
-  it("takes a press that wanders a few pixels as a click, not a drag", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { lives } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [102, 97] });
-    assert.ok(!body(element).classList.contains("stepping"));
-    assert.deepEqual(lives, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } }, live: true }]);
-  });
-
-  it("steps into an open field, which commits", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
+  it("takes ten steps with Shift, a tenth of one with Alt, and keeps within the range", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
-    rendered(element, "card.value.count.value").click();
-    const open = field(element)!;
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.equal(open.textContent, "3");
-    pressTool(tools(element)!.querySelector(".stepper.down")!, { shiftKey: true });
-    assert.equal(open.textContent, "0", "kept at the least");
-    assert.deepEqual(edits, []);
-    press(open, "Enter");
-    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "0" } } }]);
-  });
-
-  it("scrubs as a stepper is dragged up or down, shown in place and committed once on release", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { edits } = events(element);
-    element.selection = "card.value.gap";
-    const value = rendered(element, "card.value.gap.value");
-    value.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
-    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 74 }));
-    assert.equal(rendered(element, "card.value.gap.value").textContent, "9", "shown as it moves");
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 30 }));
-    assert.equal(rendered(element, "card.value.gap.value").textContent, "16", "kept within the range");
-    assert.deepEqual(edits, []);
-    up.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 30 }));
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
-    assert.equal(element.selection, "card.value.gap", "the selection stays");
-  });
-  it("keeps the steppers as the pointer crosses the gap to reach them", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { lives } = events(element);
-    element.selection = "card.value.padding";
-    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    const value = rendered(element, "card.value.padding.value");
-    over(value);
-    const shown = tools(element)!;
-    over(value.closest(".sheet-value")!);
-    assert.equal(tools(element), shown, "over the value's cell");
-    over(value.closest(".sheet-row")!);
-    assert.equal(tools(element), shown, "over the gap in the value's row");
-    over(shown);
-    pressTool(shown.querySelector(".stepper.up")!);
-    assert.deepEqual(lives, [{ key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "9" } }, live: true }]);
-    over(rendered(element, "card.value.gap.value").closest(".sheet-row")!);
-    assert.equal(tools(element)?.dataset["toolsFor"], "card.value.padding.value", "over another property, back with the selected one's value");
-    element.selection = "card.value";
-    assert.equal(tools(element), null, "and gone once it is not selected");
-  });
-
-  it("shows a selected property's tools with no pointer over it, inline too, and keeps them as the pointer moves", async () => {
-    const element = show(await fixture("adding"));
-    const over = (target: Element) => target.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    assert.equal(tools(element), null);
-    const name = rendered(element, "base.value.size").querySelector<HTMLElement>(".line-name")!;
-    name.click();
-    assert.equal(element.selection, "base.value.size");
-    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "the steppers, as soon as it is selected");
-    assert.ok(field(element) === null, "and no editor opens");
-    over(rendered(element, "big.value.size.value"));
-    body(element).dispatchEvent(new window.MouseEvent("pointerleave"));
-    assert.equal(tools(element)?.dataset["toolsFor"], "base.value.size.value", "the pointer moves nothing");
-    rendered(element, "big.value.size.value").click();
-    assert.equal(element.selection, "big.value.size", "a click on another value selects its property");
-    press(field(element)!, "Escape");
-    assert.equal(tools(element)?.dataset["toolsFor"], "big.value.size.value", "and closing its field leaves its tools");
-  });
-
-  it("shows a let's steppers, and takes room for them where more of the line follows", async () => {
-    const element = show(await fixture("adding"));
-    element.selection = "pad";
-    const shown = tools(element)!;
-    assert.ok(shown.classList.contains("with-steppers"), "a let selected shows its value's");
-
-    const edges = show(await fixture("editingEdges"));
-    edges.selection = "box.value.depth";
-    assert.ok(tools(edges)!.classList.contains("in-line"), "in the line, before the rest of a one-line element's line");
-    edges.selection = "box.value.items.value[0]";
-    assert.ok(tools(edges)!.classList.contains("in-line"), "and before the next item");
-  });
-
-  it("keeps the steppers under the pointer through the tree a click brings, and through a cleared one", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { lives } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.equal(lives.length, 1);
-    const tree = element.tree;
-    element.tree = undefined;
-    element.tree = tree;
-    assert.ok(tools(element), "still there for the next click, not the row under them");
-    assert.equal(element.selection, "card.value.gap");
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.equal(lives.length, 2, "the next click steps again");
-    assert.deepEqual(lives[1]!.edit, { kind: "setValue", value: { kind: "number", text: "6" } }, "on from the number the last click showed");
-  });
-
-  it("carries a drag on through a new tree, and ends it cleanly when the reading goes", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { edits } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
-    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 54 }));
-    assert.equal(rendered(element, "card.value.gap.value").textContent, "14");
-    element.tree = element.tree;
-    assert.equal(rendered(element, "card.value.gap.value").textContent, "14", "still shown");
-    assert.ok(body(element).classList.contains("stepping"));
-    const again = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
-    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 46 }));
-    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 46 }));
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }]);
-    assert.ok(!body(element).classList.contains("stepping"));
-
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    const down = tools(element)!.querySelector<HTMLElement>(".stepper.down")!;
-    down.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
-    down.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 110 }));
-    assert.ok(body(element).classList.contains("stepping"));
-    element.remove();
-    assert.ok(!body(element).classList.contains("stepping"), "nothing is left resizing");
-  });
-
-  it("carries a drag on through a cleared tree and the next, as a host gives a live edit's", async (t) => {
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { edits, lives } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    const up = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
-    up.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true, cancelable: true, clientY: 100 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 94 }));
-    up.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 74 }));
-    assert.ok(lives.length > 0, "the drag went live");
-    const tree = element.tree;
-    element.tree = undefined;
-    element.tree = tree;
-    const again = tools(element)!.querySelector<HTMLElement>(".stepper.up")!;
-    again.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, composed: true, clientY: 54 }));
-    assert.equal(rendered(element, "card.value.gap.value").textContent, "14", "still stepping");
-    again.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, composed: true, clientY: 54 }));
+    scrub(lead(element, "card.value.gap"), [4, 5], { shiftKey: true });
     assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "14" } } }]);
+    scrub(lead(element, "card.value.padding"), [4, -400]);
+    assert.deepEqual(edits[1], { key: "card.value.padding.value", edit: { kind: "setValue", value: { kind: "number", text: "0" } } }, "no lower than its min");
+    const fine = show(await treeOf([{ uri: "nx:///fine.nx", identity: "fine.nx", source: "type Dot = { r:float64 = 1.0 }\nlet dot = <Dot r=1.0 />\n" }]));
+    const fired = events(fine);
+    scrub(lead(fine, "dot.value.r"), [4, 7], { altKey: true });
+    assert.deepEqual(fired.edits, [{ key: "dot.value.r.value", edit: { kind: "setValue", value: { kind: "number", text: "1.2" } } }]);
   });
 
-  it("shows the value as before when a drag ends where it began", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
+  it("steps a whole number by at least one with Alt, and fires nothing before the first step", async () => {
+    const whole = show(await treeOf([{ uri: "nx:///whole.nx", identity: "whole.nx", source: "type Dot = { count:int = 3 }\nlet dot = <Dot count=3 />\n" }]));
+    const { edits, lives } = events(whole);
+    scrub(lead(whole, "dot.value.count"), [4, 7], { altKey: true });
+    assert.deepEqual(lives.map((live) => (live.edit as { value: { text: string } }).value.text), ["4", "5"]);
+    assert.deepEqual(edits, [{ key: "dot.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+  });
+
+  it("focuses the field on a press that moves less than four pixels", async () => {
     const element = show(await fixture("adding"));
     const { edits, lives } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 84, 94] });
-    // The drag went live, and ending where it began takes it back.
-    assert.ok(lives.length > 0);
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "4" } } }]);
-    const value = rendered(element, "card.value.gap.value");
-    assert.equal(value.textContent, "4");
-    assert.ok(!value.classList.contains("pending"), "nothing is waiting");
+    scrub(lead(element, "base.value.size"), [2]);
+    assert.ok(field(element), "the field opens");
+    assert.equal(field(element)!.textContent, "16");
+    assert.equal(element.selection, "base.value.size", "and its property is selected");
+    assert.deepEqual([edits, lives], [[], []]);
   });
 
-  it("fills an open field from a drag, which commits", async (t) => {
-    // As a sheet, where the steppers cover nothing under the pointer.
-    narrow(t, 30);
+  it("puts the number back when the drag is cancelled", async () => {
+    const element = show(await fixture("adding"));
+    const { edits, lives } = events(element);
+    scrub(lead(element, "base.value.size"), [4, 7, 10], { cancel: true });
+    assert.equal(lives.length, 3);
+    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: { kind: "setValue", value: { kind: "number", text: "16" } } }], "the live edits end");
+    assert.equal(rendered(element, "base.value.size.value").textContent, "16");
+  });
+
+  it("scrubs an unset number from its default, adding it", async () => {
+    const element = show(await fixture("adding"));
+    const { edits } = events(element);
+    scrub(unset(element, "latte.value").find((row) => row.dataset["name"] === "shots")!.querySelector(".field-lead")!, [4, 5]);
+    assert.deepEqual(edits, [{ key: "latte.value", edit: { kind: "addProperty", name: "shots", value: { kind: "number", text: "2" } } }]);
+  });
+
+  it("fills an open field from a drag, which commits on Enter", async () => {
     const element = show(await fixture("adding"));
     const { edits } = events(element);
     rendered(element, "card.value.count.value").click();
-    const open = field(element)!;
-    pressTool(tools(element)!.querySelector(".stepper.up")!, { from: 100, to: [94, 82] });
-    assert.equal(open.textContent, "5");
-    assert.equal(field(element), open);
+    scrub(lead(element, "card.value.count"), [4, 7]);
+    assert.equal(field(element)!.textContent, "4");
     assert.deepEqual(edits, []);
-    press(open, "Enter");
-    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }]);
+    press(field(element)!, "Enter");
+    assert.deepEqual(edits, [{ key: "card.value.count.value", edit: { kind: "setValue", value: { kind: "number", text: "4" } } }]);
+  });
+
+  it("shows no steppers", async () => {
+    const element = show(await fixture("adding"));
+    element.selection = "card.value.padding";
+    rendered(element, "card.value.padding.value").click();
+    assert.equal(root(element).querySelector(".stepper"), null);
   });
 });
 
@@ -1645,9 +1388,7 @@ describe("bindings and other elements", () => {
     const element = show(await fixture("bindings"));
     const { edits } = events(element);
     element.selection = "promo.value";
-    assert.equal(moreToggle(element)?.textContent, "Show 1 unset property");
-    moreToggle(element)!.click();
-    assert.deepEqual(moreRows(element).map(reads), ["pumps 1 default"]);
+    assert.deepEqual(unset(element, "promo.value").map(reads), ["Pumps 1"]);
     rendered(element, "promo.value.pumps.value").click();
     const open = field(element)!;
     open.textContent = "2";
@@ -1677,18 +1418,18 @@ describe("live edits", () => {
   const color = (value: string) => ({ kind: "setValue", value: { kind: "string", value } });
   const number = (text: string) => ({ kind: "setValue", value: { kind: "number", text } });
 
-  it("goes live with each step of an open field's steppers, and commits on Enter", async () => {
+  it("goes live with each step of an open field's arrow keys, and commits on Enter", async () => {
     const element = show(await fixture("adding"));
     const { edits, lives } = events(element);
-    rendered(element, "base.value.size.value").click();
+    rendered(element, "card.value.gap.value").click();
     const open = field(element)!;
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.deepEqual(lives.map((detail) => detail.edit), [number("17"), number("18")]);
-    assert.ok(lives.every((detail) => detail.live === true && detail.key === "base.value.size.value"));
+    press(open, "ArrowUp");
+    press(open, "ArrowUp");
+    assert.deepEqual(lives.map((detail) => detail.edit), [number("5"), number("6")]);
+    assert.ok(lives.every((detail) => detail.live === true && detail.key === "card.value.gap.value"));
     assert.deepEqual(edits, []);
     press(open, "Enter");
-    assert.deepEqual(edits, [{ key: "base.value.size.value", edit: number("18") }]);
+    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("6") }]);
   });
 
   it("goes live with a typed entry once typing pauses, and never with one it cannot take", async (t) => {
@@ -1758,125 +1499,39 @@ describe("live edits", () => {
     assert.ok(popover(element).hidden);
   });
 
-  it("commits stepper clicks made with the field closed when the reader selects something else", async (t) => {
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { edits, lives } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    assert.equal(lives.length, 1);
-    rendered(element, "card.value.padding").querySelector<HTMLElement>(".sheet-name")!.click();
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
-  });
-
-  it("commits stepper clicks made with the field closed when the reader opens that field", async (t) => {
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { edits } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    rendered(element, "card.value.gap.value").click();
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
-    assert.equal(field(element)?.textContent, "5", "the field opens on the value the clicks left");
-  });
-
-  it("commits stepper clicks made with the field closed when the element leaves the page", async (t) => {
-    narrow(t, 30);
-    const element = show(await fixture("adding"));
-    const { edits } = events(element);
-    element.selection = "card.value.gap";
-    rendered(element, "card.value.gap.value").dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true, composed: true }));
-    pressTool(tools(element)!.querySelector(".stepper.up")!);
-    element.remove();
-    assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: number("5") }]);
-  });
 });
 
 describe("selection as editors open, and gestures the reader moves on from", () => {
-  it("keeps an element selected, and its unset list open, when a value it lists opens", async () => {
+  it("keeps an element selected when the field of a property it does not write opens", async () => {
     const element = show(await fixture("adding"));
-    element.selection = "base.value";
-    moreToggle(element)!.click();
-    const listed = moreRows(element).length;
+    element.selection = "plain.value";
+    const listed = unset(element, "plain.value").length;
     assert.ok(listed > 0);
-    rendered(element, "base.value.size.value").click();
+    rendered(element, "plain.value.size.value").click();
     assert.ok(field(element), "the field opens");
-    assert.equal(element.selection, "base.value", "the element stays selected");
-    assert.equal(moreRows(element).length, listed, "and its list stays");
+    assert.equal(element.selection, "plain.value", "the element stays selected");
+    assert.equal(unset(element, "plain.value").length, listed, "and its unset fields stay");
   });
 
-  it("keeps a unit selected when Enter opens its first value, and Escape leaves it selected", async () => {
+  it("keeps a property selected when Enter opens its value, and Escape leaves it selected", async () => {
     const element = show(await fixture("adding"));
-    element.selection = "latte.value";
+    element.selection = "latte.value.name";
     press(body(element), "Enter");
-    const open = field(element) ?? root(element).querySelector<HTMLElement>(".popover:not([hidden]) input");
+    const open = field(element);
     assert.ok(open, "an editor opens");
-    assert.equal(element.selection, "latte.value");
+    assert.equal(element.selection, "latte.value.name");
     press(open, "Escape");
-    assert.equal(element.selection, "latte.value", "Escape keeps the selection");
-  });
-
-  it("commits stepper clicks made with the field closed on a press elsewhere, and on the host's undo keys", async (t) => {
-    narrow(t, 30);
-    for (const how of ["press", "keys"] as const) {
-      const element = show(await fixture("adding"));
-      const { edits } = events(element);
-      element.selection = "card.value.gap";
-      pressTool(tools(element)!.querySelector(".stepper.up")!);
-      assert.deepEqual(edits, [], "settling");
-      if (how === "press") {
-        document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, composed: true }));
-      } else {
-        press(body(element), "z", { ctrlKey: true });
-      }
-      assert.deepEqual(edits, [{ key: "card.value.gap.value", edit: { kind: "setValue", value: { kind: "number", text: "5" } } }], how);
-    }
+    assert.equal(element.selection, "latte.value.name", "Escape keeps the selection");
   });
 
   it("keeps a double-click's word selected", async (t) => {
     const selection = fakeSelection(t);
     const element = show(await fixture("adding"));
-    const name = rendered(element, "base.value.size").querySelector<HTMLElement>(".line-name")!;
+    const name = rendered(element, "base.value.size").querySelector<HTMLElement>(".field-lead")!;
     selection.selectAllChildren(name);
     name.dispatchEvent(new window.MouseEvent("click", { bubbles: true, composed: true, detail: 2 }));
     assert.equal(selection.isCollapsed, false, "the word stays selected");
     assert.notEqual(element.selection, "base.value.size", "and nothing is chosen");
-  });
-
-  it("hangs a selected inline property's mark over the gap where its room would wrap the line", async () => {
-    const element = show(await fixture("adding"));
-    const line = rendered(element, "big.value");
-    line.getBoundingClientRect = () => {
-      const wraps = line.querySelector(".property-menu:not(.over-gap) > .row-menu.selected") !== null;
-      const height = wraps ? 36 : 18;
-      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
-    };
-    element.selection = "big.value.size";
-    const anchor = rendered(element, "big.value.size").nextElementSibling as HTMLElement;
-    assert.ok(anchor.matches(".property-menu"));
-    assert.ok(anchor.classList.contains("over-gap"), "no room taken");
-  });
-
-  it("moves a selected inline property's mark past tools drawn over the gap without taking room", async () => {
-    const element = show(await fixture("adding"));
-    element.selection = "base.value.size";
-    const shown = tools(element)!;
-    const line = rendered(element, "big.value");
-    // The line only just fits: tools in it, or a mark taking room, would wrap it.
-    line.getBoundingClientRect = () => {
-      const wraps = line.querySelector(".value-tools.in-line") !== null || line.querySelector(".property-menu:not(.over-gap) > .row-menu.selected") !== null;
-      const height = wraps ? 36 : 18;
-      return { x: 0, y: 0, top: 0, left: 0, right: 300, bottom: height, width: 300, height, toJSON: () => ({}) } as DOMRect;
-    };
-    shown.getBoundingClientRect = () => ({ x: 100, y: 0, top: 0, left: 100, right: 130, bottom: 18, width: 30, height: 18, toJSON: () => ({}) }) as DOMRect;
-    const anchor = rendered(element, "big.value.size").nextElementSibling as HTMLElement;
-    anchor.getBoundingClientRect = () => ({ x: 104, y: 0, top: 0, left: 104, right: 104, bottom: 18, width: 0, height: 18, toJSON: () => ({}) }) as DOMRect;
-    element.selection = "big.value.size";
-    assert.ok(!tools(element)!.classList.contains("in-line"), "the tools cover the gap");
-    assert.equal(anchor.style.marginLeft, "", "the mark takes no room");
-    assert.match(anchor.style.transform, /translateX\(26px\)/, "and is moved past the tools");
   });
 
   it("keeps the selected unit when Space toggles its boolean", async () => {
@@ -1907,12 +1562,31 @@ describe("typed color editors", () => {
     const { edits } = events(element);
     rendered(element,node.key).click();
     const alpha=popover(element).querySelector<HTMLInputElement>(".popover-alpha")!;
-    alpha.value="0.25";
+    assert.equal(alpha.value,"50","opacity reads as a whole percent");
+    assert.equal(popover(element).querySelector<HTMLInputElement>(".popover-hex")!.value,"#336699","the hex shows the color alone");
+    alpha.value="25";
     alpha.dispatchEvent(new window.Event("change",{bubbles:true}));
     assert.deepEqual(edits,[{key:node.key,edit:{kind:"setValue",value:{kind:"color",text:"#33669940"}}}]);
     const targets=editTargets(indexTree(item.tree,item.text));
     const computed=item.tree.nodes.find(node=>node.role==="call")!;
     assert.equal(targets.has(computed.key),false);
+  });
+  it("commits a new hex with the opacity beside it, and a color left as it opened unchanged", async () => {
+    const item = await fromSource("let accent = #f008\n");
+    const node = item.tree.nodes.find(node => node.value === "#f008")!;
+    const element = show(item);
+    const { edits } = events(element);
+    rendered(element,node.key).click();
+    const hex=popover(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    assert.equal(hex.value,"#ff0000");
+    press(hex,"Enter");
+    assert.deepEqual(edits,[],"a percent that rounds the alpha writes nothing");
+    rendered(element,node.key).click();
+    const again=popover(element).querySelector<HTMLInputElement>(".popover-hex")!;
+    again.value="#00ff00";
+    again.dispatchEvent(new window.Event("input",{bubbles:true}));
+    press(again,"Enter");
+    assert.deepEqual(edits,[{key:node.key,edit:{kind:"setValue",value:{kind:"color",text:"#00ff0087"}}}]);
   });
   it("keeps legacy CSS string color editors free of the typed alpha control", async () => {
     const item=await fromSource('import "@nx/visualizer"\ntype Swatch = string\nvisualizer Swatch = <ValueVisualizer format=color/>\nlet accent:Swatch = "rgba(0, 0, 0, 0.5)"\n');
@@ -1924,6 +1598,86 @@ describe("typed color editors", () => {
     assert.equal(popover(element).querySelector<HTMLInputElement>(".popover-hex")!.value,"rgba(0, 0, 0, 0.5)");
     press(popover(element).querySelector(".popover-hex")!,"Escape");
     assert.deepEqual(edits,[]);
+  });
+});
+
+describe("colors in an inspector", () => {
+  const fill = async () => {
+    const item = await treeOf([{ uri: "nx:///fill.nx", identity: "fill.nx", source: "type Fill = { tint:color }\nlet fill = <Fill tint=#33669980 />\n" }]);
+    const node = item.tree.nodes.find((node) => node.value === "#33669980")!;
+    const element = show(item);
+    return { element, key: node.key, value: () => rendered(element, node.key) };
+  };
+  const color = (text: string) => ({ kind: "setValue", value: { kind: "color", text } });
+
+  it("reads a color in its parts, a six-digit hex and its opacity in percent", async () => {
+    const { value } = await fill();
+    assert.ok(value().closest(".inspector"), "in its element's inspector");
+    assert.equal(value().querySelector(".color-hex")?.textContent, "#336699");
+    assert.equal(value().querySelector(".opacity-value")?.textContent, "50");
+    assert.equal(value().querySelector(".opacity-unit")?.textContent, "%");
+    assert.ok(value().querySelector(":scope > .swatch"));
+  });
+
+  it("reads a shorthand color's hex in six digits", async () => {
+    for (const [written, hex, percent] of [["#abc", "#aabbcc", "100"], ["#abcd", "#aabbcc", "87"]] as const) {
+      const item = await treeOf([{ uri: "nx:///short.nx", identity: "short.nx", source: `type Fill = { tint:color }\nlet fill = <Fill tint=${written} />\n` }]);
+      const node = item.tree.nodes.find((node) => node.value === written)!;
+      const element = show(item);
+      const value = rendered(element, node.key);
+      assert.equal(value.querySelector(".color-hex")?.textContent, hex, written);
+      assert.equal(value.querySelector(".opacity-value")?.textContent, percent, written);
+    }
+  });
+
+  it("edits the hex in place, keeping the opacity, and the opacity, keeping the hex", async () => {
+    const { element, key, value } = await fill();
+    const { edits } = events(element);
+    value().querySelector<HTMLElement>(".color-hex")!.click();
+    let open = field(element)!;
+    assert.equal(open.textContent, "#336699");
+    open.textContent = "#ff0000";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(open, "Enter");
+    assert.deepEqual(edits, [{ key, edit: color("#ff000080") }]);
+    value().querySelector<HTMLElement>(".opacity-value")!.click();
+    open = field(element)!;
+    assert.equal(open.textContent, "50");
+    press(open, "Enter");
+    assert.equal(edits.length, 1, "an opacity left as it opened writes nothing");
+    value().querySelector<HTMLElement>(".opacity-value")!.click();
+    open = field(element)!;
+    open.textContent = "25";
+    open.dispatchEvent(new window.Event("input", { bubbles: true }));
+    press(open, "Enter");
+    assert.deepEqual(edits.at(-1), { key, edit: color("#ff000040") }, "on the hex it committed");
+  });
+
+  it("opens the color picker from the swatch, live as it moves, committing once", async () => {
+    const { element, key, value } = await fill();
+    const { edits, lives } = events(element);
+    value().querySelector<HTMLElement>(":scope > .swatch")!.click();
+    assert.equal(popover(element).hidden || !popover(element).isConnected || popover(element).querySelector(".popover-hex") === null, true, "no popover");
+    const picker = root(element).querySelector<HTMLInputElement>(".swatch-picker")!;
+    assert.equal(picker.value, "#336699");
+    for (const next of ["#112233", "#445566"]) {
+      picker.value = next;
+      picker.dispatchEvent(new window.Event("input", { bubbles: true }));
+    }
+    assert.deepEqual(lives.map((detail) => detail.edit), [color("#11223380"), color("#44556680")]);
+    picker.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.deepEqual(edits, [{ key, edit: color("#44556680") }]);
+    assert.equal(root(element).querySelector(".swatch-picker"), null, "the picker goes once closed");
+  });
+
+  it("scrubs the opacity as its percent sign is dragged, committing once on release", async () => {
+    const { element, key, value } = await fill();
+    const { edits, lives } = events(element);
+    scrub(value().querySelector(".opacity-unit")!, [2, 6, 30]);
+    assert.deepEqual(lives.map((detail) => detail.edit), [color("#33669985"), color("#33669999")], "once past a few pixels");
+    assert.deepEqual(edits, [{ key, edit: color("#33669999") }]);
+    scrub(value().querySelector(".opacity-unit")!, [-3000]);
+    assert.deepEqual(edits.at(-1), { key, edit: color("#33669900") }, "no less than none");
   });
 });
 
@@ -1966,7 +1720,7 @@ describe("value constraints", () => {
     assert.deepEqual(targets.get("paint.value.opacity.value")?.hints, { min: 0, max: 1, step: 0.1 });
     assert.deepEqual(targets.get("paint.value.layer.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
     assert.deepEqual(targets.get("paint.value.weight.value")?.hints, { min: 0, minExclusive: true });
-    assert.deepEqual(targets.get("paint.value.columns.value")?.hints, { min: 1, max: 12 }, "an integer steps by one");
+    assert.deepEqual(targets.get("paint.value.columns.value")?.hints, { min: 1, max: 12, integer: true }, "an integer steps by one");
     assert.deepEqual(targets.get("half.value")?.hints, { min: 0, max: 1, step: 0.1, maxExclusive: true });
     assert.deepEqual(
       targets.get("paint.value.dim.value")?.hints,
@@ -1978,7 +1732,7 @@ describe("value constraints", () => {
     assert.deepEqual(targets.get("paint.value.upper.value")?.hints, { min: 0, max: 1, step: 0.1 });
     const extra = unwrittenProperties(index, index.byKey.get("paint.value")!).find((entry) => entry.property.name === "extra");
     assert.equal(extra?.editor?.kind, "number");
-    assert.deepEqual(extra?.hints, { min: 1, max: 10 });
+    assert.deepEqual(extra?.hints, { min: 1, max: 10, integer: true });
   });
 
   it("steps up to an inclusive end and stays there", async () => {

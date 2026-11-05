@@ -130,13 +130,43 @@ type ChatLinkConfig = {
   preview?:LinkPreview
 }
 
-visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot" />
-visualizer StatementStep = <ElementVisualizer title=headline id=id icon="message-square-text" />
-visualizer Question = <ElementVisualizer title=label id=id icon="circle-question-mark" />
-visualizer SelectQuestion = <ElementVisualizer icon="list-checks" />
-visualizer ShortTextQuestion = <ElementVisualizer icon="text-cursor-input" />
-visualizer EmailQuestion = <ElementVisualizer icon="mail" />
-visualizer QuestionFlow = <ElementVisualizer title=title id=id icon="clipboard-list" />
+visualizer Choice = <ElementVisualizer title=label id=value idPosition=end icon="circle-dot">
+  <PropertyVisualizer property=description label="Description" />
+  <PropertyVisualizer property=pinned label="Pinned" />
+  <PropertyVisualizer property=exclusive label="Exclusive" />
+</ElementVisualizer>
+visualizer StatementStep = <ElementVisualizer title=headline id=id icon="message-square-text">
+  <PropertyVisualizer property=cta label="Button" />
+</ElementVisualizer>
+visualizer Question = <ElementVisualizer title=label id=id icon="circle-question-mark">
+  <PropertyVisualizer property=description label="Description" />
+  <PropertyVisualizer property=required label="Required" />
+  <PropertyVisualizer property=requiredMessage label="Required message" />
+  <PropertyVisualizer property=mediaPosition label="Media position" />
+</ElementVisualizer>
+visualizer SelectQuestion = <ElementVisualizer icon="list-checks">
+  <PropertyVisualizer property=multiple label="Multiple answers" />
+  <PropertyVisualizer property=other label="Other" />
+  <PropertyVisualizer property=otherLabel label="Other label" />
+  <PropertyVisualizer property=carryForwardMode label="Carry forward" />
+  <PropertyVisualizer property=layout label="Layout" />
+</ElementVisualizer>
+visualizer ShortTextQuestion = <ElementVisualizer icon="text-cursor-input">
+  <PropertyVisualizer property=placeholder label="Placeholder" />
+  <PropertyVisualizer property=inputType label="Input type" />
+  <PropertyVisualizer property=minLength label="Min length" />
+  <PropertyVisualizer property=maxLength label="Max length" />
+</ElementVisualizer>
+visualizer EmailQuestion = <ElementVisualizer icon="mail">
+  <PropertyVisualizer property=placeholder label="Placeholder" />
+  <PropertyVisualizer property=mapsToContactEmail label="Contact email" />
+</ElementVisualizer>
+visualizer QuestionFlow = <ElementVisualizer title=title id=id icon="clipboard-list">
+  <PropertyVisualizer property=presentation label="Presentation" />
+  <PropertyVisualizer property=showQuestionNumbers label="Question numbers" />
+  <PropertyVisualizer property=showProgressBar label="Progress bar" />
+  <PropertyVisualizer property=completion label="Completion" />
+</ElementVisualizer>
 visualizer CompletionScreen = <ElementVisualizer title=headline icon="flag" />
 visualizer LinkPreview = <ElementVisualizer title=title icon="link" />
 visualizer ChatIdentity = <ElementVisualizer title=name icon="bot" />

@@ -12,6 +12,15 @@ export interface Card {
   readonly signature: string;
   /** The doc comment, as Markdown, when there is one. */
   readonly doc?: string;
+  /**
+   * Whether the signature is a title, a bare name, as an element's card has: the reading already
+   * shows what kind of thing it is, so the card names it in prose instead of in NX.
+   */
+  readonly title?: true;
+  /** What a titled card adds after its name, quietly: `extends Node`. */
+  readonly detail?: string;
+  /** What kind of declaration a titled card names, for its chip: `component`, `function`, `type`. */
+  readonly kind?: string;
 }
 
 /** The roles of the values a card describes, where the reading shows them. */
@@ -73,11 +82,27 @@ function elementCard(index: TreeIndex, node: SourceNode): Card | undefined {
     return undefined;
   }
   const name = node.name ?? "";
+  let doc = declaration.doc;
   if (declaration.kind === "union" && name.includes(".")) {
-    return caseCard(index, node.declaration, name.slice(name.lastIndexOf(".") + 1), undefined);
+    doc = declaration.cases?.find((candidate) => candidate.name === name.slice(name.lastIndexOf(".") + 1))?.doc;
   }
-  // An element names a function only when the function is an element function.
-  return declarationCard(index, node.declaration!, declaration.kind === "function");
+  // The name titles the card; a base is all the declaration adds that the reading does not show.
+  const base = declaration.bases?.[0] === undefined ? undefined : index.tree.declarations[declaration.bases[0]];
+  const card: Card = { ...withDoc(name, doc), title: true, kind: chipOf(declaration, name) };
+  return base === undefined ? card : { ...card, detail: `extends ${base.name}` };
+}
+
+/** The word an element's card shows in its kind chip. */
+function chipOf(declaration: SourceDeclaration, name: string): string {
+  switch (declaration.kind) {
+    case "union":
+      return name.includes(".") ? "case" : "type";
+    case "record":
+    case "alias":
+      return "type";
+    default:
+      return declaration.kind;
+  }
 }
 
 /** A declaration's signature, as the editor's hover begins it, and its doc. */

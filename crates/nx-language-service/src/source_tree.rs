@@ -309,6 +309,10 @@ pub struct SourceVisualizer {
     /// The name of the Lucide icon that marks the element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Whether an element value reads its set properties on its field's line, when the visualizer
+    /// says; otherwise a viewer decides by the value's size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline: Option<bool>,
     /// Optional rendered presentation, supplied by a host implementation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<SourcePreviewVisualizer>,
@@ -335,6 +339,9 @@ pub struct SourcePreviewVisualizer {
 pub struct SourcePropertyVisualizer {
     /// The property's name.
     pub name: String,
+    /// The name a viewer shows for the property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// How the property's string value is shown: from its property visualizer, or else from the
     /// visualizer of the alias its type names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2332,6 +2339,7 @@ impl<'a> TreeBuilder<'a> {
             .filter(|merged| names.contains(&merged.property))
             .map(|merged| SourcePropertyVisualizer {
                 name: merged.property.clone(),
+                label: merged.get("label").map(str::to_string),
                 format: merged
                     .get("format")
                     .map(str::to_string)
@@ -2345,6 +2353,7 @@ impl<'a> TreeBuilder<'a> {
                     format: type_format(&name),
                     editor: editor(&name, None),
                     name,
+                    ..SourcePropertyVisualizer::default()
                 });
             }
         }
@@ -2356,6 +2365,7 @@ impl<'a> TreeBuilder<'a> {
                 .map(|_| resolved.id_position.unwrap_or_else(|| "start".to_string())),
             id: resolved.id,
             icon: resolved.icon,
+            inline: resolved.inline.map(|inline| inline == "true"),
             preview: resolved
                 .preview
                 .map(|renderer| SourcePreviewVisualizer { renderer }),

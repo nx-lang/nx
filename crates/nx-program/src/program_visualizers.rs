@@ -274,7 +274,8 @@ pub struct VisualizerValue {
     pub preview: Option<String>,
     /// The attributes, in source order.
     pub attributes: Vec<(String, VisualizerAttribute)>,
-    /// The `PropertyVisualizer`s of an `ElementVisualizer`, in source order.
+    /// The `PropertyVisualizer`s of an `ElementVisualizer` or a `FunctionVisualizer`, in source
+    /// order.
     pub children: Vec<VisualizerChild>,
     /// The `ValueChoice`s of a `ValueVisualizer`, in source order.
     pub choices: Vec<VisualizerChoice>,

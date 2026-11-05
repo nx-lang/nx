@@ -1630,8 +1630,6 @@ impl<'a> InferenceContext<'a> {
                 self.type_from_type_ref_in_quietly(None, &ast::TypeRef::name(name.as_str()))
             })
             .unwrap_or(Type::Error);
-        // FunctionVisualizer declares no Target. An error binding still suppresses secondary
-        // missing-type-argument errors when a mismatched ElementVisualizer targets a function.
         let binding = Some((
             target_ty.clone(),
             target.as_ref().map(|target| target.record),
@@ -1746,14 +1744,13 @@ impl<'a> InferenceContext<'a> {
             return;
         };
         match record {
-            nx_hir::VisualizerRecord::Function => {}
             nx_hir::VisualizerRecord::Value => {
                 let kind = self.hint_value_kind(target_ty);
                 self.check_hint_attributes(&properties, kind, None, target_ty);
                 let integral = Self::is_integral(target_ty);
                 self.check_choices(&content, kind, integral, None);
             }
-            nx_hir::VisualizerRecord::Element => {
+            nx_hir::VisualizerRecord::Element | nx_hir::VisualizerRecord::Function => {
                 let shape = match target_ty {
                     Type::Named(named) => self.record_shape_of(named).ok().flatten(),
                     _ => None,
@@ -9043,7 +9040,10 @@ pub(crate) fn widened_type(ty: &Type, target: nx_hir::ast::PrimitiveType) -> Typ
 fn visualizer_record_fits(expected: nx_hir::VisualizerRecord, record: &str) -> bool {
     match record {
         "ElementVisualizer" | "ValueVisualizer" | "FunctionVisualizer" => record == expected.name(),
-        "PropertyVisualizer" => expected == nx_hir::VisualizerRecord::Element,
+        "PropertyVisualizer" => matches!(
+            expected,
+            nx_hir::VisualizerRecord::Element | nx_hir::VisualizerRecord::Function
+        ),
         _ => true,
     }
 }

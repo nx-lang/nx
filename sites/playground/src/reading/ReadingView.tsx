@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import "@nx-lang/viewer";
 import {
+  NX_DETAILS_EVENT,
+  type NxDetailsState,
+  type NxDetailsDetail,
   NX_DRAFT_EVENT,
   NX_EDIT_EVENT,
   NX_FOLD_EVENT,
@@ -27,6 +30,8 @@ import "@fontsource/geist-mono/latin-400-italic.css";
 import "@fontsource/geist-mono/latin-700.css";
 
 export interface ReadingViewProps {
+  readonly detailsState: NxDetailsState | undefined;
+  readonly onDetails: (state: NxDetailsState, selection: string | undefined) => void;
   readonly reading: Reading;
   /** The selected node's key. */
   readonly selection: string | undefined;
@@ -55,6 +60,7 @@ export interface ReadingViewProps {
 
 /** What the NX pane's title bar can ask of the Visual view. */
 export interface ReadingCommands {
+  finishEditing(): boolean;
   collapseAll(): void;
   expandAll(): void;
 }
@@ -83,6 +89,8 @@ function loadIcons(): Promise<NxViewerIcons> {
 /** The NX pane's Visual view: `<nx-viewer>` showing the source tree, or why it cannot. */
 export function ReadingView({
   reading,
+  detailsState,
+  onDetails,
   selection,
   onSelect,
   folded,
@@ -103,6 +111,7 @@ export function ReadingView({
   const editable = onEdit !== undefined;
   useEffect(() => {
     commands.current = {
+      finishEditing: () => element.current?.finishEditing() ?? true,
       collapseAll: () => element.current?.collapseAll(),
       expandAll: () => element.current?.expandAll(),
     };
@@ -144,6 +153,8 @@ export function ReadingView({
       current = false;
     };
   }, []);
+  const latestDetails = useRef(onDetails);
+  latestDetails.current = onDetails;
   const latestSelect = useRef(onSelect);
   latestSelect.current = onSelect;
 
@@ -154,6 +165,7 @@ export function ReadingView({
     if (target === null || reading.tree === null || reading.text === null) {
       return;
     }
+    target.detailsState = detailsState;
     target.tree = undefined;
     target.text = reading.text;
     target.folded = folded;
@@ -175,6 +187,10 @@ export function ReadingView({
     if (target === null) {
       return;
     }
+    const detailsListener = (event: Event) => {
+      const { state, selection } = (event as CustomEvent<NxDetailsDetail>).detail;
+      latestDetails.current(state, selection);
+    };
     const listener = (event: Event) => latestSelect.current((event as CustomEvent<NxSelectDetail>).detail.key);
     const foldListener = (event: Event) => {
       const { folded, selection } = (event as CustomEvent<NxFoldDetail>).detail;
@@ -200,6 +216,7 @@ export function ReadingView({
         handler();
       }
     };
+    target.addEventListener(NX_DETAILS_EVENT, detailsListener);
     target.addEventListener(NX_SELECT_EVENT, listener);
     target.addEventListener(NX_FOLD_EVENT, foldListener);
     target.addEventListener(NX_EDIT_EVENT, editListener);
@@ -207,6 +224,7 @@ export function ReadingView({
     target.addEventListener(NX_DRAFT_EVENT, draftListener);
     target.addEventListener("keydown", keyListener);
     return () => {
+      target.removeEventListener(NX_DETAILS_EVENT, detailsListener);
       target.removeEventListener(NX_SELECT_EVENT, listener);
       target.removeEventListener(NX_FOLD_EVENT, foldListener);
       target.removeEventListener(NX_EDIT_EVENT, editListener);

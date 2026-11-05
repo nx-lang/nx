@@ -5,9 +5,7 @@
 Defines the fiddle's Visual and Source switch for NX: a reading of the snippet in the NX viewer beside
 the editor, how it is computed and drawn, how it shares a selection and folds with the editor, and the
 language-agnostic contract through which a fiddle language offers a visual view.
-
 ## Requirements
-
 ### Requirement: A language can offer a visual view of its source
 The fiddle engine SHALL let a language declare that it offers a visual view of its source, through
 the language contract and its registration script, with no language named in the editor page. While a
@@ -73,17 +71,18 @@ them. Without the icons, the reading SHALL be drawn unmarked.
 - **THEN** the reading SHALL be drawn in its dark colors, matching the editor
 
 ### Requirement: The switch offers folding, and folds are kept
-While Visual shows, the switch SHALL also offer Collapse all and Expand all. What the visitor folds
+While Visual shows, the switch SHALL also offer Collapse outline and Expand outline, which change
+folds only, not open inspectors or pins. What the visitor folds
 SHALL be kept while they switch between Visual and Source and between engines, and forgotten when
 another preset or share is loaded or another language is selected.
 
 #### Scenario: Folds survive a trip to Source
-- **WHEN** the visitor folds a group in Visual, switches to Source, edits a line outside the group and
-  switches back
-- **THEN** the group SHALL still be folded
+- **WHEN** the visitor folds a row's children in Visual, switches to Source, edits a line outside that
+  element and switches back
+- **THEN** the row SHALL still be folded
 
 #### Scenario: A new preset starts from the defaults
-- **WHEN** the visitor folds a group and then loads another preset
+- **WHEN** the visitor folds a row and then loads another preset
 - **THEN** the new preset's reading SHALL be folded as the viewer folds by default
 
 ### Requirement: The selection and the place cross between Visual and Source
@@ -138,7 +137,7 @@ undo history, in the order the edits were made, each against the text the one be
 service refuses or answers with no change SHALL leave the text as it was and the value reading as
 before. After an edit, the reading SHALL be asked for at once rather than after the typing pause.
 An edit in Visual SHALL reach diagnostics, run gating, HotReload and sharing as typing the same change
-does. A value the reader is still changing, as with a stepper, the color picker or a pause in
+does. A value the reader is still changing, as with scrubbing, the color picker or a pause in
 typing, SHALL reach the editor's text, the diagnostics and HotReload at once, and the whole change
 SHALL be one step of the undo history once committed; a change cancelled SHALL leave the text and the
 history as they were. While the editor is read-only, as for a share opened to view, the reading SHALL
@@ -149,10 +148,10 @@ Showing either view SHALL NOT run, re-run or stop the snippet.
 - **WHEN** HotReload is on and the visitor changes `FontSize=26` to `32` in Visual
 - **THEN** the editor's text SHALL read `FontSize=32` and the snippet SHALL run once, as after typing it
 
-#### Scenario: The canvas follows a stepper
-- **WHEN** HotReload is on and the visitor opens the field of `FontSize=26` in Visual and clicks its up
-  stepper
-- **THEN** the editor's text SHALL read `FontSize=27` and the snippet SHALL run, before the field closes
+#### Scenario: The canvas follows scrubbing
+- **WHEN** HotReload is on and the visitor drags the label of `FontSize=26` in Visual to the right
+- **THEN** the editor's text SHALL follow the drag and the snippet SHALL run before the drag ends, and
+  one Undo SHALL take the text back to `FontSize=26`
 
 #### Scenario: A color picked live, one step
 - **WHEN** the visitor drags in the color picker of `TextColor` and then closes the popover
@@ -207,3 +206,38 @@ Enter on a value it cannot edit.
 #### Scenario: An expression opens in Source
 - **WHEN** the visitor presses Enter on `Text={titleOf(taps)}`'s value in Visual
 - **THEN** Source SHALL show with the expression `titleOf(taps)` selected
+
+### Requirement: NX Visual reads elements as rows with inline inspectors
+The playground SHALL show NX Visual, on both engines, with the viewer's element rows and inline
+inspectors, from the source tree and visualizers it already asks for. Inspectors SHALL edit through
+the existing source-edit and undo paths and SHALL NOT need a running preview. A selection the host
+sets, such as one carried from Source, SHALL open the inspector that holds it.
+
+#### Scenario: A preset opens
+- **WHEN** a visitor loads an NX preset
+- **THEN** Visual SHALL show its rows with the default folds, no pins, and an inspector only for the
+  selected element, if any
+
+#### Scenario: No preview running
+- **WHEN** the snippet is not running
+- **THEN** selecting, pinning and editing in Visual SHALL still work
+
+### Requirement: Pins and closed inspectors follow the document
+The playground SHALL keep the viewer's `detailsState` with the folds and the selection across
+Visual/Source and engine switches for the same document, restore it before the selection on
+returning to Visual, and apply the state the viewer reports after source changes. Loading another
+preset or share, or choosing another language, SHALL clear it. It SHALL NOT be saved in source,
+shares or browser storage, nor enter undo history.
+
+#### Scenario: A round trip through Source
+- **WHEN** a visitor pins Star, switches to Source and back without editing
+- **THEN** Star SHALL still be pinned and the selection and place restored
+
+#### Scenario: A new document
+- **WHEN** a visitor loads another preset after pinning Star
+- **THEN** the new document SHALL start with no pins
+
+#### Scenario: Undo is for edits only
+- **WHEN** a visitor edits a property, pins its element, and presses Undo
+- **THEN** Undo SHALL revert the edit and leave the pin
+

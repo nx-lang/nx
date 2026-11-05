@@ -43,6 +43,7 @@ import {
   keyOfChange,
   rangeOfKey,
   type NxOpenDetail,
+  type NxDetailsState,
 } from "@nx-lang/viewer";
 import { useSourceTree } from "./reading/useSourceTree.ts";
 import { SITE_ROOT } from "./paths.ts";
@@ -128,6 +129,8 @@ export function App() {
           setPreferredView(null);
           preview.reset(opened.source);
           setFolded(undefined);
+          setDetailsState(undefined);
+          setReadingGeneration((value) => value + 1);
           setNotice(opened.notice);
         }
       });
@@ -171,6 +174,8 @@ export function App() {
     setPreferredView(null);
     preview.reset(chosen.source);
     setFolded(undefined);
+    setDetailsState(undefined);
+    setReadingGeneration((value) => value + 1);
     setNotice(null);
   };
   const share = async () => {
@@ -208,6 +213,8 @@ export function App() {
   const pendingOutputSelection = useRef<SourceSelection | null>(null);
   // What the reader folded in Visual, kept while they switch to Source and back; until they fold
   // anything, Visual folds the source's supporting declarations itself.
+  const [detailsState, setDetailsState] = useState<NxDetailsState | undefined>(undefined);
+  const [readingGeneration, setReadingGeneration] = useState(0);
   const [folded, setFolded] = useState<readonly string[] | undefined>(
     undefined,
   );
@@ -348,6 +355,9 @@ export function App() {
   }, [mode]);
   const switchTo = (next: SourceMode) => {
     if (next === mode) {
+      return;
+    }
+    if (next === "source" && readingCommands.current?.finishEditing() === false) {
       return;
     }
     if (next === "visual") {
@@ -593,27 +603,27 @@ export function App() {
               <span className="fold-actions">
                 <button
                   type="button"
-                  aria-label="Collapse all"
-                  title="Collapse all"
+                  aria-label="Collapse outline"
+                  title="Collapse outline"
                   onClick={() => readingCommands.current?.collapseAll()}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m7 20 5-5 5 5" />
                     <path d="m7 4 5 5 5-5" />
                   </svg>
-                  <span>Collapse all</span>
+                  <span>Collapse outline</span>
                 </button>
                 <button
                   type="button"
-                  aria-label="Expand all"
-                  title="Expand all"
+                  aria-label="Expand outline"
+                  title="Expand outline"
                   onClick={() => readingCommands.current?.expandAll()}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m7 15 5 5 5-5" />
                     <path d="m7 9 5-5 5 5" />
                   </svg>
-                  <span>Expand all</span>
+                  <span>Expand outline</span>
                 </button>
               </span>
             )}
@@ -634,8 +644,14 @@ export function App() {
               ))}
             </span>
           </div>
-          {mode === "visual" && (
+          <div className="reading-slot" hidden={mode !== "visual"}>
             <ReadingView
+              key={readingGeneration}
+              detailsState={detailsState}
+              onDetails={(state, kept) => {
+                setDetailsState(state);
+                setSelection(kept);
+              }}
               reading={reading}
               selection={selection}
               onSelect={setSelection}
@@ -660,7 +676,7 @@ export function App() {
               onRedo={() => visualHistory("redo")}
               revision={visualRevision}
             />
-          )}
+          </div>
           {/* The editor stays mounted while hidden, keeping its undo history and scroll position. */}
           <div className="editor" hidden={mode === "visual"}>
             {source !== null && (

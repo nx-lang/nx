@@ -1698,8 +1698,13 @@ fn test_function_with_parameters() {
     assert!(result.lowered_module.is_some());
 
     if let Some(module) = &result.lowered_module {
-        // Should have one function with two parameters
-        assert_eq!(module.items().len(), 1);
+        // One function with two parameters, followed by its derived props items
+        let functions = module
+            .items()
+            .iter()
+            .filter(|item| matches!(item, nx_hir::Item::Function(_)))
+            .count();
+        assert_eq!(functions, 1);
     }
 }
 
@@ -2002,7 +2007,12 @@ fn test_error_recovery_continues_checking() {
 
     // Should have processed both functions
     if let Some(module) = &result.lowered_module {
-        assert_eq!(module.items().len(), 2);
+        let functions = module
+            .items()
+            .iter()
+            .filter(|item| matches!(item, nx_hir::Item::Function(_)))
+            .count();
+        assert_eq!(functions, 2);
     }
 }
 

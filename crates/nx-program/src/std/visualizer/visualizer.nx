@@ -8,23 +8,29 @@
 // as their type parameter `Target`. Inside a
 // `visualizer` declaration, `Target` is bound for you: write `visualizer Choice =
 // <ElementVisualizer title=label />`, not `<ElementVisualizer Target=Choice ... />`. For a
-// component, `Target` is its props record, so property names are its props.
+// component or an element-style function, `Target` is its props record, so property names are its
+// props.
 
 /// How a viewer presents an element of a record, action or component.
 export type ElementVisualizer = {
   // The declaration this visualizer describes. Bound by the `visualizer` declaration.
   Target: type
-  /// The property whose value is the element's title: it reads alone on the element's line, and
-  /// says what a folded element holds.
+  /// The property whose value is the element's title, the display text that names it, such as a
+  /// button's label. A viewer's row shows it alone, with no label, as a layer list shows a name.
   title?: Target.Property
-  /// The property whose value identifies the element: a key that names it and is kept. It reads as
-  /// one quiet token, its value alone, where `idPosition` puts it.
+  /// The property whose value identifies the element: a key that names it and is kept. A row with
+  /// no title and no text shows it in the title's place. On a line it reads as one quiet token,
+  /// its value alone, where `idPosition` puts it.
   id?: Target.Property
   idPosition: IdPosition = start                              /// Where the element's id reads.
 
   /// The name of the icon that marks the element where it starts, from the Lucide set
   /// (https://lucide.dev/icons), such as `"list-checks"`. A kind that extends another inherits it.
   icon?: string
+  /// Whether an element used as a property's value reads its set properties on that property's
+  /// line, each editable there: `true` whenever each property is one simple value on a line, `false`
+  /// never. Unset, a short element does.
+  inline?: boolean
   /// Host-rendered view, inherited and overridden like other hints. Unsupported renderer IDs leave
   /// structured Output available.
   preview?: PreviewVisualizer
@@ -39,10 +45,13 @@ export type PreviewVisualizer = {
   renderer: string  /// Logical renderer ID registered by the host, such as "nx.graphics".
 }
 
-/// How a viewer marks an authored element-style function invocation.
-/// Previews are selected from the function's result type, independently of this invocation icon.
+/// How a viewer presents an authored element-style function invocation, as `ElementVisualizer`
+/// does an element. Previews are selected from the function's result type, independently of this.
 export type FunctionVisualizer = {
-  icon?: string  /// Lucide icon name for the invocation, such as "star".
+  // The function's derived props record. Bound by the `visualizer` declaration.
+  Target: type
+  icon?: string                                               /// Lucide icon name for the invocation, such as "star".
+  content properties?: <PropertyVisualizer Target=Target />+  /// How individual properties read.
 }
 
 /// Where an element's id reads.
@@ -57,6 +66,8 @@ export type PropertyVisualizer = {
   // The declaration whose property this describes. Bound by the `visualizer` declaration.
   Target: type
   property: Target.Property       /// The property this describes.
+  label?: string                  /// The name a viewer shows for the property, such as `"Corner radius"`. Without it,
+                                  /// a viewer derives one from the property's name.
   format?: ValueFormat            /// How the property's string value is shown.
   editor?: ValueEditor            /// The editor a viewer offers for the value. A viewer that cannot offer it uses its
                                   /// usual one.
@@ -67,7 +78,7 @@ export type PropertyVisualizer = {
   /// The largest number the editor offers. Not a constraint: a document may write a larger one. A
   /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
-  step?: float64                  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
+  step?: float64                  /// How far one step moves a number, by arrow key or by dragging its label.
   multiline: boolean = false      /// Whether the property's string field takes line breaks: Enter starts a new line,
                                   /// and the value is written over several lines.
   placeholder?: string            /// Text shown in the property's empty field, quieter than a value, and never written.
@@ -89,7 +100,7 @@ export type ValueVisualizer = {
   /// The largest number the editor offers. Not a constraint: a document may write a larger one. A
   /// `where` constraint on the type limits the value itself, and the editor keeps within both.
   max?: float64
-  step?: float64                  /// How far one step of the editor moves a number, as an arrow key or a stepper does.
+  step?: float64                  /// How far one step moves a number, by arrow key or by dragging its label.
   content choices?: ValueChoice+  /// The values a viewer offers to pick for a value of the type, in order. They suggest
                                   /// and never restrict: any value of the type may still be written.
 }

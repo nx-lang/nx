@@ -66,6 +66,8 @@ const NUMBER_TYPES = new Set(["int", "int32", "int64", "float32", "float64"]);
 
 /** The floating-point types, whose step a constraint's span gives when no hint does. */
 const FLOAT_TYPES = new Set(["float32", "float64"]);
+/** The whole-number types: `int`, `int32`, `uint8` and the like. */
+const INTEGER_TYPE = /^u?int\d*$/;
 
 /**
  * Editor hints with a constraint's bounds folded into their range: `minExclusive` and
@@ -76,6 +78,8 @@ export interface EditorHints extends SourceEditorHints {
   readonly maxExclusive?: boolean;
   /** Whether the number is a `float32`, which a value and the bounds are compared as. */
   readonly float32?: boolean;
+  /** Whether the number is a whole number, which never steps by less than one. */
+  readonly integer?: boolean;
 }
 
 /**
@@ -89,10 +93,12 @@ export function boundedHints(
   bounds: SourceBounds | undefined,
   base: string | undefined
 ): EditorHints | undefined {
+  const integer = base !== undefined && INTEGER_TYPE.test(base);
   if (bounds === undefined || (bounds.min === undefined && bounds.max === undefined)) {
     // With no constraint the hints alone give the range offered, and its step as above.
     const derived = hints?.step === undefined ? derivedStep(base, hints?.min, hints?.max) : undefined;
-    return derived === undefined ? hints : { ...hints, step: derived };
+    const stepped = derived === undefined ? hints : { ...hints, step: derived };
+    return integer ? { ...stepped, integer } : stepped;
   }
   const { min: _min, max: _max, ...rest } = hints ?? {};
   // A `float32` bound arrives as the `float64` it widens to, `0.10000000149011612`, and reads as
@@ -130,9 +136,13 @@ export function boundedHints(
     ...(step === undefined ? {} : { step }),
     ...(lowExclusive ? { minExclusive: true } : {}),
     ...(highExclusive ? { maxExclusive: true } : {}),
-    ...(float32 ? { float32: true } : {})
+    ...(float32 ? { float32: true } : {}),
+    ...(integer ? { integer: true } : {})
   };
 }
+
+/** The largest finite `float32`, a little less: an end at or past it is no end a reader steps to. */
+const LARGEST_FLOAT32 = 3.4e38;
 
 /**
  * The step of a floating-point number offered `low` to `high`: the largest power of ten not above
@@ -140,6 +150,10 @@ export function boundedHints(
  */
 function derivedStep(base: string | undefined, low: number | undefined, high: number | undefined): number | undefined {
   if (base === undefined || !FLOAT_TYPES.has(base) || low === undefined || high === undefined || !(high > low)) {
+    return undefined;
+  }
+  // An end `finite` gives, the largest float there is, bounds no range a reader steps through.
+  if (Math.abs(low) >= LARGEST_FLOAT32 || Math.abs(high) >= LARGEST_FLOAT32) {
     return undefined;
   }
   return 10 ** Math.floor(Math.log10((high - low) / 10));

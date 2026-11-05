@@ -64,6 +64,7 @@ export const styles = `
 .badge:not([hidden]) { animation: nx-viewer-late 0.15s ease-out 0.5s both; }
 @keyframes nx-viewer-late { from { opacity: 0; } }
 .source .t { color: light-dark(var(--l, inherit), var(--d, inherit)); }
+.source .t.block-brace { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .source .n { border-radius: 2px; }
 /* Text shown to people, as a \`uitext\` property holds: its words in the prose font and a plain,
    clear color of their own, since they are content and every hue in a theme means code; its quotes
@@ -74,6 +75,8 @@ export const styles = `
   font-variation-settings: var(--nx-viewer-prose-font-variation, inherit);
   color: var(--nx-viewer-uitext-color, light-dark(#222222, #e4e4e4));
 }
+/* Its words keep that color even where the highlighter reads one as code, as \`for\` in "for everyone". */
+.source .uitext-body > .t { color: inherit; }
 /* The quotes are in the words' font, so they sit against the words and not a character away. */
 .source .uitext-quote {
   font-family: var(--nx-viewer-prose-font-family, inherit);
@@ -103,6 +106,8 @@ export const styles = `
 }
 /* A chip last in its tag closes it with a small gap, less than a space, before the \`/>\`. */
 .source .id-end { margin-right: 3px; }
+/* An id never breaks inside: it moves to the next line whole. */
+.source .id-value { white-space: nowrap; }
 .source .id-quote { color: var(--nx-viewer-id-quote-color, light-dark(#afb8c1, #6e6e6e)); }
 /* An element as a property sheet: its name, then a row to an attribute, its names in one quiet
    column and its values in another, and what it holds under them. It sits where the element began
@@ -116,6 +121,208 @@ export const styles = `
 }
 /* A sheet inside another is already set in by it, so only its container bounds it. */
 .source .sheet .sheet { max-width: 100%; }
+/* An element of the composition as one row: its chevron, icon, kind and the one value it is named by on one
+   line no taller than a source line, its pin at the end, and under it, while open, its inspector. */
+.source .row-element {
+  grid-template-columns: minmax(0, 1fr);
+  width: calc(100% - var(--indent, 0) * 1ch);
+}
+.source .row-element > .row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8ch;
+  white-space: nowrap;
+  padding-left: 0;
+  text-indent: 0;
+  min-width: 0;
+}
+.source .row-element > .row-head > :is(.element-icon, .sheet-kind, .row-pin, button.fold) { flex-shrink: 0; }
+/* A row's icon centers on its line, and its menu's anchor sits at the line's top, so neither moves
+   the text off the baseline every row shares; a row is exactly one source line tall. */
+.source .row-element > .row-head > .element-icon { align-self: center; }
+.source .row-element > .row-head > .item-menu { align-self: flex-start; }
+/* A row's chevron hangs left of its icon and takes none of the row's gap, so a row that holds
+   children starts its icon where its siblings and the lines of an if or a for do. */
+.source .row-element > .row-head > button.fold { margin-right: -0.8ch; }
+/* A row leads with what the element is: its kind reads in the prose font, then the one value it is
+   named by, which a click edits in its inspector. */
+.source .row-element > .row-head > .sheet-kind,
+.source .row-element > .row-head > .sheet-kind * {
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-weight: 500;
+}
+.source .row-title {
+  flex: 0 1 auto;
+  cursor: text;
+  min-width: min(8ch, 100%);
+  overflow: hidden;
+  font-weight: 400;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+}
+/* A title stays on its row's line, as a layer's name does, faded where it is cut. */
+.source .row-title, .source .row-title * { white-space: nowrap; }
+.source .row-title .uitext-block { display: inline; max-width: none; }
+.source .row-title .uitext-block > .uitext-body { white-space: nowrap; }
+.source .row-title.clipped {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 3ch), transparent);
+}
+.source .reference-token :is(.n, span:not(.swatch)), .source .reference-token {
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+}
+/* A row's pin: shown under the pointer, while selected and always while pinned. */
+.source .row-pin {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+  cursor: pointer;
+  visibility: hidden;
+}
+.source .row-pin > svg { width: 13px; height: 13px; }
+.source .row-head:hover > .row-pin, .source .row-element.selected > .row-head > .row-pin,
+.source .row-element.pinned > .row-head > .row-pin, .source .row-pin:focus-visible { visibility: visible; }
+.source .row-pin:hover { color: var(--nx-viewer-foreground, CanvasText); }
+.source .row-pin[aria-pressed="true"] { color: var(--nx-viewer-pin-color, light-dark(#9a6700, #e3b341)); }
+.source .row-pin[aria-pressed="true"] > svg { fill: currentColor; }
+.source .row-pin:focus-visible, .source button.fold:focus-visible {
+  outline: 2px solid light-dark(#0969da, #b8a4ff);
+  outline-offset: 1px;
+}
+/* The inspector: its labels under its element's kind, whatever the depth and wherever the row's
+   icon sits, as the element measures; a field to a line. */
+.source .inspector {
+  display: block;
+  margin: 2px 0 4px var(--inspector-inset, 2ch);
+  padding: 2px 0 4px;
+  white-space: normal;
+  font-weight: 400;
+}
+/* The last line of an inspector: how many properties the element does not set, which a click shows
+   as empty fields in their places, and then hides again. Quiet, in the labels' column. */
+.source .inspector-more {
+  display: block;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  cursor: pointer;
+}
+.source .inspector-fields:empty + .inspector-more { margin-top: 0; }
+.source .inspector-more:hover { color: inherit; text-decoration: underline; }
+.source .inspector-more:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 1px; border-radius: 3px; }
+/* The inspector's fields, one to a line: the labels in a column as wide as the longest, up to 40%
+   of the room, and the values beside them. */
+.source .inspector-fields {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  gap: 2px 1.2ch;
+  align-items: baseline;
+}
+.source .inspector .sheet-row.prop-field {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0;
+  white-space: pre-wrap;
+}
+.source .inspector .sheet-row.prop-field > .field-lead { grid-column: 1; }
+.source .inspector .sheet-row.prop-field > .sheet-value {
+  grid-column: 2;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--nx-viewer-field-background, light-dark(#0000000a, #ffffff0d));
+}
+/* A value over several lines, as a list of elements, goes under its label, a step in. */
+.source .inspector .sheet-row.prop-field.field-below > .sheet-value { padding: 0; border: 0; background: none; }
+.source .inspector .sheet-row.prop-field.field-below > .sheet-below { grid-column: 1 / -1; padding-left: 2ch; }
+.source .field-lead {
+  opacity: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+  user-select: none;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+}
+/* Inline content reads as prose: the line breaks and indent around it in source collapse. */
+.source .content-field > .sheet-value, .source .content-field > .sheet-value * { white-space: normal; }
+.source .field-lead.scrubbable { cursor: ew-resize; touch-action: pan-y; }
+/* A property the element does not write: an empty value with a dashed outline. */
+.source .inspector .sheet-row.prop-field.dimmed-row { opacity: 1; }
+.source .inspector .sheet-row.prop-field.dimmed-row > .sheet-value {
+  background: none;
+  border: 1px dashed var(--nx-viewer-unset-border, light-dark(#d0d7de, #484f58));
+}
+.source .inspector .dimmed-row > .sheet-value { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.source .inspector .dimmed-row .more-default { display: none; }
+/* A boolean as a checkbox beside its label, with no box around it. */
+.source .inspector .sheet-row.prop-field.boolean-field > .sheet-value { background: none; border-color: transparent; padding-left: 0; }
+.source .inspector .boolean-field .sheet-boolean,
+.source .inspector .boolean-field .more-value {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15em;
+  height: 1.15em;
+  min-width: 0;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 0.85em;
+  line-height: 1;
+  vertical-align: middle;
+}
+.source .inspector .boolean-field .sheet-boolean.false, .source .inspector .boolean-field .more-value { color: transparent; border-color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.source .inspector .boolean-field .more-value::before { content: none; }
+.source .row-element > .sheet-held { padding-top: 0; }
+/* An element value: its icon, kind and the value it is named by, unfolding into a nested group of its fields. */
+/* Open, it goes under its label, a step in, its fields under it. */
+.source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value { grid-column: 1 / -1; padding: 0 0 0 2ch; background: none; }
+.source .nested-head { display: block; min-width: 0; }
+/* Folded, it shares its line with the row menu's anchor after it. */
+.source .nested-field:not(.open) .nested-head { display: inline; }
+.source .nested-head > .value-fold { margin-left: 0; width: 1em; opacity: 1; }
+.source .nested-head > .element-icon { margin-right: 0.5ch; }
+.source .nested-kind { font-family: var(--nx-viewer-source-font-family, var(--mono)); }
+.source .nested-head > .nested-value { display: inline-block; vertical-align: bottom; max-width: 100%; margin-left: 1ch; }
+/* A short element value reads its set properties on its field's line, each label beside its value,
+   wrapping under the first where the line runs out. */
+.source .nested-field:not(.open) .nested-head.inline-head { display: inline-flex; align-items: baseline; max-width: 100%; vertical-align: top; }
+.source .nested-head.inline-head > .value-fold { align-self: flex-start; height: 1lh; margin-right: 0.3ch; flex: none; }
+.source .nested-head.inline-head > .nested-kind { flex: none; margin-right: 1ch; }
+.source .inline-props { display: inline-flex; flex-wrap: wrap; column-gap: 2ch; min-width: 0; }
+.source .inline-prop { display: inline-flex; align-items: baseline; gap: 0.8ch; white-space: nowrap; }
+.source .inline-prop > .field-lead.inline-label { font-size: inherit; }
+/* What an element's type is for, one quiet line over its inspector's fields, cut where it runs out. */
+.source .inspector > .inspector-doc {
+  display: block;
+  margin-bottom: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-prose-font-family, inherit);
+  font-size: 0.85em;
+}
+/* An id that names its element reads as the title does: plain, with no chip. */
+.source .row-title.row-id > .id-value { background: none; padding: 0; color: inherit; font-family: var(--nx-viewer-source-font-family, var(--mono)); }
+.source .inspector.nested-inspector { margin: 2px 0 2px var(--inspector-inset, 0); padding: 0; }
+/* An open element value keeps its menu on its label's line, at the end, where a closed one has it,
+   not on a line of its own under its fields. */
+.source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value { position: relative; }
+.source .inspector .sheet-row.prop-field.nested-field.open > .sheet-value > .row-anchor { position: absolute; right: 0; bottom: calc(100% + 2px); }
+.source button.fold { border: 0; padding: 0; background: none; font: inherit; opacity: 1; flex-shrink: 0; }
 .source .sheet-head, .source .sheet-held, .source .sheet-note { grid-column: 1 / -1; }
 .source .sheet-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; padding-left: 2ch; }
 .source .sheet-held, .source .sheet-note { padding-left: 2ch; }
@@ -148,6 +355,17 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
   vertical-align: -0.05em;
 }
+/* A color in an inspector reads in its parts, as a design tool shows one: its swatch, its six-digit
+   hex, and its opacity in percent, whose sign drags to change it. Elsewhere it reads as written. */
+.source .color-opacity { display: none; }
+.source .inspector .color-value > .color-alpha-digits { display: none; }
+.source .inspector .color-value > .color-opacity { display: inline; margin-left: 1.5ch; }
+.source .inspector .color-value.editable-value > .swatch { cursor: pointer; }
+.source .opacity-unit { color: var(--nx-viewer-unit-color, light-dark(#6e6e6e, #9a9a9a)); }
+.source .inspector .color-value.editable-value .opacity-unit { cursor: ew-resize; touch-action: pan-y; }
+.source .field.field-color-opacity { display: inline-block; min-width: 3ch; }
+/* The browser's color picker a swatch opens, kept out of sight at the swatch. */
+.swatch-picker { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 .source .line-equals { color: var(--nx-viewer-equals-color, light-dark(#6e6e6e, #9a9a9a)); }
 /* A boolean reads as a mark, a check for true and a cross for false, never as a box to click. */
 .source .sheet-boolean { color: var(--nx-viewer-boolean-color, light-dark(#0451a5, #569cd6)); font-weight: 600; }
@@ -178,6 +396,12 @@ export const styles = `
   text-indent: calc((var(--column, 0) + 4) * 1ch) hanging each-line;
 }
 .source .sheet-item.as-written > .as-written-lead { display: inline-block; width: calc(var(--column, 0) * 1ch); }
+/* A row starts its icon where it starts in the source, as a root element's icon starts under the
+   lets before it, its chevron hanging in the gutter to its left. A block written as it is among
+   rows, as an \`if\` or a \`for\`, starts where the rows' icons do, and the rows it holds sit level
+   with it, the block's first and last lines framing them. */
+.source .sheet.row-element > .sheet-head.row-head { padding-left: 0; text-indent: 0; }
+.source .row-element > .sheet-held > .sheet-item.as-written { margin-left: calc(-1ch * var(--column, 0)); }
 /* An element on a line of its own wraps within itself, its later lines a step in from where it starts,
    wherever it sits; and so does one written as its tags on one line inside such an item, as the item's
    other lines wrap from the item's start. One written as its tags over several lines stays inline, its
@@ -200,11 +424,11 @@ export const styles = `
 .source .sheet > .sheet-head * { text-indent: 0; }
 /* A little room between siblings where either is a sheet, so each group stands apart from the next:
    between the elements of a list or of what an element holds, between sheets that follow one
-   another, and around a row whose value is a sheet under its name. Not between one-line elements,
-   which read as one list, nor between a sheet's own rows. */
-.source .sheet-item:has(> .sheet) + .sheet-item,
-.source .sheet-item + .sheet-item:has(> .sheet),
-.source .sheet ~ .sheet,
+   another, and around a row whose value is a sheet under its name. Not between one-line elements or
+   rows, which read as one list as a design tool's layers do, nor between a sheet's own rows. */
+.source .sheet-item:has(> .sheet:not(.row-element)) + .sheet-item,
+.source .sheet-item + .sheet-item:has(> .sheet:not(.row-element)),
+.source .sheet:not(.row-element) ~ .sheet:not(.row-element),
 .source .sheet-row:has(> .sheet-below > .sheet) + :is(.sheet-row, .sheet-held),
 .source .sheet-row + .sheet-row:has(> .sheet-below > .sheet),
 .source .sheet-item.after-blank {
@@ -213,9 +437,9 @@ export const styles = `
 /* In a narrow pane every value moves under its name, so text never runs down a thin column. */
 .source { container-type: inline-size; }
 @container (width < 64ch) {
-  .source .sheet-row > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
+  .source .sheet-row:not(.prop-field) > .sheet-value { grid-column: 1 / -1; padding-left: 2ch; }
   /* An unwritten property with nothing to show takes no line of its own; a click on its name edits it. */
-  .source .dimmed-row > .sheet-value:has(> .more-value:empty:only-child) { display: none; }
+  .source .dimmed-row:not(.prop-field) > .sheet-value:has(> .more-value:empty:only-child) { display: none; }
 }
 
 /* A group's name is a step bolder than its rows, and a bracket runs down the group from under its
@@ -236,6 +460,8 @@ export const styles = `
   border-bottom-left-radius: 3px;
   pointer-events: none;
 }
+/* A row with nothing under it, its inspector closed and nothing held, has no bracket. */
+.source .row-element:not(:has(> .sheet-held, > .inspector))::after { display: none; }
 /* A group that starts with an icon drops its bracket from under the icon's middle. */
 .source .sheet:has(> .sheet-head > .element-icon)::after { left: calc(0.5em - 0.5px); }
 /* A span in another font takes no line height of its own, so every line keeps the height the
@@ -323,6 +549,11 @@ export const styles = `
 .highlight.selected-body {
   background: color-mix(in srgb, var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)) 45%, transparent);
 }
+/* An open inspector: a raised neutral surface, in or out of focus. */
+.highlight.selected-body.inspector-panel,
+:host(:not(:focus-within)) .highlight.selected-body.inspector-panel {
+  background: var(--nx-viewer-inspector-background, light-dark(#f6f8fa, #252526));
+}
 /* Out of focus, a selection stays, quieter, as a list's does. */
 :host(:not(:focus-within)) .highlight.selected { background: var(--nx-viewer-selection-inactive, light-dark(#0000000f, #ffffff17)); }
 :host(:not(:focus-within)) .highlight.selected-body {
@@ -366,6 +597,22 @@ export const styles = `
   font-size: var(--nx-viewer-source-font-size, 13px);
   white-space: pre-wrap;
 }
+/* An element's card is titled by its name, in prose, as the row names it. */
+.card-title { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; font-weight: 600; }
+/* The kind of declaration, as a quiet chip before the name. */
+.card-kind {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  /* Centered on the name's capitals rather than its line box, which sits a pixel lower. */
+  position: relative;
+  top: -1px;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #9d9d9d));
+  background: light-dark(#0000000d, #ffffff14);
+}
+.card-detail { font-weight: 400; color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .card-doc {
   margin-top: 6px;
   padding-top: 6px;
@@ -477,7 +724,49 @@ export const styles = `
 .edit-problem[hidden] { display: none; }
 .popover .popover-hex { font-family: var(--nx-viewer-source-font-family, var(--mono)); width: 10ch; }
 .popover .popover-hex.invalid { box-shadow: inset 0 -1px 0 var(--nx-viewer-invalid, light-dark(#cf222e, #f85149)); }
-.popover .popover-picker { width: 28px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+/* A color row as design tools draw it: a square swatch, the hex, and the opacity in percent. */
+.popover.colors { min-width: 0; }
+.popover.colors > input.popover-hex { flex: 1 1 auto; width: 10ch; min-width: 0; }
+.popover .popover-picker {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.popover .popover-picker::-webkit-color-swatch-wrapper { padding: 0; }
+.popover .popover-picker::-webkit-color-swatch {
+  border: 1px solid light-dark(#0000002e, #ffffff3d);
+  border-radius: 4px;
+}
+.popover .popover-picker::-moz-color-swatch {
+  border: 1px solid light-dark(#0000002e, #ffffff3d);
+  border-radius: 4px;
+}
+.popover .popover-opacity {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  padding: 2px 6px 2px 0;
+  border-radius: 4px;
+  background: light-dark(#0000000a, #ffffff0f);
+  cursor: text;
+}
+.popover .popover-opacity > input.popover-alpha {
+  width: 5ch;
+  padding: 0 1px 0 6px;
+  background: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.popover .popover-opacity > input.popover-alpha::-webkit-inner-spin-button,
+.popover .popover-opacity > input.popover-alpha::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.popover .popover-opacity:focus-within { box-shadow: inset 0 0 0 1px light-dark(#0969da, #007fd4); }
+.popover .popover-alpha-unit { color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
 .popover .options { max-height: 16em; overflow: auto; margin-top: 4px; }
 .popover .option {
   display: flex;
@@ -507,17 +796,8 @@ export const styles = `
   color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
   pointer-events: none;
 }
-/* What a selected element does not write: a quiet row that opens a dimmed row to each property. */
+/* What an element does not write: an unset field in its inspector. */
 .source .more { font-weight: 400; }
-.source .more-toggle { cursor: pointer; user-select: none; outline: none; }
-.source .more-toggle > .more-label {
-  grid-column: 1 / -1;
-  color: var(--nx-viewer-more-color, light-dark(#6e7781, #8b949e));
-  font-family: var(--nx-viewer-prose-font-family, inherit);
-  font-size: 0.92em;
-}
-.source .more-toggle:hover > .more-label, .source .more-toggle:focus-visible > .more-label { color: var(--nx-viewer-foreground, CanvasText); }
-.source .more-toggle:focus-visible > .more-label { text-decoration: underline; }
 .source .dimmed-row { opacity: var(--nx-viewer-dimmed-opacity, 0.55); outline: none; }
 /* A row being set reads at full strength, its field as any other. */
 .source .dimmed-row:has(.field) { opacity: 1; }
@@ -549,30 +829,11 @@ export const styles = `
   content: attr(data-placeholder);
   color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
 }
+/* A placeholder that asks for text, as "Add description" does, reads in the prose font. */
+.source .more-value.prose-placeholder:empty::before,
+.source .more-value.prose-placeholder > .field:empty::before { font-family: var(--nx-viewer-prose-font-family, inherit); }
 /* An empty field still reads as one, with room for the caret. */
 .source .field:empty { display: inline-block; min-width: 1ch; min-height: 1lh; vertical-align: top; }
-.source .more-filter-row > .more-filter {
-  grid-column: 1 / -1;
-  width: min(24ch, 100%);
-  margin: 1px 0;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 4px;
-  outline: none;
-  font: inherit;
-  color: inherit;
-  background: light-dark(#0000000a, #ffffff0f);
-}
-.source .more-filter-row > .more-filter:focus-visible { box-shadow: 0 0 0 1px var(--nx-viewer-field-border, light-dark(#0090f1, #007fd4)); }
-/* Under a line, the list sets out as a group's rows do, from where the line's indentation ends. */
-.source .more-block {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 2ch;
-  justify-content: start;
-  padding-left: calc(var(--more-indent, 0) * 1ch);
-  white-space: pre;
-}
 /* A written row's menu: a quiet mark just past its value, or past the tools drawn there, under the
    pointer and when selected, from a point that takes no room, so it moves nothing. */
 .source .sheet-row[data-key] { position: relative; }
@@ -615,9 +876,9 @@ export const styles = `
 .source .sheet-head:hover > .item-menu > .row-menu:not(.shared),
 .source .line-element.selected > .item-menu > .row-menu:not(.shared),
 .source .line-element:hover > .item-menu > .row-menu:not(.shared) { visibility: visible; }
-/* An item that moves is dragged by its icon and its name: a hand to grab, and no text selection
-   or panning to compete with it. */
-.body.editable .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* An item that moves is dragged by its icon and its name, which keep the usual pointer, as rows in
+   a design tool's layers do, with no text selection or panning to compete with the drag. */
+.body.editable .drag-handle { touch-action: none; user-select: none; -webkit-user-select: none; }
 /* A touch on a handle's icon may be taken as one on the fold chevron beside it, which then must not
    pan either. */
 .body.editable .sheet-head:has(> .drag-handle) > .fold { touch-action: none; }
@@ -767,8 +1028,8 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
   vertical-align: -0.05em;
 }
-/* A number's steppers, Framer-style, and a field's choices chevron: drawn where they would stand in
-   the line, just past the value, and taken out of it, so nothing moves. */
+/* A field's choices chevron: drawn where it would stand in the line, just past the value, and taken
+   out of it, so nothing moves. */
 .source .value-tools {
   position: absolute;
   z-index: 2;
@@ -783,51 +1044,18 @@ export const styles = `
 }
 /* Taking room in the line, past an open field with more of its line after it. */
 .source .value-tools.in-line { position: static; vertical-align: top; }
-.source .value-tools .steppers, .source .value-tools .choices-toggle { display: none; }
-.source .value-tools.with-steppers .steppers {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 1px;
-  align-self: center;
-  box-sizing: border-box;
-  /* A little taller than the line, so each half is a target a pointer can hit; whole pixels, with the
-     rule between them as the gap, so the two halves are exactly the same height. */
-  width: 18px;
-  height: 25px;
-  border: 1px solid var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--nx-viewer-card-border, light-dark(#d0d7de, #454545));
-}
-/* At the top or bottom edge of what the reading shows, the steppers reach inward from their line. */
-.source .value-tools.at-top .steppers { align-self: flex-start; }
-.source .value-tools.at-bottom .steppers { align-self: flex-end; }
-/* A stepper is a button: the drag it also takes shows its cursor only once the pointer moves. */
-.source .value-tools .stepper {
-  position: relative;
-  flex: 1 1 0;
-  cursor: default;
-  background: var(--nx-viewer-field-background, light-dark(#ffffff, #1e1e1e));
-}
-/* The hover and press tints lie over the field's color, so the rule's color never shows through. */
-.source .value-tools .stepper:hover {
-  background-image: linear-gradient(var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17)) 0 0);
-}
-.source .value-tools .stepper:active {
-  background-image: linear-gradient(var(--nx-viewer-edit-active, light-dark(#0000001f, #ffffff29)) 0 0);
-}
-.source .value-tools .stepper::after, .source .value-tools .choices-toggle::after {
+.source .value-tools .choices-toggle { display: none; }
+.source .value-tools .choices-toggle::after {
   content: "";
   position: absolute;
   inset: 0;
   background: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 10px no-repeat;
 }
-.source .value-tools .stepper.up::after { transform: rotate(180deg); }
-.source .value-tools .stepper:hover::after, .source .value-tools .choices-toggle:hover::after {
+.source .value-tools .choices-toggle:hover::after {
   background: var(--nx-viewer-foreground, CanvasText);
 }
 .source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
 .source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
-.body.stepping, .body.stepping * { cursor: ns-resize !important; user-select: none; }
+.body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 `;

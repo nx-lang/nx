@@ -194,6 +194,8 @@ pub(crate) struct ResolvedVisualizer {
     pub id: Option<String>,
     pub id_position: Option<String>,
     pub icon: Option<String>,
+    /// `true` or `false`: whether an element value reads its properties on its field's line.
+    pub inline: Option<String>,
     pub preview: Option<String>,
     pub format: Option<String>,
     /// Every editor hint the `ValueVisualizer`s write, by name, as text, the latest first: a reader
@@ -260,6 +262,7 @@ impl ResolvedVisualizer {
             (&mut self.id, "id"),
             (&mut self.id_position, "idPosition"),
             (&mut self.icon, "icon"),
+            (&mut self.inline, "inline"),
             (&mut self.format, "format"),
         ] {
             if let Some(value) = text(name) {
@@ -270,8 +273,7 @@ impl ResolvedVisualizer {
             self.preview = Some(preview.clone());
         }
         match value.record {
-            VisualizerRecord::Function => {}
-            VisualizerRecord::Element => {
+            VisualizerRecord::Element | VisualizerRecord::Function => {
                 // The later visualizer's property visualizers come first, in its order; the earlier
                 // ones it does not name follow in theirs. Two of one property in one visualizer
                 // merge too.
@@ -343,6 +345,7 @@ fn is_known_value(name: &str, text: &str) -> bool {
     match name {
         "idPosition" => matches!(text, "start" | "end"),
         "format" => matches!(text, "id" | "color"),
+        "inline" => matches!(text, "true" | "false"),
         "editor" => matches!(text, "field" | "dropdown" | "segmented"),
         _ => true,
     }

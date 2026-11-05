@@ -10,6 +10,7 @@
  */
 import type { EditorRange, SourceEdit, SourceRole, SourceTree } from "@nx-lang/language-protocol";
 
+import { changeDetails, compositionOwner, detailsOpen, emptyDetails, isComposition, mapDetails, reconcileDetails, sameDetails, type NxDetailsState } from "./compact.js";
 import { cardOf, propertyCardOf, type Card } from "./card.js";
 import {
   editOf,
@@ -33,7 +34,10 @@ import {
   defaultValue,
   offsetAtPoint,
   pickerColor,
+  colorFromPart,
+  expandHex,
   preserveHexAlpha,
+  withOpacity,
   rangeProblem,
   showValue,
   stepNumber,
@@ -41,9 +45,17 @@ import {
 } from "./editors.js";
 import { renderMarkdown } from "./markdown.js";
 import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.js";
-import { defaultFolded, readingRuns, renderSource, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
+import { derivedLabel } from "./labels.js";
+import { defaultFolded, hexParts, readingRuns, renderSource, topLevelLet, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
+
+export type { NxDetailsState } from "./compact.js";
+export const NX_DETAILS_EVENT = "nx-details";
+export interface NxDetailsDetail {
+  readonly state: NxDetailsState;
+  readonly selection: string | undefined;
+}
 
 export { nodeAtSpan } from "./tree.js";
 export { keyAtRange, keyOfChange, rangeOfKey, spanOfChanges } from "./selection.js";
@@ -81,7 +93,7 @@ export interface NxEditDetail {
   readonly key: string;
   readonly edit: SourceEdit;
   /**
-   * Set on a value the reader is still changing, as a stepper, the color picker or a pause in typing
+   * Set on a value the reader is still changing, as scrubbing, the color picker or a pause in typing
    * gives it: shown at once, replaced by the next value, and ended by an edit without `live`, the
    * value committed or, when the change is cancelled, the value it began from.
    */
@@ -126,35 +138,43 @@ export interface NxSelectDetail {
 export type NxViewerMarkdown = (markdown: string) => Node;
 
 /** The element's properties, which a host may set before the element is defined. */
-const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable"] as const;
+const PROPERTIES = ["tree", "text", "colors", "icons", "markdown", "folded", "selection", "stale", "editable", "detailsState"] as const;
 
-/** How many unwritten properties a selected element lists before a filter field leads them. */
-const MORE_FILTER_PAST = 12;
 
-/**
- * How far the pointer moves before a press on a stepper becomes a drag, in pixels: more than a name's,
- * since a stepper is clicked far more often than dragged, and a hand rarely keeps still on so small a
- * target.
- */
-const STEPPER_SLOP = 6;
+/** How far the pointer moves sideways before a press on a number's lead scrubs it, in pixels. */
+const SCRUB_SLOP = 4;
 
 /** How far the pointer moves while pressed, in pixels, before the text it selects is a selection of text, not a click. */
 const TEXT_SELECT_SLOP = 6;
 
-/** How far the pointer moves up or down, in pixels, for a stepper dragged to step its number once. */
-const STEPPER_STEP = 4;
+/** How far the pointer moves sideways, in pixels, for a scrubbed number to step once. */
+const SCRUB_STEP = 3;
 
 /** The tooltip of a value's choices chevron. */
 const CHOICES_TITLE = "Choices (Alt+\u2193)";
 
-/** How long the pointer rests on a name or a value before its card opens, in milliseconds. */
-const CARD_DELAY = 500;
+/** How long the pointer rests on a name or a value before its first card opens, in milliseconds. */
+const CARD_DELAY = 1000;
+
+/**
+ * How long after a card was last shown the next opens at once, in milliseconds, as a design tool's
+ * tooltips do while the pointer moves from one to the next.
+ */
+const CARD_WARM = 1500;
+
+/** How long a card waits to open while the cards are warm, in milliseconds. */
+const CARD_WARM_DELAY = 80;
 
 /** How long a card stays once the pointer leaves it and what it describes, to reach it. */
 const CARD_GRACE = 300;
 
 /** The room between a card and what it describes, in pixels. */
 const CARD_GAP = 4;
+/** How far right of what a hover card describes it starts, so the labels below stay readable. */
+const CARD_SHIFT = 8;
+/** How far right of the pointer a card starts when what it describes is wider than this. */
+const CARD_POINTER_SHIFT = 12;
+const CARD_WIDE = 160;
 /** How long typing pauses before an invalid entry says why, in milliseconds. */
 const PROBLEM_DELAY = 400;
 
@@ -247,6 +267,9 @@ interface EditSession {
   choiceActive?: HTMLElement | undefined;
   /** Whether a field's choices are listed under it; a color's always are. */
   choicesOpen?: boolean;
+  /** For a color edited in its parts: which part its field holds, and the color it opened on. */
+  colorPart?: "hex" | "opacity";
+  colorFrom?: string;
   closed: boolean;
 }
 
@@ -276,27 +299,22 @@ interface Live {
   last: string | undefined;
   /** A value waiting for typing to pause. */
   timer: ReturnType<typeof setTimeout> | undefined;
-  /** The commit of stepper clicks made with the field closed, once the reader pauses. */
-  settle: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** How long typing pauses before its entry goes live. */
 const LIVE_TYPING_DELAY = 300;
-/** How long after the last stepper click, with the field closed, the clicks are committed. */
-const STEP_SETTLE_DELAY = 500;
-
-/** A stepper pressed on a number, and dragged up or down once the press became a drag. */
-interface Stepping {
+/** A number's lead pressed, and dragged sideways to scrub the number once the press became a drag. */
+interface Scrub {
   target: EditTarget;
   readonly pointer: number;
   /** Where the press began, and, once it became a drag, where the drag began. */
-  y: number;
-  /** Which stepper: up, `1`, or down, `-1`. */
-  readonly direction: 1 | -1;
+  x: number;
   /** The number when the press began. */
   readonly from: string;
   /** The number now, once the press became a drag. */
   value: string | undefined;
+  /** For a color's opacity scrubbed by its percent sign: its opacity when the press began. */
+  readonly percent?: number;
 }
 
 /** An item of a list pressed on its handle, and dragged once the press became a drag. */
@@ -356,12 +374,6 @@ interface Following {
   said: string;
 }
 
-/** A stepper's tooltip, which names the keys that do the same. */
-const STEPPER_TITLES = {
-  up: "Step up (\u2191). Shift+click steps 10. Drag up or down to scrub.",
-  down: "Step down (\u2193). Shift+click steps 10. Drag up or down to scrub."
-} as const;
-
 function keyOf(element: Element): string | undefined {
   return (element as HTMLElement).dataset["key"];
 }
@@ -375,6 +387,13 @@ function keyOf(element: Element): string | undefined {
 export class NxViewerElement extends ElementBase {
   static observedAttributes = ["stale"];
 
+  #detailsState: NxDetailsState = emptyDetails();
+  #lastIndex: TreeIndex | undefined;
+  /** The element values unfolded into nested groups of fields. */
+  #valuesOpen = new Set<string>();
+  /** The elements whose open inspectors also show the properties they do not set. */
+  #allProperties = new Set<string>();
+  #refreshingDetails = false;
   #tree: SourceTree | undefined;
   #text = "";
   #colors: readonly NxViewerColor[] = [];
@@ -405,6 +424,10 @@ export class NxViewerElement extends ElementBase {
    * A node marked on several spans, as a line's name and its `=`, is one target.
    */
   #pointedKey: string | undefined;
+  /** Where the pointer last stood across the page, for placing a card against a wide anchor. */
+  #pointerX: number | undefined;
+  /** Where the pointer last moved to, to tell a pointer that moves from one the reading scrolls under. */
+  #pointerAt: { readonly x: number; readonly y: number } | undefined;
   /** The key of the node the open card describes. */
   #cardKey: string | undefined;
   /** What scrolls the reading while a card is open, which closes the card when it scrolls. */
@@ -413,6 +436,18 @@ export class NxViewerElement extends ElementBase {
   #cardByKeyboard = false;
   #cardOpenTimer: ReturnType<typeof setTimeout> | undefined;
   #cardCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the cards cool, so the next card waits its full delay again. */
+  #cardWarmUntil = 0;
+  /**
+   * What the pointer was over when it pressed, scrolled or typed: it opens no card until the pointer
+   * moves onto something else.
+   */
+  #cardQuietKey: string | undefined;
+  /**
+   * Where the pointer stood when the reading scrolled under it; until it moves from there, what
+   * scrolls under it opens no card.
+   */
+  #cardStillAt: { readonly x: number; readonly y: number } | undefined;
   /** Whether the reader may edit values in place. */
   #editable = false;
   /** The values of the tree shown that the reading can edit, by key, while it may. */
@@ -437,19 +472,12 @@ export class NxViewerElement extends ElementBase {
   #ignoreClick = false;
   /** The value whose popover a press on it closed, which the click that follows leaves closed. */
   #closedOnPress: string | undefined;
-  /** A stepper pressed, and dragged up or down once the press became a drag. */
-  #stepping: Stepping | undefined;
-  /** A press on a stepper held through a cleared tree, to go on with the next one. */
-  #restep: Stepping | undefined;
-  /** The key of the element whose unwritten properties are listed. */
-  #moreOpen: string | undefined;
-  /** What the filter of the unwritten properties holds. */
-  #moreFilter = "";
-  /** What the list of unwritten properties was drawn for: the element's key and whether it was open. */
-  #moreFor: string | undefined;
-  /** The rows of unwritten properties drawn, and the block that holds them under a line. */
-  #moreDrawn: HTMLElement[] = [];
-  #moreBlock: HTMLElement | undefined;
+  /** A number's lead pressed, and scrubbing it once the press became a drag. */
+  #scrub: Scrub | undefined;
+  /** Which part of a color shown in its parts the next editor opens on. */
+  #colorPart: "hex" | "opacity" = "hex";
+  /** The color picker a color's swatch opened, while it is open. */
+  #swatchPicker: HTMLInputElement | undefined;
   /** The keys of the unwritten properties' values, which the reading edits as written ones. */
   #moreKeys: string[] = [];
   /** The cards of the unwritten properties' names, by the key their attribute would have. */
@@ -472,7 +500,7 @@ export class NxViewerElement extends ElementBase {
   readonly #card: HTMLDivElement;
   /** The popover a case or a color is chosen in, or a field's choices are listed in. */
   readonly #popover: HTMLDivElement;
-  /** A number's steppers and a field's choices chevron, drawn past the value they act on. */
+  /** A field's choices chevron, drawn past the value it acts on. */
   readonly #tools: HTMLSpanElement;
   /** The menu of a row's actions. */
   readonly #menu: HTMLDivElement;
@@ -483,10 +511,7 @@ export class NxViewerElement extends ElementBase {
   #problemTimer: ReturnType<typeof setTimeout> | undefined;
   /** Closes the card when anything around the reading scrolls, or Escape is pressed anywhere. */
   readonly #onDocumentScroll = (): void => {
-    this.#closeCard();
-    if (this.#tools.isConnected) {
-      this.#edgeTools();
-    }
+    this.#quietCards(true);
   };
   readonly #onDocumentKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
@@ -500,8 +525,26 @@ export class NxViewerElement extends ElementBase {
   /** Cancels a popover when the pointer goes down anywhere outside it. */
   readonly #onDocumentPointerDown = (event: PointerEvent): void => {
     const session = this.#session;
+    // A press on the lead of the open field's own property scrubs into the field, which stays open.
+    const onLead =
+      session?.field !== undefined &&
+      event.composedPath().some((node) => (node as Element).classList?.contains("field-lead") === true && (node as Element).parentElement?.contains(session.span) === true);
+    // A press elsewhere settles an open field first. In the viewer, one holding an invalid entry keeps
+    // the press from choosing anything, so the inspector holding it stays open; outside it, the press
+    // goes on and the entry is dropped, as leaving the field does.
+    if (session?.field !== undefined && !onLead && !event.composedPath().includes(session.field) && !event.composedPath().includes(this.#tools)) {
+      if (!event.composedPath().includes(this)) {
+        if (!session.closed) {
+          this.#finishField(session, "blur");
+        }
+      } else if (!this.finishEditing()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
     this.#closedOnPress = undefined;
-    // Stepper clicks made with the field closed are committed by a press anywhere but the tools, as
+    // A value still going live with no field open is committed by a press anywhere but the tools, as
     // on the host's Undo, which then takes back the whole change.
     if (session === undefined && this.#live !== undefined && !event.composedPath().includes(this.#tools)) {
       this.#settleLive();
@@ -518,7 +561,7 @@ export class NxViewerElement extends ElementBase {
     }
     // A press on the tools is theirs: a case's chevron closes its popover itself.
     const path = event.composedPath();
-    if (session !== undefined && session.field === undefined && !path.includes(this.#popover) && !path.includes(this.#tools)) {
+    if (session !== undefined && !session.closed && session.field === undefined && !path.includes(this.#popover) && !path.includes(this.#tools)) {
       this.#closeElsewhere(session);
       // A press on the value whose popover was open closes it, as a dropdown's does; the click
       // that follows does not open it again.
@@ -614,22 +657,11 @@ export class NxViewerElement extends ElementBase {
     this.#tools = document.createElement("span");
     this.#tools.className = "value-tools";
     this.#tools.setAttribute("aria-hidden", "true");
-    const steppers = document.createElement("span");
-    steppers.className = "steppers";
-    for (const direction of ["up", "down"] as const) {
-      const stepper = document.createElement("span");
-      stepper.className = `stepper ${direction}`;
-      stepper.title = STEPPER_TITLES[direction];
-      steppers.append(stepper);
-    }
     const toggle = document.createElement("span");
     toggle.className = "choices-toggle";
     toggle.title = CHOICES_TITLE;
-    this.#tools.append(steppers, toggle);
+    this.#tools.append(toggle);
     this.#tools.addEventListener("pointerdown", (event) => this.#onToolsPointerDown(event));
-    this.#tools.addEventListener("pointermove", (event) => this.#onToolsPointerMove(event));
-    this.#tools.addEventListener("pointerup", (event) => this.#onToolsPointerUp(event, true));
-    this.#tools.addEventListener("pointercancel", (event) => this.#onToolsPointerUp(event, false));
     for (const name of ["click", "dblclick", "mousedown"]) {
       this.#tools.addEventListener(name, (event) => {
         event.stopPropagation();
@@ -659,15 +691,36 @@ export class NxViewerElement extends ElementBase {
 
     this.#body.addEventListener("click", (event) => this.#onClick(event));
     this.#body.addEventListener("dblclick", (event) => this.#onDoubleClick(event));
-    this.#body.addEventListener("pointerdown", (event) => this.#onPointerDown(event));
-    this.#body.addEventListener("pointermove", (event) => this.#onPointerMove(event));
-    this.#body.addEventListener("pointerup", (event) => this.#onPointerUp(event, true));
-    this.#body.addEventListener("pointercancel", (event) => this.#onPointerUp(event, false));
+    this.#body.addEventListener("pointerdown", (event) => {
+      this.#onLeadPointerDown(event);
+      if (this.#scrub === undefined) {
+        this.#onPointerDown(event);
+      }
+    });
+    this.#body.addEventListener("pointermove", (event) => {
+      this.#pointerX = event.clientX;
+      this.#pointerMoved(event);
+      if (!this.#onScrubMove(event)) {
+        this.#onPointerMove(event);
+      }
+    });
+    this.#body.addEventListener("pointerup", (event) => {
+      if (!this.#onScrubUp(event, true)) {
+        this.#onPointerUp(event, true);
+      }
+    });
+    this.#body.addEventListener("pointercancel", (event) => {
+      if (!this.#onScrubUp(event, false)) {
+        this.#onPointerUp(event, false);
+      }
+    });
     // A focus ring is for a reader on the keyboard; after a click, the selection says where they are.
     this.#body.addEventListener("pointerdown", () => {
       this.#body.classList.add("by-pointer");
-      this.#closeCard();
+      this.#quietCards();
     });
+    // A wheel or a scroll moves the reading under the pointer: what passes under it is not hovered.
+    this.#body.addEventListener("wheel", () => this.#quietCards(true), { passive: true });
     frame.addEventListener("keydown", () => this.#body.classList.remove("by-pointer"));
     frame.addEventListener("keydown", (event) => this.#onKeyDown(event));
     this.#body.addEventListener("pointerover", (event) => {
@@ -675,8 +728,18 @@ export class NxViewerElement extends ElementBase {
       if (this.#drag?.started === true) {
         return;
       }
+      this.#pointerX = event.clientX;
+      // A pointer that moves meets something new before it moves over it, so one met where the
+      // pointer last moved to came to it: the reading scrolled, or redrew, under a still pointer.
+      const at = this.#pointerAt;
+      if (at === undefined) {
+        this.#pointerAt = { x: event.clientX, y: event.clientY };
+      } else if (at.x === event.clientX && at.y === event.clientY) {
+        this.#cardStillAt = at;
+      }
       this.#setHoveredUnit(this.#unitOf(event.target as Element));
-      this.#point(this.#hoverTargetOf(event.target));
+      // A held button is a press or a drag on its way: what it passes over opens no card.
+      this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));
     });
     this.#body.addEventListener("pointerleave", () => {
       this.#setHoveredUnit(undefined);
@@ -728,6 +791,126 @@ export class NxViewerElement extends ElementBase {
     this.#dropSession();
   }
 
+  get detailsState(): NxDetailsState {
+    return { pinned: [...this.#detailsState.pinned], suppressed: this.#detailsState.suppressed };
+  }
+  set detailsState(value: NxDetailsState | undefined) {
+    const next = mapDetails(value ?? emptyDetails(), (key) => key);
+    if (!sameDetails(next, this.#detailsState)) {
+      this.#detailsState = next;
+      this.#render();
+    }
+  }
+
+  /** Settle an editor before a host hides Visual; false keeps an invalid draft visible. */
+  finishEditing(): boolean {
+    const session = this.#session;
+    if (session?.field !== undefined) {
+      return this.#finishField(session, "key");
+    }
+    if (session !== undefined) {
+      if (session.target.kind === "color" && this.#problemOf(session.target, this.#draftOf(session) ?? "") !== undefined) {
+        this.#validate(session, true);
+        return false;
+      }
+      this.#closeElsewhere(session);
+    }
+    this.#settleLive();
+    return true;
+  }
+
+  #reportDetails(): void {
+    const detail: NxDetailsDetail = { state: this.detailsState, selection: this.#selection };
+    this.dispatchEvent(new CustomEvent(NX_DETAILS_EVENT, { detail, bubbles: true, composed: true }));
+  }
+
+  #openDetailsKeys(): Set<string> {
+    const index = this.#index;
+    const result = new Set<string>();
+    if (index !== undefined) {
+      const owner = compositionOwner(index, this.#selection);
+      for (const node of index.tree.nodes) {
+        if (detailsOpen(this.#detailsState, node.key, owner)) { result.add(node.key); }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Closes or reopens the inspector of the element with `key`, or pins or unpins it, keeping its
+   * row where it was on screen. An inspector holding an invalid entry stays open.
+   */
+  #toggleDetails(key: string, action: "toggle" | "pin"): void {
+    if (!this.finishEditing()) { return; }
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, this.#selection);
+    const wasOpen = detailsOpen(this.#detailsState, key, owner);
+    const focusedInside = this.#rendered.get(key)?.querySelector(":scope > .inspector")?.contains(this.shadowRoot?.activeElement ?? null) === true;
+    this.#detailsState = changeDetails(this.#detailsState, key, action, owner);
+    const isOpen = detailsOpen(this.#detailsState, key, owner);
+    this.#keepRow(key, () => this.#render());
+    const drawn = this.#rendered.get(key);
+    if (action === "pin") {
+      drawn?.querySelector<HTMLElement>(":scope > .sheet-head .row-pin")?.focus({ preventScroll: true });
+    } else if (focusedInside && !isOpen) {
+      this.#body.focus({ preventScroll: true });
+    }
+    const name = drawn?.querySelector(".sheet-kind")?.textContent ?? "element";
+    const pinned = this.#detailsState.pinned.includes(key);
+    this.#announcer.textContent =
+      action === "pin" ? `${name} ${pinned ? "pinned" : "unpinned"}` : wasOpen === isOpen ? "" : `${name} properties ${isOpen ? "shown" : "hidden"}`;
+    this.#reportDetails();
+  }
+
+  /** Runs `change`, which draws the reading again, keeping the row of `key` where it was on screen. */
+  #keepRow(key: string | undefined, change: () => void): void {
+    const headOf = (drawn: HTMLElement | undefined): HTMLElement | undefined =>
+      drawn?.matches(".sheet") === true ? (drawn.querySelector<HTMLElement>(":scope > .sheet-head") ?? drawn) : drawn;
+    const top = key === undefined ? undefined : headOf(this.#rendered.get(key))?.getBoundingClientRect().top;
+    change();
+    const after = key === undefined ? undefined : headOf(this.#rendered.get(key))?.getBoundingClientRect().top;
+    if (top !== undefined && after !== undefined && after !== top) {
+      this.#scroller()?.scrollBy?.({ top: after - top });
+    }
+  }
+
+  /**
+   * The elements whose inspectors show every property. An inspector that closes forgets it, so it
+   * opens again on what its element sets.
+   */
+  #shownAll(): Set<string> {
+    const open = this.#openDetailsKeys();
+    for (const key of this.#allProperties) {
+      if (!open.has(key) && !this.#valuesOpen.has(key)) {
+        this.#allProperties.delete(key);
+      }
+    }
+    return this.#allProperties;
+  }
+
+  /** Shows the properties an element does not set in its inspector, or hides them again. */
+  #toggleAllProperties(key: string): void {
+    if (!this.finishEditing()) { return; }
+    if (!this.#allProperties.delete(key)) {
+      this.#allProperties.add(key);
+    }
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, key);
+    this.#keepRow(owner, () => this.#render());
+    [...this.#body.querySelectorAll<HTMLElement>(".inspector-more")].find((candidate) => candidate.dataset["moreKey"] === key)?.focus({ preventScroll: true });
+  }
+
+  /** Unfolds an element value into a nested group of its fields, or folds it back. */
+  #toggleValue(key: string): void {
+    if (!this.finishEditing()) { return; }
+    const open = new Set(this.#valuesOpen);
+    if (!open.delete(key)) {
+      open.add(key);
+    }
+    this.#valuesOpen = open;
+    const owner = this.#index === undefined ? undefined : compositionOwner(this.#index, key);
+    this.#keepRow(owner, () => this.#render());
+    [...this.#body.querySelectorAll<HTMLElement>(".value-fold")].find((candidate) => candidate.dataset["valueKey"] === key)?.focus({ preventScroll: true });
+  }
+
   /** The source tree to show, as the language service's `sourceTree` query answers it. */
   get tree(): SourceTree | undefined {
     return this.#tree;
@@ -764,11 +947,28 @@ export class NxViewerElement extends ElementBase {
             : `${following.list}[${following.position}]`;
       this.#selection = undefined;
     }
+    const beforeDetails = this.#detailsState;
+    if (tree !== undefined) {
+      const next = indexTree(tree, this.#text);
+      if (follows) {
+        this.#detailsState = mapDetails(this.#detailsState, (key) => mappedKey(key, following.list, following.map, following.sequence));
+      } else if (this.#lastIndex !== undefined) {
+        this.#detailsState = reconcileDetails(this.#lastIndex, next, this.#detailsState);
+      }
+      this.#detailsState = mapDetails(this.#detailsState, (key) => {
+        const at = next.byKey.get(key);
+        return at !== undefined && isComposition(next, at) ? key : undefined;
+      });
+      this.#lastIndex = next;
+    }
     this.#tree = tree;
     // A new tree says what each edit made of the source, or that it made nothing.
     this.#pending.clear();
     this.#removed.clear();
     this.#render();
+    if (!sameDetails(beforeDetails, this.#detailsState)) {
+      this.#reportDetails();
+    }
     if (follows) {
       this.#select(selected, true);
       if (foldsMoved) {
@@ -859,6 +1059,9 @@ export class NxViewerElement extends ElementBase {
 
   /** Folds everything that can fold. */
   collapseAll(): void {
+    if (!this.finishEditing()) {
+      return;
+    }
     // What can fold inside a folded unit is not drawn, so it is found with everything unfolded.
     this.#chosenFolded = new Set();
     this.#render();
@@ -1003,9 +1206,6 @@ export class NxViewerElement extends ElementBase {
         this.#keptColor = { key: session.target.key, input: session.input, picker: session.picker, listening: session.listening };
       }
     }
-    // A press on a stepper goes on with the next tree, on the same number, through a cleared one too.
-    const stepping = this.#stepping ?? this.#restep;
-    this.#restep = undefined;
     this.#dropSession();
     this.#pointedKey = undefined;
     this.#rendered.clear();
@@ -1021,10 +1221,8 @@ export class NxViewerElement extends ElementBase {
     this.#body.classList.toggle("editable", this.#editable);
     this.#index = undefined;
     this.#targets = new Map();
-    this.#moreDrawn = [];
-    this.#moreBlock = undefined;
     this.#moreKeys = [];
-    this.#moreFor = undefined;
+    this.#moreCards.clear();
     this.#closeMenu(false);
     if (tree === undefined) {
       // A host that gives the next tree soon, at once or once it has it, keeps the height; one that
@@ -1034,7 +1232,6 @@ export class NxViewerElement extends ElementBase {
           this.#body.style.minHeight = "";
         }
       }, EMPTY_HOLD);
-      this.#restep = stepping;
       return;
     }
     const index = indexTree(tree, this.#text);
@@ -1044,7 +1241,7 @@ export class NxViewerElement extends ElementBase {
     const targets = editTargets(index);
     const draw = (wrapped?: ReadonlySet<string>): void => {
       this.#body.replaceChildren(
-        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning })
+        renderSource(this.ownerDocument, index, this.#colors, { wrapped, icons: this.#icons, folded: this.#folded, turning: this.#turning, details: this.#openDetailsKeys(), pinned: this.#detailsState.pinned, valuesOpen: this.#valuesOpen, allProperties: this.#shownAll() })
       );
     };
     try {
@@ -1075,6 +1272,9 @@ export class NxViewerElement extends ElementBase {
       this.#targets = targets;
       this.#markEditable();
     }
+    this.#fillUnwritten(index);
+    this.#markScrubbable();
+    this.#fitTitles();
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
     // by the reader or the host, is kept: when it hides the selection, the selection moves to the
     // folded unit that hides it, as a tree's does, or is cleared when no drawn unit holds it.
@@ -1110,9 +1310,15 @@ export class NxViewerElement extends ElementBase {
       kept.listening.abort();
       this.#closePopover();
     }
-    if (stepping !== undefined) {
-      this.#resumeStepping(stepping);
-    } else if (!this.#tools.isConnected) {
+    // A number being scrubbed goes on with the next tree, showing the number it has reached.
+    const scrub = this.#scrub;
+    if (scrub !== undefined) {
+      scrub.target = this.#targets.get(scrub.target.key) ?? scrub.target;
+      if (scrub.value !== undefined) {
+        this.#showStepped(scrub.target, scrub.value);
+      }
+    }
+    if (!this.#tools.isConnected) {
       this.#restTools();
     }
     // Fonts that arrive later change where the rows fall, and what fits on a line.
@@ -1217,6 +1423,7 @@ export class NxViewerElement extends ElementBase {
    * Alt+click does in a design tool's layers.
    */
   #toggleFold(key: string, deep: boolean): void {
+    if (!this.finishEditing()) { return; }
     const folded = new Set(this.#folded);
     const folding = !folded.has(key);
     this.#turning = { key, wasFolded: !folding };
@@ -1224,6 +1431,7 @@ export class NxViewerElement extends ElementBase {
     // is scrolled back by however far its line moved.
     const toggleOf = (): HTMLElement | undefined =>
       [...this.#body.querySelectorAll<HTMLElement>(".fold")].find((toggle) => toggle.dataset["foldKey"] === key);
+    const hadFocus = this.shadowRoot?.activeElement === toggleOf();
     const before = toggleOf()?.getBoundingClientRect().top;
     if (folding && deep) {
       // What can fold inside a folded unit is not drawn, so it is found with the unit opened all
@@ -1248,6 +1456,7 @@ export class NxViewerElement extends ElementBase {
       }
     }
     this.#setFolded(folded);
+    if (hadFocus) { toggleOf()?.focus({ preventScroll: true }); }
     const after = toggleOf()?.getBoundingClientRect().top;
     if (before !== undefined && after !== undefined && after !== before) {
       this.#scroller()?.scrollBy({ top: after - before, behavior: "instant" as ScrollBehavior });
@@ -1341,26 +1550,11 @@ export class NxViewerElement extends ElementBase {
     if (unit !== undefined) {
       const head = firstLine(unit);
       if (head !== undefined) {
-        draw(unit, unit.getBoundingClientRect(), "selected-body");
+        // An element's open inspector is a panel of its own; the selection colours only its row.
+        draw(unit, unit.getBoundingClientRect(), unit.matches(".row-element") ? "selected-body inspector-panel" : "selected-body");
         draw(unit, head, "selected");
       } else {
         draw(unit, unit.getBoundingClientRect(), "selected");
-      }
-      // A line's unwritten properties, listed under it, are part of what is selected.
-      if (this.#moreBlock !== undefined && this.#body.contains(this.#moreBlock)) {
-        // The rows' cells stretch across the block, so how far they reach is read from what they hold.
-        const reach = [...this.#moreBlock.querySelectorAll<HTMLElement>(".more-label, .more-filter, .sheet-name, .more-value, .more-default")]
-          .filter((part) => part.closest<HTMLElement>(".sheet-row")?.hidden !== true)
-          .map((part) => {
-            // A cell may stretch across its grid; its text's own box says where it ends.
-            if (part.childNodes.length === 0) {
-              return part.getBoundingClientRect().right;
-            }
-            const range = this.ownerDocument.createRange();
-            range.selectNodeContents(part);
-            return range.getBoundingClientRect().right;
-          });
-        draw(unit, this.#moreBlock.getBoundingClientRect(), "selected-body", Math.max(0, ...reach));
       }
     }
     const hovered = this.#hoveredUnit;
@@ -1374,6 +1568,10 @@ export class NxViewerElement extends ElementBase {
   #units(): HTMLElement[] {
     const units: HTMLElement[] = [];
     for (const found of this.#body.querySelectorAll<HTMLElement>(UNITS)) {
+      // The arrows walk rows; a row's inspector is reached with Tab.
+      if (found.closest(".inspector") !== null) {
+        continue;
+      }
       const unit = this.#unitOf(found);
       if (unit !== undefined && !units.includes(unit)) {
         units.push(unit);
@@ -1422,7 +1620,8 @@ export class NxViewerElement extends ElementBase {
     }
     if (next !== undefined) {
       this.#select(keyOf(next), true);
-      next.scrollIntoView?.({ block: "nearest" });
+      const current = keyOf(next);
+      if (current !== undefined) { this.#rendered.get(current)?.scrollIntoView?.({ block: "nearest" }); }
     }
   }
 
@@ -1436,16 +1635,46 @@ export class NxViewerElement extends ElementBase {
     if (fire && this.#live !== undefined) {
       this.#settleLive();
     }
-    // Selecting another unit closes the list of an element's unwritten properties.
-    if (key !== this.#moreOpen) {
-      this.#moreOpen = undefined;
-      this.#moreFilter = "";
-    }
     if (this.#menuKey !== undefined && this.#menuKey !== key) {
       this.#closeMenu(false);
     }
+    let detailsChanged = false;
+    if (reveal && !this.#refreshingDetails && this.#index !== undefined) {
+      const before = this.#openDetailsKeys();
+      const oldOwner = compositionOwner(this.#index, this.#selection);
+      const owner = compositionOwner(this.#index, key);
+      const priorState = this.#detailsState;
+      if (oldOwner !== owner || (key !== this.#selection && key !== owner && key !== undefined && !this.#rendered.has(key))) {
+        this.#detailsState = { ...this.#detailsState, suppressed: undefined };
+      }
+      const old = this.#selection;
+      this.#selection = key;
+      const after = this.#openDetailsKeys();
+      this.#selection = old;
+      if (before.size !== after.size || [...before].some((value) => !after.has(value))) {
+        if (!this.finishEditing()) {
+          this.#detailsState = priorState;
+          // A host's selection the viewer refuses is answered with the one it keeps, so the two agree.
+          if (!fire) {
+            this.#announceSelection();
+          }
+          return;
+        }
+        const drawn = key === undefined ? undefined : this.#rendered.get(key);
+        const anchor = drawn?.matches(".sheet") ? drawn.querySelector<HTMLElement>(":scope > .sheet-head") : drawn;
+        const top = anchor?.getBoundingClientRect().top;
+        this.#selection = key;
+        this.#refreshingDetails = true;
+        try { this.#render(); } finally { this.#refreshingDetails = false; }
+        const nextDrawn = key === undefined ? undefined : this.#rendered.get(key);
+        const nextAnchor = nextDrawn?.matches(".sheet") ? nextDrawn.querySelector<HTMLElement>(":scope > .sheet-head") : nextDrawn;
+        const nextTop = nextAnchor?.getBoundingClientRect().top;
+        if (top !== undefined && nextTop !== undefined) { this.#scroller()?.scrollBy?.({ top: nextTop - top }); }
+      }
+      detailsChanged = !sameDetails(priorState, this.#detailsState);
+    }
     this.#selectNode(key, fire, reveal);
-    this.#drawMore();
+    if (detailsChanged) { this.#reportDetails(); }
     this.#fitPropertyMark();
     // A selected property shows its value's tools, and only it.
     this.#restTools();
@@ -1479,6 +1708,13 @@ export class NxViewerElement extends ElementBase {
     for (const element of this.#body.querySelectorAll(".selected")) {
       element.classList.remove("selected");
       element.removeAttribute("aria-current");
+      if (element.matches(".row-element")) {
+        element.setAttribute("aria-selected", "false");
+      }
+    }
+    // Only the selected row's pin is a stop for Tab, so the rows are not a long run of them.
+    for (const pin of this.#body.querySelectorAll<HTMLElement>(".row-pin")) {
+      pin.tabIndex = -1;
     }
     queueMicrotask(() => this.#paintHighlights());
     const index = this.#index;
@@ -1488,7 +1724,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     // A node folded away is unfolded to, so what is selected can be seen.
-    const hiding = reveal ? [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded)) : [];
+    const hiding = reveal ? [...this.#folded].filter((folded) => folded !== key && this.#isInside(key, folded) && !(compositionOwner(index, key) === folded)) : [];
     if (hiding.length > 0) {
       this.#selection = key;
       const folded = new Set(this.#folded);
@@ -1500,6 +1736,15 @@ export class NxViewerElement extends ElementBase {
     const original = this.#rendered.get(key);
     original?.classList.add("selected");
     original?.setAttribute("aria-current", "true");
+    if (original?.matches(".row-element") === true) {
+      original.setAttribute("aria-selected", "true");
+    }
+    // The pin of the row the selection is in, the row itself or a field of its inspector, is a stop.
+    const row = original?.closest<HTMLElement>(".row-element");
+    const pin = row?.querySelector<HTMLElement>(":scope > .row-head > .row-pin");
+    if (pin !== null && pin !== undefined) {
+      pin.tabIndex = 0;
+    }
     // The menu mark of an item sharing its line stands apart from it, at the end of its row.
     for (const mark of this.#body.querySelectorAll<HTMLElement>(".row-menu.shared")) {
       if (mark.dataset["menuKey"] === key) {
@@ -1517,6 +1762,18 @@ export class NxViewerElement extends ElementBase {
     } else if (reveal) {
       original?.scrollIntoView?.({ block: "nearest" });
     }
+  }
+
+  /** Fires `nx-select` for what is selected now. */
+  #announceSelection(): void {
+    const key = this.#selection;
+    const at = key === undefined ? undefined : this.#index?.byKey.get(key);
+    if (key === undefined || at === undefined) {
+      return;
+    }
+    const node = nodeOf(this.#index!, at);
+    const detail: NxSelectDetail = { key, role: node.role, range: node.range };
+    this.dispatchEvent(new CustomEvent(NX_SELECT_EVENT, { detail, bubbles: true, composed: true }));
   }
 
   // ---- Editing ----------------------------------------------------------------------------
@@ -1551,7 +1808,10 @@ export class NxViewerElement extends ElementBase {
       mark.setAttribute("aria-haspopup", "menu");
       mark.setAttribute("aria-label", `Actions for ${index.tree.nodes[index.byKey.get(row.dataset["key"]!)!]?.name ?? "the row"}`);
       mark.dataset["menuKey"] = row.dataset["key"]!;
-      const holder = row.querySelector<HTMLElement>(":scope > .sheet-below") ?? row.querySelector<HTMLElement>(":scope > .sheet-value");
+      // An inspector's field keeps it beside its label, even where its value goes under the label.
+      const holder = row.classList.contains("prop-field")
+        ? row.querySelector<HTMLElement>(":scope > .sheet-value")
+        : row.querySelector<HTMLElement>(":scope > .sheet-below") ?? row.querySelector<HTMLElement>(":scope > .sheet-value");
       if (holder === null) {
         row.append(mark);
         continue;
@@ -1737,7 +1997,7 @@ export class NxViewerElement extends ElementBase {
       if (value === this.#currentOf(target)) {
         return;
       }
-      live = { target, key: this.#editKeyOf(target), from: this.#currentOf(target), last: undefined, timer: undefined, settle: undefined };
+      live = { target, key: this.#editKeyOf(target), from: this.#currentOf(target), last: undefined, timer: undefined };
       this.#live = live;
     }
     const going = live;
@@ -1770,7 +2030,6 @@ export class NxViewerElement extends ElementBase {
     }
     this.#live = undefined;
     clearTimeout(live.timer);
-    clearTimeout(live.settle);
     if (live.last !== undefined) {
       this.#fire(NX_EDIT_EVENT, { key: live.key, edit: editOf(live.target, live.from) });
     }
@@ -1783,7 +2042,6 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     clearTimeout(live.timer);
-    clearTimeout(live.settle);
     if (live.last === undefined) {
       this.#live = undefined;
       return;
@@ -1811,11 +2069,9 @@ export class NxViewerElement extends ElementBase {
     }
     // The value's property is selected as its editor opens, from a click, Tab or a chevron, so its
     // tools and its menu stay once the editor closes. A reading drawn again keeps the selection, as
-    // Enter on a selected unit does, and so does an element whose unset properties are listed, so
-    // the list stays.
+    // Enter on a selected unit does.
     const property = this.#propertyOf(key);
-    const listing = this.#moreOpen !== undefined && property !== undefined && this.#isInside(property, this.#moreOpen);
-    if (select && caret === undefined && property !== undefined && property !== this.#selection && !listing) {
+    if (select && caret === undefined && property !== undefined && property !== this.#selection) {
       this.#select(property, true, false);
     }
     this.#closeCard();
@@ -1828,9 +2084,18 @@ export class NxViewerElement extends ElementBase {
       case "case":
         this.#openCases(target, span, draft ?? "", caret);
         break;
-      case "color":
+      case "color": {
+        // A color literal in an inspector reads in its parts, and its hex or its opacity edits in place.
+        const part = span.querySelector<HTMLElement>(
+          this.#colorPart === "opacity" ? ":scope > .color-opacity > .opacity-value" : ":scope > .color-hex"
+        );
+        if (part !== null && span.closest(".inspector") !== null && isHexColor((draft ?? current).trim())) {
+          this.#openColorPart(target, part, this.#colorPart, (draft ?? current).trim(), current, caret);
+          break;
+        }
         this.#openColor(target, span, draft ?? current, caret);
         break;
+      }
       default:
         this.#openField(target, span, draft ?? current, caret);
     }
@@ -1902,9 +2167,87 @@ export class NxViewerElement extends ElementBase {
     return root?.getSelection?.() ?? this.ownerDocument.getSelection?.();
   }
 
-  /** What an open editor holds now, to open it again with. */
+  /**
+   * What an open editor holds now, to open it again with. A color literal's hex field holds its
+   * color alone and its opacity field the rest, so the two together are the entry.
+   */
   #draftOf(session: EditSession): string | undefined {
-    return session.field !== undefined ? fieldText(session.field) : session.input?.value;
+    if (session.field !== undefined) {
+      const entry = fieldText(session.field);
+      return session.colorPart === undefined ? entry : colorFromPart(session.colorPart, entry, session.colorFrom!);
+    }
+    const raw = session.input?.value;
+    const alpha = session.target.colorLiteral === true ? this.#popover.querySelector<HTMLInputElement>(".popover-alpha") : null;
+    if (raw === undefined || alpha === null) {
+      return raw;
+    }
+    // Left as they opened, the two read the color as written, not as a percent rounds its alpha.
+    if (raw === alpha.dataset["color"] && alpha.value === alpha.dataset["percent"]) {
+      return alpha.dataset["written"];
+    }
+    return withOpacity(raw, Number(alpha.value));
+  }
+
+  /**
+   * Opens a field in place on one part of a color shown in its parts, `part`: its hex, which keeps
+   * the color's opacity, or its opacity in percent, which keeps its color. `entry` is the color to
+   * show, and `from` the color the field changes.
+   */
+  #openColorPart(target: EditTarget, part: HTMLElement, which: "hex" | "opacity", entry: string, from: string, caret?: Caret): void {
+    const parts = hexParts(entry);
+    this.#openField(target, part, which === "hex" ? parts.rgb : String(parts.percent), caret);
+    const session = this.#session;
+    if (session !== undefined && session.target === target) {
+      session.colorPart = which;
+      session.colorFrom = from;
+      session.field?.classList.add(which === "hex" ? "field-color-hex" : "field-color-opacity");
+      session.field?.setAttribute("aria-label", `${this.#labelOf(target)}: ${which === "hex" ? "hex color" : "opacity, percent"}`);
+      this.#validate(session);
+    }
+  }
+
+  /**
+   * Opens the color picker on a color shown in its parts, from its swatch: the color goes live as it
+   * is picked and is committed once when the picker closes on it, keeping its opacity.
+   */
+  #pickSwatch(key: string, swatch: HTMLElement): void {
+    const target = this.#targets.get(key);
+    if (target === undefined || !this.finishEditing()) {
+      return;
+    }
+    const property = this.#propertyOf(key);
+    if (property !== undefined && property !== this.#selection) {
+      this.#select(property, true, false);
+    }
+    this.#swatchPicker?.remove();
+    const from = this.#currentOf(target);
+    const picker = this.ownerDocument.createElement("input");
+    picker.type = "color";
+    picker.className = "swatch-picker";
+    picker.tabIndex = -1;
+    picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
+    picker.value = pickerColor(from, swatch);
+    // Where the swatch is, so the browser opens its picker there.
+    const box = swatch.getBoundingClientRect();
+    const frame = this.#frame.getBoundingClientRect();
+    picker.style.left = `${box.left - frame.left}px`;
+    picker.style.top = `${box.bottom - frame.top}px`;
+    this.#frame.append(picker);
+    this.#swatchPicker = picker;
+    const color = (): string => colorFromPart("hex", picker.value, from);
+    picker.addEventListener("input", () => this.#showStepped(target, color()));
+    picker.addEventListener("change", () => {
+      picker.remove();
+      if (this.#swatchPicker === picker) {
+        this.#swatchPicker = undefined;
+      }
+      this.#endNumberDrag(target, from, color(), true);
+    });
+    try {
+      (picker as HTMLInputElement & { showPicker?(): void }).showPicker?.() ?? picker.click();
+    } catch {
+      picker.click();
+    }
   }
 
   /** A field in the value's own place, holding `text`, that grows with it and wraps in the reading. */
@@ -1950,9 +2293,13 @@ export class NxViewerElement extends ElementBase {
         this.#paintHighlights();
       }
     });
-    field.addEventListener("blur", () => {
+    field.addEventListener("blur", (event) => {
       if (!session.closed) {
-        this.#finishField(session, "blur");
+        // Focus moving out of the viewer drops an entry it cannot take; focus moving within it, or
+        // leaving the window, keeps that entry open with its note.
+        const to = event.relatedTarget as Node | null;
+        const outside = to !== null && to !== this && !this.contains(to) && !this.#body.contains(to);
+        this.#finishField(session, outside ? "blur" : "key");
       }
     });
     this.#validate(session);
@@ -2151,8 +2498,8 @@ export class NxViewerElement extends ElementBase {
    */
   #finishField(session: EditSession, how: "key" | "blur"): boolean {
     const target = session.target;
-    let value = fieldText(session.field!);
-    if (target.kind === "number") {
+    let value = this.#draftOf(session) ?? "";
+    if (target.kind === "number" || session.colorPart !== undefined) {
       value = value.trim();
     }
     if (value === this.#currentOf(target)) {
@@ -2183,7 +2530,7 @@ export class NxViewerElement extends ElementBase {
    * commits it, as leaving a field does; anything else is cancelled.
    */
   #closeElsewhere(session: EditSession): void {
-    const value = session.target.kind === "color" ? (session.input?.value ?? "").trim() : undefined;
+    const value = session.target.kind === "color" ? (this.#draftOf(session) ?? "").trim() : undefined;
     if (value !== undefined && value !== this.#currentOf(session.target) && this.#problemOf(session.target, value) === undefined) {
       this.#endSession(session, false);
       this.#commitValue(session.target, value);
@@ -2229,8 +2576,6 @@ export class NxViewerElement extends ElementBase {
     this.#reportDraft(false);
     this.#closePopover();
     this.#hideTools();
-    this.#stepping = undefined;
-    this.#body.classList.remove("stepping");
   }
 
   /** Hides the popover and drops its contents and its kind, so nothing of it stays on screen. */
@@ -2254,7 +2599,6 @@ export class NxViewerElement extends ElementBase {
       }
       this.#live = undefined;
       clearTimeout(live.timer);
-      clearTimeout(live.settle);
       this.#pending.set(target.key, value);
       const span = this.#rendered.get(target.key);
       if (span !== undefined) {
@@ -2307,6 +2651,13 @@ export class NxViewerElement extends ElementBase {
       at += direction;
     }
     const next = from < 0 ? undefined : values[at];
+    // Tab past an inspector's last field stops at its last line, which shows or hides the rest.
+    const inspector = from < 0 ? undefined : values[from]!.closest<HTMLElement>(".inspector");
+    const more = inspector?.querySelector<HTMLElement>(":scope > .inspector-more");
+    if (direction === 1 && more !== null && more !== undefined && (next === undefined || next.closest(".inspector") !== inspector)) {
+      more.focus({ preventScroll: true });
+      return;
+    }
     if (next === undefined) {
       return;
     }
@@ -2833,9 +3184,10 @@ export class NxViewerElement extends ElementBase {
       picker.value = pickerColor(text, span.querySelector(".swatch") ?? undefined);
       picker.setAttribute("aria-label", `${this.#labelOf(target)}: pick a color`);
       this.#popover.className = "popover colors";
-      this.#popover.replaceChildren(input, picker);
+      // The swatch leads, as a design tool's color row does, then the hex it shows.
+      this.#popover.replaceChildren(picker, input);
     }
-    this.#popover.querySelector(".popover-alpha")?.remove();
+    this.#popover.querySelector(".popover-opacity")?.remove();
     this.#popover.hidden = false;
     span.classList.add("editing");
     const session: EditSession = { target, span, input, picker, listening, closed: false };
@@ -2843,18 +3195,33 @@ export class NxViewerElement extends ElementBase {
       const alpha = document.createElement("input");
       alpha.className = "popover-alpha";
       alpha.type = "number";
+      // Opacity reads as a whole percent, as design tools show it, not as the raw fraction of 255.
       alpha.min = "0";
-      alpha.max = "1";
-      alpha.step = "0.01";
-      alpha.setAttribute("aria-label", `${this.#labelOf(target)}: alpha`);
-      const hex = preserveHexAlpha("#000000", input.value);
-      alpha.value = String(hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1);
-      this.#popover.append(alpha);
+      alpha.max = "100";
+      alpha.step = "1";
+      alpha.setAttribute("aria-label", `${this.#labelOf(target)}: opacity, percent`);
+      const hex = preserveHexAlpha("#000000", text);
+      alpha.value = String(Math.round((hex.length === 9 ? parseInt(hex.slice(7), 16) / 255 : 1) * 100));
+      // The hex field shows the color alone, as design tools do; its opacity is the field beside it.
+      if (isHexColor(input.value.trim())) {
+        const written = input.value;
+        input.value = preserveHexAlpha(expandHex(input.value.trim()), "#000000");
+        alpha.dataset["written"] = written;
+        alpha.dataset["color"] = input.value;
+        alpha.dataset["percent"] = alpha.value;
+      }
+      // The field and its unit read as one box, the unit quiet inside it at the end.
+      const unit = document.createElement("span");
+      unit.className = "popover-alpha-unit";
+      unit.textContent = "%";
+      const opacity = document.createElement("label");
+      opacity.className = "popover-opacity";
+      opacity.append(alpha, unit);
+      this.#popover.append(opacity);
       alpha.addEventListener("change", () => {
         const value = Number(alpha.value);
-        if (!Number.isFinite(value) || value < 0 || value > 1 || alpha.value.trim() === "") return;
-        input.value = picker.value + Math.round(value * 255).toString(16).padStart(2, "0");
-        this.#choose(session, input.value);
+        if (!Number.isFinite(value) || value < 0 || value > 100 || alpha.value.trim() === "") return;
+        this.#choose(session, withOpacity(input.value.trim(), value));
       }, { signal });
     }
     this.#session = session;
@@ -2874,7 +3241,10 @@ export class NxViewerElement extends ElementBase {
       },
       { signal }
     );
-    picker.addEventListener("change", () => this.#choose(session, preserveHexAlpha(picker.value, input.value)), { signal });
+    picker.addEventListener("change", () => {
+      input.value = preserveHexAlpha(picker.value, input.value);
+      this.#choose(session, this.#draftOf(session) ?? input.value);
+    }, { signal });
     this.#validate(session);
     this.#placeCard(span, this.#popover);
     if (kept !== undefined) {
@@ -2934,7 +3304,7 @@ export class NxViewerElement extends ElementBase {
         this.#pickChoice(session, session.choiceActive);
         return;
       }
-      const raw = session.input?.value ?? "";
+      const raw = this.#draftOf(session) ?? "";
       const value = raw.trim();
       // A popover left as it was leaves the value as it is.
       if (value === this.#currentOf(target)) {
@@ -3191,26 +3561,23 @@ export class NxViewerElement extends ElementBase {
     this.#fire(NX_EDIT_EVENT, { key, edit: { kind: "remove" } });
   }
 
-  // ---- Steppers -----------------------------------------------------------------------------
+  // ---- A value's tools ------------------------------------------------------------------------
 
   /**
-   * Draws the tools past the value `span` draws for `target`: a number's steppers, and a chevron
-   * past a case, past a selected property's value with choices, or past an open field with choices.
-   * Nothing for a value with none of these.
+   * Draws the tools past the value `span` draws for `target`: a chevron past a case, past a selected
+   * property's value with choices, or past an open field with choices. Nothing for a value with none.
    */
   #showTools(span: HTMLElement, target: EditTarget): void {
     const session = this.#session?.target.key === target.key ? this.#session : undefined;
-    const steppers = target.kind === "number";
     const isCase = target.kind === "case";
     // The chevron says a list is there: past a case, past an open field with choices, and past a
     // selected property's value with choices.
     const chevron =
       isCase || (session === undefined ? this.#hasChoices(target) : session.field !== undefined && (session.choices?.length ?? 0) > 0);
-    if (!steppers && !chevron) {
+    if (!chevron) {
       this.#hideTools();
       return;
     }
-    this.#tools.classList.toggle("with-steppers", steppers);
     this.#tools.classList.toggle("with-choices", chevron);
     // A case's popover open is its list open.
     this.#tools.classList.toggle("open", session?.choicesOpen === true || (isCase && session !== undefined));
@@ -3232,31 +3599,9 @@ export class NxViewerElement extends ElementBase {
       this.#tools.classList.remove("in-line");
     }
     this.#fitRowMark();
-    this.#edgeTools();
     if (inLine || wasInLine) {
       // The line grew or shrank, so its highlight is redrawn to fit it.
       queueMicrotask(() => this.#paintHighlights());
-    }
-  }
-
-  /**
-   * Keeps the steppers, a little taller than their line, inside what the reading shows: at its top
-   * or bottom edge they reach from their line's edge inward rather than past the edge, where they
-   * would be cut off. Nothing scrolls.
-   */
-  #edgeTools(): void {
-    const steppers = this.#tools.querySelector<HTMLElement>(".steppers");
-    this.#tools.classList.remove("at-top", "at-bottom");
-    const line = this.#tools.getBoundingClientRect();
-    const reach = steppers === null ? 0 : (steppers.getBoundingClientRect().height - line.height) / 2;
-    if (line.height === 0 || reach <= 0) {
-      return;
-    }
-    const port = this.#scrollPort();
-    if (line.top - reach < port.top) {
-      this.#tools.classList.add("at-top");
-    } else if (line.bottom + reach > port.top + port.height) {
-      this.#tools.classList.add("at-bottom");
     }
   }
 
@@ -3298,9 +3643,9 @@ export class NxViewerElement extends ElementBase {
     return parent !== undefined && index.tree.nodes[parent]!.role === "attribute" ? index.tree.nodes[parent]!.key : undefined;
   }
 
-  /** Whether `target`'s value has tools to show: a number's steppers, a case's or its choices' chevron. */
+  /** Whether `target`'s value has tools to show: a case's or its choices' chevron. */
   #offersTools(target: EditTarget): boolean {
-    return target.kind === "number" || target.kind === "case" || this.#hasChoices(target);
+    return target.kind === "case" || this.#hasChoices(target);
   }
 
   /**
@@ -3333,10 +3678,10 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Shows the tools where they rest with no editor open: past the selected property's value, or
-   * nowhere. An editor open or a stepper pressed keeps the tools it has.
+   * nowhere. An editor open keeps the tools it has.
    */
   #restTools(): void {
-    if (this.#session !== undefined || this.#stepping !== undefined) {
+    if (this.#session !== undefined || this.#scrub !== undefined) {
       return;
     }
     const selected = this.#selectedToolsValue();
@@ -3395,7 +3740,7 @@ export class NxViewerElement extends ElementBase {
     event.stopPropagation();
     // The open field keeps the focus, and nothing is selected as text.
     event.preventDefault();
-    const part = (event.target as Element).closest?.(".stepper, .choices-toggle") as HTMLElement | null;
+    const part = (event.target as Element).closest?.(".choices-toggle") as HTMLElement | null;
     const key = this.#tools.dataset["toolsFor"];
     const target = key === undefined ? undefined : this.#targets.get(key);
     if (part === null || target === undefined || event.button !== 0) {
@@ -3429,110 +3774,131 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    const from = session?.field !== undefined ? (session.field.textContent ?? "").trim() : this.#shownOf(target);
-    this.#stepping = { target, pointer: event.pointerId, y: event.clientY, direction: part.classList.contains("up") ? 1 : -1, from, value: undefined };
-    try {
-      part.setPointerCapture?.(event.pointerId);
-    } catch {
-      // A pointer the element cannot capture still steps on release over it.
-    }
   }
 
-  #onToolsPointerMove(event: PointerEvent): void {
-    const stepping = this.#stepping;
-    if (stepping === undefined || event.pointerId !== stepping.pointer) {
+  /**
+   * Begins a press on a number field's lead, its icon or label: dragged sideways, it
+   * scrubs the number; let go before it moves, it focuses the field.
+   */
+  #onLeadPointerDown(event: PointerEvent): void {
+    if (!this.#editable || event.button !== 0 || this.#scrub !== undefined) {
       return;
     }
-    event.stopPropagation();
-    // Up is more, as the steppers point.
-    const moved = stepping.y - event.clientY;
-    if (stepping.value === undefined) {
-      if (Math.abs(moved) < STEPPER_SLOP) {
+    // A color's percent sign, in an inspector, scrubs its opacity as a number's lead scrubs it.
+    const sign = (event.target as Element).closest?.(".inspector .color-value.editable-value > .color-opacity > .opacity-unit") as HTMLElement | null;
+    if (sign !== null && sign !== undefined && this.#body.contains(sign)) {
+      const colorTarget = this.#targets.get(keyOf(sign.closest<HTMLElement>(".color-value")!)!);
+      if (colorTarget?.kind !== "color" || !this.finishEditing()) {
         return;
       }
-      // The drag counts from here, so it starts at the number pressed rather than a few steps on.
-      stepping.y = event.clientY;
+      event.preventDefault();
+      event.stopPropagation();
+      const from = this.#shownOf(colorTarget);
+      this.#scrub = { target: colorTarget, pointer: event.pointerId, x: event.clientX, from, value: undefined, percent: hexParts(from).percent };
+      try {
+        this.#body.setPointerCapture?.(event.pointerId);
+      } catch {
+        // A pointer the element cannot capture still scrubs while it stays over the reading.
+      }
+      return;
     }
-    const target = stepping.target;
-    const steps = Math.trunc((stepping.y - event.clientY) / STEPPER_STEP) * (event.shiftKey ? 10 : 1);
-    const value = stepNumber(stepping.from, steps, target.signed !== false, target.hints) ?? stepping.from;
-    if (stepping.value === undefined) {
-      this.#body.classList.add("stepping");
+    const lead = (event.target as Element).closest?.(".field-lead") as HTMLElement | null;
+    const field = lead?.closest<HTMLElement>(".prop-field");
+    if (lead === null || lead === undefined || field === null || field === undefined || !this.#body.contains(field)) {
+      return;
     }
-    stepping.value = value;
-    this.#showStepped(target, value);
+    const value = field.querySelector<HTMLElement>(":scope > .sheet-value > .editable-value, :scope > .sheet-value > .more-value.editable-value");
+    const target = value === null ? undefined : this.#targets.get(keyOf(value)!);
+    if (target?.kind !== "number") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const session = this.#session?.target.key === target.key && this.#session.field !== undefined ? this.#session : undefined;
+    const from = session !== undefined ? (session.field!.textContent ?? "").trim() : this.#shownOf(target);
+    this.#scrub = { target, pointer: event.pointerId, x: event.clientX, from, value: undefined };
+    try {
+      this.#body.setPointerCapture?.(event.pointerId);
+    } catch {
+      // A pointer the element cannot capture still scrubs while it stays over the reading.
+    }
+  }
+
+  /** Scrubs the number pressed: one step for every few pixels sideways, ten with Shift, a tenth with Alt. */
+  #onScrubMove(event: PointerEvent): boolean {
+    const scrub = this.#scrub;
+    if (scrub === undefined || event.pointerId !== scrub.pointer) {
+      return false;
+    }
+    event.preventDefault();
+    if (scrub.value === undefined) {
+      if (Math.abs(event.clientX - scrub.x) < SCRUB_SLOP) {
+        return true;
+      }
+      this.#body.classList.add("scrubbing");
+    }
+    const target = scrub.target;
+    // Steps count from the press, so a drag of 30 pixels is ten steps.
+    const steps = Math.trunc((event.clientX - scrub.x) / SCRUB_STEP) * (event.shiftKey ? 10 : 1);
+    if (scrub.percent !== undefined) {
+      // An opacity steps a percent at a time, ten with Shift, between none and full.
+      const percent = Math.max(0, Math.min(100, scrub.percent + steps));
+      const color = colorFromPart("opacity", String(percent), scrub.from);
+      if (color !== scrub.value) {
+        scrub.value = color;
+        this.#showStepped(target, color);
+      }
+      return true;
+    }
+    const step = target.hints?.step !== undefined && target.hints.step > 0 ? target.hints.step : 1;
+    // Alt steps a tenth as far, though never below one for a whole number.
+    const fine = target.hints?.integer === true ? Math.max(1, Math.round(step / 10)) : step / 10;
+    const hints = event.altKey ? { ...target.hints, step: fine } : target.hints;
+    const value = steps === 0 ? scrub.from : stepNumber(scrub.from, steps, target.signed !== false, hints) ?? scrub.from;
+    if (value !== scrub.value) {
+      scrub.value = value;
+      this.#showStepped(target, value);
+    }
+    return true;
   }
 
   /**
-   * Ends a press on a stepper: a click steps once, or ten steps with Shift; a drag has scrubbed. Into
-   * the open field, or committed once, at release; a cancelled drag puts the value back.
+   * Ends a press on a number's lead: a drag commits the number it reached once, or puts it back when
+   * cancelled; a press that never moved focuses the field.
    */
-  #onToolsPointerUp(event: PointerEvent, commit: boolean): void {
-    const stepping = this.#stepping;
-    if (stepping === undefined || event.pointerId !== stepping.pointer) {
-      return;
+  #onScrubUp(event: PointerEvent, commit: boolean): boolean {
+    const scrub = this.#scrub;
+    if (scrub === undefined || event.pointerId !== scrub.pointer) {
+      return false;
     }
-    event.stopPropagation();
-    this.#stepping = undefined;
-    this.#body.classList.remove("stepping");
-    const target = stepping.target;
-    const dragged = stepping.value !== undefined;
-    const value = !commit
-      ? stepping.from
-      : (stepping.value ??
-        stepNumber(stepping.from, stepping.direction * (event.shiftKey ? 10 : 1), target.signed !== false, target.hints));
-    if (value === undefined || (!dragged && value === stepping.from)) {
-      return;
+    this.#scrub = undefined;
+    this.#body.classList.remove("scrubbing");
+    try {
+      this.#body.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Already released.
     }
+    const target = scrub.target;
+    if (scrub.value === undefined) {
+      if (commit && this.#session?.target.key !== target.key) {
+        // A press on a color's percent sign that never moved edits its opacity.
+        this.#colorPart = scrub.percent !== undefined ? "opacity" : "hex";
+        this.#openEditor(target.key);
+        this.#colorPart = "hex";
+      }
+      this.#ignoreClick = true;
+      setTimeout(() => (this.#ignoreClick = false), 0);
+      return true;
+    }
+    this.#ignoreClick = true;
+    setTimeout(() => (this.#ignoreClick = false), 0);
     const session = this.#session?.target.key === target.key && this.#session.field !== undefined ? this.#session : undefined;
     if (session !== undefined) {
-      this.#showStepped(target, value);
-      if (commit) {
-        this.#selectAll(session.field!);
-      }
-      return;
+      this.#showStepped(target, commit ? scrub.value : scrub.from);
+      return true;
     }
-    if (!dragged && commit) {
-      // A click goes live, and clicks on the same number are committed together once the reader
-      // pauses, or moves on.
-      this.#showStepped(target, value);
-      const live = this.#live;
-      if (live !== undefined && live.target.key === target.key) {
-        clearTimeout(live.settle);
-        live.settle = setTimeout(() => {
-          if (this.#live === live) {
-            this.#settleLive();
-          }
-        }, STEP_SETTLE_DELAY);
-      }
-      return;
-    }
-    this.#endNumberDrag(target, stepping.from, value, commit);
-  }
-
-  /**
-   * Carries a press on a stepper on through a reading drawn again: its tools drawn past the same
-   * number, showing the number it has reached. When the number is gone, the press ends.
-   */
-  #resumeStepping(stepping: Stepping): void {
-    const target = this.#targets.get(stepping.target.key);
-    const session = this.#session?.target.key === stepping.target.key ? this.#session : undefined;
-    const span = session?.span ?? this.#rendered.get(stepping.target.key);
-    if (target === undefined || target.kind !== "number" || span === undefined) {
-      return;
-    }
-    stepping.target = target;
-    this.#stepping = stepping;
-    this.#showTools(span, target);
-    try {
-      this.#tools.querySelector(stepping.direction === 1 ? ".stepper.up" : ".stepper.down")?.setPointerCapture?.(stepping.pointer);
-    } catch {
-      // A pointer the DOM no longer knows ends with its next event.
-    }
-    if (stepping.value !== undefined) {
-      this.#body.classList.add("stepping");
-      this.#showStepped(target, stepping.value);
-    }
+    this.#endNumberDrag(target, scrub.from, commit ? scrub.value : scrub.from, commit);
+    return true;
   }
 
   /**
@@ -3597,112 +3963,29 @@ export class NxViewerElement extends ElementBase {
   // ---- Properties an element does not write -------------------------------------------------
 
   /**
-   * Draws, on the selected element, the quiet row that lists the properties it does not write, and
-   * under it, when open, a dimmed row to each. Drawn again only when the element or its state
-   * changed, or with `force`.
+   * Fills the empty field of each property an open inspector's element does not write: its
+   * default, quieter, or a placeholder (for text, "Add" and its label; else the type it takes), and, while the reading is editable, the
+   * editor that writes it.
    */
-  #drawMore(force = false): void {
-    const key = this.#selection;
-    const open = key !== undefined && this.#moreOpen === key;
-    const state = key === undefined ? undefined : `${key}\u0000${open}`;
-    if (!force && state === this.#moreFor && (state === undefined || this.#moreDrawn.some((drawn) => this.#body.contains(drawn)))) {
-      return;
+  #fillUnwritten(index: TreeIndex): void {
+    const fields = [...this.#body.querySelectorAll<HTMLElement>(".dimmed-row[data-more-of]")];
+    const byElement = new Map<string, HTMLElement[]>();
+    for (const field of fields) {
+      const key = field.dataset["moreOf"]!;
+      byElement.set(key, [...(byElement.get(key) ?? []), field]);
     }
-    const focused = this.shadowRoot?.activeElement;
-    const refocus = focused instanceof HTMLElement && this.#moreDrawn.some((drawn) => drawn.contains(focused)) ? focused.dataset["moreFocus"] : undefined;
-    for (const drawn of this.#moreDrawn) {
-      drawn.remove();
-    }
-    for (const stale of this.#moreKeys) {
-      this.#targets.delete(stale);
-      this.#rendered.delete(stale);
-    }
-    this.#moreDrawn = [];
-    this.#moreBlock = undefined;
-    this.#moreKeys = [];
-    this.#moreCards.clear();
-    this.#moreFor = state;
-    const index = this.#index;
-    const at = key === undefined ? undefined : index?.byKey.get(key);
-    const element = key === undefined ? undefined : this.#rendered.get(key);
-    if (!this.#editable || index === undefined || at === undefined || element === undefined || !element.matches(".sheet:not(.folded), .line-element, .tag-line")) {
-      return;
-    }
-    const unwritten = unwrittenProperties(index, at);
-    if (unwritten.length === 0) {
-      return;
-    }
-    const document = this.ownerDocument;
-    const rows: HTMLElement[] = [];
-    const toggle = document.createElement("span");
-    toggle.className = open ? "sheet-row more more-toggle open" : "sheet-row more more-toggle";
-    toggle.tabIndex = 0;
-    toggle.dataset["moreFocus"] = "toggle";
-    toggle.setAttribute("role", "button");
-    toggle.setAttribute("aria-expanded", String(open));
-    const label = document.createElement("span");
-    label.className = "more-label";
-    const properties = unwritten.length === 1 ? "property" : "properties";
-    // Named for what it lists, unset properties, so it does not read as more of those written.
-    label.textContent = open ? `Hide unset ${properties}` : `Show ${unwritten.length} unset ${properties}`;
-    toggle.setAttribute("aria-label", `${unwritten.length} unset ${properties}`);
-    toggle.append(label);
-    rows.push(toggle);
-    if (open) {
-      if (unwritten.length > MORE_FILTER_PAST) {
-        const holder = document.createElement("span");
-        holder.className = "sheet-row more more-filter-row";
-        const filter = document.createElement("input");
-        filter.className = "more-filter";
-        filter.placeholder = "Filter properties";
-        filter.spellcheck = false;
-        filter.value = this.#moreFilter;
-        filter.dataset["moreFocus"] = "filter";
-        filter.setAttribute("aria-label", "Filter properties");
-        filter.addEventListener("input", () => {
-          this.#moreFilter = filter.value;
-          this.#filterMore();
-        });
-        holder.append(filter);
-        rows.push(holder);
+    for (const [key, drawn] of byElement) {
+      const at = index.byKey.get(key);
+      if (at === undefined) {
+        continue;
       }
-      for (const entry of unwritten) {
-        rows.push(this.#dimmedRow(index, at, key!, entry));
+      const entries = new Map(unwrittenProperties(index, at).map((entry) => [entry.property.name, entry]));
+      for (const field of drawn) {
+        const entry = entries.get(field.dataset["name"]!);
+        if (entry !== undefined) {
+          this.#fillDimmed(index, at, key, field, entry);
+        }
       }
-    }
-    for (const row of rows) {
-      row.dataset["moreOf"] = key;
-    }
-    if (element.matches(".sheet")) {
-      const written = [...element.children].filter((child) => child.matches(".sheet-row:not(.more), .sheet-head"));
-      written[written.length - 1]!.after(...rows);
-      this.#moreDrawn = rows;
-    } else {
-      // A line lists them under it, as a group would.
-      const block = document.createElement("span");
-      block.className = "more-block";
-      block.dataset["moreOf"] = key;
-      const inGroup = element.parentElement?.closest(".sheet") !== null;
-      const line = this.#text.split("\n")[index.tree.nodes[at]!.range.start.line] ?? "";
-      block.style.setProperty("--more-indent", String(inGroup ? 0 : line.length - line.trimStart().length));
-      block.append(...rows);
-      // After the line's end, so the block takes no blank line of its own.
-      const next = element.nextSibling;
-      if (next !== null && next.nodeType === 3 && (next.textContent ?? "").startsWith("\n")) {
-        (next as Text).splitText(1);
-        next.after(block);
-      } else {
-        element.after(block);
-      }
-      // Under the element itself, inside its highlight, where it starts partway along its line.
-      const blockBox = block.getBoundingClientRect();
-      const from = element.getClientRects()[0];
-      if (blockBox.width > 0 && from !== undefined) {
-        // In a narrow pane, no further in than halfway, so the rows keep room to read.
-        block.style.paddingLeft = `${Math.min(blockBox.width / 2, Math.max(0, from.left - blockBox.left))}px`;
-      }
-      this.#moreDrawn = [block];
-      this.#moreBlock = block;
     }
     for (const value of this.#moreKeys) {
       const span = this.#rendered.get(value);
@@ -3712,33 +3995,19 @@ export class NxViewerElement extends ElementBase {
         this.#markAdded(this.#targets.get(value)!, span);
       }
     }
-    this.#filterMore();
-    if (refocus !== undefined) {
-      [...this.#moreDrawn.flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])]
-        .find((candidate) => candidate.dataset["moreFocus"] === refocus)
-        ?.focus({ preventScroll: true });
-    }
-    queueMicrotask(() => this.#paintHighlights());
   }
 
-  /** A dimmed row for a property the element at `at`, with `key`, does not write. */
-  #dimmedRow(index: TreeIndex, at: number, key: string, entry: UnwrittenProperty): HTMLElement {
+  /** Fills the empty field of a property the element at `at`, with `key`, does not write. */
+  #fillDimmed(index: TreeIndex, at: number, key: string, field: HTMLElement, entry: UnwrittenProperty): void {
     const document = this.ownerDocument;
     const { property, editor, hints } = entry;
     const attributeKey = `${key}.${property.name}`;
     const valueKey = `${attributeKey}.value`;
-    const row = document.createElement("span");
-    row.className = "sheet-row more dimmed-row";
-    row.tabIndex = -1;
-    row.dataset["moreFocus"] = `row:${property.name}`;
-    row.dataset["name"] = property.name;
-    const name = document.createElement("span");
-    name.className = "sheet-name";
-    name.textContent = property.name;
-    name.dataset["hover"] = attributeKey;
+    field.tabIndex = -1;
+    field.dataset["moreFocus"] = `row:${property.name}`;
+    field.querySelector<HTMLElement>(".sheet-name")?.setAttribute("data-hover", attributeKey);
     this.#moreCards.set(attributeKey, propertyCardOf(property));
-    const cell = document.createElement("span");
-    cell.className = "sheet-value";
+    const cell = field.querySelector<HTMLElement>(":scope > .sheet-value")!;
     const value = document.createElement("span");
     value.className = "more-value";
     // Text shown to people is typed in the prose font it reads in once written.
@@ -3746,13 +4015,18 @@ export class NxViewerElement extends ElementBase {
       value.classList.add("more-prose");
     }
     // With no default to show, the value's place reads the type it takes, quieter.
+    // Text asks for itself by its label, as a form's empty field does.
     if (property.default === undefined) {
-      value.dataset["placeholder"] = hints?.placeholder ?? property.type;
+      const label = field.querySelector(".lead-caption")?.textContent || derivedLabel(property.name);
+      value.dataset["placeholder"] = hints?.placeholder ?? (editor?.kind === "text" ? `Add ${label.toLowerCase()}` : property.type);
+      if (hints?.placeholder !== undefined || editor?.kind === "text") {
+        value.classList.add("prose-placeholder");
+      }
     }
     const start = defaultValue(property.default, editor);
     value.append(...defaultShown(document, property.default, editor, entry.format));
     cell.append(value);
-    if (editor !== undefined) {
+    if (editor !== undefined && this.#editable) {
       const target: EditTarget = {
         at,
         key: valueKey,
@@ -3769,87 +4043,68 @@ export class NxViewerElement extends ElementBase {
       this.#targets.set(valueKey, target);
       this.#rendered.set(valueKey, value);
       this.#moreKeys.push(valueKey);
-    } else {
+    } else if (this.#editable) {
       // No editor takes its type, as a record's: Enter or a double-click opens the element in Source.
-      row.dataset["opens"] = "true";
+      field.dataset["opens"] = "true";
     }
-    if (property.default !== undefined) {
-      const quiet = document.createElement("span");
-      quiet.className = "more-default";
-      quiet.textContent = "default";
-      cell.append(" ", quiet);
-    }
-    row.append(name, cell);
-    row.setAttribute("aria-label", `${property.name}, not written${property.default === undefined ? "" : `, default ${property.default}`}`);
-    return row;
+    field.setAttribute("aria-label", `${property.name}, not written${property.default === undefined ? "" : `, default ${property.default}`}`);
   }
 
-  /** Hides the dimmed rows whose names do not hold what the filter holds. */
-  #filterMore(): void {
-    const query = this.#moreFilter.trim().toLowerCase();
-    for (const drawn of this.#moreDrawn) {
-      const rows = drawn.matches(".dimmed-row, .added-row") ? [drawn] : [...drawn.querySelectorAll<HTMLElement>(".dimmed-row, .added-row")];
-      for (const row of rows) {
-        row.hidden = query !== "" && !row.dataset["name"]!.toLowerCase().includes(query);
+  /** Marks the lead of each editable number's field, which scrubs the number when dragged sideways. */
+  #markScrubbable(): void {
+    if (!this.#editable) {
+      return;
+    }
+    for (const lead of this.#body.querySelectorAll<HTMLElement>(".prop-field > .field-lead")) {
+      const value = lead.parentElement!.querySelector<HTMLElement>(":scope > .sheet-value > .editable-value");
+      if (value !== null && this.#targets.get(keyOf(value)!)?.kind === "number") {
+        lead.classList.add("scrubbable");
       }
     }
   }
 
-  /** Opens or closes the selected element's list of unwritten properties. */
-  #toggleMore(): void {
-    const key = this.#selection;
-    if (key === undefined) {
-      return;
+  /**
+   * Fades each row's value where its line cuts it, and sets each open inspector, an unfolded element
+   * value's included, in so its labels start under its element's kind, wherever the icon sits.
+   */
+  #fitTitles(): void {
+    for (const title of this.#body.querySelectorAll<HTMLElement>(".row-title")) {
+      title.classList.toggle("clipped", title.scrollWidth > title.clientWidth + 1);
     }
-    this.#moreOpen = this.#moreOpen === key ? undefined : key;
-    this.#moreFilter = "";
-    this.#drawMore();
-    const focus = this.#moreDrawn
-      .flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])
-      .find((candidate) => candidate.dataset["moreFocus"] === (this.#moreOpen === undefined ? "toggle" : "filter"));
-    if (this.#moreOpen !== undefined && focus !== undefined) {
-      focus.focus({ preventScroll: true });
-    } else if (this.shadowRoot?.activeElement === null || this.shadowRoot?.activeElement === undefined) {
-      this.#body.focus({ preventScroll: true });
+    for (const inspector of this.#body.querySelectorAll<HTMLElement>(".row-element > .inspector")) {
+      const row = inspector.parentElement!;
+      const kind = row.querySelector<HTMLElement>(":scope > .row-head > .sheet-kind");
+      if (kind === null) {
+        continue;
+      }
+      const inset = kind.getBoundingClientRect().left - row.getBoundingClientRect().left;
+      if (inset > 0) {
+        inspector.style.setProperty("--inspector-inset", `${Math.round(inset)}px`);
+      }
+    }
+    // An unfolded element value's fields start under its kind too, as a row's do.
+    for (const inspector of this.#body.querySelectorAll<HTMLElement>(".nested-head > .nested-inspector")) {
+      const head = inspector.parentElement!;
+      const kind = head.querySelector<HTMLElement>(":scope > .nested-kind");
+      if (kind === null) {
+        continue;
+      }
+      const inset = kind.getBoundingClientRect().left - head.getBoundingClientRect().left;
+      if (inset > 0) {
+        inspector.style.setProperty("--inspector-inset", `${Math.round(inset)}px`);
+      }
     }
   }
 
-  /** Closes the list of unwritten properties, and the reading takes the keys again. */
-  #closeMore(): void {
-    this.#moreOpen = undefined;
-    this.#moreFilter = "";
-    this.#drawMore();
-    this.#body.focus({ preventScroll: true });
-  }
-
-  /** The keys of the list of unwritten properties, where focus is in it. */
+  /** The keys of an unwritten property's field, where focus is on it. */
   #onMoreKey(event: KeyboardEvent, target: HTMLElement): void {
-    const focusables = this.#moreDrawn
-      .flatMap((drawn) => [drawn, ...drawn.querySelectorAll<HTMLElement>("[data-more-focus]")])
-      .filter((candidate) => candidate.dataset["moreFocus"] !== undefined && !candidate.hidden && candidate.closest("[hidden]") === null);
-    const holder = target.closest<HTMLElement>("[data-more-focus]");
-    const at = holder === null ? -1 : focusables.indexOf(holder);
+    const holder = target.closest<HTMLElement>(".dimmed-row, .added-row");
     if (event.key === "Escape") {
       event.preventDefault();
-      this.#closeMore();
+      this.#body.focus({ preventScroll: true });
       return;
     }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const next = at + (event.key === "ArrowDown" ? 1 : -1);
-      if (next < 0) {
-        this.#body.focus({ preventScroll: true });
-      } else {
-        focusables[Math.min(next, focusables.length - 1)]?.focus({ preventScroll: true });
-      }
-      return;
-    }
-    if (holder?.classList.contains("more-toggle") === true && (event.key === "Enter" || event.key === " ")) {
-      event.preventDefault();
-      this.#toggleMore();
-      return;
-    }
-    if (holder?.classList.contains("dimmed-row") !== true && holder?.classList.contains("added-row") !== true) {
+    if (holder === null) {
       return;
     }
     const value = holder.querySelector<HTMLElement>(".editable-value");
@@ -3924,6 +4179,10 @@ export class NxViewerElement extends ElementBase {
       }
       item("open", "Show in Source");
     } else {
+      const goal = this.#referenceGoal(at);
+      if (goal !== undefined) {
+        item("goto", `Go to ${goal.name}`);
+      }
       const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
       if (removal === "reset") {
         item("remove", "Reset to default", this.#defaultShownFor(at));
@@ -4002,6 +4261,36 @@ export class NxViewerElement extends ElementBase {
     }
   }
 
+  /**
+   * Where a property whose value is a reference to a top-level `let` leads: the `let`'s key, its
+   * value's where the reading draws that, and its name; nothing for any other value, nor for a
+   * reference to a local that shares a `let`'s name.
+   */
+  #referenceGoal(at: number): { readonly key: string; readonly name: string } | undefined {
+    const tree = this.#index!.tree;
+    const attribute = tree.nodes[at]!;
+    if (attribute.role !== "attribute") {
+      return undefined;
+    }
+    const values = this.#index!.children[at] ?? [];
+    const value = values.length === 1 ? tree.nodes[values[0]!]! : undefined;
+    if (value?.role !== "reference" || value.name === undefined) {
+      return undefined;
+    }
+    const declaration = tree.nodes[topLevelLet(tree, value)];
+    if (declaration === undefined) {
+      return undefined;
+    }
+    const drawn = (key: string): boolean => this.#drawnAt(key) !== undefined;
+    const key = drawn(`${declaration.key}.value`) ? `${declaration.key}.value` : declaration.key;
+    return drawn(key) ? { key, name: value.name } : undefined;
+  }
+
+  /** The element the reading draws the node with `key` as, if it draws it. */
+  #drawnAt(key: string): HTMLElement | undefined {
+    return [...this.#body.querySelectorAll<HTMLElement>("[data-key]")].find((element) => element.dataset["key"] === key);
+  }
+
   /** Does what the menu's `item` says to its row, and closes the menu. */
   #chooseMenuItem(item: HTMLElement): void {
     const key = this.#menuKey;
@@ -4026,6 +4315,15 @@ export class NxViewerElement extends ElementBase {
       case "delete":
         this.#removeItem(key);
         break;
+      case "goto": {
+        const at = this.#index?.byKey.get(key);
+        const goal = at === undefined ? undefined : this.#referenceGoal(at);
+        if (goal !== undefined) {
+          this.#select(goal.key, true);
+          this.#drawnAt(goal.key)?.scrollIntoView?.({ block: "nearest" });
+        }
+        break;
+      }
       case "open": {
         const at = this.#index?.byKey.get(key);
         if (at !== undefined) {
@@ -4042,7 +4340,7 @@ export class NxViewerElement extends ElementBase {
 
   #onPointerDown(event: PointerEvent): void {
     this.#pressedAt = { x: event.clientX, y: event.clientY };
-    if (!this.#editable || event.button !== 0) {
+    if ((event.target as Element).closest("button") !== null || !this.#editable || event.button !== 0) {
       return;
     }
     // A press on an item's handle drags the item once it moves; a click there selects it. A touch
@@ -4127,6 +4425,21 @@ export class NxViewerElement extends ElementBase {
 
   #onClick(event: MouseEvent): void {
     const target = event.target as Element;
+    const details = target.closest<HTMLElement>("[data-details-action]");
+    if (details !== null) {
+      this.#toggleDetails(details.dataset["detailsKey"]!, details.dataset["detailsAction"] as "toggle" | "pin");
+      return;
+    }
+    const reveal = target.closest<HTMLElement>(".inspector-more[data-more-key]");
+    if (reveal !== null && this.#body.contains(reveal)) {
+      this.#toggleAllProperties(reveal.dataset["moreKey"]!);
+      return;
+    }
+    const valueFold = target.closest<HTMLElement>(".value-fold[data-value-key]");
+    if (valueFold !== null && this.#body.contains(valueFold)) {
+      this.#toggleValue(valueFold.dataset["valueKey"]!);
+      return;
+    }
     const toggle = (target.closest?.(".fold-run-head")?.querySelector(".fold") ?? target.closest?.(".fold")) as
       | HTMLElement
       | null
@@ -4155,14 +4468,9 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
-    // The quiet row on a selected element opens and closes its list of unwritten properties, and the
-    // rest of that list, but its values, is no choice of node.
+    // An unwritten property's field is no choice of node: a click on it edits its value.
     const more = target.closest?.(".more") as HTMLElement | null | undefined;
     if (more !== null && more !== undefined && this.#body.contains(more)) {
-      if (more.classList.contains("more-toggle")) {
-        this.#toggleMore();
-        return;
-      }
       if (target.closest?.(".editable-value") == null) {
         // A click anywhere on a dimmed row edits its value, which may be empty, as an optional one is.
         const row = target.closest?.(".dimmed-row, .added-row") as HTMLElement | null | undefined;
@@ -4204,7 +4512,15 @@ export class NxViewerElement extends ElementBase {
       if (closed || (event.detail > 1 && this.#targets.get(key)?.kind === "boolean") || this.#session?.target.key === key) {
         return;
       }
+      // A color shown in its parts: its swatch opens the picker, its opacity edits its percent.
+      const colorParts = value.matches(".color-value") && value.closest(".inspector") !== null;
+      if (colorParts && target.closest?.(".swatch") != null) {
+        this.#pickSwatch(key, target.closest(".swatch") as HTMLElement);
+        return;
+      }
+      this.#colorPart = colorParts && target.closest?.(".color-opacity") != null ? "opacity" : "hex";
       this.#openEditor(key);
+      this.#colorPart = "hex";
       const field = this.#session?.target.key === key ? this.#session.field : undefined;
       if (field !== undefined) {
         const at = offsetAtPoint(field, event.clientX, event.clientY);
@@ -4220,12 +4536,84 @@ export class NxViewerElement extends ElementBase {
       this.#select(keyOf(property), true);
       return;
     }
+    // A click on the value a row or a folded element value is named by edits that property in its
+    // inspector, opening the inspector first.
+    const named = this.#editable ? (target.closest?.(".row-title[data-field]") as HTMLElement | null | undefined) : undefined;
+    if (named !== null && named !== undefined && this.#body.contains(named)) {
+      this.#editNamed(named);
+      return;
+    }
     // A click chooses the unit it falls in: the element, row or line, not a word in it. Outside
     // every unit, as in a function's body, it chooses the smallest node there.
     const chosen = this.#unitOf(target) ?? (target.closest?.("[data-key]") as HTMLElement | null | undefined);
     if (chosen !== null && chosen !== undefined && this.#body.contains(chosen)) {
-      this.#select(keyOf(chosen), true);
+      // A click on the selected row closes its inspector, and the next opens it again.
+      const key = keyOf(chosen);
+      if (key !== undefined && key === this.#selection && chosen.matches(".row-element") && target.closest?.(".row-head")?.parentElement === chosen) {
+        this.#toggleDetails(key, "toggle");
+        return;
+      }
+      this.#select(key, true);
     }
+  }
+
+  /**
+   * Edits the property whose value `named` shows on a row or a folded element value: opens the
+   * inspector it is in, then the property's value, or selects the property when it cannot be edited
+   * in place.
+   */
+  #editNamed(named: HTMLElement): void {
+    const field = named.dataset["field"]!;
+    const nested = named.closest<HTMLElement>(".nested-head[data-key]");
+    const row = named.closest<HTMLElement>(".row-element[data-key]");
+    if (nested !== null) {
+      const key = keyOf(nested)!;
+      if (!this.#valuesOpen.has(key)) {
+        this.#toggleValue(key);
+      }
+    } else if (row !== null) {
+      const key = keyOf(row)!;
+      if (this.#selection !== key) {
+        this.#select(key, true);
+      }
+      if (this.#rendered.get(key)?.querySelector(":scope > .inspector") == null) {
+        this.#toggleDetails(key, "toggle");
+      }
+    }
+    const drawn = this.#rendered.get(field);
+    const value = drawn?.closest(".inspector") == null ? undefined : drawn.querySelector<HTMLElement>(".editable-value[data-key]");
+    if (value !== null && value !== undefined) {
+      // The caret starts at the beginning, so typing adds to the value rather than replacing it.
+      const key = keyOf(value)!;
+      this.#openEditor(key);
+      const opened = this.#session?.target.key === key ? this.#session.field : undefined;
+      if (opened !== undefined) {
+        this.#placeCaret(opened, { start: 0, end: 0 });
+      }
+    } else if (drawn !== undefined) {
+      this.#select(field, true);
+    }
+  }
+
+  /** Goes into `inspector`: opens the first value it can edit, or else selects its first field. */
+  #enterInspector(inspector: HTMLElement): boolean {
+    const value = this.#editable ? inspector.querySelector<HTMLElement>(".editable-value[data-key]") : null;
+    const first = inspector.querySelector<HTMLElement>(".sheet-row[data-key]");
+    if (value !== null) {
+      this.#openEditor(keyOf(value)!);
+      return true;
+    }
+    if (first !== null) {
+      this.#select(keyOf(first), true);
+      this.#body.focus({ preventScroll: true });
+      return true;
+    }
+    const more = inspector.querySelector<HTMLElement>(":scope > .inspector-more");
+    if (more !== null) {
+      more.focus({ preventScroll: true });
+      return true;
+    }
+    return false;
   }
 
   #onKeyDown(event: KeyboardEvent): void {
@@ -4233,11 +4621,30 @@ export class NxViewerElement extends ElementBase {
     if (!this.#body.contains(target)) {
       return;
     }
-    // The host's undo and redo, pressed in the reading, see stepper clicks still settling committed.
+    const button = target.closest("button");
+    if (button !== null) {
+      // Up and Down on a focused button walk the rows, as they do from the reading.
+      if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        this.#body.focus({ preventScroll: true });
+        this.#stepUnit(event.key === "ArrowDown" ? "next" : "previous");
+        return;
+      }
+      // Tab from a pin goes into its open inspector.
+      if (event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && button.matches(".row-pin")) {
+        const row = button.closest<HTMLElement>(".row-element");
+        const inspector = row?.querySelector<HTMLElement>(":scope > .inspector") ?? null;
+        if (inspector !== null && this.#enterInspector(inspector)) {
+          event.preventDefault();
+        }
+      }
+      return;
+    }
+    // The host's undo and redo, pressed in the reading, see a value still going live committed.
     if (this.#session === undefined && this.#live !== undefined && (event.ctrlKey || event.metaKey) && /^[zy]$/i.test(event.key)) {
       this.#settleLive();
     }
-    const more = target.closest?.(".more, .more-block") as HTMLElement | null | undefined;
+    const more = target.closest?.(".more") as HTMLElement | null | undefined;
     if (more !== null && more !== undefined) {
       this.#onMoreKey(event, target as HTMLElement);
       return;
@@ -4278,9 +4685,6 @@ export class NxViewerElement extends ElementBase {
     }
     if (event.key === "Escape") {
       this.#closeCard();
-      if (this.#moreOpen !== undefined) {
-        this.#closeMore();
-      }
       return;
     }
     // Cmd+Backspace leaves out the selected row's property, as Delete does: a Mac laptop's delete
@@ -4291,16 +4695,36 @@ export class NxViewerElement extends ElementBase {
       }
       return;
     }
+    // Tab from a selected row goes to its pin, the row's own stop, and from there into its open
+    // inspector; a row without a pin goes straight into the inspector.
+    if (event.key === "Tab" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && target === this.#body && this.#selection !== undefined) {
+      const row = this.#rendered.get(this.#selection);
+      if (row?.matches(".row-element") === true) {
+        const pin = row.querySelector<HTMLElement>(":scope > .row-head > .row-pin");
+        const inspector = row.querySelector<HTMLElement>(":scope > .inspector");
+        if (pin !== null) {
+          event.preventDefault();
+          pin.focus();
+          return;
+        }
+        if (inspector !== null && this.#enterInspector(inspector)) {
+          event.preventDefault();
+          return;
+        }
+      }
+    }
+    // Enter on a selected row closes its inspector, and opens it again.
+    if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && this.#selection !== undefined && this.#rendered.get(this.#selection)?.matches(".row-element") === true) {
+      event.preventDefault();
+      this.#toggleDetails(this.#selection, "toggle");
+      return;
+    }
     // Enter or F2 opens the selected unit's first value, Space toggles its boolean, and Delete leaves
     // out its property. Ctrl or Cmd with Z or Y are the host's, for its undo.
     if (this.#editable && !event.ctrlKey && !event.metaKey && !event.altKey) {
       if (event.key === "Enter" || event.key === "F2") {
         if (this.#openSelected(event.key === "Enter")) {
           event.preventDefault();
-        } else if (event.key === "Enter" && this.#moreDrawn.length > 0) {
-          // An element with no value of its own to open opens its list of unwritten properties.
-          event.preventDefault();
-          this.#toggleMore();
         }
         return;
       }
@@ -4358,7 +4782,13 @@ export class NxViewerElement extends ElementBase {
     }
     this.#pointedKey = key;
     clearTimeout(this.#cardOpenTimer);
-    if (this.#session !== undefined) {
+    if (key !== this.#cardQuietKey) {
+      this.#cardQuietKey = undefined;
+    }
+    if (this.#session !== undefined || this.#cardQuietKey !== undefined || this.#cardStillAt !== undefined) {
+      if (!this.#card.hidden && !this.#cardByKeyboard && key !== this.#cardKey) {
+        this.#closeCardSoon();
+      }
       return;
     }
     if (key !== undefined && key === this.#cardKey) {
@@ -4369,8 +4799,37 @@ export class NxViewerElement extends ElementBase {
       this.#closeCardSoon();
     }
     if (target !== undefined && key !== undefined) {
-      this.#cardOpenTimer = setTimeout(() => this.#openCard(key, target, false), CARD_DELAY);
+      const warm = !this.#card.hidden || Date.now() < this.#cardWarmUntil;
+      this.#cardOpenTimer = setTimeout(() => this.#openCard(key, target, false), warm ? CARD_WARM_DELAY : CARD_DELAY);
     }
+  }
+
+  /**
+   * Closes the card, and keeps one from opening for what the pointer is over until it moves onto
+   * something else: a press or a scroll means the reader is doing something, not asking what it is.
+   */
+  #quietCards(scrolled = false): void {
+    this.#closeCard();
+    this.#cardQuietKey = this.#pointedKey;
+    this.#cardWarmUntil = 0;
+    if (scrolled && this.#pointerAt !== undefined) {
+      this.#cardStillAt = this.#pointerAt;
+    }
+  }
+
+  /**
+   * Notes where the pointer is, and once it moves from where it stood when the reading scrolled,
+   * lets what it is over open a card again, as if it had just arrived there.
+   */
+  #pointerMoved(event: PointerEvent): void {
+    this.#pointerAt = { x: event.clientX, y: event.clientY };
+    const still = this.#cardStillAt;
+    if (still === undefined || (still.x === event.clientX && still.y === event.clientY)) {
+      return;
+    }
+    this.#cardStillAt = undefined;
+    this.#pointedKey = undefined;
+    this.#point(event.buttons > 0 ? undefined : this.#hoverTargetOf(event.target));
   }
 
   /**
@@ -4386,11 +4845,16 @@ export class NxViewerElement extends ElementBase {
     }
     clearTimeout(this.#cardCloseTimer);
     this.#fillCard(card);
-    if (anchor.classList.contains("drag-handle")) {
-      // The handle says what it does, quietly, after what the item is.
+    // A handle or a scrubbed label says what dragging it does, quietly, after what it is.
+    const hinted = anchor.classList.contains("drag-handle")
+      ? "Drag to reorder"
+      : anchor.classList.contains("scrubbable")
+        ? "Drag sideways to change; Shift for 10 steps, Alt for a tenth"
+        : undefined;
+    if (hinted !== undefined) {
       const hint = this.ownerDocument.createElement("div");
       hint.className = "card-hint";
-      hint.textContent = "Drag to reorder";
+      hint.textContent = hinted;
       this.#card.append(hint);
     }
     this.#cardKey = key;
@@ -4405,15 +4869,29 @@ export class NxViewerElement extends ElementBase {
       scroller.addEventListener("scroll", this.#onDocumentScroll);
     }
     const doc = (this.#card.querySelector(".card-doc")?.textContent ?? "").trim();
-    return `${card.signature}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
+    const titled = card.kind === undefined ? card.signature : `${card.kind} ${card.signature}`;
+    const named = card.detail === undefined ? titled : `${titled}, ${card.detail}`;
+    return `${named}${doc === "" ? "" : `. ${doc}`}`.replace(/\s+/g, " ");
   }
 
-  /** Puts `card`'s signature and doc in the hover card. */
+  /** Puts `card`'s signature, or its title, and its doc in the hover card. */
   #fillCard(card: Card): void {
     const document = this.ownerDocument;
     const signature = document.createElement("div");
-    signature.className = "card-signature";
+    signature.className = card.title === true ? "card-title" : "card-signature";
     signature.textContent = card.signature;
+    if (card.kind !== undefined) {
+      const chip = document.createElement("span");
+      chip.className = "card-kind";
+      chip.textContent = card.kind;
+      signature.prepend(chip, " ");
+    }
+    if (card.detail !== undefined) {
+      const detail = document.createElement("span");
+      detail.className = "card-detail";
+      detail.textContent = card.detail;
+      signature.append(" ", detail);
+    }
     this.#card.replaceChildren(signature);
     if (card.doc !== undefined) {
       const doc = document.createElement("div");
@@ -4460,7 +4938,19 @@ export class NxViewerElement extends ElementBase {
     }
     y = Math.max(top, Math.min(y, bottom - size.height));
     // An anchor wrapped over two lines starts where its first line does, not at the line's start.
-    const start = anchor.getClientRects()[0]?.left ?? target.left;
+    const first = anchor.getClientRects()[0] ?? target;
+    let start = first.left;
+    if (card === this.#card) {
+      // A hover card starts just past what it describes, so it covers the line below it only from
+      // there on and the labels down the left stay readable while the reader scans. Past a wide
+      // anchor, such as a doc line, it starts just past the pointer instead (a card opened from the
+      // keyboard has no pointer, so it starts past the anchor and is kept inside the box).
+      const pointer = this.#cardByKeyboard ? undefined : this.#pointerX;
+      start =
+        first.width > CARD_WIDE && pointer !== undefined && pointer >= first.left && pointer <= first.right
+          ? pointer + CARD_POINTER_SHIFT
+          : first.right + CARD_SHIFT;
+    }
     const x = Math.max(box.left, Math.min(start, box.right - size.width));
     card.style.left = `${x - frame.left}px`;
     card.style.top = `${y - frame.top}px`;
@@ -4483,6 +4973,9 @@ export class NxViewerElement extends ElementBase {
 
   #hideCard(): void {
     clearTimeout(this.#cardCloseTimer);
+    if (this.#card !== undefined && !this.#card.hidden) {
+      this.#cardWarmUntil = Date.now() + CARD_WARM;
+    }
     this.#cardScroller?.removeEventListener("scroll", this.#onDocumentScroll);
     this.#cardScroller = undefined;
     this.#cardKey = undefined;
