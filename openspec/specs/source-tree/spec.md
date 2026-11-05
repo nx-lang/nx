@@ -193,13 +193,13 @@ unchanged from an answer without this feature. When it is present, the answer SH
 program's visualizer declarations and the named host visualizer modules, as the visualizer-declarations capability defines, and
 SHALL attach to each declaration entry with a resolved visualizer a `visualizer` value:
 
-- for a record, an action or a component: its `title`, `id`, `icon` and `preview` descriptor when set, its `idPosition`
+- for a record, an action or a component: its `title`, `id`, `icon`, `inline` and `preview` descriptor when set, its `idPosition`
   when it has an `id`, and a `properties` list holding every property of the entry once, in the
   resolved order (the properties the visualizer lists, then the rest in declaration order), each with
-  its name and its resolved `format` when set;
-- for an element function (`let <Name … />`): its FunctionVisualizer icon when set and a `properties` list
-  holding each of its properties once, in declaration order, each with its name and the `format` its
-  type gives it when set;
+  its name and its resolved `format` and `label` when set;
+- for an element function (`let <Name … />`): its FunctionVisualizer icon when set and a
+  `properties` list holding each of its properties once, in the same resolved order, each with its
+  name and its resolved `format` and `label` when set;
 - for an alias: its `format`.
 
 An entry for a record, action, component or element function that has no visualizer but has a
@@ -248,6 +248,12 @@ and SHALL NOT fail the query. The `visualizer` values SHALL round-trip through J
 - **THEN** the declaration table SHALL also contain loaded visualizer targets not directly referenced
 by the document, including derived kinds that only inherit a visualizer, with the same resolved inheritance/override metadata
 - **AND** the default query SHALL retain its existing bounded declaration-table behavior
+
+#### Scenario: Labels reach the reader
+- **WHEN** a client asks with `visualizers` and `Box`'s visualizer gives `width` the label `Width` and
+  `fill` the label `Fill`
+- **THEN** the entry for `Box` SHALL carry a `width` property with the label `Width` and a `fill`
+  property with the label `Fill`, and neither SHALL carry an icon
 
 ### Requirement: A resolved visualizer carries its editor hints
 Each property in a declaration's `visualizer` `properties` list SHALL carry, when a `sourceTree`

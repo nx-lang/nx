@@ -15,9 +15,11 @@ parameter, a state field or an emitted action; a generic component's `T.Props` S
 component's type parameters, as a generic record's `R.Update` declares the record's. `T.Props` SHALL be a plain record in every other
 respect: it SHALL have its own derived `T.Props.Update` and `T.Props.Property`, SHALL be accepted by
 the update intrinsics as a record, SHALL be visible and importable wherever `T` is, and SHALL NOT be
-abstract, an action record, or usable as the base of an `extends` clause. No other declaration SHALL
-have a derived `Props`, so `T.Props.Props`, `T.State.Props`, `T.Update.Props` and `R.Props` for a
-record `R` SHALL be rejected as unknown types.
+abstract, an action record, or usable as the base of an `extends` clause. An element-style function
+`F` (`let <F … /> = …`) SHALL have a derived `F.Props` by the same rules, one field per property in
+declaration order, so a visualizer can name its properties; a paren-style function SHALL NOT. No
+other declaration SHALL have a derived `Props`, so `T.Props.Props`, `T.State.Props`,
+`T.Update.Props` and `R.Props` for a record `R` SHALL be rejected as unknown types.
 
 #### Scenario: Props record has the props and not the state
 - **WHEN** a file contains `component <Counter step:int = 1 label?:string /> = { state { count:int = 0 } <Label text={count} /> }` and `let p = <Counter.Props step=2 />`
@@ -58,4 +60,13 @@ record `R` SHALL be rejected as unknown types.
 #### Scenario: A props record of an imported component is available through the import
 - **WHEN** library `ui` exports `component <Card title:string /> = { <Panel /> }` and a module imports `Card` from it and contains `let p = <Card.Props title="Hi" />`
 - **THEN** type checking SHALL accept the reference without the library exporting anything named `Card.Props`
+
+#### Scenario: An element function has a props record
+- **WHEN** a file contains `let <Badge label:string tone:string = "neutral" /> = <Label text={label} />` and `let k: Badge.Props.Property = {Badge.Props.Property.tone}`
+- **THEN** type checking SHALL accept the binding
+- **AND** the cases of `Badge.Props.Property` SHALL be ordered `label`, `tone`
+
+#### Scenario: A paren-style function has none
+- **WHEN** a file contains `let double(x:int) = x * 2` and `let p: double.Props = <double.Props x=1 />`
+- **THEN** type checking SHALL reject `double.Props` as an unknown type
 
