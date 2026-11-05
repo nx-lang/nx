@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.11.0
+
+### Visual view (unstable)
+- Present composition elements as compact rows with their display text in the header and an inspector
+  for the selected row. Pin inspectors open, reveal unset properties, and preserve view choices across
+  source updates through `detailsState` and `nx-details`.
+- Edit short record values inline. `ElementVisualizer.inline` controls whether a value stays inline
+  or expands into structured fields; `PropertyVisualizer.label` gives fields readable names.
+- Scrub numeric fields by dragging their labels sideways, with live source updates and one undo step.
+- Improve color fields, property documentation, hover cards, selection, and keyboard interaction in
+  inspectors. Upgrade the viewer and language tooling together with the compiler.
+
 ## 0.10.0
 
 ### Libraries and previews
