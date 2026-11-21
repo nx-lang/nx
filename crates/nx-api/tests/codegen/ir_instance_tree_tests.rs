@@ -1032,6 +1032,38 @@ fn rebinding_a_kept_child_is_charged_to_the_operation_budget() {
     assert!(Arc::ptr_eq(&panel, &kept));
 }
 
+#[test]
+fn keeping_a_child_leaves_the_usage_report_as_the_last_call_wrote_it() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tap(&mut tree, "root", "Same").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    let usage = Arc::new(nx_ir_runtime::Usage::new());
+    let reported = RuntimeOptions {
+        max_operations: Some(1_000_000),
+        usage: Some(Arc::clone(&usage)),
+        ..options()
+    };
+    tree.visit("root", &root, None, &reported).unwrap();
+    let output = rendered(&tree, "root");
+    let descriptor = find(&output, "Panel", None).unwrap().clone();
+    // The Page's visit made no lifecycle call either; initialize a node to write the report.
+    let page = tree
+        .program()
+        .evaluate_function("root", &[], &reported)
+        .unwrap();
+    assert_eq!(page, root);
+    let written = usage.operations();
+    assert!(written.is_some());
+    let panel = rendered(&tree, "root/panel");
+    let kept = tree
+        .visit("root/panel", &descriptor, Some("root"), &reported)
+        .unwrap();
+    assert!(Arc::ptr_eq(&panel, &kept));
+    assert_eq!(usage.operations(), written);
+}
+
 // ------------------------------------------------------------------------------------------------
 // A pass drops the nodes whose places left the output
 // ------------------------------------------------------------------------------------------------

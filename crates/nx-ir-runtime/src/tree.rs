@@ -948,8 +948,9 @@ impl Across<'_, '_, '_> {
 
     /// Whether the handler `before` holds under `old` and the one `now` holds under `new` may
     /// stand for each other: equal as `==` finds them when `compare` asks, answering the same
-    /// emit when it does not, and paired one to one. A token either instance does not hold makes them unequal; the visit then initializes
-    /// the node, which reports the token.
+    /// emit when it does not, and never one earlier handler replaced by two new ones. A token
+    /// either instance does not hold makes them unequal; the visit then initializes the node,
+    /// which reports the token.
     fn handlers(
         &self,
         old: &str,

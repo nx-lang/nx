@@ -344,23 +344,21 @@ impl ComponentInstance {
 
 impl Program {
     /// Runs `work`, the instance tree's comparison and rebinding of a kept node of `component`,
-    /// as one call: under `options`' operation budget, named after the component when it runs
-    /// out, with the call's stack budget, and reported in its usage report like any other.
+    /// under `options`' operation budget, named after the component when it runs out, and its
+    /// stack budget.
+    ///
+    /// <para>It is not a lifecycle call: it leaves the usage and origins reports as they were,
+    /// and a visit that compares and then initializes the node spends a budget on each.</para>
     pub(crate) fn metered<T>(
         &self,
         component: &str,
         options: &RuntimeOptions,
         work: impl FnOnce(&Meter<'_, '_>, &Stack) -> Result<T>,
     ) -> Result<T> {
-        self.call(
-            options,
-            |_| {},
-            |machine| {
-                let (index, _, _) = machine.component(component)?;
-                let meter = machine.meter(entry_cx(index), None);
-                work(&meter, &machine.stack)
-            },
-        )
+        let machine = Machine::new(&self.data, options);
+        let (index, _, _) = machine.component(component)?;
+        let meter = machine.meter(entry_cx(index), None);
+        work(&meter, &machine.stack)
     }
 }
 

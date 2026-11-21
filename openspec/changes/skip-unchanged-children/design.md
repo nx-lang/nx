@@ -99,9 +99,11 @@ carries names the handler at the same place as before. The rendered output Arc i
 
 Rebinding happens during the visit, so it's subject to `atomically` like any other change and
 leaves the tree as it was if the pass fails. It runs no NX code, but the comparison and the
-substitution run as one call under the visit's options: each value they walk costs one operation,
-as `==` charges, under the stack budget. Lists and records are remembered by allocation as well as
-handlers, so a value many handlers capture is walked once.
+substitution run under the visit's operation and stack budgets: comparing handlers costs what `==`
+costs, and the substitution one operation for each handler, list and record it walks. It remembers
+lists and records by allocation as well as handlers, so a value many handlers capture is walked
+once. This is not a lifecycle call, so it leaves the usage and origins reports alone; a visit that
+compares and then initializes the node spends a budget on each.
 
 ### Settledness and walking
 

@@ -31,7 +31,7 @@ of the repo in the scratchpad. The working tree was not touched.
 
 ## Findings
 
-### 🟡 Fixed - RF1 The comparison and the rebinding walk captured values without a meter, so their cost scales with handlers × capture size outside the operation budget
+### ✅ Verified - RF1 The comparison and the rebinding walk captured values without a meter, so their cost scales with handlers × capture size outside the operation budget
 - **Severity:** Medium
 - **Confidence:** Medium. The mechanism is confirmed by reading the code and by a probe. I did not
   build a worst case that does damage.
@@ -58,8 +58,9 @@ of the repo in the scratchpad. The working tree was not touched.
   that capture one large prop under a tight `max_operations`. If the design keeps "costs no
   operations", state the bound in the spec and README.
 - **Fix:** The comparison and the rebinding now run as one `Program::metered` call under the visit's options: `handlers_equal` gets the call's charged meter, and `Rebinding` charges one operation per handler, list and record it walks, and memoizes lists and records by allocation as well as handlers, so a shared capture is walked once. Spec, design and README say so; test `rebinding_a_kept_child_is_charged_to_the_operation_budget` checks that a visit under a budget of one is refused and changes nothing.
+- **Verification:** Verified. The comparison and the rebinding now run inside one `Program::metered` call, and `handlers_equal` gets that call's charged meter. `Rebinding` charges for each handler, list and record it walks and memoizes lists and records by allocation. Lists are keyed by `Arc<[Value]>::as_ptr`, empty lists are skipped, and each memoized value is held so its address cannot be reused. The memo is order-independent because each result depends only on handler replacements, which are memoized deterministically. `rebinding_a_kept_child_is_charged_to_the_operation_budget` passes. Two side effects of the metered call are new findings: RF7 (usage/origins reports) and RF8 (the comparison is not memoized).
 
-### 🟡 Fixed - RF2 Many-to-one pairings are accepted, contrary to the spec's "paired one-to-one" rule
+### ✅ Verified - RF2 Many-to-one pairings are accepted, contrary to the spec's "paired one-to-one" rule
 - **Severity:** Low
 - **Confidence:** High (by reading the code)
 - **Evidence:**
@@ -77,8 +78,9 @@ of the repo in the scratchpad. The working tree was not touched.
   Add a test for the fallback, for example a parent that hands one handler to two props in one
   render and two allocations in the next.
 - **Fix:** Kept many-to-one (harmless, matches what a new render writes) and changed the spec and design to say exactly that: one old handler replaced by two different new ones makes the descriptors different. `Rebinding::pair` documents it; unit tests `rebinding_tests` cover one-to-many refused, many-to-one allowed, and kept/replaced mixing refused.
+- **Verification:** Verified. The spec and design now state the actual rule (one-to-many is refused, many-to-one is allowed). The doc comment on `Rebinding::pair` agrees, and three `rebinding_tests` unit tests cover the cases. The doc comment on `Across::handlers` still says "paired one to one" (see RF9).
 
-### 🟡 Fixed - RF3 A kept child gets a new emit handler that nothing checks against the emit, which the lifecycle would check
+### ✅ Verified - RF3 A kept child gets a new emit handler that nothing checks against the emit, which the lifecycle would check
 - **Severity:** Low
 - **Confidence:** Low. The type checker may already rule this out for every program that compiles.
 - **Evidence:**
@@ -94,8 +96,9 @@ of the repo in the scratchpad. The working tree was not touched.
   old.emit == new.emit`, and `action_name` if relevant. This is cheap and restores the lifecycle's
   check.
 - **Fix:** The presence-only branch of `Across::handlers` now also requires the same `component`, `emit` and `action_name`, the check `split_handler_properties` makes. Spec and design say so.
+- **Verification:** Verified. The presence-only branch of `Across::handlers` now requires the same `component`, `emit` and `action_name`, the identity that `split_handler_properties` checks.
 
-### 🟡 Fixed - RF4 Plain values are compared with `NxValue ==`, which counts `-0.0` and `0.0` as equal, so the skip now spans parent renders where the body could tell them apart
+### ✅ Verified - RF4 Plain values are compared with `NxValue ==`, which counts `-0.0` and `0.0` as equal, so the skip now spans parent renders where the body could tell them apart
 - **Severity:** Low
 - **Confidence:** Low-Medium. It depends on whether NX output can expose the sign of zero, for
   example through `1.0 / x` or formatting.
@@ -109,8 +112,9 @@ of the repo in the scratchpad. The working tree was not touched.
 - **Recommendation:** Compare floats by bits (`to_bits`), or document that the language treats them
   as equal.
 - **Fix:** `Across::values` compares floats by `to_bits`, so `-0.0` and `0.0` (and NaNs with different bits) count as different and the child is initialized again.
+- **Verification:** Verified. `NxValue::Float` is compared by `to_bits`. Descriptors come from runtime output, which writes only `Float`; host `Float32` is widened on the way in, so leaving `Float32` uncovered is fine. A NaN with identical bits is now kept, which is sound because the body is deterministic for identical bits.
 
-### 🟡 Fixed - RF5 Tests miss several of the risky paths
+### ✅ Verified - RF5 Tests miss several of the risky paths
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** No test covers these paths:
@@ -123,8 +127,9 @@ of the repo in the scratchpad. The working tree was not touched.
     `rebind`).
 - **Recommendation:** Add a focused test for each path.
 - **Fix:** Added `an_emit_handler_bound_in_one_render_and_not_the_next_is_a_changed_descriptor`, `a_kept_child_dispatched_against_before_its_parent_rendered_is_rebound_with_what_is_under_it`, `a_node_visited_before_its_ancestor_is_rebound_counts_as_visited`, and unit tests for the pairing fallback (an NX program that pairs one handler to two in one render and two in the next is not practical to write, so `Rebinding::pair` is tested directly).
+- **Verification:** Verified. The four new tests and the unit tests cover the paths listed. The dispatched-then-kept test exercises the `continue` branch of `rebinding` and the later `Across` visit of the Card through the Panel's pre-dispatch instance. `cargo test -p nx-api --test codegen_parity ir_instance_tree`: 51 passed. `cargo test -p nx-ir-runtime rebinding`: 3 passed.
 
-### 🟡 Fixed - RF6 New doc lines exceed the line-length target
+### ✅ Verified - RF6 New doc lines exceed the line-length target
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:**
@@ -134,13 +139,78 @@ of the repo in the scratchpad. The working tree was not touched.
   - crates/nx-ir-runtime/README.md:312 is far past the wrap width used by the surrounding text.
 - **Recommendation:** Rewrap both to match the neighboring lines.
 - **Fix:** Rewrapped the module doc in tree.rs and the README bullet.
+- **Verification:** Verified for the cited lines: tree.rs:9 and README.md:312 are rewrapped. The fix commit added new long lines, which are tracked separately as RF9.
+
+## New Findings Discovered During 2026-11-21 20:28 Verification
+
+### 🟡 Fixed - RF7 The new `Program::metered` call resets the caller's usage and origins reports, so a visit's reports now depend on which path it took
+- **Severity:** Low
+- **Confidence:** High for the mechanism, Medium for how much it matters to hosts
+- **Evidence:** `metered` goes through `Program::call` (component.rs), which clears
+  `options.usage` and `options.origins` and then records its own result. The effect depends on
+  the path a visit takes:
+  - **Kept:** the usage report holds the cost of the comparison and rebinding, and the origins
+    report is cleared and left empty, although the node's output (and the origins it has) is
+    unchanged. Before this commit, a visit that did not render left both reports as they were.
+    The same-descriptor fast path still makes no call, so it leaves them untouched. A host that
+    reads `origins` after each visit therefore gets nothing for a kept node and must instead rely
+    on `Arc::ptr_eq` of `rendered`.
+  - **Fallback to initialization:** the comparison runs as its own call with its own
+    `max_operations`, and then `initialize_component` clears `usage` and reports only its own
+    cost. So one visit can spend close to twice the budget, and the usage report understates
+    what it used.
+  - **Documentation:** none of this is in the README's tree section or the spec. The spec says
+    "the operation budget and the input limit SHALL apply to each of those calls separately" only
+    for lifecycle calls.
+- **Recommendation:** Document what a visit leaves in `usage` and `origins` on each path, for
+  example "a kept node's origins are those of its earlier render". Better still:
+  - Keep `origins` as it was in the metered call, for example with a `call` variant that does not
+    touch origins.
+  - Either charge the comparison and the following initialization to one budget and one usage
+    record, or state that they are separate.
+  - Add a test with a `Usage` and an `Origins` across a kept visit and a fallback visit.
+- **Fix:** `Program::metered` no longer goes through `Program::call`: it builds a `Machine` on the options and meters the work, leaving the usage and origins reports as the last lifecycle call wrote them. The doc comment, README, design and spec say the reports are left alone and that a visit that compares and then initializes spends a budget on each. Test `keeping_a_child_leaves_the_usage_report_as_the_last_call_wrote_it` checks the usage report is unchanged by a kept visit.
+
+### 🟡 Fixed - RF8 The spec and README say a value many handlers capture is walked once, but the comparison walks it once for every handler pair
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:**
+  - The spec says "The comparison and the rebinding SHALL count against the visit's operation
+    budget ... and SHALL walk a value many handlers capture once". The README and design say the
+    same.
+  - Only `Rebinding` memoizes. `Across::handlers` calls `handlers_equal` for each pair of visible
+    handlers, and `values_equal` walks every capture in full each time. So N content handlers that
+    each capture one value of size S still cost about N × S. That work is now metered, so the
+    budget bounds it and it is no longer a safety problem, but the spec is wrong about it.
+  - The README also says "one operation for each value they walk". `Rebinding` charges only
+    handlers, lists and records, while `values_equal` also charges scalars and text length.
+- **Recommendation:** Narrow the wording to "the rebinding walks a shared value once; the
+  comparison costs what `==` costs", or memoize pairs in `Across` by `(old, new)` allocation.
+- **Fix:** Reworded spec, design and README: comparing handlers costs what `==` costs; only the rebinding walks a shared value once, at one operation per handler, list and record.
+
+### 🟡 Fixed - RF9 The fix commit adds doc lines past the wrap width and leaves a stale "one to one" comment
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:**
+  - crates/nx-ir-runtime/src/tree.rs:951, the doc of `Across::handlers`, is 138 columns. The same
+    comment still says "and paired one to one", which contradicts the many-to-one rule RF2 settled
+    on.
+  - The README bullet line "operation for each value they walk, and a value many handlers capture
+    is walked once. A handler inside" is 104 columns, against about 100 for its neighbors.
+- **Recommendation:** Rewrap both. Change the comment to "and paired so that no earlier handler
+  has two replacements".
+- **Fix:** Rewrapped the `Across::handlers` doc (also updated it from "paired one to one") and the README bullet.
 
 ## Questions
-- Should the rebinding and comparison work count against `maxOperations`, given that hosts use the
-  budget to bound each call? (RF1)
+- ~~Should the rebinding and comparison work count against `maxOperations`, given that hosts use
+  the budget to bound each call? (RF1)~~ Answered by the fix: yes. RF7 asks whether that charge
+  should share one budget and one usage report with a fallback initialization.
 - Task 4.3 is still open. That is expected at this stage, since it includes the review loop.
 
 ## Summary
+- Verification (2026-11-21 20:28): RF1–RF6 are verified. RF7–RF9 are new findings, all Low. They
+  concern side effects of the metered call on the reports, spec wording about memoization, and
+  wrapping. No correctness regression was found in the fix commit.
 - I found no correctness bug in the skip or the rebinding for the scenarios in the spec, including
   emit routing to the parent's current instance, content handlers that run against their owner,
   tokens that stay valid, rebinding through descendants, RF1 nesting, and all-or-nothing behavior

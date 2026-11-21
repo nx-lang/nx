@@ -107,8 +107,9 @@ SHALL be the same allocation as before, so that every token a host read from tha
 handler at the same place. A rebound node SHALL count as initialized through the parent's current
 instance. Rebinding SHALL evaluate no NX code and SHALL count as a change to the tree, so a pass
 that fails leaves every rebound node as it was. The comparison and the rebinding SHALL count
-against the visit's operation budget, as the language's `==` counts a comparison, and SHALL walk a
-value many handlers capture once.
+against the visit's operation budget, the comparison as the language's `==` counts one, and the
+rebinding SHALL walk a value many handlers capture once. They SHALL leave the usage and origins
+reports as they were.
 
 #### Scenario: A kept child's emit reaches the parent's current instance
 - **WHEN** a `Card` node is kept under a `Page` node that rendered again, and the host dispatches a

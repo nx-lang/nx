@@ -289,10 +289,12 @@ What the tree does:
   props, its bound handlers, its state, its output's handlers and what its own handlers capture,
   and so is every node initialized through it, and through those. Its tokens keep naming the
   handlers at the same places, so a token the host read before stays good. The comparison and the
-  rebinding evaluate no NX code, but they count against `max_operations` as `==` does, one
-  operation for each value they walk, and a value many handlers capture is walked once. A handler inside
-  content captures the whole frame of the body that bound it, so after any change to its owner's
-  state it is unequal, and a child holding it renders again.
+  rebinding evaluate no NX code but count against `max_operations`: comparing handlers costs what
+  `==` costs, and rebinding costs one operation for each handler, list and record it walks, walking
+  a value many handlers capture once. They leave the usage and origins reports alone, and a visit
+  that compares and then initializes the node spends a budget on each. A handler inside content
+  captures the whole frame of the body that bound it, so after any change to its owner's state it
+  is unequal, and a child holding it renders again.
 - **An instance lives as long as its place in the output.** `finish` drops what a pass left
   unvisited under a node it visited that had rendered since the last pass: the host has just
   walked that node's new output and did not find the place in it. Under a visited node that had
