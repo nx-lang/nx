@@ -140,9 +140,10 @@ which matters for four reasons:
 What is lost is an override whose own value reads another environment value that is overridden
 further in. For example, `<Banner env.color.accent={ if env.colorMode is {…} }>` with a
 `colorMode` override inside `Banner`: the accent is fixed by the colorMode at `<Banner>`. The fix
-is to override `colorMode` or the default, not `accent`, and `specs/future.md` records lazy
-overrides as a possible extension. **This is the one place where the spec departs from the doc,
-so it needs Bret's OK.**
+is to override `colorMode` or the default, not `accent`, and `specs/future.md` records an explicit
+opt-in for lazy overrides (for example, an override whose value is a function, called where it is
+read) as a possible extension. Bret agreed to these semantics on 2026-11-21, and the doc now says
+the same.
 
 For the same reason, the values of an element's `env.` attributes, and of a block's overrides,
 are evaluated outside the overrides, so `env.space={env.space * 2}` doubles the outer value. The
@@ -294,8 +295,6 @@ IR as before.
 
 ## Open Questions
 
-- **Local overrides evaluated where written** (Decision 4) need Bret's OK, since the doc has them
-  evaluated where read.
 - **Host elements.** Should a host element be able to read the environment, for example to set
   `dir` or a CSS color scheme? For now a host asks the runtime, and an intrinsic element carries
   no `$env`. Adding `$env` to host elements is easy later, if hosts want it.
