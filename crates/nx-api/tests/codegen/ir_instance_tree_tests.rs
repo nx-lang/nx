@@ -101,6 +101,32 @@ fn find<'a>(value: &'a NxValue, type_name: &str, text: Option<&str>) -> Option<&
     }
 }
 
+/// The first record of type `type_name` in a rendered value, depth first, after `after`.
+fn find_after<'a>(value: &'a NxValue, type_name: &str, after: &NxValue) -> Option<&'a NxValue> {
+    let mut all = Vec::new();
+    collect(value, type_name, &mut all);
+    all.into_iter()
+        .skip_while(|found| !std::ptr::eq(*found, after))
+        .nth(1)
+}
+
+fn collect<'a>(value: &'a NxValue, type_name: &str, found: &mut Vec<&'a NxValue>) {
+    match value {
+        NxValue::Array(items) => items
+            .iter()
+            .for_each(|item| collect(item, type_name, found)),
+        NxValue::Record { properties, .. } => {
+            if type_of(value) == Some(type_name) {
+                found.push(value);
+            }
+            properties
+                .values()
+                .for_each(|entry| collect(entry, type_name, found));
+        }
+        _ => {}
+    }
+}
+
 fn renders(tree: &InstanceTree, key: &str, type_name: &str, text: &str) -> bool {
     find(&rendered(tree, key), type_name, Some(text)).is_some()
 }
@@ -532,13 +558,17 @@ fn a_parent_that_renders_again_re_initializes_the_child_with_the_state_it_held()
 }
 
 #[test]
-fn a_render_reaches_what_is_under_the_node_and_nothing_beside_it() {
-    // Two Pages side by side under no node, each with a Card that emits to it and a Box.
+fn a_render_reaches_only_the_children_whose_descriptors_changed() {
+    // Two Pages side by side under no node, each with two Cards that emit to it and a Box. The
+    // first Card shows what the last log said; the second shows a fixed title.
     let mut tree = linked(
         "
-component <Card extends Node emits { Logged { text:string } } /> = {
+component <Card extends Node title:string emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Stack>
+    <Label Text={title} />
+    <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  </Stack>
 }
 component <Box extends Node /> = {
   state { opened:int = 0 }
@@ -546,41 +576,77 @@ component <Box extends Node /> = {
 }
 component <Page /> = {
   state { last:string = \"\" }
-  <Stack><Card onLogged=<State.Update last={action.text} /> /><Box /></Stack>
+  <Stack>
+    <Card title={last} onLogged=<State.Update last={action.text} /> />
+    <Card title=\"fixed\" onLogged=<State.Update last={action.text} /> />
+    <Box />
+  </Stack>
 }
 let root() = { <Page /> }",
     );
     let root = evaluated(&tree, "root");
+    let children = ["first", "second", "box"];
     let pass = |tree: &mut InstanceTree| {
         tree.begin();
         for page in ["one", "two"] {
             tree.visit(page, &root, None, &options()).unwrap();
-            visit_child(tree, &format!("{page}/card"), "Card", page);
-            visit_child(tree, &format!("{page}/box"), "Box", page);
+            let output = rendered(tree, page);
+            let items = [
+                find(&output, "Card", None),
+                find(&output, "Card", None).and_then(|first| find_after(&output, "Card", first)),
+                find(&output, "Box", None),
+            ];
+            for (name, item) in children.iter().zip(items) {
+                let item = item.expect("a descriptor");
+                tree.visit(&format!("{page}/{name}"), item, Some(page), &options())
+                    .unwrap();
+            }
         }
         tree.finish();
     };
     pass(&mut tree);
     tap(&mut tree, "one/box", "Open").unwrap();
     pass(&mut tree);
-    let before: Vec<_> = ["one/box", "two", "two/card", "two/box"]
-        .iter()
-        .map(|key| rendered(&tree, key))
-        .collect();
+    let before: Vec<_> = [
+        "one/second",
+        "one/box",
+        "two",
+        "two/first",
+        "two/second",
+        "two/box",
+    ]
+    .iter()
+    .map(|key| rendered(&tree, key))
+    .collect();
 
-    // The Card's emit patches the first Page, which renders again.
-    tap(&mut tree, "one/card", "Log").unwrap();
+    // The second Card's emit patches the first Page, which renders again.
+    tap(&mut tree, "one/second", "Log").unwrap();
+    let after_tap = rendered(&tree, "one/second");
     pass(&mut tree);
     assert_eq!(state(&tree, "one"), json(r#"{ "last": "hi" }"#));
-    // Both nodes under it were initialized again, with the state each held: the Card, which
-    // the Page handed another handler, and the Box, which it handed nothing new.
-    assert_eq!(generation(&tree, "one/card"), 1);
-    assert_eq!(state(&tree, "one/card"), json(r#"{ "logs": 1 }"#));
-    assert_eq!(generation(&tree, "one/box"), 1);
+    // The first Card was handed another title, so it was initialized again with the state it held.
+    assert_eq!(generation(&tree, "one/first"), 1);
+    assert!(renders(&tree, "one/first", "Label", "hi"));
+    // The second Card and the Box were handed what they held, but for the handler the Page bound
+    // for the Card's emit: neither rendered, and both are settled.
+    assert_eq!(generation(&tree, "one/second"), 2);
+    assert_eq!(state(&tree, "one/second"), json(r#"{ "logs": 1 }"#));
+    assert!(Arc::ptr_eq(&after_tap, &rendered(&tree, "one/second")));
+    assert!(!Arc::ptr_eq(&before[0], &after_tap));
     assert_eq!(state(&tree, "one/box"), json(r#"{ "opened": 1 }"#));
-    assert!(!Arc::ptr_eq(&before[0], &rendered(&tree, "one/box")));
+    assert!(Arc::ptr_eq(&before[1], &rendered(&tree, "one/box")));
+    for key in ["one/second", "one/box"] {
+        assert!(tree.is_settled(key), "{key}");
+    }
+    // The kept Card's emit reaches the Page's current instance.
+    tap(&mut tree, "one/second", "Log").unwrap();
+    assert_eq!(state(&tree, "one/second"), json(r#"{ "logs": 2 }"#));
+    pass(&mut tree);
     // The Page beside it, and what is under that one, did not render.
-    for (held, key) in before[1..].iter().zip(["two", "two/card", "two/box"]) {
+    for (held, key) in before[2..]
+        .iter()
+        .zip(["two", "two/first", "two/second", "two/box"])
+    {
         assert!(Arc::ptr_eq(held, &rendered(&tree, key)), "{key}");
     }
 }
@@ -598,7 +664,7 @@ fn the_same_descriptor_leaves_the_node_alone() {
 }
 
 #[test]
-fn a_descriptor_that_reads_the_same_from_a_parent_initialized_again_is_a_new_one() {
+fn an_equal_descriptor_from_a_parent_initialized_again_keeps_the_child() {
     let mut tree = linked(
         "
 component <Card extends Node emits { Logged { text:string } } /> = {
@@ -623,6 +689,7 @@ let second() = { <Page tag=\"b\" /> }",
     visit_child(&mut tree, "root/card", "Card", "root");
     tap(&mut tree, "root/card", "Log").unwrap();
     assert_eq!(state(&tree, "root"), json(r#"{ "last": "ahi" }"#));
+    let held = rendered(&tree, "root/card");
 
     // The Page is given other props and initialized again. What it renders for the Card reads
     // as it did the first time, since a render numbers its tokens from one.
@@ -630,9 +697,13 @@ let second() = { <Page tag=\"b\" /> }",
     assert_eq!(generation(&tree, "root"), 1);
     assert_eq!(card_of(&tree), before);
 
-    visit_child(&mut tree, "root/card", "Card", "root");
-    // Initialized again, with the state it held and the handler the Page now holds.
-    assert_eq!(generation(&tree, "root/card"), 1);
+    let again = tree
+        .visit("root/card", &card_of(&tree), Some("root"), &options())
+        .unwrap();
+    // Kept, not initialized again: the Card's body sees nothing that changed. It holds the state
+    // and the very output it held, and the handler the Page's new instance holds at that place.
+    assert!(Arc::ptr_eq(&held, &again));
+    assert_eq!(generation(&tree, "root/card"), 2);
     assert_eq!(state(&tree, "root/card"), json(r#"{ "logs": 1 }"#));
     let (card, page) = (
         tree.instance("root/card").unwrap(),
@@ -641,6 +712,356 @@ let second() = { <Page tag=\"b\" /> }",
     assert!(card.bound_handler_is("onLogged", page, "h1-1"));
     tap(&mut tree, "root/card", "Log").unwrap();
     assert_eq!(state(&tree, "root"), json(r#"{ "last": "bhi" }"#));
+}
+
+#[test]
+fn a_visible_handler_with_another_capture_is_a_changed_descriptor() {
+    let mut tree = open(CONTENT);
+    visit_child(&mut tree, "root/box", "Box", "root");
+    tree.finish();
+    let before = rendered(&tree, "root/box");
+    // The Page's own button, in the Box's content, patches the Page.
+    tap(&mut tree, "root/box", "More").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/box", "Box", "root");
+    tree.finish();
+    // The handler in the Box's content now captures another `count`, which the Box's body could
+    // tell by comparing it, so the Box was initialized again.
+    assert!(!Arc::ptr_eq(&before, &rendered(&tree, "root/box")));
+    assert!(renders(&tree, "root/box", "Label", "counted"));
+}
+
+// ------------------------------------------------------------------------------------------------
+// A kept child is rebound to its parent's new handlers
+// ------------------------------------------------------------------------------------------------
+
+/// `Page` puts a button of its own in a `Panel`'s content and binds a handler for the `Panel`'s
+/// emit; the `Panel` binds one for its `Card`'s emit, which captures the `Panel`'s content. The
+/// Page's `Same` button renders it again with nothing changed.
+const PANEL: &str = "
+component <Card extends Node emits { Logged { text:string } } /> = {
+  state { logs:int = 0 }
+  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+}
+component <Panel extends Node content Children:Node+ emits { Noted { text:string } } /> = {
+  state { notes:int = 0 }
+  <Stack>
+    {Children}
+    <Card onLogged={<State.Update notes={notes + 1} /> <Panel.Noted text={action.text} />} />
+  </Stack>
+}
+component <Page /> = {
+  state { mode:string = \"a\" taps:int = 0 last:string = \"\" }
+  <Stack>
+    <Button Text=\"Same\" onTapped=<State.Update mode=\"a\" /> />
+    <Panel onNoted=<State.Update last={action.text} />>
+      <Button Text=\"More\" onTapped=<State.Update taps={taps + 1} /> />
+    </Panel>
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+/// A pass over the Page, its Panel and the Panel's Card.
+fn panel_pass(tree: &mut InstanceTree) {
+    let root = evaluated(tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(tree, "root/panel", "Panel", "root");
+    visit_child(tree, "root/panel/card", "Card", "root/panel");
+    tree.finish();
+}
+
+#[test]
+fn a_kept_child_and_the_node_under_it_are_rebound_and_their_tokens_stay_valid() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    let (panel, card) = (
+        rendered(&tree, "root/panel"),
+        rendered(&tree, "root/panel/card"),
+    );
+    let log = token(&tree, "root/panel/card", "Log");
+
+    // The Page renders again with nothing changed: the Panel and the Card are kept, with the
+    // very output they held, and are settled.
+    tap(&mut tree, "root", "Same").unwrap();
+    assert_eq!(generation(&tree, "root"), 2);
+    panel_pass(&mut tree);
+    assert!(Arc::ptr_eq(&panel, &rendered(&tree, "root/panel")));
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root/panel/card")));
+    assert_eq!(generation(&tree, "root/panel"), 1);
+    assert_eq!(generation(&tree, "root/panel/card"), 1);
+    for key in ["root", "root/panel", "root/panel/card"] {
+        assert!(tree.is_settled(key), "{key}");
+    }
+
+    // The token the host read before the Page rendered again still names the Card's handler, and
+    // the chain of emits reaches the Panel and then the Page's current instance.
+    let effects = tree
+        .dispatch("root/panel/card", &log, tapped(), &options())
+        .unwrap();
+    assert!(effects.is_empty());
+    assert_eq!(state(&tree, "root/panel/card"), json(r#"{ "logs": 1 }"#));
+    assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 1 }"#));
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "mode": "a", "taps": 0, "last": "hi" }"#)
+    );
+}
+
+#[test]
+fn a_handler_handed_through_a_kept_child_runs_against_its_owner() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tap(&mut tree, "root", "Same").unwrap();
+    panel_pass(&mut tree);
+    let panel = rendered(&tree, "root/panel");
+    // The Page's button in the Panel's content patches the Page, not the Panel.
+    tap(&mut tree, "root/panel", "More").unwrap();
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "mode": "a", "taps": 1, "last": "" }"#)
+    );
+    assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 0 }"#));
+    assert!(Arc::ptr_eq(&panel, &rendered(&tree, "root/panel")));
+}
+
+#[test]
+fn a_component_nested_under_itself_is_still_told_from_its_ancestor_after_a_skip() {
+    let mut tree = linked(
+        "
+component <Rec extends Node emits { Pinged { } } /> = {
+  state { open:boolean = false }
+  <Stack>
+    <Button Text=\"Toggle\" onTapped=<State.Update open={!open} /> />
+    { if open { <Rec onPinged=<State.Update open={open} /> /> } else { <Label Text=\"closed\" /> } }
+  </Stack>
+}
+component <Host /> = {
+  state { n:int = 0 }
+  <Stack>
+    <Button Text=\"Same\" onTapped=<State.Update n={n} /> />
+    <Rec onPinged=<State.Update n={n} /> />
+  </Stack>
+}
+let root() = { <Host /> }",
+    );
+    let pass = |tree: &mut InstanceTree, inner: bool| {
+        let root = evaluated(tree, "root");
+        tree.begin();
+        tree.visit("root", &root, None, &options()).unwrap();
+        visit_child(tree, "root/rec", "Rec", "root");
+        if inner {
+            visit_child(tree, "root/rec/rec", "Rec", "root/rec");
+        }
+        tree.finish();
+    };
+    pass(&mut tree, false);
+    // Open the outer one and the inner one it now renders.
+    tap(&mut tree, "root/rec", "Toggle").unwrap();
+    pass(&mut tree, true);
+    tap(&mut tree, "root/rec/rec", "Toggle").unwrap();
+    pass(&mut tree, true);
+    // The Host renders again with nothing changed: both are kept and rebound.
+    let outer = rendered(&tree, "root/rec");
+    tap(&mut tree, "root", "Same").unwrap();
+    pass(&mut tree, true);
+    assert!(Arc::ptr_eq(&outer, &rendered(&tree, "root/rec")));
+    assert_eq!(state(&tree, "root/rec"), json(r#"{ "open": true }"#));
+    assert_eq!(state(&tree, "root/rec/rec"), json(r#"{ "open": true }"#));
+
+    // Both hold equal props and state, so their own handlers are equal; a tap on the inner one's
+    // button still closes the inner one.
+    tap(&mut tree, "root/rec/rec", "Toggle").unwrap();
+    assert_eq!(state(&tree, "root/rec/rec"), json(r#"{ "open": false }"#));
+    assert_eq!(state(&tree, "root/rec"), json(r#"{ "open": true }"#));
+}
+
+#[test]
+fn a_pass_that_fails_after_a_rebinding_leaves_the_tree_as_it_was() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tap(&mut tree, "root", "Same").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    let instance = tree.instance("root/panel").unwrap().clone();
+    let failed = tree.atomically(|tree| {
+        // The Panel is kept and rebound to the Page's new handlers, then the pass fails.
+        visit_child(tree, "root/panel", "Panel", "root");
+        tree.visit("root/other", &NxValue::Int(1), Some("root"), &options())
+    });
+    assert_eq!(failed.unwrap_err().code(), "nx-ir-boundary-type");
+    // The Panel holds the instance it held before the failed change, so the Page's new
+    // handlers do not reach it until a pass visits it again.
+    let held = tree.instance("root/panel").unwrap();
+    assert_eq!(held.generation(), instance.generation());
+    assert!(tree
+        .atomically(|tree| tap(tree, "root/panel", "More").map(|_| ()))
+        .is_err());
+    tree.finish();
+    panel_pass(&mut tree);
+    tap(&mut tree, "root/panel", "More").unwrap();
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "mode": "a", "taps": 1, "last": "" }"#)
+    );
+}
+
+#[test]
+fn an_emit_handler_bound_in_one_render_and_not_the_next_is_a_changed_descriptor() {
+    let mut tree = linked(
+        "
+component <Card extends Node emits { Logged { text:string } } /> = {
+  state { logs:int = 0 }
+  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+}
+component <Page /> = {
+  state { bound:boolean = true last:string = \"\" }
+  <Stack>
+    <Button Text=\"Unbind\" onTapped=<State.Update bound=false /> />
+    <Card if bound { onLogged=<State.Update last={action.text} /> } />
+  </Stack>
+}
+let root() = { <Page /> }",
+    );
+    let pass = |tree: &mut InstanceTree| {
+        let root = evaluated(tree, "root");
+        tree.begin();
+        tree.visit("root", &root, None, &options()).unwrap();
+        visit_child(tree, "root/card", "Card", "root");
+        tree.finish();
+    };
+    pass(&mut tree);
+    tap(&mut tree, "root/card", "Log").unwrap();
+    pass(&mut tree);
+    let before = rendered(&tree, "root/card");
+    tap(&mut tree, "root", "Unbind").unwrap();
+    pass(&mut tree);
+    // The Card's descriptor lost its handler, so it was initialized again with the state it held,
+    // and its emit is now the host's.
+    assert!(!Arc::ptr_eq(&before, &rendered(&tree, "root/card")));
+    assert_eq!(generation(&tree, "root/card"), 1);
+    assert_eq!(state(&tree, "root/card"), json(r#"{ "logs": 1 }"#));
+    let effects = tap(&mut tree, "root/card", "Log").unwrap();
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "bound": false, "last": "hi" }"#)
+    );
+}
+
+#[test]
+fn a_kept_child_dispatched_against_before_its_parent_rendered_is_rebound_with_what_is_under_it() {
+    // The Page's handler for the Panel's emit sets what it holds already, so the Page renders
+    // again with nothing changed.
+    let mut tree = linked(&PANEL.replace("last={action.text}", "mode=\"a\""));
+    panel_pass(&mut tree);
+    // The Card's emit reaches the Panel, whose own emit reaches the Page: all three render, and
+    // the Card was initialized through the instance the Panel held before.
+    tap(&mut tree, "root/panel/card", "Log").unwrap();
+    assert_eq!(generation(&tree, "root/panel"), 2);
+    let panel = rendered(&tree, "root/panel");
+    panel_pass(&mut tree);
+    // The Panel is kept, with the output its dispatch rendered, and so is the Card under it.
+    assert!(Arc::ptr_eq(&panel, &rendered(&tree, "root/panel")));
+    assert_eq!(generation(&tree, "root/panel"), 2);
+    assert_eq!(generation(&tree, "root/panel/card"), 2);
+    assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 1 }"#));
+    assert_eq!(state(&tree, "root/panel/card"), json(r#"{ "logs": 1 }"#));
+    for key in ["root", "root/panel", "root/panel/card"] {
+        assert!(tree.is_settled(key), "{key}");
+    }
+    // The chain still runs against the current instances.
+    tap(&mut tree, "root/panel/card", "Log").unwrap();
+    assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 2 }"#));
+    assert_eq!(state(&tree, "root/panel/card"), json(r#"{ "logs": 2 }"#));
+}
+
+#[test]
+fn a_node_visited_before_its_ancestor_is_rebound_counts_as_visited() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    // A pass visits all three, the Page renders again with nothing changed while it is under
+    // way, and the pass visits the Page and the Panel again, but not the Card.
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/panel", "Panel", "root");
+    visit_child(&mut tree, "root/panel/card", "Card", "root/panel");
+    tap(&mut tree, "root", "Same").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/panel", "Panel", "root");
+    tree.finish();
+    // The Card was rebound with the Panel and its visit still counts.
+    assert!(tree.rendered("root/panel/card").is_some());
+    for key in ["root", "root/panel", "root/panel/card"] {
+        assert!(tree.is_settled(key), "{key}");
+    }
+    tap(&mut tree, "root/panel/card", "Log").unwrap();
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "mode": "a", "taps": 0, "last": "hi" }"#)
+    );
+}
+
+#[test]
+fn rebinding_a_kept_child_is_charged_to_the_operation_budget() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tap(&mut tree, "root", "Same").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    let output = rendered(&tree, "root");
+    let descriptor = find(&output, "Panel", None).unwrap().clone();
+    let tight = RuntimeOptions {
+        max_operations: Some(1),
+        ..options()
+    };
+    let refused = tree.visit("root/panel", &descriptor, Some("root"), &tight);
+    assert_eq!(refused.unwrap_err().code(), "nx-ir-resource-limit");
+    // Nothing changed, and with the default budget the Panel is kept.
+    let panel = rendered(&tree, "root/panel");
+    let kept = tree
+        .visit("root/panel", &descriptor, Some("root"), &options())
+        .unwrap();
+    assert!(Arc::ptr_eq(&panel, &kept));
+}
+
+#[test]
+fn keeping_a_child_leaves_the_usage_report_as_the_last_call_wrote_it() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tap(&mut tree, "root", "Same").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    let usage = Arc::new(nx_ir_runtime::Usage::new());
+    let reported = RuntimeOptions {
+        max_operations: Some(1_000_000),
+        usage: Some(Arc::clone(&usage)),
+        ..options()
+    };
+    tree.visit("root", &root, None, &reported).unwrap();
+    let output = rendered(&tree, "root");
+    let descriptor = find(&output, "Panel", None).unwrap().clone();
+    // The Page's visit made no lifecycle call either; initialize a node to write the report.
+    let page = tree
+        .program()
+        .evaluate_function("root", &[], &reported)
+        .unwrap();
+    assert_eq!(page, root);
+    let written = usage.operations();
+    assert!(written.is_some());
+    let panel = rendered(&tree, "root/panel");
+    let kept = tree
+        .visit("root/panel", &descriptor, Some("root"), &reported)
+        .unwrap();
+    assert!(Arc::ptr_eq(&panel, &kept));
+    assert_eq!(usage.operations(), written);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1250,10 +1671,12 @@ let root() = { <Top /> }",
         }]
     );
 
-    // The top rendered again, so the next pass hands the middle a new descriptor and initializes it
-    // again. The descriptor the middle then holds for the leaf reads exactly as the first one
-    // did, token and all, and names a handler of the middle's new instance: the leaf is
-    // initialized again too, both keep their state, and the chain still reaches the top.
+    // The top rendered again, so the next pass hands the middle a descriptor read from the top's
+    // new instance. It differs only in the handler the top bound for the middle's emit, which the
+    // middle's body never sees, so the middle is kept and rebound rather than rendered again, and
+    // the leaf under it with it: neither renders, both keep their state, and the chain still
+    // reaches the top's current instance.
+    let middle = rendered(&tree, "root/middle");
     let root = evaluated(&tree, "root");
     tree.begin();
     tree.visit("root", &root, None, &options()).unwrap();
@@ -1261,7 +1684,9 @@ let root() = { <Top /> }",
     visit_child(&mut tree, "root/middle/leaf", "Leaf", "root/middle");
     tree.finish();
     assert_eq!(state(&tree, "root/middle"), json(r#"{ "passed": 1 }"#));
-    assert_eq!(generation(&tree, "root/middle/leaf"), 1);
+    assert!(Arc::ptr_eq(&middle, &rendered(&tree, "root/middle")));
+    assert_eq!(generation(&tree, "root/middle"), 2);
+    assert_eq!(generation(&tree, "root/middle/leaf"), 2);
     let effects = tap(&mut tree, "root/middle/leaf", "Pick").unwrap();
     assert_eq!(effects.len(), 1);
     assert_eq!(state(&tree, "root/middle"), json(r#"{ "passed": 2 }"#));

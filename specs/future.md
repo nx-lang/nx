@@ -1056,7 +1056,8 @@ The steps, in the order they pay off:
 
 1. **Skip a child whose props are unchanged.** A node under one that rendered is left alone when
    the descriptor it is handed equals the one it holds. This is what stops a render from reaching
-   everything below it, and it is most of the gain.
+   everything below it, and it is most of the gain. Done in `skip-unchanged-children` (see the
+   status below).
 2. **Track what a body read.** A dispatch that patches a field no body under the component read
    renders nothing below; one that patches a field only a grandchild's props carry renders the
    path to it. This needs the evaluator to record reads against the instance.
@@ -1084,9 +1085,24 @@ things stand between that and using it:
   lifecycle has no operation for, or the parent's new instance keeps the old handler where the new
   one is equal to it, which is the cheaper of the two and is what "remembering" a closure means.
 
-Nobody has measured a program where any of this matters. The cost today is one render for each
-component under the one that changed, which for a view of a few hundred components is small beside
-drawing them. The reason to do step 1 before it is measured to matter is not speed but the model:
+**Status (2026-11-21).** Change `skip-unchanged-children` (PR #73) does step 1 and takes the first
+way out. Read tracking (step 2) is planned with environment values (`add-environment-values`),
+which record the environment slots each body read and need the skip to check them too.
+A child whose descriptor is equal keeps its instance and output and is rebound to the parent's new
+handlers. Handlers bound for its emits only need to be present on both sides, since the body never
+sees them. That leaves the capture problem open for handlers the child's body can see, such as a
+button handler inside a `Stack`'s content. Those still compare unequal after any change to the
+owner's state, so such a child renders again. **Narrowing captures** to the frame slots a handler
+actually reads would let those skip too. The compiler knows which slots those are, but the change
+touches the image format (a handler node would list its captured slots) and both runtimes, which
+must capture the same slots so that equality and operation counts agree. Do it once a program shows
+content-heavy components rendering again for nothing, or together with read tracking for
+environment values if that needs the same per-node read sets.
+
+Nobody has measured a program where any of this matters. The cost before step 1 was one render
+for each component under the one that changed, which for a view of a few hundred components is
+small beside drawing them. The reason to do step 1 before it is measured to matter is not speed but
+the model:
 a host that follows changes (see above) is told that everything under a changed node changed, and
 has to compare output itself to find out that most of it did not.
 

@@ -11,9 +11,10 @@ without writing the composition itself.
 ## Requirements
 ### Requirement: The Rust runtime exports an instance tree over a linked program
 The Rust IR runtime SHALL export an instance tree created for one linked program. The tree SHALL
-compose instances only through the runtime's component lifecycle, so that every rendered output,
-state and token it yields, and every diagnostic of an evaluation, is one the lifecycle operations
-yield for the same props, state and batches. Every operation of the tree that evaluates SHALL take runtime options and SHALL
+compose instances only through the runtime's component lifecycle, and through rebinding a kept
+node, which evaluates nothing, so that every rendered output, state and token it yields, and every
+diagnostic of an evaluation, is one the lifecycle operations yield for the same props, state and
+batches. Every operation of the tree that evaluates SHALL take runtime options and SHALL
 pass them to each lifecycle call it makes; the operation budget and the input limit SHALL apply to
 each of those calls separately. The tree SHALL say whether a name is a component the program can
 instantiate, which is what the lifecycle can initialize: a component entrypoint of the entry module
@@ -79,34 +80,48 @@ node under it, with `nx-ir-instance-key`.
   visit of the pass reached SHALL be dropped when the pass ends
 
 ### Requirement: Props flow down and state stays with the node
-A node visited with the descriptor it was last initialized from SHALL NOT be initialized again, and
-its rendered output and tokens SHALL be unchanged. A node visited with any other descriptor of its
-component SHALL be initialized again from that descriptor's fields with the state the node holds,
-so that the output reflects the new props and the kept state, and its tokens SHALL be those of the
-new render.
+A node visited with a descriptor equal to the one it was last initialized from SHALL NOT be
+initialized again: it SHALL keep its instance's state, and its rendered output and tokens SHALL be
+unchanged. A node visited with any other descriptor of its component SHALL be initialized again
+from that descriptor's fields with the state the node holds, so that the output reflects the new
+props and the kept state, and its tokens SHALL be those of the new render.
 
-A descriptor is the one a node was initialized from only when it holds the same values and was
-read from the output of the same instance of the parent. A token numbers the handlers of one
-render, and a parent that is initialized again numbers them from one again, so its output can hold
-a descriptor that reads exactly as an earlier one did and names other handlers. Such a descriptor
-is another descriptor.
+Two descriptors are equal when they hold the same values at the same places, with handlers
+compared as follows:
 
-So a node that renders again reaches every node under it: each is handed a descriptor read from
-another instance and is initialized again when a pass visits it, with the state it held, and so in
-turn are the nodes under that one. A node beside the one that rendered, and a node above it that
-no emitted action reached, SHALL NOT render again because of it.
+- A handler the component's body can see, in a prop or in content at any depth, SHALL be resolved
+  through the instance each descriptor was read from, and the two handlers SHALL be equal as the
+  language's `==` finds them: the same handler node with equal captures.
+- A handler the parent bound for one of the component's emits is never in the body's scope, so the
+  two descriptors SHALL only both bind it or both leave it out.
+- The text of a token SHALL NOT count. A parent that renders again numbers its handlers from one
+  again, so the same text can name another handler, and other text can name an equal one.
+
+When one old handler would be replaced by two different new handlers, the descriptors SHALL be
+treated as different. Two old handlers replaced by one new handler are allowed, since a render that
+hands one handler to two places writes it at both. A handler bound for an emit SHALL also answer
+the same emit in both descriptors, as initializing the node checks.
+
+So a node that renders again reaches only the nodes under it whose descriptors changed, and in
+turn the nodes under those. A node beside the one that rendered, and a node above it that no
+emitted action reached, SHALL NOT render again because of it.
 
 #### Scenario: A parent that renders again re-initializes the child with the state it held
-- **WHEN** a child node's state has been patched to `count` equal to `2`, its parent re-renders and
-  the host visits the child with the parent's new descriptor
+- **WHEN** a child node's state has been patched to `count` equal to `2`, its parent re-renders
+  with a different value for one of the child's props, and the host visits the child with the
+  parent's new descriptor
 - **THEN** the child's rendered output SHALL reflect the new descriptor's props and `count` equal
   to `2`
 
-#### Scenario: A render reaches what is under the node and nothing beside it
-- **WHEN** a node with two children is dispatched against through one child's emit, and a pass
-  visits everything
-- **THEN** the node and both children SHALL hold instances of a new render, each child with the
+#### Scenario: A render reaches only the children whose descriptors changed
+- **WHEN** a node renders `<Card title={first} onLogged=<State.Update last={action.text} /> />`
+  and `<Card title="fixed" onLogged=<State.Update last={action.text} /> />`, it is dispatched
+  against through the second card's emit so that `last` and `first` change, and a pass visits
+  everything
+- **THEN** the node and the first card SHALL hold instances of a new render, the card with the
   state it held
+- **AND** the second card SHALL hold the state and the very rendered output it held before, and
+  SHALL be settled once the pass ends
 - **AND** a node beside the one dispatched against SHALL hold the instance and the rendered output
   it held before
 
@@ -114,13 +129,19 @@ no emitted action reached, SHALL NOT render again because of it.
 - **WHEN** a host visits a node twice with the same descriptor
 - **THEN** the second visit SHALL return the first visit's rendered output with the same tokens
 
-#### Scenario: A descriptor that reads the same from a parent initialized again is a new one
+#### Scenario: An equal descriptor from a parent initialized again keeps the child
 - **WHEN** a parent node is initialized again from other props, its output holds for a child a
-  descriptor equal, token included, to the one the child was initialized from, and the host visits
-  the child with it
-- **THEN** the child SHALL be initialized again with the state it held
-- **AND** the handler the child holds SHALL be the one the parent's new instance holds under that
-  token
+  descriptor equal to the one the child was initialized from, and the host visits the child with it
+- **THEN** the child SHALL NOT be initialized again and SHALL return the rendered output it held
+- **AND** the handler the child holds SHALL be the one the parent's new instance holds at that
+  place in the descriptor
+
+#### Scenario: A visible handler with another capture is a changed descriptor
+- **WHEN** `Page` renders `<Stack><Button onTapped=<State.Update taps={taps + 1} /> /></Stack>`,
+  `Stack` is an authored component that renders its content, `taps` changes, and a pass visits the
+  `Stack` node with `Page`'s new descriptor
+- **THEN** the `Stack` node SHALL be initialized again with the state it held, because the handler
+  in its content captures another value of `taps`
 
 ### Requirement: A pass drops the nodes whose places left the output
 The tree SHALL let a host mark the start and the end of a pass, and an instance SHALL live as long
@@ -296,9 +317,9 @@ no entry names a token an earlier dispatch of the same chain retired.
 - **THEN** the dispatch SHALL return that action as an effect naming the component that produced it
 
 ### Requirement: A change to the tree is all or nothing
-A host dispatch that fails at any point, in the handler it named or in one an effect was routed to,
-SHALL leave every node holding the descriptor, the instance and the rendered output it held before
-the dispatch, and SHALL report the runtime's diagnostic for the failure. The tree SHALL also let a
+A host dispatch that fails SHALL leave every node holding the descriptor, the instance and the
+rendered output it held before the dispatch, whether it fails in the handler it named or in one an
+effect was routed to, and SHALL report the runtime's diagnostic for the failure. The tree SHALL also let a
 host run a pass as one change: when the pass fails, the nodes, what they hold and the
 record of what the pass visited SHALL be as they were before it.
 
@@ -314,8 +335,9 @@ record of what the pass visited SHALL be as they were before it.
   the pass
 
 ### Requirement: A handler bound outside any component is reported as inert
-A descriptor visited under no node comes from pure evaluation, so a handler it carries has no token
-and names no handler of any instance. The tree SHALL remove every such handler from the fields it
+The tree SHALL treat a handler in a descriptor visited under no node as inert: such a descriptor
+comes from pure evaluation, so a handler it carries has no token and names no handler of any
+instance. The tree SHALL remove every such handler from the fields it
 initializes the node from, at any depth, and SHALL report each to the host for the pass as
 `<Type>.<property>`, naming the record that carried it. A descriptor visited under a node SHALL be
 passed as it is.
@@ -369,4 +391,60 @@ renders itself. This limit is the one such a program meets.
 - **AND** a walk under a component depth of 150 SHALL visit all 150
 - **AND** a later walk under a component depth of 3 SHALL fail at the fourth node, naming the
   value `3`, and SHALL leave that node as it was
+
+### Requirement: A kept child is rebound to its parent's new handlers
+The tree SHALL rebind a node, instead of initializing it again, when a visit keeps the node because
+its descriptor is equal to the one it was initialized from but was read from another instance of
+the parent than the one the node was initialized through. Each handler the node
+held from the parent's earlier instance SHALL be replaced by the handler the parent's current
+instance holds at the same place in the new descriptor. The replacement SHALL reach everything the
+node holds: its props, the handlers bound for its emits, its state, the handlers of its rendered
+output, and the captures of handlers its own body made. A handler rebuilt that way SHALL in turn
+replace the earlier one in every node initialized through the node, and so on down the tree.
+
+A rebound node SHALL keep its generation, the order of its handlers and its rendered output, which
+SHALL be the same allocation as before, so that every token a host read from that output names the
+handler at the same place. A rebound node SHALL count as initialized through the parent's current
+instance. Rebinding SHALL evaluate no NX code and SHALL count as a change to the tree, so a pass
+that fails leaves every rebound node as it was. The comparison and the rebinding SHALL count
+against the visit's operation budget, the comparison as the language's `==` counts one, and the
+rebinding SHALL walk a value many handlers capture once. They SHALL leave the usage and origins
+reports as they were.
+
+#### Scenario: A kept child's emit reaches the parent's current instance
+- **WHEN** a `Card` node is kept under a `Page` node that rendered again, and the host dispatches a
+  `Card` handler that emits `Logged`, which `Page` bound to `<State.Update last={action.text} />`
+- **THEN** the `Page` node's state SHALL hold the action's `text` in `last`
+- **AND** the dispatch SHALL NOT fail with `nx-ir-handler-token`
+
+#### Scenario: A handler handed through a kept child runs against its owner
+- **WHEN** `Page` renders `<Stack><Button onTapped=<State.Update taps={taps + 1} /> /></Stack>`
+  with a content handler whose captures don't change, `Page` renders again for another reason, a
+  pass keeps the `Stack` node, and the host dispatches the button's token through the `Stack` node
+- **THEN** the `Page` node's state SHALL be patched
+- **AND** the `Stack` node SHALL hold the state it held
+
+#### Scenario: Tokens read before the rebinding stay valid
+- **WHEN** a host reads a token from a `Card` node's rendered output, the `Card`'s parent renders
+  again, a pass keeps and rebinds the `Card`, and the host dispatches that token through the `Card`
+- **THEN** the dispatch SHALL run the handler at that place of the `Card`'s output
+
+#### Scenario: A node under a kept child is rebound with it
+- **WHEN** `Page` renders a `Panel` that renders a `Card`, `Page` binds a handler for `Panel`'s emit
+  and `Panel` binds a handler for `Card`'s emit that captures `Panel`'s props, `Page` renders again
+  and a pass visits `Page` and `Panel` only
+- **THEN** the `Panel` node SHALL be kept and rebound, and the `Card` node SHALL be kept
+- **AND** an emit from the `Card` SHALL reach the `Panel` node, and an emit from the `Panel` the
+  `Page` node
+
+#### Scenario: Rebinding is refused under a budget it exceeds
+- **WHEN** a host visits a node that would be kept and rebound under an operation budget of one
+- **THEN** the visit SHALL fail with `nx-ir-resource-limit` and the tree SHALL be as it was
+
+#### Scenario: A component nested under itself is still told from its ancestor after a skip
+- **WHEN** a component renders another instance of itself with equal props, the outer instance's
+  parent renders again so that both are kept and rebound, and the host dispatches the inner
+  instance's own handler through the inner node
+- **THEN** the inner node's state SHALL be patched
+- **AND** the outer node's state SHALL be unchanged
 
