@@ -143,7 +143,7 @@ of the repo in the scratchpad. The working tree was not touched.
 
 ## New Findings Discovered During 2026-11-21 20:28 Verification
 
-### 🟡 Fixed - RF7 The new `Program::metered` call resets the caller's usage and origins reports, so a visit's reports now depend on which path it took
+### ✅ Verified - RF7 The new `Program::metered` call resets the caller's usage and origins reports, so a visit's reports now depend on which path it took
 - **Severity:** Low
 - **Confidence:** High for the mechanism, Medium for how much it matters to hosts
 - **Evidence:** `metered` goes through `Program::call` (component.rs), which clears
@@ -170,8 +170,9 @@ of the repo in the scratchpad. The working tree was not touched.
     record, or state that they are separate.
   - Add a test with a `Usage` and an `Origins` across a kept visit and a fallback visit.
 - **Fix:** `Program::metered` no longer goes through `Program::call`: it builds a `Machine` on the options and meters the work, leaving the usage and origins reports as the last lifecycle call wrote them. The doc comment, README, design and spec say the reports are left alone and that a visit that compares and then initializes spends a budget on each. Test `keeping_a_child_leaves_the_usage_report_as_the_last_call_wrote_it` checks the usage report is unchanged by a kept visit.
+- **Verification:** Verified. `metered` now builds a `Machine` directly instead of going through `Program::call`, so it neither clears nor writes `usage` or `origins`. The `Machine` collects origins internally, but only `call` copies them into the report. The budget and stack limits still apply, and the resource-limit error still names the component. README, design and spec now say that the reports are left alone and that a fallback visit spends one budget on the comparison and one on the initialization. `keeping_a_child_leaves_the_usage_report_as_the_last_call_wrote_it` passes. Origins have no test, but leaving them alone follows from the same code path.
 
-### 🟡 Fixed - RF8 The spec and README say a value many handlers capture is walked once, but the comparison walks it once for every handler pair
+### ✅ Verified - RF8 The spec and README say a value many handlers capture is walked once, but the comparison walks it once for every handler pair
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:**
@@ -187,8 +188,9 @@ of the repo in the scratchpad. The working tree was not touched.
 - **Recommendation:** Narrow the wording to "the rebinding walks a shared value once; the
   comparison costs what `==` costs", or memoize pairs in `Across` by `(old, new)` allocation.
 - **Fix:** Reworded spec, design and README: comparing handlers costs what `==` costs; only the rebinding walks a shared value once, at one operation per handler, list and record.
+- **Verification:** Verified. Spec, design and README now say that the comparison costs what `==` costs, that the rebinding costs one operation per handler, list and record, and that only the rebinding walks a shared value once.
 
-### 🟡 Fixed - RF9 The fix commit adds doc lines past the wrap width and leaves a stale "one to one" comment
+### ✅ Verified - RF9 The fix commit adds doc lines past the wrap width and leaves a stale "one to one" comment
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:**
@@ -200,6 +202,7 @@ of the repo in the scratchpad. The working tree was not touched.
 - **Recommendation:** Rewrap both. Change the comment to "and paired so that no earlier handler
   has two replacements".
 - **Fix:** Rewrapped the `Across::handlers` doc (also updated it from "paired one to one") and the README bullet.
+- **Verification:** Verified. The `Across::handlers` doc is rewrapped and now states the rule as "never one earlier handler replaced by two new ones". The README bullet is rewrapped. No changed doc line in tree.rs, component.rs or that README section is longer than 100 columns.
 
 ## Questions
 - ~~Should the rebinding and comparison work count against `maxOperations`, given that hosts use
@@ -208,6 +211,8 @@ of the repo in the scratchpad. The working tree was not touched.
 - Task 4.3 is still open. That is expected at this stage, since it includes the review loop.
 
 ## Summary
+- Second verification (2026-11-21 20:31): RF7–RF9 are verified and no new findings were
+  opened. All nine findings are closed.
 - Verification (2026-11-21 20:28): RF1–RF6 are verified. RF7–RF9 are new findings, all Low. They
   concern side effects of the metered call on the reports, spec wording about memoization, and
   wrapping. No correctness regression was found in the fix commit.
