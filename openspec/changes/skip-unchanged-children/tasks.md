@@ -19,5 +19,5 @@
 ## 4. Docs and completion
 
 - [ ] 4.1 Update `crates/nx-ir-runtime/README.md`: a pass walks only what changed now also holds under a parent that rendered again, and how handlers are rebound.
-- [ ] 4.2 Update the instance-tree section of `specs/future.md`: step 1 is done, narrowing captures to what a handler reads is what would extend it to content handlers, and read tracking arrives with environment values.
+- [ ] 4.2 Update the instance-tree section of `specs/future.md` once implemented: step 1 is done, and read tracking arrives with environment values. (The note on narrowing captures was added with the spec.)
 - [ ] 4.3 Run the Rust IR runtime and nx-api test suites, `cargo fmt` and `cargo clippy`, then the review loop, then validate strictly, sync and archive.
