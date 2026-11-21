@@ -277,9 +277,20 @@ What the tree does:
   under it, with a new one in its initial state.
 - **Props flow down and state stays.** A visit with the descriptor the node was last initialized
   from, read from the same instance of the parent, does nothing. Any other descriptor initializes
-  the node again with the state it holds. A descriptor from a parent that was initialized again is
-  another descriptor even where it reads the same: a render numbers its tokens from one, so two
-  renders can spell different handlers alike.
+  the node again with the state it holds, unless it is equal to the one the node holds.
+- **A child handed what it held is kept.** When a parent renders again, a child whose new
+  descriptor is equal to its old one keeps its instance, its state and its rendered output, the
+  same allocation, and does not render. Values are compared by value. A handler the child's body
+  can see, in a prop or in content, must be equal as `==` finds it: the same handler node with an
+  equal capture. A handler the parent bound for one of the child's emits (`onLogged`) need only be
+  there in both, because the body never sees it. Token text does not count, since each render
+  numbers its tokens from one. The kept child is **rebound** instead: every handler it held from
+  the parent's earlier instance is swapped for the parent's new handler at the same place, in its
+  props, its bound handlers, its state, its output's handlers and what its own handlers capture,
+  and so is every node initialized through it, and through those. Its tokens keep naming the
+  handlers at the same places, so a token the host read before stays good. A handler inside
+  content captures the whole frame of the body that bound it, so after any change to its owner's
+  state it is unequal, and a child holding it renders again.
 - **An instance lives as long as its place in the output.** `finish` drops what a pass left
   unvisited under a node it visited that had rendered since the last pass: the host has just
   walked that node's new output and did not find the place in it. Under a visited node that had
@@ -297,7 +308,8 @@ What the tree does:
 - **A pass walks only what changed.** `is_settled` says of a node that neither it nor anything
   under it has rendered since a pass last visited it, so a pass need not go below it. After a
   dispatch deep in the tree, a pass visits the nodes from the root down to the one that rendered,
-  and then everything under that one. While a node does not render again, `rendered` hands out the
+  and then what under that one was handed something new: a kept child is settled again as soon as
+  the pass visits it, unless it rendered on its own since the last pass. While a node does not render again, `rendered` hands out the
   same allocation, so `Arc::ptr_eq` tells a host whether what it last read there still stands.
 - **A handler runs where it was bound.** `dispatch` runs the handler against the node whose body
   created it: the node named, or the ancestor farthest from it that holds the same handler, which

@@ -1,5 +1,31 @@
 ## MODIFIED Requirements
 
+### Requirement: The Rust runtime exports an instance tree over a linked program
+The Rust IR runtime SHALL export an instance tree created for one linked program. The tree SHALL
+compose instances only through the runtime's component lifecycle, and through rebinding a kept
+node, which evaluates nothing, so that every rendered output, state and token it yields, and every
+diagnostic of an evaluation, is one the lifecycle operations yield for the same props, state and
+batches. Every operation of the tree that evaluates SHALL take runtime options and SHALL
+pass them to each lifecycle call it makes; the operation budget and the input limit SHALL apply to
+each of those calls separately. The tree SHALL say whether a name is a component the program can
+instantiate, which is what the lifecycle can initialize: a component entrypoint of the entry module
+declared with a body. A host tells by it an authored component in rendered output from a record
+that is the host's own to interpret.
+
+#### Scenario: A node holds what the lifecycle renders
+- **WHEN** a host visits a descriptor of `Counter` in a tree and separately initializes `Counter`
+  from the same props through the lifecycle
+- **THEN** the node's rendered output and tokens SHALL equal the initialization's
+
+#### Scenario: An authored component is told from an external one
+- **WHEN** a program declares `component <Card /> = { <Label /> }` and `external component <Label />`
+- **THEN** the tree SHALL answer that `Card` can be instantiated
+- **AND** SHALL answer that `Label` and an undeclared name cannot
+
+#### Scenario: A limit reached inside a tree operation is the runtime's diagnostic
+- **WHEN** a host dispatches through a tree under an operation budget a handler exhausts
+- **THEN** the operation SHALL fail with `nx-ir-resource-limit` naming the operation budget
+
 ### Requirement: Props flow down and state stays with the node
 A node visited with a descriptor equal to the one it was last initialized from SHALL NOT be
 initialized again: it SHALL keep its instance's state, and its rendered output and tokens SHALL be
