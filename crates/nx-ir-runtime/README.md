@@ -288,7 +288,9 @@ What the tree does:
   the parent's earlier instance is swapped for the parent's new handler at the same place, in its
   props, its bound handlers, its state, its output's handlers and what its own handlers capture,
   and so is every node initialized through it, and through those. Its tokens keep naming the
-  handlers at the same places, so a token the host read before stays good. A handler inside
+  handlers at the same places, so a token the host read before stays good. The comparison and the
+  rebinding evaluate no NX code, but they count against `max_operations` as `==` does, one
+  operation for each value they walk, and a value many handlers capture is walked once. A handler inside
   content captures the whole frame of the body that bound it, so after any change to its owner's
   state it is unequal, and a child holding it renders again.
 - **An instance lives as long as its place in the output.** `finish` drops what a pass left
@@ -309,8 +311,9 @@ What the tree does:
   under it has rendered since a pass last visited it, so a pass need not go below it. After a
   dispatch deep in the tree, a pass visits the nodes from the root down to the one that rendered,
   and then what under that one was handed something new: a kept child is settled again as soon as
-  the pass visits it, unless it rendered on its own since the last pass. While a node does not render again, `rendered` hands out the
-  same allocation, so `Arc::ptr_eq` tells a host whether what it last read there still stands.
+  the pass visits it, unless it rendered on its own since the last pass. While a node does not
+  render again, `rendered` hands out the same allocation, so `Arc::ptr_eq` tells a host whether
+  what it last read there still stands.
 - **A handler runs where it was bound.** `dispatch` runs the handler against the node whose body
   created it: the node named, or the ancestor farthest from it that holds the same handler, which
   is where a handler passed down through content or props came from. A `Page`'s button rendered

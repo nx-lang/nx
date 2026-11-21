@@ -137,17 +137,22 @@ impl ComponentInstance {
 /// <para>Pairs are recorded first, from the places the two descriptors hold their handlers at.
 /// Substituting then extends the record: a handler that captures one being replaced is itself
 /// replaced by a copy that captures the replacement, and a handler found to capture none is
-/// remembered as kept, so a handler reached again is not walked again.</para>
+/// remembered as kept. A list or record is remembered the same way, so a value many handlers
+/// capture is walked once, and each value walked costs one operation.</para>
 #[derive(Debug, Default)]
 pub(crate) struct Rebinding {
     /// For each handler met, by address, the handler itself, which keeps the address in use, and
     /// what replaces it; `None` when it is kept.
     replaced: HashMap<usize, (Arc<Handler>, Option<Arc<Handler>>)>,
+    /// The same for each list and record met.
+    values: HashMap<usize, (Value, Option<Value>)>,
 }
 
 impl Rebinding {
     /// Records that `new` replaces `old`. Fails, returning false, when `old` is already replaced
-    /// by another handler: the two descriptors then do not pair their handlers one to one.
+    /// by another handler: the two descriptors then do not pair their handlers one to one. Two
+    /// earlier handlers replaced by one are allowed: a render that handed one handler to two
+    /// places writes it at both, as the new render does.
     pub(crate) fn pair(&mut self, old: &Arc<Handler>, new: &Arc<Handler>) -> bool {
         let replacement = (!Arc::ptr_eq(old, new)).then(|| Arc::clone(new));
         match self.replaced.get(&address(old)) {
@@ -169,15 +174,17 @@ impl Rebinding {
         &mut self,
         handler: &Arc<Handler>,
         depth: u32,
+        meter: &Meter<'_, '_>,
         stack: &Stack,
     ) -> Result<Option<Arc<Handler>>> {
         if let Some((_, replacement)) = self.replaced.get(&address(handler)) {
             return Ok(replacement.clone());
         }
+        meter.charge(1)?;
         let mut captured = None;
         for (slot, value) in handler.captured.iter().enumerate() {
             let Some(value) = value else { continue };
-            if let Some(value) = self.value(value, depth, stack)? {
+            if let Some(value) = self.value(value, depth, meter, stack)? {
                 if let Some(entry) = captured
                     .get_or_insert_with(|| handler.captured.clone())
                     .get_mut(slot)
@@ -198,7 +205,13 @@ impl Rebinding {
     }
 
     /// `value` with every handler replaced, or `None` when nothing in it is.
-    fn value(&mut self, value: &Value, depth: u32, stack: &Stack) -> Result<Option<Value>> {
+    fn value(
+        &mut self,
+        value: &Value,
+        depth: u32,
+        meter: &Meter<'_, '_>,
+        stack: &Stack,
+    ) -> Result<Option<Value>> {
         if depth > MAX_VALUE_DEPTH {
             return too_deep();
         }
@@ -206,12 +219,29 @@ impl Rebinding {
             return stack.value_too_deep();
         }
         let deeper = depth.saturating_add(1);
-        Ok(match value {
-            Value::Handler(handler) => self.handler(handler, deeper, stack)?.map(Value::Handler),
+        let held = match value {
+            Value::Handler(handler) => {
+                return Ok(self
+                    .handler(handler, deeper, meter, stack)?
+                    .map(Value::Handler))
+            }
+            Value::Seq(items) => items.as_ptr() as usize,
+            Value::Record(record) => Arc::as_ptr(record) as usize,
+            _ => return Ok(None),
+        };
+        // An empty list holds nothing and may share its address with any other.
+        if matches!(value, Value::Seq(items) if items.is_empty()) {
+            return Ok(None);
+        }
+        if let Some((_, replacement)) = self.values.get(&held) {
+            return Ok(replacement.clone());
+        }
+        meter.charge(1)?;
+        let replacement = match value {
             Value::Seq(items) => {
                 let mut changed: Option<Vec<Value>> = None;
                 for (index, item) in items.iter().enumerate() {
-                    if let Some(item) = self.value(item, deeper, stack)? {
+                    if let Some(item) = self.value(item, deeper, meter, stack)? {
                         if let Some(entry) =
                             changed.get_or_insert_with(|| items.to_vec()).get_mut(index)
                         {
@@ -221,18 +251,30 @@ impl Rebinding {
                 }
                 changed.map(Value::seq)
             }
-            Value::Record(record) => self.fields(&record.fields, deeper, stack)?.map(|fields| {
-                Value::record_from(record.type_name.clone(), fields, record.origin.clone())
-            }),
+            Value::Record(record) => {
+                self.fields(&record.fields, deeper, meter, stack)?
+                    .map(|fields| {
+                        Value::record_from(record.type_name.clone(), fields, record.origin.clone())
+                    })
+            }
             _ => None,
-        })
+        };
+        self.values
+            .insert(held, (value.clone(), replacement.clone()));
+        Ok(replacement)
     }
 
     /// `fields` with every handler replaced, or `None` when nothing in them is.
-    fn fields(&mut self, fields: &Fields, depth: u32, stack: &Stack) -> Result<Option<Fields>> {
+    fn fields(
+        &mut self,
+        fields: &Fields,
+        depth: u32,
+        meter: &Meter<'_, '_>,
+        stack: &Stack,
+    ) -> Result<Option<Fields>> {
         let mut changed: Option<Fields> = None;
         for (index, (_, value)) in fields.iter().enumerate() {
-            if let Some(value) = self.value(value, depth, stack)? {
+            if let Some(value) = self.value(value, depth, meter, stack)? {
                 if let Some(entry) = changed.get_or_insert_with(|| fields.clone()).get_mut(index) {
                     entry.1 = value;
                 }
@@ -255,14 +297,15 @@ impl ComponentInstance {
     pub(crate) fn rebound(
         &self,
         rebinding: &mut Rebinding,
+        meter: &Meter<'_, '_>,
         stack: &Stack,
     ) -> Result<Option<ComponentInstance>> {
         let data = &*self.data;
-        let props = rebinding.fields(&data.props, 0, stack)?;
-        let state = rebinding.fields(&data.state, 0, stack)?;
+        let props = rebinding.fields(&data.props, 0, meter, stack)?;
+        let state = rebinding.fields(&data.state, 0, meter, stack)?;
         let mut handler_props = None;
         for (index, (_, handler)) in data.handler_props.iter().enumerate() {
-            if let Some(handler) = rebinding.handler(handler, 1, stack)? {
+            if let Some(handler) = rebinding.handler(handler, 1, meter, stack)? {
                 if let Some(entry) = handler_props
                     .get_or_insert_with(|| data.handler_props.clone())
                     .get_mut(index)
@@ -273,7 +316,7 @@ impl ComponentInstance {
         }
         let mut handlers = None;
         for (index, handler) in data.handlers.iter().enumerate() {
-            if let Some(handler) = rebinding.handler(handler, 1, stack)? {
+            if let Some(handler) = rebinding.handler(handler, 1, meter, stack)? {
                 if let Some(entry) = handlers
                     .get_or_insert_with(|| data.handlers.clone())
                     .get_mut(index)
@@ -296,6 +339,28 @@ impl ComponentInstance {
                 generation: data.generation,
             }),
         }))
+    }
+}
+
+impl Program {
+    /// Runs `work`, the instance tree's comparison and rebinding of a kept node of `component`,
+    /// as one call: under `options`' operation budget, named after the component when it runs
+    /// out, with the call's stack budget, and reported in its usage report like any other.
+    pub(crate) fn metered<T>(
+        &self,
+        component: &str,
+        options: &RuntimeOptions,
+        work: impl FnOnce(&Meter<'_, '_>, &Stack) -> Result<T>,
+    ) -> Result<T> {
+        self.call(
+            options,
+            |_| {},
+            |machine| {
+                let (index, _, _) = machine.component(component)?;
+                let meter = machine.meter(entry_cx(index), None);
+                work(&meter, &machine.stack)
+            },
+        )
     }
 }
 
@@ -1471,5 +1536,49 @@ struct Position(&'static str, usize, &'static str);
 impl fmt::Display for Position {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}{}{}", self.0, self.1, self.2)
+    }
+}
+
+#[cfg(test)]
+mod rebinding_tests {
+    use super::*;
+
+    fn handler(node: u32) -> Arc<Handler> {
+        Arc::new(Handler {
+            module: Arc::from("main"),
+            declaration: Arc::from("Page"),
+            node,
+            component: Arc::from("main::Card"),
+            component_name: Arc::from("Card"),
+            emit: Arc::from("Logged"),
+            action_name: Arc::from("Card.Logged"),
+            owner: Some(Arc::from("main::Page")),
+            captured: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn an_old_handler_replaced_by_two_new_ones_is_refused() {
+        let (old, first, second) = (handler(1), handler(1), handler(1));
+        let mut rebinding = Rebinding::default();
+        assert!(rebinding.pair(&old, &first));
+        assert!(rebinding.pair(&old, &first));
+        assert!(!rebinding.pair(&old, &second));
+    }
+
+    #[test]
+    fn two_old_handlers_replaced_by_one_new_one_are_allowed() {
+        let (one, two, new) = (handler(1), handler(1), handler(1));
+        let mut rebinding = Rebinding::default();
+        assert!(rebinding.pair(&one, &new));
+        assert!(rebinding.pair(&two, &new));
+    }
+
+    #[test]
+    fn a_kept_handler_and_a_replaced_one_do_not_mix() {
+        let (old, new) = (handler(1), handler(1));
+        let mut rebinding = Rebinding::default();
+        assert!(rebinding.pair(&old, &old));
+        assert!(!rebinding.pair(&old, &new));
     }
 }

@@ -6,9 +6,10 @@
 //! instance of its own: created under the instance whose output held the descriptor, so a
 //! handler the parent bound reaches the child; initialized again with the state it holds when
 //! the parent renders again and hands it other props, or kept and rebound to the parent's new
-//! handlers when it hands the same ones; and dropped when the output no longer has its place. A handler found in one instance's output may have been bound by an enclosing
-//! component's body and passed down as content, and an action a component emits belongs to the
-//! handler its parent bound for it. [`InstanceTree`] is that composition, made of
+//! handlers when it hands the same ones; and dropped when the output no longer has its place.
+//! A handler found in one instance's output may have been bound by an enclosing component's
+//! body and passed down as content, and an action a component emits belongs to the handler its
+//! parent bound for it. [`InstanceTree`] is that composition, made of
 //! [`Program::initialize_component`] and [`Program::dispatch_component_actions`], and of
 //! rebinding a kept instance, which evaluates nothing.</para>
 //!
@@ -69,6 +70,15 @@ struct Node {
     /// Dropping a node can leave this set on the nodes above it until a pass ends, which costs a
     /// host a walk it did not need and nothing else.
     unsettled: bool,
+}
+
+/// A node a rebinding changes: the instance it holds, the one replacing it, and the instance of
+/// its parent its `through` is to name.
+struct Change {
+    key: Arc<str>,
+    before: ComponentInstance,
+    after: ComponentInstance,
+    through: ComponentInstance,
 }
 
 /// A handler waiting to be dispatched against the node whose body created it.
@@ -383,16 +393,29 @@ impl InstanceTree {
             if let (Some(before), Some((_, now))) = (&node.through, &above) {
                 if !through_same {
                     let bound = bound_properties(&self.program, component);
-                    let mut rebinding = Rebinding::default();
-                    let across = Across {
-                        before,
-                        now,
-                        stack: &stack,
-                    };
-                    if across.descriptors(&node.descriptor, descriptor, &bound, &mut rebinding)? {
-                        let now = now.clone();
+                    let changes = self.program.metered(component, options, |meter, stack| {
+                        let mut rebinding = Rebinding::default();
+                        let across = Across {
+                            before,
+                            now,
+                            meter,
+                            stack,
+                        };
+                        if !across.descriptors(
+                            &node.descriptor,
+                            descriptor,
+                            &bound,
+                            &mut rebinding,
+                        )? {
+                            return Ok(None);
+                        }
+                        self.rebinding(&key, now, rebinding, meter, stack).map(Some)
+                    })?;
+                    if let Some(changes) = changes {
                         let kept = copy(descriptor, 0, &stack)?;
-                        return self.rebind(key, kept, now, rebinding, &stack);
+                        let rendered = self.rebind(&key, kept, changes);
+                        self.inert.append(&mut inert);
+                        return rendered;
                     }
                 }
             }
@@ -441,47 +464,43 @@ impl InstanceTree {
         Ok(rendered)
     }
 
-    /// Keeps the node at `key`, whose new descriptor equals the one it holds but was read from
-    /// `now`, another instance of its parent than the one it was initialized through: the node
-    /// and every node initialized through it, and through those in turn, swap the handlers
-    /// `rebinding` replaces for their replacements instead of rendering again. Each keeps its
-    /// rendered output, its state and whether it is walked and settled.
-    ///
-    /// <para>Every new instance is made before any node changes, so a walk that fails part way
-    /// leaves the tree as it was.</para>
-    fn rebind(
-        &mut self,
-        key: Arc<str>,
-        descriptor: NxValue,
-        now: ComponentInstance,
+    /// What keeping the node at `key` changes. Its new descriptor equals the one it holds but was
+    /// read from `now`, another instance of its parent than the one it was initialized through:
+    /// the node and every node initialized through it, and through those in turn, swap the
+    /// handlers `rebinding` replaces for their replacements instead of rendering again. Each
+    /// change is a node, the instance it holds, the one replacing it, and the instance its
+    /// `through` is to name. Nothing changes here, so a walk that fails leaves the tree as it was.
+    fn rebinding(
+        &self,
+        key: &Arc<str>,
+        now: &ComponentInstance,
         mut rebinding: Rebinding,
+        meter: &Meter<'_, '_>,
         stack: &Stack,
-    ) -> Result<Arc<NxValue>> {
-        let Some(node) = self.nodes.get(&key) else {
-            return fail(
-                "nx-ir-instance-key",
-                format!("The instance tree holds no node at '{key}'."),
-            );
-        };
+    ) -> Result<Vec<Change>> {
+        let (key, node) = self.node(key)?;
         let first = node
             .instance
-            .rebound(&mut rebinding, stack)?
+            .rebound(&mut rebinding, meter, stack)?
             .unwrap_or_else(|| node.instance.clone());
-        // Every node that is to change, with the instance it holds and the one replacing it, and
-        // the instance its `through` is to name.
-        let mut changes: Vec<(
-            Arc<str>,
-            ComponentInstance,
-            ComponentInstance,
-            ComponentInstance,
-        )> = vec![(Arc::clone(&key), node.instance.clone(), first, now)];
+        let mut changes = vec![Change {
+            key,
+            before: node.instance.clone(),
+            after: first,
+            through: now.clone(),
+        }];
         let mut children: Option<HashMap<Arc<str>, Vec<Arc<str>>>> = None;
         let mut next = 0;
-        while let Some((parent, before, after, _)) = changes.get(next).cloned() {
+        while let Some(change) = changes.get(next) {
             next = next.saturating_add(1);
-            if before.is(&after) {
+            if change.before.is(&change.after) {
                 continue;
             }
+            let (parent, before, after) = (
+                Arc::clone(&change.key),
+                change.before.clone(),
+                change.after.clone(),
+            );
             let children = children.get_or_insert_with(|| {
                 let mut index: HashMap<Arc<str>, Vec<Arc<str>>> = HashMap::new();
                 for (key, node) in &self.nodes {
@@ -509,36 +528,50 @@ impl InstanceTree {
                 }
                 let rebound = node
                     .instance
-                    .rebound(&mut rebinding, stack)?
+                    .rebound(&mut rebinding, meter, stack)?
                     .unwrap_or_else(|| node.instance.clone());
-                changes.push((
-                    Arc::clone(child),
-                    node.instance.clone(),
-                    rebound,
-                    after.clone(),
-                ));
+                changes.push(Change {
+                    key: Arc::clone(child),
+                    before: node.instance.clone(),
+                    after: rebound,
+                    through: after.clone(),
+                });
             }
         }
-        for (changed, before, after, through) in changes {
+        Ok(changes)
+    }
+
+    /// Makes the `changes` [`rebinding`](Self::rebinding) planned for the node at `key`, which
+    /// now holds `descriptor`, and returns what it rendered: the output it held. Each node keeps
+    /// its rendered output, its state and whether it is walked and settled, and a visit of the
+    /// pass that named its earlier instance names the new one.
+    fn rebind(
+        &mut self,
+        key: &Arc<str>,
+        descriptor: NxValue,
+        changes: Vec<Change>,
+    ) -> Result<Arc<NxValue>> {
+        for change in changes {
             if self
                 .visited
-                .get(&changed)
-                .is_some_and(|seen| seen.is(&before))
+                .get(&change.key)
+                .is_some_and(|seen| seen.is(&change.before))
             {
-                self.visited.insert(Arc::clone(&changed), after.clone());
+                self.visited
+                    .insert(Arc::clone(&change.key), change.after.clone());
             }
-            if let Some(node) = self.nodes.get_mut(&changed) {
-                node.instance = after;
-                node.through = Some(through);
+            if let Some(node) = self.nodes.get_mut(&change.key) {
+                node.instance = change.after;
+                node.through = Some(change.through);
             }
         }
-        let node = self.nodes.get_mut(&key).map(|node| {
+        let node = self.nodes.get_mut(key).map(|node| {
             node.descriptor = Arc::new(descriptor);
             (Arc::clone(&node.rendered), node.instance.clone())
         });
         match node {
             Some((rendered, instance)) => {
-                self.visited.insert(key, instance);
+                self.visited.insert(Arc::clone(key), instance);
                 Ok(rendered)
             }
             None => fail(
@@ -805,13 +838,15 @@ fn bound_properties(program: &Program, name: &str) -> Vec<String> {
 
 /// Compares a descriptor a node holds, read from the output of the parent's instance `before`,
 /// with one a visit brings, read from the output of `now`, pairing the handlers they hold.
-struct Across<'a> {
+struct Across<'a, 'm, 'p> {
     before: &'a ComponentInstance,
     now: &'a ComponentInstance,
+    /// What comparing handlers costs, as `==` charges it.
+    meter: &'a Meter<'m, 'p>,
     stack: &'a Stack,
 }
 
-impl Across<'_> {
+impl Across<'_, '_, '_> {
     /// Whether the two descriptors are equal, so that the node's body would render the same
     /// output from either. A handler the body can see is compared as `==` compares it; one
     /// bound for an emit, named in `bound`, need only be there in both. Every pair of handlers
@@ -905,13 +940,15 @@ impl Across<'_> {
             }
             (NxValue::Array(_) | NxValue::Record { .. }, _)
             | (_, NxValue::Array(_) | NxValue::Record { .. }) => Ok(false),
+            // The same number, sign of zero included: a body can tell `-0.0` from `0.0`.
+            (NxValue::Float(old), NxValue::Float(new)) => Ok(old.to_bits() == new.to_bits()),
             (old, new) => Ok(old == new),
         }
     }
 
     /// Whether the handler `before` holds under `old` and the one `now` holds under `new` may
-    /// stand for each other: equal as `==` finds them when `compare` asks, and paired one to
-    /// one. A token either instance does not hold makes them unequal; the visit then initializes
+    /// stand for each other: equal as `==` finds them when `compare` asks, answering the same
+    /// emit when it does not, and paired one to one. A token either instance does not hold makes them unequal; the visit then initializes
     /// the node, which reports the token.
     fn handlers(
         &self,
@@ -923,10 +960,15 @@ impl Across<'_> {
         let (Some(old), Some(new)) = (self.before.handler(old), self.now.handler(new)) else {
             return Ok(false);
         };
-        if compare
-            && !Arc::ptr_eq(old, new)
-            && !handlers_equal(old, new, &Meter::free(), self.stack)?
+        if compare {
+            if !Arc::ptr_eq(old, new) && !handlers_equal(old, new, self.meter, self.stack)? {
+                return Ok(false);
+            }
+        } else if old.component != new.component
+            || old.emit != new.emit
+            || old.action_name != new.action_name
         {
+            // A handler bound for an emit answers that emit, as initializing the node checks.
             return Ok(false);
         }
         Ok(rebinding.pair(old, new))

@@ -44,8 +44,10 @@ compared as follows:
 - The text of a token SHALL NOT count. A parent that renders again numbers its handlers from one
   again, so the same text can name another handler, and other text can name an equal one.
 
-When the old handlers are not paired one-to-one with new ones, the descriptors SHALL be treated as
-different.
+When one old handler would be replaced by two different new handlers, the descriptors SHALL be
+treated as different. Two old handlers replaced by one new handler are allowed, since a render that
+hands one handler to two places writes it at both. A handler bound for an emit SHALL also answer
+the same emit in both descriptors, as initializing the node checks.
 
 So a node that renders again reaches only the nodes under it whose descriptors changed, and in
 turn the nodes under those. A node beside the one that rendered, and a node above it that no
@@ -104,7 +106,9 @@ A rebound node SHALL keep its generation, the order of its handlers and its rend
 SHALL be the same allocation as before, so that every token a host read from that output names the
 handler at the same place. A rebound node SHALL count as initialized through the parent's current
 instance. Rebinding SHALL evaluate no NX code and SHALL count as a change to the tree, so a pass
-that fails leaves every rebound node as it was.
+that fails leaves every rebound node as it was. The comparison and the rebinding SHALL count
+against the visit's operation budget, as the language's `==` counts a comparison, and SHALL walk a
+value many handlers capture once.
 
 #### Scenario: A kept child's emit reaches the parent's current instance
 - **WHEN** a `Card` node is kept under a `Page` node that rendered again, and the host dispatches a
@@ -131,6 +135,10 @@ that fails leaves every rebound node as it was.
 - **THEN** the `Panel` node SHALL be kept and rebound, and the `Card` node SHALL be kept
 - **AND** an emit from the `Card` SHALL reach the `Panel` node, and an emit from the `Panel` the
   `Page` node
+
+#### Scenario: Rebinding is refused under a budget it exceeds
+- **WHEN** a host visits a node that would be kept and rebound under an operation budget of one
+- **THEN** the visit SHALL fail with `nx-ir-resource-limit` and the tree SHALL be as it was
 
 #### Scenario: A component nested under itself is still told from its ancestor after a skip
 - **WHEN** a component renders another instance of itself with equal props, the outer instance's

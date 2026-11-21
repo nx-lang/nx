@@ -77,8 +77,10 @@ and the same text can name another handler. What matters is the place the token 
 
 The comparison walks both descriptors once and records pairs of old and new handlers as it goes.
 If the same old handler is paired with two different new handlers, the pairs don't define a single
-replacement, and the child is initialized again as it is today. That case is rare and needs no
-special handling beyond falling back.
+replacement, and the child is initialized again as it is today. Two old handlers paired with the
+same new one are fine: the rebound output holds the new handler at both places, as a new render
+would. A handler bound for an emit must also answer the same emit in both descriptors, which is
+the check initialization makes.
 
 ### Rebinding the subtree
 
@@ -96,8 +98,10 @@ A rebound instance keeps its generation and the order of `handlers`, so every to
 carries names the handler at the same place as before. The rendered output Arc isn't touched.
 
 Rebinding happens during the visit, so it's subject to `atomically` like any other change and
-leaves the tree as it was if the pass fails. It runs no NX code, so it costs no operations, but it
-walks values under the stack budget the visit uses.
+leaves the tree as it was if the pass fails. It runs no NX code, but the comparison and the
+substitution run as one call under the visit's options: each value they walk costs one operation,
+as `==` charges, under the stack budget. Lists and records are remembered by allocation as well as
+handlers, so a value many handlers capture is walked once.
 
 ### Settledness and walking
 
