@@ -30,11 +30,11 @@ retain their presentation behavior.
 The playground picker SHALL support RGB and alpha editing for safely editable direct `Color.srgb`
 colors. Edits SHALL change only a hex token, the literal text argument of parse when it parses to
 `Color.srgb`, literal numeric arguments of rgb/rgba/srgb, or literal numeric fields of directly
-authored `Color.srgb` records. They SHALL preserve unrelated source, comments, and unchanged
-channel precision, use normal undo, and reject stale source revisions. Opening or dismissing a
-picker SHALL not change source or quantize channels. A recognized color in another space SHALL be shown
-read-only, with its swatch and its CSS text, and SHALL NOT be offered to the sRGB picker. Unsupported or computed expressions SHALL remain read-only; the
-picker SHALL NOT replace them with a constant.
+authored `Color.srgb` records. They SHALL preserve unrelated source, comments, and unchanged channel
+precision, use normal undo, and reject stale source revisions. Opening or dismissing a picker SHALL
+not change source or quantize channels. A recognized color in another space SHALL be shown
+read-only, with its swatch, and SHALL NOT be offered to the sRGB picker. Unsupported or computed
+expressions SHALL remain read-only; the picker SHALL NOT replace them with a constant.
 
 #### Scenario: Transparent literal is edited safely
 - **WHEN** an author changes RGB on #33669980 without changing alpha

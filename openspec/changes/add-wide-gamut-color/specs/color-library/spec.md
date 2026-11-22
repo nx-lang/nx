@@ -10,10 +10,11 @@ and otherwise unconstrained. `srgb` and `displayP3` channels SHALL be encoded wi
 curve, using the sRGB and Display P3 primaries respectively. Because the ranges are value
 constraints, an ordinary record construction SHALL be checked by the existing constant and runtime
 constraint rules. `validate` SHALL accept any case and fail with `color-invalid-channel`, naming the
-field, for a value that bypassed those rules, such as one read without a typed boundary. Library functions SHALL
-validate every Color input. Constructors SHALL validate before narrowing, SHALL round stored channels
-to IEEE float32 nearest/ties-to-even, and SHALL normalize signed zero. No library function SHALL
-expose a channel of a color without naming its space, through a case or a conversion.
+field, for a value that bypassed those rules, such as one read without a typed boundary. Library
+functions SHALL validate every Color input. Constructors SHALL validate before narrowing, SHALL
+round stored channels to IEEE float32 nearest/ties-to-even, and SHALL normalize signed zero. No
+library function SHALL expose a channel of a color without naming its space, through a case or a
+conversion.
 
 #### Scenario: Omitted alpha and precision
 - **WHEN** srgb receives (0.123456789, 0.4, 0.8) without alpha

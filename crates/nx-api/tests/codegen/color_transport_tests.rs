@@ -387,6 +387,17 @@ fn color_transport_default_alpha_and_invalid_channels() {
         .evaluate_function("validateBrand", &[invalid], &RuntimeOptions::default())
         .unwrap_err();
     assert_eq!(error.code(), "nx-ir-boundary-constraint");
+    let negative_chroma =
+        NxValue::from_json_str(r#"{"accent":{"$type":"Color.oklch","l":0.5,"c":-1,"h":30}}"#)
+            .unwrap();
+    let error = program
+        .evaluate_function(
+            "validateBrand",
+            &[negative_chroma],
+            &RuntimeOptions::default(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code(), "nx-ir-boundary-constraint");
 }
 
 #[test]
