@@ -121,10 +121,9 @@ later, from a descriptor, so the descriptor has to carry what was around it.
 
 ### 4. Local overrides are evaluated where they are written
 
-The doc says that defaults and overrides are both evaluated where they are read. This change keeps
-that for defaults and for main-module provides, but evaluates the value of an `env.` attribute or
-a `provide` block where it is written, as a prop expression is. Then an override is plain data,
-which matters for four reasons:
+Defaults and main-module provides are evaluated where they are read. The value of an `env.`
+attribute or a `provide` block is evaluated where it is written, as a prop expression is. Then an
+override is plain data, which matters for four reasons:
 
 - **Descriptors stay values.** A component use carries its overrides in a `$env` field the host
   can see, compare and send over JSON. A lazy override would be a closure over the caller's
@@ -142,8 +141,7 @@ further in. For example, `<Banner env.color.accent={ if env.colorMode is {…} }
 `colorMode` override inside `Banner`: the accent is fixed by the colorMode at `<Banner>`. The fix
 is to override `colorMode` or the default, not `accent`, and `specs/future.md` records an explicit
 opt-in for lazy overrides (for example, an override whose value is a function, called where it is
-read) as a possible extension. Bret agreed to these semantics on 2026-11-21, and the doc now says
-the same.
+read) as a possible extension.
 
 For the same reason, the values of an element's `env.` attributes, and of a block's overrides,
 are evaluated outside the overrides, so `env.space={env.space * 2}` doubles the outer value. The
