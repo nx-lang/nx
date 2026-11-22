@@ -6,11 +6,14 @@ its default node, and exported as other declarations are. A read SHALL be an `en
 `30`, holding a reference to the declaration, with any field read after it encoded as ordinary
 `member` nodes. A `provide` block, and an element with `env.` attributes, SHALL be an `envProvide`
 node, kind `31`, holding a list of overrides and a body, where each override holds a reference to
-the declaration, a list of field names that may be empty, and a value node. A module entry SHALL
-hold a `provides` list of its top-level provides in source order, each either an override of that
-shape or a bundle holding one node of `env.Update` type. A module that declares an environment
-value, contains an `envRead` or `envProvide` node or has top-level provides SHALL list the required
-feature `environment-v1`, and a module that does none of these SHALL NOT. The `explain` text SHALL
+the declaration, a list of field names that may be empty, and a value node. An `env.Update` bundle
+SHALL be an `envUpdate` node, kind `32`, holding a list of overrides of the same shape. A module
+with top-level provides SHALL hold one declaration of kind `provides`, named `$provides`, listing
+them in source order, each holding an optional reference to the declaration, a list of field names
+and a value node: an override names its declaration, and a bundle names none and its node is of
+`env.Update` type. A module that declares an environment value, contains an `envRead`,
+`envProvide` or `envUpdate` node or has top-level provides SHALL list the required feature
+`environment-v1`, and a module that does none of these SHALL NOT. The `explain` text SHALL
 read the nodes as `env.` reads and `provide` blocks. Adding the declaration kind, the node kinds and
 the feature SHALL NOT change the IR schema version.
 
@@ -62,11 +65,11 @@ descriptor SHALL never get one.
 A runtime SHALL find the value of an environment value at a read from, in order: the overrides of
 the `envProvide` nodes being evaluated around the read, nearest first; the overrides in `$env` of
 the current component's descriptor, last entry first, and then those of each component above it;
-the host's root value; the entry module's `provides`, last first; and the declaration's default.
+the host's root value; the entry module's provides, last first; and the declaration's default.
 An override with a non-empty path SHALL apply its value at that path to the value the later sources
 give. A default and an entry-module provide SHALL be evaluated at each read that uses it, in the
 environment of the read, and while an entry-module provide of a value is evaluated, a read of that
-value SHALL see only the sources after it. The `provides` of a module that is not the entry module
+value SHALL see only the sources after it. The provides of a module that is not the entry module
 SHALL be ignored.
 
 #### Scenario: A default is evaluated in the reader's environment

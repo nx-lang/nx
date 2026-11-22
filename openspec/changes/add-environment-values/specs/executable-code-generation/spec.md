@@ -3,9 +3,10 @@
 ### Requirement: Generated code evaluates environment values
 Generated TypeScript and JavaScript SHALL evaluate `env.` reads, `provide` blocks, elements with
 `env.` attributes and the entry module's provides with the results the native runtime gives,
-including the `$env` field of component descriptors. Generated entry functions and component
-evaluation SHALL take an environment as an option, made from root values with the helper the
-runtime package exports, and an evaluation given none SHALL run with no root values. A component
+including the `$env` field of component descriptors. A caller SHALL run a generated entry function
+in an environment with the `nxWithEnvironment` helper, and component evaluation SHALL take an
+environment through its options, made from root values with the `nxEnvironment` helper the
+generated program exports; an evaluation given none SHALL run with no root values. A component
 descriptor's `$env` SHALL be what the runtime's `enter` reads, so a host of generated code
 composes a child's environment as a host of the TypeScript runtime does.
 

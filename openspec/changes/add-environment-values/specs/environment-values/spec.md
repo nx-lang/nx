@@ -236,11 +236,12 @@ evaluated inside them.
 - **THEN** a read of `env.color` with no override around it SHALL be `b`
 
 ### Requirement: A default that depends on itself is rejected
-A declaration's default, or a main-module provide, whose evaluation can read the value it sets SHALL be
-rejected with `environment-cycle` at the declaration or provide, naming the values on the path.
-The check SHALL follow `env.` reads, the functions and values those call, and the defaults of the
-values they read, and SHALL NOT follow component uses. A main-module provide that reads the value
-it sets SHALL NOT count as a cycle, since that read sees the sources after it.
+A declaration's default whose evaluation can read the value itself SHALL be rejected with
+`environment-cycle` at the declaration, naming the values on the path. The check SHALL follow
+`env.` reads, the functions and values those call, and the defaults of the values they read, and
+SHALL NOT follow component uses. A main-module provide SHALL NOT be checked, and SHALL NOT be
+followed: while it is evaluated for a value, a read of that value sees only the sources after it,
+so a provide cannot loop.
 
 #### Scenario: Two defaults that read each other
 - **WHEN** `environment a: int = env.b + 1` and `environment b: int = env.a + 1`

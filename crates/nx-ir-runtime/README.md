@@ -180,6 +180,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Environment values
+
+A program that declares `environment` values reads them with `env.name`, and a host gives an
+evaluation its root values through `RuntimeOptions::environment`. `Environment::root` makes one
+from values named by their simple name, or by their qualified name, `identity::name`, where two
+environment values share one. The values are checked against their declared types, and an unknown
+or ambiguous name is `nx-ir-environment-name`.
+
+A rendered component descriptor carries the overrides written around it in `$env`. A host renders
+the child in the environment `environment.enter(descriptor)` gives, which adds those overrides
+inside the ones it holds; a malformed `$env` is `nx-ir-boundary-type`. A component never sees
+`$env` among its props. See *Environment values* in `docs/nx-ir-format.md` for the lookup order and
+the cost.
+
+```rust,no_run
+use nx_ir_runtime::{Environment, Program, RuntimeOptions};
+use nx_value::NxValue;
+
+fn main() -> nx_ir_runtime::Result<()> {
+    let program = Program::prepare(std::fs::read("app.nxir").unwrap())?;
+    let options = RuntimeOptions {
+        environment: Environment::root([("colorMode", NxValue::String("dark".into()))]),
+        ..RuntimeOptions::default()
+    };
+    let _ = (program, options);
+    Ok(())
+}
+```
+
+The instance tree does this for a host. `InstanceTree::with_environment(program, roots)` starts a
+tree from root values; each node renders in the environment its place gives it, and records each
+environment value its render read, with the value it found. `set_environment(roots, options)`
+replaces the root values, all or nothing, and renders again, with the state each holds, only the
+nodes whose recorded reads now give a different value at their place. They are found through an
+index from each value to the nodes that read it, not by walking the tree. A visit skips a child
+whose descriptor is equal apart from `$env` and whose recorded reads give the same values in its
+new environment. `environment_value(key, name, options)` answers what a node reads for `env.name`.
+
 ## Instance tree
 
 A component's rendered output can hold descriptors of other components the entry module declares:

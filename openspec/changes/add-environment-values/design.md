@@ -193,9 +193,11 @@ of the new nodes or has top-level provides.
   result is an ordinary `member` node.
 - **`envProvide`** is node kind `31`, holding a list of overrides and the body. Each override is
   the declaration reference, the path of field names and the value node.
-- **The module entry gains `provides`.** It is a list of the same override shape, plus bundle
-  entries that hold one node of `env.Update` type. Only the entry module's list takes effect,
-  since it is the only module no other module imports.
+- **`envUpdate`** is node kind `32`, an `env.Update` bundle: a list of overrides of the same shape.
+- **Top-level provides are a `provides` declaration** (kind `7`, named `$provides`), so the module
+  entry's layout doesn't change. It lists the provides in source order; each holds an optional
+  declaration reference, a path and a value node, and a bundle is the entry with no reference.
+  Only the entry module's list takes effect, since it is the only module no other module imports.
 - **An `env.Update` value** is a record whose fields are named by the qualified names of
   environment values. The emitter writes the qualified names, so a bundle that `brand` builds
   applies to the right values in a main module that doesn't import them by those names.
@@ -226,12 +228,17 @@ These are rules both runtimes can follow exactly, and the corpus records them.
   - It keeps a module-level current environment, which a provide sets and restores around its
     body.
   - Entry functions and component evaluation take the environment as an option.
-  - The program-module runtime package provides the lookup, so generated code and the TypeScript
-    runtime share it.
+  - Generated code carries its own copy of the lookup, emitted with the other runtime helpers,
+    since a generated program doesn't depend on the TypeScript IR runtime. The shared corpus and
+    the generated-code tests keep the two copies giving the same results.
+  - A caller runs an entry function in an environment with `nxWithEnvironment(environment, run)`;
+    component schemas take `{ environment }` as an option of `initializeJson` and `evaluateJson`.
+    The program's `index.js` exports `nxEnvironment`, `NxEnvironment` and `nxWithEnvironment`
+    when it uses environment values.
   - Evaluation in JavaScript is synchronous, so a module-level stack is safe.
-- **CLI.** `nxlang run --env name=value` can be repeated. The value is NX value text, parsed and
-  checked against the declared type, so `--env colorMode=dark` and `--env locale="fr-FR"` both
-  work.
+- **CLI.** `nxlang run --env name=value` can be repeated. The value is JSON, or a bare word read
+  as a union case's name or a string, checked against the declared type, so `--env colorMode=dark`
+  and `--env locale=fr-FR` both work.
 
 ### 8. Read tracking in the instance tree
 
@@ -268,8 +275,13 @@ values it reads:
 It doesn't follow the component uses it builds, because their bodies run on their own.
 
 - **Hover** uses the direct reads and those through calls: "Reads `env.colorMode`, `env.color`".
-- **The cycle check** uses the full set. A default, or a main-module provide, whose set reaches
-  its own slot is `environment-cycle`, reported at the declaration with the path.
+- **The cycle check** uses the full set. A default whose set reaches its own slot is
+  `environment-cycle`, reported at the declaration with the path. A main-module provide can't
+  loop, because while it is evaluated a read of its value sees only the sources after it. The
+  check runs when a program is built, so the editor shows it once the program is built rather than
+  as the default is typed.
+- **Go to definition** isn't offered yet: the language service has no definition query. Hover on a
+  read or override shows the declaration instead.
 - **Local overrides can't form a cycle.** They are evaluated outside themselves.
 - **The runtimes keep their call-depth limit** as the backstop.
 
