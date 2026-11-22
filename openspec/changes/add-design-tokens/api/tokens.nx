@@ -1,0 +1,262 @@
+// Semantic tokens: the environment values every NX UI library reads. This set is the stable core;
+// a library adds its own component tokens as environment values whose defaults read these.
+
+import "./types.nx"
+import "./palette.nx"
+
+// ------------------------------------------------------------------------------------------------
+// Modes
+// ------------------------------------------------------------------------------------------------
+
+/// Whether the program is shown in light or dark colors.
+export type ColorMode = light | dark
+
+/// The color mode the program is shown in. A host usually sets it from the system setting.
+export environment colorMode: ColorMode = light
+
+// ------------------------------------------------------------------------------------------------
+// Color
+// ------------------------------------------------------------------------------------------------
+
+/// Text and icon colors, for use on `background` and `surface`.
+export type TextColors = {
+  normal: Color    /// Body text and icons.
+  muted: Color     /// Secondary text: captions, placeholders and metadata.
+  disabled: Color  /// The text of disabled controls.
+}
+
+/// The color roles. Each `on…` role is for text and icons drawn on the role it names.
+export type SemanticColors = {
+  background: Color    /// The base background of the program.
+  surface: Color       /// Raised content: cards, sheets, menus and dialogs.
+  surfaceMuted: Color  /// Quiet fills: inputs, table stripes and hovered rows.
+  text: TextColors     /// Text and icons on `background` and `surface`.
+  border: Color        /// Dividers and the outlines of controls.
+  focus: Color         /// The focus ring.
+  accent: Color        /// The main action and selection color, usually the brand color.
+  onAccent: Color      /// Text and icons on `accent`.
+  danger: Color        /// Errors and destructive actions.
+  onDanger: Color      /// Text and icons on `danger`.
+  warning: Color       /// Warnings and caution.
+  onWarning: Color     /// Text and icons on `warning`.
+  success: Color       /// Success and completion.
+  onSuccess: Color     /// Text and icons on `success`.
+}
+
+/// The color roles, for the color mode in effect.
+export environment color: SemanticColors = {
+  if env.colorMode is {
+    light => <SemanticColors
+      background=#ffffff
+      surface=#ffffff
+      surfaceMuted={palette.gray100}
+      text=<TextColors normal={palette.gray900} muted={palette.gray500} disabled={palette.gray400} />
+      border={palette.gray200}
+      focus={palette.blue500}
+      accent={palette.blue600}
+      onAccent=#ffffff
+      danger={palette.red600}
+      onDanger=#ffffff
+      warning={palette.amber500}
+      onWarning={palette.gray950}
+      success={palette.green700}
+      onSuccess=#ffffff
+    />
+    dark => <SemanticColors
+      background={palette.gray950}
+      surface={palette.gray900}
+      surfaceMuted={palette.gray800}
+      text=<TextColors normal={palette.gray50} muted={palette.gray400} disabled={palette.gray600} />
+      border={palette.gray800}
+      focus={palette.blue400}
+      accent={palette.blue400}
+      onAccent={palette.gray950}
+      danger={palette.red500}
+      onDanger={palette.gray950}
+      warning={palette.amber400}
+      onWarning={palette.gray950}
+      success={palette.green500}
+      onSuccess={palette.gray950}
+    />
+  }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Size
+// ------------------------------------------------------------------------------------------------
+
+/// The spacing scale.
+export type SpaceScale = {
+  none: Spacing  /// 0
+  xxs: Spacing   /// 2
+  xs: Spacing    /// 4
+  sm: Spacing    /// 8
+  md: Spacing    /// 12
+  lg: Spacing    /// 16
+  xl: Spacing    /// 24
+  xxl: Spacing   /// 32
+  xxxl: Spacing  /// 48
+}
+
+/// Gaps, padding and margins.
+export environment space: SpaceScale =
+  <SpaceScale none=0 xxs=2 xs=4 sm=8 md=12 lg=16 xl=24 xxl=32 xxxl=48 />
+
+/// The corner radius scale.
+export type RadiusScale = {
+  none: Radius  /// Square corners.
+  sm: Radius    /// 2
+  md: Radius    /// 4
+  lg: Radius    /// 8
+  xl: Radius    /// 12
+  full: Radius  /// Fully round: pills and circles.
+}
+
+/// Corner radii.
+export environment radius: RadiusScale = <RadiusScale none=0 sm=2 md=4 lg=8 xl=12 full=9999 />
+
+/// Border and divider widths.
+export type BorderWidthScale = {
+  thin: BorderWidth   /// Dividers and control outlines.
+  thick: BorderWidth  /// Emphasis and the focus ring.
+}
+
+/// Border and divider widths.
+export environment borderWidth: BorderWidthScale = <BorderWidthScale thin=1 thick=2 />
+
+// ------------------------------------------------------------------------------------------------
+// Type
+// ------------------------------------------------------------------------------------------------
+
+/// The font families.
+export type FontFamilies = {
+  sans: FontFamily  /// Body and interface text.
+  mono: FontFamily  /// Code and tabular figures.
+}
+
+/// The font size scale.
+export type FontSizeScale = {
+  xs: FontSize    /// 12
+  sm: FontSize    /// 14
+  md: FontSize    /// 16
+  lg: FontSize    /// 18
+  xl: FontSize    /// 20
+  xxl: FontSize   /// 24
+  xxxl: FontSize  /// 30
+}
+
+/// The font weights in use.
+export type FontWeights = {
+  regular: FontWeight   /// 400
+  medium: FontWeight    /// 500
+  semibold: FontWeight  /// 600
+  bold: FontWeight      /// 700
+}
+
+/// The font scales that text styles are built from.
+export type Fonts = {
+  family: FontFamilies  /// The families.
+  size: FontSizeScale   /// The sizes.
+  weight: FontWeights   /// The weights.
+}
+
+/// The font scales.
+export environment font: Fonts = <Fonts
+  family=<FontFamilies sans="sans-serif" mono="monospace" />
+  size=<FontSizeScale xs=12 sm=14 md=16 lg=18 xl=20 xxl=24 xxxl=30 />
+  weight=<FontWeights regular=400 medium=500 semibold=600 bold=700 />
+/>
+
+/// The text roles.
+export type TextStyles = {
+  caption: TextStyle  /// Small print: captions, timestamps and footnotes.
+  body: TextStyle     /// Running text.
+  label: TextStyle    /// Controls: buttons, tabs, form labels.
+  title: TextStyle    /// The title of a card, dialog or section.
+  heading: TextStyle  /// A page or major section heading.
+  display: TextStyle  /// Large hero text.
+  code: TextStyle     /// Code and other monospaced text.
+}
+
+/// The text roles, built from `env.font`, so changing a font scale restyles every role that uses
+/// it.
+export environment text: TextStyles = <TextStyles
+  caption=<TextStyle
+    family={env.font.family.sans} size={env.font.size.xs} weight={env.font.weight.regular} lineHeight=1.4
+  />
+  body=<TextStyle
+    family={env.font.family.sans} size={env.font.size.md} weight={env.font.weight.regular} lineHeight=1.5
+  />
+  label=<TextStyle
+    family={env.font.family.sans} size={env.font.size.sm} weight={env.font.weight.medium} lineHeight=1.4
+  />
+  title=<TextStyle
+    family={env.font.family.sans} size={env.font.size.lg} weight={env.font.weight.semibold} lineHeight=1.4
+  />
+  heading=<TextStyle
+    family={env.font.family.sans} size={env.font.size.xxl} weight={env.font.weight.semibold} lineHeight=1.3
+  />
+  display=<TextStyle
+    family={env.font.family.sans} size={env.font.size.xxxl} weight={env.font.weight.bold} lineHeight=1.2
+  />
+  code=<TextStyle
+    family={env.font.family.mono} size={env.font.size.sm} weight={env.font.weight.regular} lineHeight=1.5
+  />
+/>
+
+// ------------------------------------------------------------------------------------------------
+// Depth and motion
+// ------------------------------------------------------------------------------------------------
+
+/// The elevation scale.
+export type ShadowScale = {
+  sm: Shadow  /// Controls and small raised elements.
+  md: Shadow  /// Cards and menus.
+  lg: Shadow  /// Dialogs and popovers.
+}
+
+/// Drop shadows, darker in dark mode so they still read against dark surfaces.
+export environment shadow: ShadowScale = {
+  if env.colorMode is {
+    light => <ShadowScale
+      sm=<Shadow offsetY=1 blur=2 color=#0000000d />
+      md=<Shadow offsetY=4 blur=6 spread=-1 color=#0000001a />
+      lg=<Shadow offsetY=10 blur=15 spread=-3 color=#0000001a />
+    />
+    dark => <ShadowScale
+      sm=<Shadow offsetY=1 blur=2 color=#0000004d />
+      md=<Shadow offsetY=4 blur=6 spread=-1 color=#00000066 />
+      lg=<Shadow offsetY=10 blur=15 spread=-3 color=#00000080 />
+    />
+  }
+}
+
+/// Animation durations.
+export type Durations = {
+  fast: Duration    /// 100: small state changes such as hover.
+  normal: Duration  /// 200: most transitions.
+  slow: Duration    /// 300: large movements such as sheets and dialogs.
+}
+
+/// Animation curves.
+export type Easings = {
+  standard: Easing  /// Movement within the screen.
+  enter: Easing     /// Elements entering: fast start, gentle stop.
+  exit: Easing      /// Elements leaving: gentle start, fast end.
+}
+
+/// Animation timing.
+export type Motion = {
+  duration: Durations  /// The durations.
+  easing: Easings      /// The curves.
+}
+
+/// Animation timing.
+export environment motion: Motion = <Motion
+  duration=<Durations fast=100 normal=200 slow=300 />
+  easing=<Easings
+    standard=<Easing x1=0.2 y1=0 x2=0 y2=1 />
+    enter=<Easing x1=0.05 y1=0.7 x2=0.1 y2=1 />
+    exit=<Easing x1=0.3 y1=0 x2=0.8 y2=0.15 />
+  />
+/>

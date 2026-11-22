@@ -1,0 +1,59 @@
+// Token value types: the DTCG 2025.10 type list as NX type aliases. Each alias is transparent to
+// type checking, so `padding=12` stays valid; the names let tools tell spacing from radius.
+
+import "@nx/color" as colors
+
+/// An sRGB color with alpha, from @nx/color.
+export type Color = colors.Color
+
+/// Gaps, padding and margins, in layout units.
+export type Spacing = float64 where finite && >= 0.0
+
+/// Corner radii, in layout units.
+export type Radius = float64 where finite && >= 0.0
+
+/// Border and stroke widths, in layout units.
+export type BorderWidth = float64 where finite && >= 0.0
+
+/// Font sizes, in layout units.
+export type FontSize = float64 where finite && > 0.0
+
+/// A line height, as a multiple of the font size.
+export type LineHeight = float64 where finite && > 0.0
+
+/// A font weight: 400 is regular and 700 is bold.
+export type FontWeight = int where in 1..=1000
+
+/// A font family name, such as "Inter", or a generic family: "sans-serif", "serif", "monospace".
+export type FontFamily = string
+
+/// 0 is transparent and 1 is opaque.
+export type Opacity = float64 where in 0.0..=1.0
+
+/// A length of time, in milliseconds.
+export type Duration = float64 where finite && >= 0.0
+
+/// A cubic Bézier timing curve from (0, 0) to (1, 1), as in CSS `cubic-bezier()`.
+export type Easing = {
+  x1: float64 where in 0.0..=1.0  /// The first control point's x.
+  y1: float64 where finite        /// The first control point's y.
+  x2: float64 where in 0.0..=1.0  /// The second control point's x.
+  y2: float64 where finite        /// The second control point's y.
+}
+
+/// One drop shadow, as in CSS `box-shadow` without `inset`.
+export type Shadow = {
+  offsetX: float64 where finite = 0.0  /// Horizontal offset, in layout units.
+  offsetY: float64 where finite = 0.0  /// Vertical offset, in layout units.
+  blur: Spacing = 0.0                  /// Blur radius, in layout units.
+  spread: float64 where finite = 0.0   /// Growth (or, when negative, shrinkage) of the shape.
+  color: Color                         /// The shadow's color, usually translucent.
+}
+
+/// A complete text style: what DTCG calls a typography token.
+export type TextStyle = {
+  family: FontFamily      /// The font family.
+  size: FontSize          /// The font size.
+  weight: FontWeight      /// The font weight.
+  lineHeight: LineHeight  /// The line height, as a multiple of the size.
+}

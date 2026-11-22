@@ -1,0 +1,56 @@
+// A UI library's own tokens: component tokens are environment values of the library, and their
+// defaults read the core. A theme that sets only core roles restyles these too; a theme can still
+// set `env.button.…` to tune this library alone.
+
+import "../api/types.nx"
+import "../api/tokens.nx"
+
+/// The host's drawing primitives this sketch renders to.
+export external component <Box
+  fill: Color
+  radius: Radius
+  paddingX: Spacing
+  paddingY: Spacing
+  content Children?: Element+
+/>
+export external component <Text value: string color: Color style: TextStyle />
+
+/// What a button looks like.
+export type ButtonTokens = {
+  fill: Color         /// The background.
+  text: Color         /// The label color.
+  radius: Radius      /// The corner radius.
+  paddingX: Spacing   /// Horizontal padding.
+  paddingY: Spacing   /// Vertical padding.
+  label: TextStyle    /// The label's text style.
+}
+
+/// What a button looks like, derived from the core tokens.
+export environment button: ButtonTokens = <ButtonTokens
+  fill={env.color.accent}
+  text={env.color.onAccent}
+  radius={env.radius.md}
+  paddingX={env.space.lg}
+  paddingY={env.space.sm}
+  label={env.text.label}
+/>
+
+/// A colored role this library needs that the core lacks, derived from a core role.
+export type UIColors = {
+  selection: Color  /// The background of selected rows.
+}
+
+/// This library's extra color roles.
+export environment uiColor: UIColors = {
+  if env.colorMode is {
+    light => <UIColors selection={env.color.surfaceMuted} />
+    dark => <UIColors selection={env.color.border} />
+  }
+}
+
+/// A button, styled entirely from `env.button`.
+export component <Button text: string /> = {
+  <Box fill={env.button.fill} radius={env.button.radius} paddingX={env.button.paddingX} paddingY={env.button.paddingY}>
+    <Text value={text} color={env.button.text} style={env.button.label} />
+  </Box>
+}
