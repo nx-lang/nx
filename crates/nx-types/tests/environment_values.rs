@@ -1,0 +1,128 @@
+//! Checking environment values: declarations, `env.` reads, `env.` attributes and `provide`
+//! blocks, from the `add-environment-values` change.
+
+use nx_types::check_str;
+
+fn codes(source: &str) -> Vec<(String, String)> {
+    check_str(source, "test.nx")
+        .errors()
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.code().unwrap_or("").to_string(),
+                diagnostic.message().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn assert_clean(source: &str) {
+    let errors = codes(source);
+    assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+}
+
+fn assert_code(source: &str, code: &str) {
+    let errors = codes(source);
+    assert!(
+        errors.iter().any(|(found, _)| found == code),
+        "expected {code}, got: {errors:?}"
+    );
+}
+
+const MODES: &str = "export type ColorMode = light | dark\n\
+                     export environment colorMode: ColorMode = light\n\
+                     environment locale: string = \"en-US\"\n\
+                     type SemanticColors = { accent:string surface:string }\n\
+                     environment color: SemanticColors = <SemanticColors accent=\"blue\" surface=\"white\" />\n";
+
+#[test]
+fn a_declaration_with_a_type_and_a_default_is_clean() {
+    assert_clean(MODES);
+}
+
+#[test]
+fn a_declaration_without_a_default_is_rejected() {
+    assert_code("environment locale: string", "environment-default-required");
+}
+
+#[test]
+fn a_default_of_the_wrong_type_is_rejected() {
+    assert_code("environment scale: float64 = \"large\"", "value-type-mismatch");
+}
+
+#[test]
+fn environment_stays_a_field_name() {
+    assert_clean("type Deployment = { environment:string }");
+}
+
+#[test]
+fn a_read_has_the_declared_type() {
+    assert_clean(&format!("{MODES}let greeting(): string = {{ env.locale }}"));
+    assert_code(
+        &format!("{MODES}let greeting(): int = {{ env.locale }}"),
+        "return-type-mismatch",
+    );
+}
+
+#[test]
+fn a_field_read_goes_through_the_record() {
+    assert_clean(&format!("{MODES}let accent(): string = {{ env.color.accent }}"));
+}
+
+#[test]
+fn an_unknown_read_is_rejected() {
+    assert_code("let x() = { env.missing }", "unknown-environment-value");
+}
+
+#[test]
+fn env_cannot_be_bound_or_read_alone() {
+    assert_code("let describe(env: string) = { 1 }", "reserved-name");
+    assert_code("let describe() = { env }", "reserved-name");
+}
+
+#[test]
+fn a_provide_block_checks_its_overrides() {
+    assert_clean(&format!(
+        "{MODES}let label(): string = {{ provide env.locale=\"fr-FR\" {{ env.locale }} }}"
+    ));
+    assert_clean(&format!(
+        "{MODES}let mode() = {{ provide env.colorMode=dark {{ env.colorMode }} }}"
+    ));
+    assert_code(
+        &format!("{MODES}let label() = {{ provide env.locale=3 {{ env.locale }} }}"),
+        "value-type-mismatch",
+    );
+}
+
+#[test]
+fn a_field_override_checks_against_the_field() {
+    assert_clean(&format!(
+        "{MODES}let a() = {{ provide env.color.accent=\"pink\" {{ env.color }} }}"
+    ));
+    assert_code(
+        &format!("{MODES}let a() = {{ provide env.locale.region=\"FR\" {{ env.locale }} }}"),
+        "environment-path",
+    );
+}
+
+#[test]
+fn an_element_attribute_overrides_and_is_not_a_property() {
+    let source = format!(
+        "{MODES}component <Card title:string /> = {{ <Text value={{title}} /> }}\n\
+         external component <Text value:string />\n\
+         component <Page /> = {{ <Card title=\"x\" env.colorMode=dark /> }}"
+    );
+    assert_clean(&source);
+    let missing = format!(
+        "{MODES}component <Card title:string /> = {{ <Text value={{title}} /> }}\n\
+         external component <Text value:string />\n\
+         component <Page /> = {{ <Card env.colorMode=dark /> }}"
+    );
+    assert!(!codes(&missing).is_empty());
+}
+
+#[test]
+fn a_top_level_provide_is_checked() {
+    assert_clean(&format!("{MODES}provide env.locale = \"fr-FR\""));
+    assert_code(&format!("{MODES}provide env.locale = 3"), "value-type-mismatch");
+}

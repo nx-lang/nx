@@ -293,6 +293,54 @@ fn test_parse_visualizer_definition() {
 }
 
 #[test]
+fn test_parse_environment_and_provide_forms() {
+    let source = r#"
+        import "./brand" as brand
+        export environment colorMode: ColorMode = light
+        environment locale: string
+        provide brand.theme
+        provide env.radius = <Radius small=4 />
+        provide env.color.accent = #ffffff
+        let label() = { provide env.locale="fr-FR" env.color.accent=#fff { env.locale } }
+        component <Footer /> = { <Section env.colorMode=dark><Links /></Section> }
+        let siblings() = { provide env.colorMode=dark { <Header /> <Hero /> } <Body /> }
+    "#;
+    let result = parse_str(source, "environment.nx");
+
+    assert!(result.is_ok(), "Environment forms should parse: {:?}", result.errors);
+    let root = result.root().expect("Should have root node");
+    assert_eq!(count_kind(&root, SyntaxKind::ENVIRONMENT_DEFINITION), 2);
+    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_DEFINITION), 3);
+    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 2);
+    let provides = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PROVIDE_DEFINITION)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        provides[0].child_by_field("bundle").map(|node| node.text()),
+        Some("brand.theme")
+    );
+    assert_eq!(
+        provides[1].child_by_field("target").map(|node| node.text()),
+        Some("env.radius")
+    );
+}
+
+#[test]
+fn test_parse_environment_and_provide_remain_names_elsewhere() {
+    let source = r#"
+        type Plan = { provide:string environment:string }
+        component <Panel environment:string /> = { <Label text={environment} /> }
+    "#;
+    let result = parse_str(source, "environment-contextual.nx");
+
+    assert!(result.is_ok(), "provide and environment should stay names: {:?}", result.errors);
+    let root = result.root().expect("Should have root node");
+    assert!(!contains_kind(&root, SyntaxKind::ENVIRONMENT_DEFINITION));
+    assert!(!contains_kind(&root, SyntaxKind::PROVIDE_DEFINITION));
+}
+
+#[test]
 fn test_parse_visualizer_remains_identifier_outside_module_member_position() {
     let source = r#"
         type Settings = { visualizer:string }

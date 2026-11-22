@@ -442,6 +442,9 @@ pub struct InferenceContext<'a> {
     /// element is a call of that value with arguments bound by name; each maps to the name of the
     /// type's content parameter, which body content binds to, when the type has one.
     function_value_calls: FxHashMap<ElementId, Option<Name>>,
+    /// The visible binding each environment read and override resolved to, keyed by the read's
+    /// expression and, for an override, by its value expression.
+    environment_bindings: FxHashMap<ExprId, Name>,
     /// The type each use site bound to each of its target's type parameters, by element.
     ///
     /// Nothing in analysis reads this back; it is kept in the analysis result so that carrying
@@ -536,6 +539,7 @@ impl<'a> InferenceContext<'a> {
             type_ref_span: TextSpan::new(0.into(), 0.into()),
             consumed_type_arguments: FxHashSet::default(),
             function_value_calls: FxHashMap::default(),
+            environment_bindings: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
             range_for_expressions: FxHashSet::default(),
             indexed_loops: Vec::new(),
@@ -770,6 +774,27 @@ impl<'a> InferenceContext<'a> {
                 case.clone(),
                 Some(DeclaringOrigin::new(module_identity, *definition_id)),
             ),
+
+            // `env.name`: the declared type of the environment value it resolves to.
+            ast::Expr::EnvRead { name, span, .. } => {
+                let (name, span) = (name.clone(), *span);
+                match self.resolve_environment_value(&name, span) {
+                    Some((binding, ty)) => {
+                        self.environment_bindings.insert(expr_id, binding);
+                        ty
+                    }
+                    None => Type::Error,
+                }
+            }
+
+            // The overrides are checked where they are written, and the block is its body.
+            ast::Expr::Provide {
+                overrides, body, ..
+            } => {
+                let (overrides, body) = (overrides.clone(), *body);
+                self.check_environment_overrides(&overrides);
+                self.infer_expr(body)
+            }
 
             // Identifiers look up in environment, then in the narrowings in force.
             ast::Expr::Ident(name) => {
@@ -7638,6 +7663,227 @@ impl<'a> InferenceContext<'a> {
     /// callee type's content parameter when it has one.
     pub fn function_value_calls(&self) -> &FxHashMap<ElementId, Option<Name>> {
         &self.function_value_calls
+    }
+
+    /// The visible binding each environment read resolved to, by the read's expression, and each
+    /// override, by its value expression.
+    pub fn environment_bindings(&self) -> &FxHashMap<ExprId, Name> {
+        &self.environment_bindings
+    }
+
+    /// Resolves `env.name` among the environment values the module can see: its own, the
+    /// internal ones of its library and the exported ones of its imports, under any alias.
+    /// Returns the visible binding and the value's declared type, or reports
+    /// `unknown-environment-value` or `ambiguous-environment-value` and returns `None`.
+    fn resolve_environment_value(&mut self, name: &Name, span: TextSpan) -> Option<(Name, Type)> {
+        let mut candidates: Vec<(Name, ResolvedPreparedItem)> = Vec::new();
+        let bindings = self
+            .module
+            .bindings(PreparedNamespace::Value)
+            .filter(|binding| {
+                nx_hir::environment_binding_name(binding.visible_name.as_str())
+                    == Some(name.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for binding in bindings {
+            let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
+                continue;
+            };
+            if candidates
+                .iter()
+                .any(|(_, seen)| seen.declaring_origin() == resolved.declaring_origin())
+            {
+                continue;
+            }
+            candidates.push((binding.visible_name.clone(), resolved));
+        }
+        candidates.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        match candidates.len() {
+            0 => {
+                self.error(
+                    "unknown-environment-value",
+                    format!(
+                        "No environment value named '{name}' is visible here; declare it with \
+                         `environment {name}: Type = default`, or import the module that \
+                         exports it"
+                    ),
+                    span,
+                );
+                None
+            }
+            1 => {
+                let (visible, resolved) = candidates.pop()?;
+                let declaring_module = resolved.module_identity().to_string();
+                let ty_ref = match &resolved {
+                    ResolvedPreparedItem::Raw {
+                        item: Item::Value(value),
+                        ..
+                    } => value.ty.clone(),
+                    ResolvedPreparedItem::Imported { item, .. } => match &item.item {
+                        InterfaceItemKind::Value { ty, .. } => Some(ty.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let ty = ty_ref
+                    .map(|ty_ref| {
+                        self.type_from_type_ref_in_quietly(Some(&declaring_module), &ty_ref)
+                    })
+                    .unwrap_or(Type::Error);
+                Some((visible, ty))
+            }
+            _ => {
+                let modules = candidates
+                    .iter()
+                    .map(|(_, resolved)| format!("'{}'", resolved.module_identity()))
+                    .collect::<Vec<_>>()
+                    .join(" and ");
+                self.error(
+                    "ambiguous-environment-value",
+                    format!(
+                        "'env.{name}' is ambiguous: environment values named '{name}' are \
+                         declared in {modules}"
+                    ),
+                    span,
+                );
+                None
+            }
+        }
+    }
+
+    /// The type an override with `path` sets, starting from the value's declared type, or `None`
+    /// after reporting `environment-path` when a step is not a field of a record.
+    fn environment_path_type(
+        &mut self,
+        name: &Name,
+        ty: Type,
+        path: &[Name],
+        span: TextSpan,
+    ) -> Option<Type> {
+        let mut current = ty;
+        let mut spelled = format!("env.{name}");
+        for field_name in path {
+            if current.is_error() {
+                return Some(Type::Error);
+            }
+            let field = match &current {
+                Type::Named(named) if named.args().is_empty() => {
+                    match self.record_shape_of(named) {
+                        Ok(Some(shape)) => shape
+                            .fields
+                            .iter()
+                            .find(|field| field.name == *field_name)
+                            .map(|field| (field.module_identity.clone(), field.ty.clone())),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let Some((declaring_module, field_ty)) = field else {
+                self.error(
+                    "environment-path",
+                    format!(
+                        "'{spelled}.{field_name}' does not name a field: '{spelled}' is a {current}, \
+                         and an override path can only step through fields of a record"
+                    ),
+                    span,
+                );
+                return None;
+            };
+            current = self.type_from_type_ref_in_quietly(Some(&declaring_module), &field_ty);
+            spelled = format!("{spelled}.{field_name}");
+        }
+        Some(current)
+    }
+
+    /// Checks one override: resolves the value it names, the field its path reaches, and its
+    /// value against that field's type. The value is inferred in any case.
+    fn check_environment_override(&mut self, provided: &nx_hir::ast::EnvOverride) {
+        let actual = self.infer_expr(provided.value);
+        let Some((binding, ty)) = self.resolve_environment_value(&provided.name, provided.span)
+        else {
+            return;
+        };
+        self.environment_bindings.insert(provided.value, binding);
+        let Some(expected) =
+            self.environment_path_type(&provided.name, ty, &provided.path, provided.span)
+        else {
+            return;
+        };
+        let mut spelled = format!("env.{}", provided.name);
+        for field in &provided.path {
+            spelled = format!("{spelled}.{field}");
+        }
+        self.check_typed_binding_for(
+            Some(provided.value),
+            &actual,
+            &expected,
+            provided.span,
+            "value-type-mismatch",
+            format!("Override of '{spelled}'"),
+            &spelled,
+        );
+    }
+
+    /// Checks the module's top-level provides: an override as an element's is, and a bundle
+    /// against `env.Update`.
+    pub fn infer_module_provides(&mut self, provides: &[nx_hir::ProvideDecl]) {
+        let mut overrides = Vec::new();
+        for provide in provides {
+            match provide {
+                nx_hir::ProvideDecl::Override(provided) => {
+                    self.check_environment_override(provided);
+                    overrides.push(provided.clone());
+                }
+                nx_hir::ProvideDecl::Bundle { value, span } => {
+                    let actual = self.infer_expr(*value);
+                    self.check_environment_bundle(&actual, *span);
+                }
+            }
+        }
+    }
+
+    /// Checks that a bundle applied by a top-level `provide` is an `env.Update`.
+    fn check_environment_bundle(&mut self, actual: &Type, span: TextSpan) {
+        if actual.is_error() || Self::is_environment_update_type(actual) {
+            return;
+        }
+        self.error(
+            "value-type-mismatch",
+            format!(
+                "`provide` applies an `env.Update` bundle, but this is a {actual}; to set one \
+                 value, write `provide env.name = value`"
+            ),
+            span,
+        );
+    }
+
+    /// Whether `ty` is the bundle type `env.Update`.
+    fn is_environment_update_type(ty: &Type) -> bool {
+        matches!(ty, Type::Named(named) if named.name.as_str() == nx_hir::ENVIRONMENT_UPDATE_TYPE)
+    }
+
+    /// Checks the overrides of one element or `provide` block: each on its own, and the same
+    /// path written twice.
+    fn check_environment_overrides(&mut self, overrides: &[nx_hir::ast::EnvOverride]) {
+        let mut seen: Vec<(Name, Vec<Name>)> = Vec::new();
+        for provided in overrides {
+            let key = (provided.name.clone(), provided.path.clone());
+            if seen.contains(&key) {
+                let mut spelled = format!("env.{}", provided.name);
+                for field in &provided.path {
+                    spelled = format!("{spelled}.{field}");
+                }
+                self.error(
+                    "duplicate-property",
+                    format!("'{spelled}' is overridden more than once here"),
+                    provided.span,
+                );
+            }
+            seen.push(key);
+            self.check_environment_override(provided);
+        }
     }
 
     /// The type each use site bound to each of its target's type parameters, by element.

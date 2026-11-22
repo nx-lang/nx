@@ -238,6 +238,8 @@ pub fn analyze_prepared_module(
     for visualizer in prepared_module.raw_module().visualizers() {
         ctx.infer_visualizer(visualizer);
     }
+    let provides = prepared_module.raw_module().provides().to_vec();
+    ctx.infer_module_provides(&provides);
 
     // Apply contextual name resolutions before the module is snapshotted, so every consumer after
     // type checking sees the qualified member access rather than the bare source spelling.
@@ -273,6 +275,7 @@ pub fn analyze_prepared_module(
     let range_for_expressions = ctx.range_for_expressions().clone();
     let element_type_arguments = ctx.resolved_type_arguments().clone();
     let function_value_calls = ctx.function_value_calls().clone();
+    let environment_bindings = ctx.environment_bindings().clone();
     let (mut type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
 
@@ -305,6 +308,7 @@ pub fn analyze_prepared_module(
     // `24.0` and nothing else. The passes are independent — a contextual name is not a numeric
     // literal — so their order does not matter. A constant expression that took a type is first
     // replaced by the literal it folded to, which the conversion then gives the site's width.
+    nx_hir::apply_environment_bindings(&mut prepared_module, &environment_bindings);
     nx_hir::apply_constant_folds(&mut prepared_module, &folded_constants);
     nx_hir::apply_literal_conversions(&mut prepared_module, &converted_literals);
 

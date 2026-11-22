@@ -84,6 +84,8 @@ module.exports = grammar({
         $.function_definition,
         $.component_definition,
         $.visualizer_definition,
+        $.environment_definition,
+        $.provide_definition,
       )),
       optional($.element),
     ),
@@ -241,6 +243,52 @@ module.exports = grammar({
       field('target', $.qualified_name),
       '=',
       field('value', $.rhs_expression),
+    ),
+
+    // `environment name: Type = default`: a value every component can read as `env.name` and any
+    // element or `provide` block can override for what is inside it. `environment` is a keyword
+    // only as the first token of a module member. The type and the default are optional here so
+    // that lowering can report a missing one by name rather than leaving a bare parse error.
+    environment_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
+      'environment',
+      field('name', $.identifier),
+      optional(seq(
+        ':',
+        field('type', $.type),
+      )),
+      optional(seq(
+        '=',
+        field('value', $.rhs_expression),
+      )),
+    ),
+
+    // An app-wide provide at the top level of the main module: `provide env.radius = …` sets one
+    // value or field, and `provide brand.theme` applies an `env.Update` bundle. Lowering checks
+    // that a target starts with `env` and the type checker that a bundle is an `env.Update`.
+    provide_definition: $ => seq(
+      'provide',
+      choice(
+        seq(
+          field('target', $.qualified_name),
+          '=',
+          field('value', $.rhs_expression),
+        ),
+        field('bundle', choice(
+          $.qualified_name,
+          $.element,
+          $.values_braced_expression,
+        )),
+      ),
+    ),
+
+    // `provide env.locale="fr-FR" env.space=8 { body }`: the body evaluated with the overrides in
+    // effect. Overrides are written as an element's `env.` attributes are, so lowering treats an
+    // element's `env.` attributes and a block alike.
+    provide_expression: $ => seq(
+      'provide',
+      repeat1(field('override', $.property_value)),
+      field('body', $.values_braced_expression),
     ),
 
     // A base type followed by at most one occurrence suffix: `?` zero or one, `+` one or more,
@@ -592,6 +640,7 @@ module.exports = grammar({
 
     value_list_item_expression: $ => choice(
       $.element,
+      $.provide_expression,
       $.value_if_expression,
       $.value_for_expression,
       $.call_expression,
@@ -828,6 +877,7 @@ module.exports = grammar({
 
     elements_expression: $ => repeat1(choice(
       $.element,
+      $.provide_expression,
       $.elements_if_expression,
       $.elements_for_expression,
       $.values_braced_expression,
