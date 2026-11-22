@@ -264,7 +264,7 @@ fn selected_modules<'a>(
     }
 }
 
-fn module_identity(module: &CodegenModule) -> String {
+pub(crate) fn module_identity(module: &CodegenModule) -> String {
     match &module.provenance {
         CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
         // The prelude is a library whose root is its reserved identity rather than a directory, so

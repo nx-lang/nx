@@ -134,9 +134,11 @@ fn execute_generated_js_program_module_script(
     fs::write(dir.path().join("program.js"), module.source_text).expect("program module");
 
     let program_url = format!("file://{}", dir.path().join("program.js").display());
+    let runtime_url = format!("file://{}", dir.path().join("nx-runtime.js").display());
     let script = format!(
         "import({:?}).then((m) => {{ {} }});",
-        program_url, script_body
+        program_url,
+        script_body.replace("__NX_RUNTIME_URL__", &runtime_url)
     );
     let output = node_command()
         .arg("--input-type=module")
@@ -3551,4 +3553,143 @@ fn conditional_properties_preserve_updates_numeric_matches_and_content() {
         );
         assert_generated_typescript_artifact_type_checks(&artifact);
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Environment values in generated code
+// ------------------------------------------------------------------------------------------------
+
+const ENVIRONMENT_SOURCE: &str = r#"
+type Mode = light | dark
+type Size = { width:int height:int }
+environment locale: string = "en-US"
+environment colorMode: Mode = light
+environment size: Size = <Size width=10 height=20 />
+environment label: string = { env.locale + "!" }
+let theme: env.Update = <env.Update locale="de-DE" />
+provide env.size.width = 12
+component <Badge /> = { <Text value={env.locale} /> }
+component <Swatch /> = { <Text value={if env.colorMode == Mode.dark { "night" } else { "day" }} /> }
+external component <Text value:string />
+let label() = { provide env.locale="fr-FR" { env.locale } }
+let shout() = { provide env.locale="fr-FR" { env.label } }
+let size() = { provide env.size.height=5 { env.size } }
+let mode() = { env.colorMode }
+let wrapped() = { provide env.colorMode=dark { <Badge env.locale="it-IT" /> } }
+let bundle() = { theme }
+"#;
+
+/// What the IR runtime gives for `function` under the root values `roots`, as JSON.
+fn ir_environment_result(function: &str, roots: &[(&str, serde_json::Value)]) -> Value {
+    let program = crate::ir_runtime_tests::program(ENVIRONMENT_SOURCE);
+    let environment = nx_ir_runtime::Environment::root(roots.iter().map(|(name, value)| {
+        (
+            *name,
+            nx_value::NxValue::from_json_str(&value.to_string()).expect("root value"),
+        )
+    }));
+    let options = nx_ir_runtime::RuntimeOptions {
+        environment,
+        ..nx_ir_runtime::RuntimeOptions::default()
+    };
+    let value = program
+        .evaluate_function(function, &[], &options)
+        .unwrap_or_else(|error| panic!("{function}: {error}"));
+    serde_json::from_str(&value.to_json_string().expect("json")).expect("json value")
+}
+
+#[test]
+fn a_generated_function_reads_a_provided_value() {
+    let artifact = artifact_from_source(ENVIRONMENT_SOURCE);
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        "console.log(JSON.stringify([m.label(), m.shout(), m.size(), m.mode(), m.wrapped(), m.bundle()]));",
+    );
+    let actual: Value = serde_json::from_str(&output).expect("json output");
+    let expected = Value::Array(
+        ["label", "shout", "size", "mode", "wrapped", "bundle"]
+            .iter()
+            .map(|function| ir_environment_result(function, &[]))
+            .collect(),
+    );
+    assert_eq!(actual, expected);
+    assert_eq!(actual[0], "fr-FR");
+    assert_eq!(
+        actual[2],
+        serde_json::json!({ "$type": "Size", "width": 12, "height": 5 })
+    );
+}
+
+#[test]
+fn a_generated_component_reads_a_root_value_as_the_ir_runtime_does() {
+    let artifact = artifact_from_source(ENVIRONMENT_SOURCE);
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"const dark = m.nxEnvironment({ colorMode: "dark" });
+           const swatch = m.SwatchSchema.initializeJson({}, { environment: dark }).rendered;
+           const mode = m.nxWithEnvironment(dark, () => m.mode());
+           const wrapped = m.wrapped();
+           const badge = m.BadgeSchema.evaluateJson(wrapped, undefined, { environment: m.nxEnvironment().enter(wrapped) });
+           const errors = [];
+           for (const run of [
+             () => m.nxWithEnvironment(m.nxEnvironment({ colourMode: "dark" }), () => m.mode()),
+             () => m.nxWithEnvironment(m.nxEnvironment({ colorMode: "dim" }), () => m.mode()),
+             () => m.nxEnvironment().enter({ $type: "Badge", $env: 5 }),
+           ]) {
+             try { run(); errors.push("none"); } catch (error) { errors.push(error.diagnostics[0].code); }
+           }
+           console.log(JSON.stringify({ swatch, mode, badge, errors }));"#,
+    );
+    let actual: Value = serde_json::from_str(&output).expect("json output");
+    assert_eq!(
+        actual["swatch"],
+        serde_json::json!({ "$type": "Text", "value": "night" })
+    );
+    assert_eq!(
+        actual["mode"],
+        ir_environment_result("mode", &[("colorMode", serde_json::json!("dark"))])
+    );
+    // The descriptor's `$env` is what `enter` reads, so the child renders in it.
+    assert_eq!(
+        actual["badge"],
+        serde_json::json!({ "$type": "Text", "value": "it-IT" })
+    );
+    assert_eq!(
+        actual["errors"],
+        serde_json::json!([
+            "nx-ir-environment-name",
+            "invalid-enum",
+            "nx-ir-boundary-type"
+        ])
+    );
+}
+
+#[test]
+fn generated_environment_typescript_type_checks() {
+    assert_generated_typescript_artifact_type_checks(&artifact_from_source(ENVIRONMENT_SOURCE));
+}
+
+#[test]
+fn a_program_module_takes_the_entry_modules_provides() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/design.nx",
+                "export environment space: int = 4\nexport environment radius: int = 2",
+            ),
+            (
+                "app/main.nx",
+                "import \"./design.nx\"\nprovide env.space = 8\nlet sizes() = { \"\" + env.space + \",\" + env.radius }",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let output = execute_generated_js_program_module_script(
+        &artifact,
+        r#"import("__NX_RUNTIME_URL__").then((runtime) => {
+             const rooted = runtime.nxWithEnvironment(runtime.nxEnvironment({ radius: 3 }), () => m.sizes());
+             console.log(JSON.stringify([m.sizes(), rooted]));
+           });"#,
+    );
+    assert_eq!(output, r#"["8,2","8,3"]"#);
 }
