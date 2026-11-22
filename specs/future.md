@@ -2424,12 +2424,21 @@ function call styles and first-class calling conventions remain a separate desig
 
 ## Wide-Gamut Color
 
-Proposed as the OpenSpec change `add-wide-gamut-color`: `Color` becomes a union of color spaces
-(`srgb`, `displayP3`, `oklab`, `oklch`) with explicit `inGamut` and `toGamut`. Left for later after
-it lands:
+`Color` (`@nx/color`) is encoded sRGB, with each channel constrained to [0, 1]. Colors outside
+sRGB, such as Display P3 and much of OKLCH (Tailwind v4's palette is defined in OKLCH), can't be
+held, so `oklch(…)` clamps each channel, which shifts hue and lightness. Supporting wide gamut means:
 
-- Drawing on P3 surfaces in Skia and Canvas, instead of mapping into sRGB at preparation.
-- An OKLCH picker, so wide colors can be edited and not only shown.
-- Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
+- **The value:** extended-range sRGB, where channels may go below 0 or above 1 (as Apple and Android
+  do, keeping the record's shape), or a color-space tag. Extended range is the likely choice, with
+  `displayP3(…)` and `oklch(…)` as constructors.
+- **Conversions:** keep out-of-gamut values, and add an explicit `toGamut(color, srgb)` that uses the
+  CSS Color 4 gamut-mapping algorithm for display.
+- **Literals:** `#rrggbb` stays sRGB; wide colors come from functions, so the grammar doesn't change.
+- **Output and transport:** `toCss` writes `color(display-p3 …)` with an sRGB fallback; the host
+  transport, the .NET binding and the graphics renderers pass wide colors through, and draw them on a
+  P3 surface where the host has one.
+- **Operations:** `mix`, `lighten`, `contrastRatio` and the others get defined behavior for
+  out-of-range input; contrast is measured on the gamut-mapped color, since that is what a screen
+  shows.
 
-`@nx/design`'s palette uses Tailwind v3's sRGB values until the change lands.
+`@nx/design`'s palette uses Tailwind v3's sRGB values until this lands.
