@@ -41,7 +41,7 @@ against both runtimes for the findings below.
 - **Fix:** The Rust parser now rejects `srgb`, `srgb-linear` and `display-p3` outside `color()`, matching TypeScript (`color.rs` parse). Corpus cases for `display-p3(1 0 0)` and `srgb(1 0 0)` expect `color-invalid-text` on both runtimes.
 - **Verification:** Verified. `parse` now refuses `srgb`, `srgb-linear` and `display-p3` before handling `color(` (`color.rs:601-604`), so `color(display-p3 …)` still parses. Both runtimes pass the new corpus error cases: `cargo test -p nx-value color` (9 tests) and the TypeScript corpus (294 cases).
 
-### 🟡 Fixed - RF2 Wide colors don't open a read-only picker; their edit target is dropped instead
+### ✅ Verified - RF2 Wide colors don't open a read-only picker; their edit target is dropped instead
 - **Severity:** Medium
 - **Confidence:** Medium
 - **Evidence:** `packages/viewer/src/edit.ts:312-314` returns `undefined` for a `call`/`element`
@@ -59,6 +59,7 @@ against both runtimes for the findings below.
 - **Fix:** Kept the no-picker behavior (a wide color is shown with its swatch and CSS text, never offered to the sRGB picker) and reworded the color-tooling requirement, its scenario and design.md to say so. New viewer test in `editing.test.ts` checks that only the sRGB color is a picker target while the P3 color keeps its swatch.
 - **Verification:** Partly fixed. The behavior is consistent and tested: `editing.test.ts` shows only the sRGB color is a picker target, and the P3 color keeps its swatch. The reworded scenario is coherent. However, the requirement sentence now says a wide color "SHALL be shown read-only, with its swatch **and its CSS text**", and nothing shows the CSS text. Source view shows the authored text (`displayP3(1, 0, 0)`, `<c.Color.oklch …/>`), and the swatch `title` is only set to the outside-sRGB note, and only for colors outside sRGB (`packages/viewer/src/source.ts:329`). An in-gamut `oklch(0.7, 0.1, 200)` shows no CSS anywhere. design.md's line ("shown read-only, with no picker") also now runs past the 100-character wrap. To close: drop "and its CSS text" from the requirement, or set the swatch's `title` (and the outside-sRGB label) to the color's CSS text and add an assertion for it.
 - **Fix (2):** Dropped "and its CSS text" from the requirement, which now says a wide color is shown read-only with its swatch and is not offered to the sRGB picker. Rewrapped that paragraph and the design.md line to 100 columns.
+- **Verification (2):** Verified. The color-tooling requirement now says a wide color is shown read-only with its swatch and is not offered to the sRGB picker. That matches `edit.ts`, the `editing.test.ts` test and the updated scenario, and nothing in the spec now promises CSS text in the UI. The reworded paragraph and the design.md line are wrapped at 100 columns.
 
 ### ✅ Verified - RF3 An invalid SDK color fails with `nx-ir-boundary-constraint`, but the spec scenario requires `color-invalid-channel`
 - **Severity:** Medium
@@ -147,7 +148,7 @@ against both runtimes for the findings below.
 
 ## New Findings Discovered During 2026-11-22 20:15 Verification
 
-### 🟡 Fixed - RF8 The reworded "Invalid SDK record" scenario is not tested for its own case
+### ✅ Verified - RF8 The reworded "Invalid SDK record" scenario is not tested for its own case
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** The scenario in `specs/color-library/spec.md` now names a `Color.oklch` with `c = -1`
@@ -164,6 +165,7 @@ against both runtimes for the findings below.
   `specs/color-tooling/spec.md` (the read-only sentence) now run past the file's 100-character
   wrap. Rewrap them when the spec is next touched.
 - **Fix:** `color_transport_default_alpha_and_invalid_channels` now also passes a `Color.oklch` with `c = -1` through the typed `validateBrand` boundary and expects `nx-ir-boundary-constraint`. Rewrapped the reworded requirement paragraph in the color-library spec to 100 columns.
+- **Verification:** Verified. `color_transport_default_alpha_and_invalid_channels` now sends `Color.oklch` with `c = -1` through `validateBrand` and expects `nx-ir-boundary-constraint`, which covers the inline `c` constraint the scenario names. `cargo test -p nx-api color_transport_default_alpha_and_invalid_channels` passes. The color-library paragraph is rewrapped. The optional MessagePack non-finite Oklab case was not added; that is acceptable.
 
 ## Questions
 - RF2 and RF3 were answered by the coordinator: no picker for wide colors, and typed boundaries fail
@@ -174,6 +176,8 @@ against both runtimes for the findings below.
 - First pass: the implementation follows the design and its Decided Questions. Both runtimes pass
   the shared corpus, and the TypeScript source still produces valid emitted JavaScript.
 - Verification (2026-11-22): RF1, RF3, RF4, RF5, RF6 and RF7 are verified.
-- RF2 is reopened only for one phrase in the requirement, "and its CSS text", which nothing
-  implements.
-- RF8 is new and Low: the reworded SDK-boundary scenario has no test for its Oklch case.
+- RF2 was reopened at first for one phrase in the requirement, "and its CSS text", which nothing
+  implemented. RF8 was added as Low: the reworded SDK-boundary scenario had no test for its Oklch
+  case.
+- Second verification (2026-11-22): RF2 and RF8 are verified, and no new findings came up. All
+  eight findings are now verified.
