@@ -1290,7 +1290,7 @@ its items add to a call that takes them as its positional arguments, content or 
 - **AND** no more than the limit allows of the list SHALL have been read
 
 ### Requirement: TypeScript runtime diagnostics name the argument a failure is in
-A TypeScript runtime diagnostic for a bad argument SHALL name the argument.
+A TypeScript runtime diagnostic for a failure in a host-passed argument's value SHALL carry the parameter's name as `argument`.
 A diagnostic for a failure the runtime finds in a value a host passed as an argument of the
 function it called, through `callFunction` or `evaluateFunction`, SHALL carry `argument`: the name
 of the parameter the value was passed for. That covers a value that does not fit the parameter's
@@ -1698,7 +1698,7 @@ occurrence, and dispatch.
   ordered effects match between the TypeScript runtime and the native runtime
 
 ### Requirement: Component descriptors are recursively validated at typed sites
-The TypeScript runtime SHALL validate a component descriptor's props recursively at typed sites.
+The TypeScript runtime SHALL validate the props of a descriptor of the expected component recursively at typed sites.
 When a component-typed value has no discriminator or names the expected component declaration,
 its props SHALL be recursively normalized against that declaration at host and program-internal
 typed sites. Defaults SHALL be filled, unknown props and invalid nested records SHALL be rejected,

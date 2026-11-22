@@ -431,6 +431,36 @@ for (const program of loadCorpus()) {
   }
 }
 
+// An image that uses environment values but does not list `environment-v1` is refused naming the
+// feature: each environment image with the feature's name swapped for another of the same length.
+{
+  const feature = new TextEncoder().encode("environment-v1");
+  const other = new TextEncoder().encode("constraints-v1");
+  const program = loadCorpus().find((candidate) => candidate.name === "environment");
+  for (const [identity, image] of program.artifacts) {
+    const damaged = image.slice();
+    let found = false;
+    for (let index = 0; index + feature.length <= damaged.length; index += 1) {
+      if (feature.every((byte, offset) => damaged[index + offset] === byte)) {
+        damaged.set(other, index);
+        found = true;
+      }
+    }
+    const result = tryPrepareNxIrModule(damaged);
+    const messages = result.ok ? [] : result.diagnostics.map((diagnostic) => diagnostic.message);
+    if (
+      found &&
+      messages.length === 1 &&
+      messages[0].includes("requires the feature 'environment-v1' the module does not list")
+    ) {
+      console.log(`ok - environment/${identity} without environment-v1 is refused naming the feature`);
+    } else {
+      failures += 1;
+      console.log(`not ok - environment/${identity} without environment-v1: ${JSON.stringify(messages)}`);
+    }
+  }
+}
+
 // Damage: every corpus image cut at every four-byte boundary, and every cell of the smallest one
 // with a function entrypoint overwritten, must be refused with a diagnostic or read as a valid
 // image, never thrown. A damaged image that prepared is then linked and each of its entrypoints

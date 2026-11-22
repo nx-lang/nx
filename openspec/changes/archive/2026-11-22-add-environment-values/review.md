@@ -192,6 +192,80 @@ type-check tests. Findings RF1 and RF2 were reproduced with throwaway tests, sin
   reads, so the node can still be skipped.
 - **Status:** Deferred with RF11. It costs extra renders, never a wrong one, and only for a body whose cascaded default fails outside its own override. Recorded in `specs/future.md` ("A read that fails beneath a body's overrides is never skipped").
 
+## Review of 566d54c
+
+**Scope:** `runtime/typescript/src/index.ts` and `runtime/typescript/dist` (the `environment-v1` check moved into
+`#validateEntry`), `crates/nx-ir-runtime/src/module.rs` (`check_environment_entries`), the 13 lead sentences added to
+`openspec/specs/{editor-language-service,editor-syntax-highlighting,nx-ir-format,rust-ir-runtime,typescript-ir-runtime}`,
+and the archive sync of this change's deltas into `openspec/specs`.
+
+**Checked and found correct:**
+- **Feature check equivalence.** The new per-entry check tests the same tables and kinds as the old pass: nodes 30, 31 and
+  32, and declarations 6 and 7. A flag keeps it to at most one diagnostic, and the message is unchanged. It runs only for
+  an entry that passed layout validation. On a clean image every entry passes, so the result is the same as the old pass,
+  which ran only when there were no diagnostics. On an image that already has diagnostics, the new check may add the
+  feature diagnostic beside them. Preparation fails either way, and this now matches Rust, whose
+  `check_environment_entries` runs after `check_nodes` without that gating.
+- **Probe.** I replaced `environment-v1` with `constraints-v1` (same length) in the bytes of the corpus images
+  `environment/expected/{main,design,design.stripped}.nx.nxir`. TypeScript `prepareNxIrModule` refuses each with exactly
+  one `nx-ir-malformed` diagnostic: "the module uses environment values, which requires the feature 'environment-v1' the
+  module does not list." Rust `PreparedModule::prepare` refuses with the same message, prefixed "NX IR image is
+  malformed:". The unpatched image prepares. `corpus.test.mjs` passes, including the truncated- and damaged-image sweeps.
+- **dist.** A fresh `tsc -p tsconfig.json` into a scratch directory produces `src/index.js` and `src/index.d.ts` identical
+  to the committed `dist`.
+- **Sync.** Every ADDED and MODIFIED requirement of the eight delta specs appears in `openspec/specs` with exactly the
+  delta's text (compared requirement by requirement). The MODIFIED "Props flow down and state stays with the node"
+  replaced the old text and isn't duplicated; that old paragraph is the only text the commit removes from
+  `openspec/specs`. `openspec/specs/environment-values/spec.md` was created. All eight touched specs pass
+  `openspec validate --specs --strict`.
+- **Lead sentences.** Of the 13, 9 match their paragraphs without adding or weakening anything: handler properties,
+  hover documentation, function-type scoping, fingerprints, property unions, erasure, corpus arguments, TypeScript update
+  records and TypeScript property unions. RF13 and RF14 cover the other four.
+
+### 🟡 Fixed - RF13 The "diagnostics name the argument" leads say every bad-argument diagnostic names its argument, which the paragraphs exclude
+- **Severity:** Low
+- **Evidence:** `openspec/specs/rust-ir-runtime/spec.md:613` ("A Rust runtime diagnostic for a bad argument SHALL name the
+  argument.") and `openspec/specs/typescript-ir-runtime/spec.md:1293` (the same for TypeScript). Each paragraph limits
+  this to "a failure the runtime finds in a value a host passed as an argument … for" one parameter. It then explicitly
+  requires no name for cases a reader would call a bad argument: a failure a parameter's default raises, a resource limit
+  reached while checking an argument, more positional arguments than parameters, and (Rust) a `Function` record given to
+  `call_function` that names no function. The leads also say "name" where the paragraphs mean a data field beside the
+  message (`argument`), not the message text.
+- **Recommendation:** Narrow both leads, for example: "A diagnostic for a failure in a value a host passed for a parameter
+  SHALL carry that parameter's name."
+- **Fix:** The leads now say the diagnostic for a failure in a host-passed argument's value carries the parameter's name, as data (Rust: "for the failures listed below"; TypeScript: "as `argument`").
+
+### 🟡 Fixed - RF14 The descriptor-validation leads drop the condition that limits recursive validation
+- **Severity:** Low
+- **Evidence:** `openspec/specs/rust-ir-runtime/spec.md:836` and `openspec/specs/typescript-ir-runtime/spec.md:1701` say
+  the runtime "SHALL validate a component descriptor's props recursively at typed sites". The paragraph obliges this only
+  "when a component-typed value has no discriminator or names the expected component declaration". It also says
+  "Existing cross-component descriptor behavior SHALL remain unchanged", which the unconditional lead now contradicts for
+  a descriptor of another component.
+- **Recommendation:** Keep the condition in the lead, for example: "…SHALL validate the props of a component descriptor
+  of the expected component recursively at typed sites."
+- **Fix:** The leads now say "the props of a descriptor of the expected component", which keeps the paragraph's condition.
+
+### 🟡 Fixed - RF15 The new `environment-values` spec keeps the archive placeholder as its Purpose
+- **Severity:** Low
+- **Evidence:** `openspec/specs/environment-values/spec.md` starts with "## Purpose / TBD - created by archiving change
+  add-environment-values. Update Purpose after archive." The capability is new, and the proposal already has a one-line
+  description that could serve. Eleven older specs carry the same placeholder, so this follows an existing pattern rather
+  than breaking validation.
+- **Recommendation:** Replace the placeholder with a one-sentence purpose, such as typed values with defaults that the
+  host, the main module and any element can set for what is inside them.
+- **Fix:** `environment-values/spec.md` now has a real Purpose. The eleven older placeholders are out of scope here.
+
+### 🟡 Fixed - RF16 No committed test covers the missing-`environment-v1` diagnostic in either runtime
+- **Severity:** Low
+- **Evidence:** The commit rewrites the TypeScript check, and nothing in `runtime/typescript/test/` or the Rust tests
+  exercises it. A search for "does not list" and `environment-v1` found no refusal test. The equivalence above rests on my
+  byte-patched probe, which is not in the repository. The damaged-image sweep in `corpus.test.mjs` only checks that
+  preparation doesn't throw.
+- **Recommendation:** Add the probe as a test in both runtimes: the corpus `main.nx.nxir` with its `environment-v1` string
+  replaced by another known feature of the same length, refused with the single `nx-ir-malformed` diagnostic.
+- **Fix:** Added `an_environment_image_without_its_feature_is_refused` (Rust, `eval.rs` tests) and the matching check in `runtime/typescript/test/corpus.test.mjs`: each environment corpus image with `environment-v1` swapped for `constraints-v1` is refused with exactly that diagnostic.
+
 ## Questions
 - For RF1: should an external component be able to carry `$env`, for example for a future "host elements read the
   environment" design (the design's Open Question)? If so, the tree still has to enter it for the authored components in

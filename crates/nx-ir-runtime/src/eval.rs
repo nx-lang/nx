@@ -2149,6 +2149,36 @@ mod tests {
     use super::*;
     use crate::{LinkOptions, PreparedModule, Program};
 
+    /// An image that uses environment values but doesn't list `environment-v1` is refused,
+    /// naming the feature: the corpus images with the feature swapped for another of its length.
+    #[test]
+    fn an_environment_image_without_its_feature_is_refused() {
+        for file in ["main.nx.nxir", "design.nx.nxir"] {
+            let image = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../specs/ir-conformance/environment/expected")
+                .join(file);
+            let mut bytes = std::fs::read(image).unwrap();
+            let (feature, other) = (b"environment-v1", b"constraints-v1");
+            let at: Vec<usize> = bytes
+                .windows(feature.len())
+                .enumerate()
+                .filter(|(_, window)| window == feature)
+                .map(|(index, _)| index)
+                .collect();
+            assert!(!at.is_empty(), "{file} lists no environment-v1");
+            for index in at {
+                bytes[index..index + other.len()].copy_from_slice(other);
+            }
+            let error = PreparedModule::prepare(bytes).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("requires the feature 'environment-v1' the module does not list"),
+                "{file}: {error}"
+            );
+        }
+    }
+
     /// The nesting bound, checked where an unoptimized build can reach it. Such a build's frames
     /// use the stack budget up before a thousand nodes nest, so a test that nests them for real
     /// meets `maxStackBytes` first; this one starts the count near the bound instead.

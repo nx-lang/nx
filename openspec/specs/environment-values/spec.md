@@ -1,7 +1,9 @@
 # environment-values Specification
 
 ## Purpose
-TBD - created by archiving change add-environment-values. Update Purpose after archive.
+Define environment values: values with a type and a default that any body reads with `env.name`,
+overridden for part of the output with `env.` attributes and `provide` blocks, set app-wide by the
+main module's top-level provides, and given root values by the host.
 ## Requirements
 ### Requirement: An environment value is declared with a type and a default
 A module SHALL be able to declare an environment value at its top level with

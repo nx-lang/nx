@@ -610,7 +610,7 @@ these bounds and is not what the check looks for.
 - **AND** every case SHALL be within the bounds in an unoptimized build and in an optimized one
 
 ### Requirement: Rust runtime diagnostics name the argument a failure is in
-A Rust runtime diagnostic for a bad argument SHALL name the argument.
+A Rust runtime diagnostic for a failure in a host-passed argument's value SHALL carry the parameter's name, for the failures listed below.
 A diagnostic for a failure the Rust runtime finds in a value a host passed as an argument of the
 function it called, by name or by position, SHALL carry the name of the parameter the value was
 passed for, as data beside the message. It SHALL carry that name for the same failures the
@@ -833,7 +833,7 @@ component lifecycle.
 - **AND** SHALL NOT be computed by evaluating the program another way
 
 ### Requirement: Component descriptors are recursively validated at typed sites
-The Rust runtime SHALL validate a component descriptor's props recursively at typed sites.
+The Rust runtime SHALL validate the props of a descriptor of the expected component recursively at typed sites.
 When a component-typed value has no discriminator or names the expected component declaration,
 its props SHALL be recursively normalized against that declaration at host and program-internal
 typed sites. Defaults SHALL be filled, unknown props and invalid nested records SHALL be rejected,
