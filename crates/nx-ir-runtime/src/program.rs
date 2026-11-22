@@ -43,6 +43,9 @@ pub(crate) struct ProgramData {
     /// The identity and image hash of every module, in identity order: what an instance records
     /// to say which program it belongs to.
     pub images: Arc<[(Arc<str>, u64)]>,
+    /// The program's environment declarations and component names, indexed on first use.
+    pub environment: std::sync::OnceLock<crate::environment::EnvironmentIndex>,
+    pub component_names: std::sync::OnceLock<std::collections::HashSet<Arc<str>>>,
 }
 
 /// An entry module with every module it reaches, ready to evaluate.
@@ -183,6 +186,8 @@ impl Program {
                 modules,
                 by_identity,
                 images: Arc::from(images),
+                environment: std::sync::OnceLock::new(),
+                component_names: std::sync::OnceLock::new(),
             }),
         })
     }
@@ -234,6 +239,31 @@ impl PreparedModule {
 }
 
 impl ProgramData {
+    pub(crate) fn environment_index(&self) -> &crate::environment::EnvironmentIndex {
+        self.environment
+            .get_or_init(|| crate::environment::EnvironmentIndex::build(self))
+    }
+
+    /// Whether a component of the program is declared with this name: what a record's `$type`
+    /// says when the record is a component descriptor.
+    pub(crate) fn is_component_name(&self, name: &str) -> bool {
+        self.component_names
+            .get_or_init(|| {
+                self.modules
+                    .iter()
+                    .flat_map(|linked| linked.module.declarations.iter())
+                    .filter(|declaration| {
+                        matches!(
+                            declaration.kind,
+                            crate::module::DeclarationKind::Component(_)
+                        )
+                    })
+                    .map(|declaration| Arc::clone(&declaration.name))
+                    .collect()
+            })
+            .contains(name)
+    }
+
     pub(crate) fn linked(&self, module: u32) -> Option<&Linked> {
         self.modules.get(module as usize)
     }

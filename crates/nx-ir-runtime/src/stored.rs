@@ -398,6 +398,10 @@ impl Reader<'_, '_> {
                                 .iter()
                                 .for_each(|case| defaults(&case.fields, &mut pending));
                         }
+                        DeclarationKind::Environment { default, .. } => pending.push(*default),
+                        DeclarationKind::Provides(provides) => {
+                            pending.extend(provides.iter().map(|provide| provide.value));
+                        }
                         DeclarationKind::TypeAlias => {}
                     }
                 }

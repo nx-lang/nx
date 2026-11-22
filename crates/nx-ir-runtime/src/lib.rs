@@ -28,6 +28,7 @@
 )]
 
 mod component;
+mod environment;
 mod error;
 mod eval;
 mod helpers;
@@ -46,6 +47,7 @@ mod value;
 pub use component::{
     ComponentDispatchResult, ComponentInit, ComponentInitResult, ComponentInstance,
 };
+pub use environment::{Environment, EnvironmentEntry};
 pub use error::{Diagnostic, Limit, NxIrRuntimeError, Result, SourceSpan};
 pub use eval::{
     RuntimeOptions, NX_DEFAULT_MAX_CALL_DEPTH, NX_DEFAULT_MAX_COMPONENT_DEPTH,

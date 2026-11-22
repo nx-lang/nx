@@ -15,7 +15,9 @@ use nx_api::codegen::{
     emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
     NxIrEmitOptions,
 };
-use nx_api::ir_runtime::{FunctionValue, LinkOptions, PreparedModule, Program, RuntimeOptions};
+use nx_api::ir_runtime::{
+    Environment, FunctionValue, LinkOptions, PreparedModule, Program, RuntimeOptions,
+};
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
     NxDiagnostic, NxWorkspace, ProgramArtifact, ProgramBuildContext,
@@ -61,6 +63,11 @@ enum Commands {
         /// Write output to a file instead of stdout
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Set an environment value's root value, as `name=value`; may be repeated. The value is
+        /// a bare word for a union case or a string, or JSON for anything else
+        #[arg(long = "env", value_name = "NAME=VALUE")]
+        env: Vec<String>,
     },
 
     /// Generate language-specific type definitions from an NX file, library directory, or
@@ -190,7 +197,8 @@ fn main() -> ExitCode {
             file,
             format,
             output,
-        } => run_file(&file, format, output.as_ref()),
+            env,
+        } => run_file(&file, format, output.as_ref(), &env),
         Commands::Typegen {
             file,
             language,
@@ -239,7 +247,40 @@ fn explain_ir_artifact(path: &Path) -> ExitCode {
     }
 }
 
-fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> ExitCode {
+/// The root environment `--env name=value` arguments give: each value is JSON, or a bare word,
+/// which is a union case's name or a string.
+fn environment_from_args(args: &[String]) -> Result<Environment, String> {
+    let mut values = Vec::with_capacity(args.len());
+    for arg in args {
+        let Some((name, text)) = arg.split_once('=') else {
+            return Err(format!(
+                "Error: --env '{arg}' is not of the form name=value"
+            ));
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(format!("Error: --env '{arg}' names no environment value"));
+        }
+        let value = nx_value::NxValue::from_json_str(text)
+            .unwrap_or_else(|_| nx_value::NxValue::String(text.to_string()));
+        values.push((name.to_string(), value));
+    }
+    Ok(Environment::root(values))
+}
+
+fn run_file(
+    path: &PathBuf,
+    format: OutputFormat,
+    output: Option<&PathBuf>,
+    env: &[String],
+) -> ExitCode {
+    let environment = match environment_from_args(env) {
+        Ok(environment) => environment,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::from(1);
+        }
+    };
     // Check if file exists
     if !path.exists() {
         eprintln!("Error: File not found: {}", path.display());
@@ -289,7 +330,7 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
         return ExitCode::from(1);
     }
 
-    let value = match execute_program(&program) {
+    let value = match execute_program(&program, environment) {
         Ok(value) => value,
         Err(message) => {
             eprintln!("{message}");
@@ -318,7 +359,10 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
 }
 
 /// Each invocation compiles, links and receives a fresh finite operation budget.
-fn execute_program(artifact: &ProgramArtifact) -> Result<FunctionValue, String> {
+fn execute_program(
+    artifact: &ProgramArtifact,
+    environment: Environment,
+) -> Result<FunctionValue, String> {
     let images = emit_nx_ir(
         artifact,
         &NxIrEmitOptions {
@@ -347,6 +391,7 @@ fn execute_program(artifact: &ProgramArtifact) -> Result<FunctionValue, String> 
             &[],
             &RuntimeOptions {
                 max_operations: Some(1_000_000),
+                environment,
                 ..RuntimeOptions::default()
             },
         )
@@ -1196,7 +1241,7 @@ mod tests {
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        let error = execute_program(&limited).unwrap_err();
+        let error = execute_program(&limited, Environment::default()).unwrap_err();
         assert!(error.contains("nx-ir-resource-limit"), "{error}");
         assert!(error.to_lowercase().contains("operation"), "{error}");
         let small = build_program_artifact_from_source(
@@ -1207,7 +1252,12 @@ mod tests {
         .unwrap();
         for _ in 0..2 {
             assert_eq!(
-                format_output(&small, &execute_program(&small).unwrap(), OutputFormat::Nx).unwrap(),
+                format_output(
+                    &small,
+                    &execute_program(&small, Environment::default()).unwrap(),
+                    OutputFormat::Nx
+                )
+                .unwrap(),
                 "42"
             );
         }
@@ -1222,7 +1272,7 @@ mod tests {
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        let error = execute_program(&artifact).unwrap_err();
+        let error = execute_program(&artifact, Environment::default()).unwrap_err();
         assert!(
             error.contains("nx-ir-division-by-zero") && error.contains("main.nx:1:"),
             "{error}"
@@ -1253,7 +1303,7 @@ mod tests {
             ("let down(n:int): int = { if n == 0 { 0 } else { down(n - 1) } } let root() = { down(120) }", "nx-ir-resource-limit"),
         ] {
             let artifact = build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty()).unwrap();
-            let text = execute_program(&artifact).unwrap_err();
+            let text = execute_program(&artifact, Environment::default()).unwrap_err();
             assert!(text.contains("error") && text.contains(code) && text.contains("main.nx"), "{text}");
             assert!(!text.contains("<unknown>") && !text.contains(" : "), "{text}");
         }
@@ -1267,14 +1317,14 @@ mod tests {
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        assert!(execute_program(&artifact).is_ok());
+        assert!(execute_program(&artifact, Environment::default()).is_ok());
         let rejected = build_program_artifact_from_source(
             "type User = { age:int = 30 }\nlet root() = { User() }",
             "main.nx",
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        let error = execute_program(&rejected).unwrap_err();
+        let error = execute_program(&rejected, Environment::default()).unwrap_err();
         assert!(error.contains("record-construction-requires-element"));
     }
 
@@ -1291,7 +1341,7 @@ mod tests {
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
     }
@@ -1317,7 +1367,7 @@ let root() = { Math.addOne(41) }"#,
         .expect("root file");
 
         let program = build_import_resolved_program(&app_dir.join("main.nx"));
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
         let result = result.expect("qualified imported function should execute");
 
         assert_eq!(
@@ -1347,7 +1397,7 @@ let root() = { Ui.title() }"#,
         .expect("root file");
 
         let program = build_import_resolved_program(&app_dir.join("main.nx"));
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
         let result = result.expect("qualified imported function should execute");
 
         assert_eq!(
@@ -1389,7 +1439,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1411,7 +1461,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1433,7 +1483,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1463,7 +1513,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let output = format_output(&program, &result.unwrap(), OutputFormat::Nx).unwrap();
@@ -1484,7 +1534,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1506,7 +1556,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -3502,7 +3552,7 @@ let z = {
         let evaluate = |source: &str| -> Result<(String, String), String> {
             fs::write(&main, source).expect("main file");
             let program = build_program_reporting_errors(&main)?;
-            let value = execute_program(&program)?;
+            let value = execute_program(&program, Environment::default())?;
             Ok((
                 format_output(&program, &value, OutputFormat::Nx)?,
                 format_output(&program, &value, OutputFormat::Json)?,
@@ -3528,7 +3578,7 @@ let z = {
         let (_dir, path) = create_temp_nx_file(source);
         let program =
             build_program_reporting_errors(&path).expect("the program should analyze cleanly");
-        execute_program(&program)
+        execute_program(&program, Environment::default())
             .expect("root should evaluate")
             .canonical()
             .clone()

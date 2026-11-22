@@ -356,6 +356,7 @@ impl Program {
         work: impl FnOnce(&Meter<'_, '_>, &Stack) -> Result<T>,
     ) -> Result<T> {
         let machine = Machine::new(&self.data, options);
+        machine.begin_environment()?;
         let (index, _, _) = machine.component(component)?;
         let meter = machine.meter(entry_cx(index), None);
         work(&meter, &machine.stack)
@@ -814,7 +815,7 @@ impl<'p> Machine<'p> {
     }
 }
 
-fn entry_cx(declaration: u32) -> Cx {
+pub(crate) fn entry_cx(declaration: u32) -> Cx {
     Cx {
         module: 0,
         declaration,
@@ -899,7 +900,7 @@ impl Program {
             }
         };
         let machine = Machine::new(&self.data, options);
-        let result = body(&machine);
+        let result = machine.begin_environment().and_then(|()| body(&machine));
         if let Some(usage) = usage {
             usage.record(machine.used(), input_size);
         }
@@ -1069,7 +1070,8 @@ impl Program {
                     belongs(&self.data, &parent.data.program, &parent.data.component)?;
                 }
                 let path = Labeled(name, " props");
-                let supplied = Value::record(None, fields_from_host(props, &machine.stack)?);
+                let props = crate::environment::without_env(props);
+                let supplied = Value::record(None, fields_from_host(&props, &machine.stack)?);
                 let resolved = resolve_parent_handlers(
                     &supplied,
                     init.parent.map(|parent| &*parent.data),
@@ -1160,10 +1162,11 @@ impl Program {
                     );
                 };
                 let path = Labeled(name, " props");
+                let props = crate::environment::without_env(props);
                 let (fields, _) = machine.split_handler_properties(
                     0,
                     index,
-                    fields_from_host(props, &machine.stack)?,
+                    fields_from_host(&props, &machine.stack)?,
                     &path,
                 )?;
                 let cx = entry_cx(index);

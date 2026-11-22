@@ -94,6 +94,9 @@ pub struct RuntimeOptions {
     /// in any call, so an instance keeps the origins of its state through a dispatch given no
     /// report. A record the host passes in has none.</para>
     pub origins: Option<Arc<Origins>>,
+    /// The environment the call runs in: the host's root values and the overrides of the
+    /// descriptors entered on the way to it. The default has neither.
+    pub environment: crate::environment::Environment,
 }
 
 /// The default of [`RuntimeOptions::max_call_depth`].
@@ -121,6 +124,7 @@ impl Default for RuntimeOptions {
             max_stack_bytes: NX_DEFAULT_MAX_STACK_BYTES,
             usage: None,
             origins: None,
+            environment: crate::environment::Environment::default(),
         }
     }
 }
@@ -258,6 +262,8 @@ pub(crate) struct Machine<'p> {
     /// The origins of the records of the value the call returns, once it has been written for
     /// the host; `None` when the host gave no report.
     collected: RefCell<Option<Collected>>,
+    /// The environment stack and what the call has read from it.
+    pub(crate) env: RefCell<crate::environment::EnvState>,
 }
 
 impl<'p> Machine<'p> {
@@ -270,6 +276,7 @@ impl<'p> Machine<'p> {
             stack: Stack::begin(options.max_stack_bytes),
             default_failed: Cell::new(false),
             collected: RefCell::new(options.origins.as_ref().map(|_| Collected::default())),
+            env: RefCell::new(crate::environment::EnvState::default()),
         }
     }
 
@@ -639,7 +646,26 @@ impl<'p> Machine<'p> {
             Node::Element(element) => self.eval_element(cx, frame, index, element),
             Node::Component(construct) => self.eval_component(cx, frame, index, construct),
             Node::ActionHandler(handler) => self.eval_handler(cx, frame, index, handler),
+            Node::EnvRead(reference) => self.eval_env_read(cx, index, reference),
+            Node::EnvProvide { overrides, body } => {
+                self.eval_provide(cx, frame, index, overrides, *body)
+            }
+            Node::EnvUpdate(overrides) => self.eval_bundle(cx, frame, index, overrides),
         }
+    }
+
+    #[inline(never)]
+    fn eval_env_read(&self, cx: Cx, node: u32, reference: &Ref) -> Result<Value> {
+        let (module, index, declaration) = self.resolve(cx, node, reference)?;
+        if !matches!(declaration.kind, DeclarationKind::Environment { .. }) {
+            return self.fail(
+                cx,
+                node,
+                "nx-ir-reference",
+                format!("'{}' is not an environment value.", reference.name),
+            );
+        }
+        self.environment_value(cx, Some(node), (module, index))
     }
 
     #[cold]
