@@ -222,7 +222,7 @@ and the archive sync of this change's deltas into `openspec/specs`.
   hover documentation, function-type scoping, fingerprints, property unions, erasure, corpus arguments, TypeScript update
   records and TypeScript property unions. RF13 and RF14 cover the other four.
 
-### 🟡 Fixed - RF13 The "diagnostics name the argument" leads say every bad-argument diagnostic names its argument, which the paragraphs exclude
+### ✅ Verified - RF13 The "diagnostics name the argument" leads say every bad-argument diagnostic names its argument, which the paragraphs exclude
 - **Severity:** Low
 - **Evidence:** `openspec/specs/rust-ir-runtime/spec.md:613` ("A Rust runtime diagnostic for a bad argument SHALL name the
   argument.") and `openspec/specs/typescript-ir-runtime/spec.md:1293` (the same for TypeScript). Each paragraph limits
@@ -234,8 +234,9 @@ and the archive sync of this change's deltas into `openspec/specs`.
 - **Recommendation:** Narrow both leads, for example: "A diagnostic for a failure in a value a host passed for a parameter
   SHALL carry that parameter's name."
 - **Fix:** The leads now say the diagnostic for a failure in a host-passed argument's value carries the parameter's name, as data (Rust: "for the failures listed below"; TypeScript: "as `argument`").
+- **Verification:** Verified in e8b5cb05. Both leads now speak only of a failure in the value a host passed for a parameter, and say the name is carried as data. Rust adds "for the failures listed below", which defers to the paragraph's list; TypeScript names the field, "as `argument`". Neither lead adds an obligation or drops one the paragraph keeps. TypeScript's "required parameter given no argument" case is narrower than the lead's wording, but the paragraph still obliges it. One cosmetic point: both leads run to about 130 characters, against the roughly 100-column wrap the rest of the specs use. The specs pass `openspec validate --specs --strict`.
 
-### 🟡 Fixed - RF14 The descriptor-validation leads drop the condition that limits recursive validation
+### ✅ Verified - RF14 The descriptor-validation leads drop the condition that limits recursive validation
 - **Severity:** Low
 - **Evidence:** `openspec/specs/rust-ir-runtime/spec.md:836` and `openspec/specs/typescript-ir-runtime/spec.md:1701` say
   the runtime "SHALL validate a component descriptor's props recursively at typed sites". The paragraph obliges this only
@@ -245,8 +246,9 @@ and the archive sync of this change's deltas into `openspec/specs`.
 - **Recommendation:** Keep the condition in the lead, for example: "…SHALL validate the props of a component descriptor
   of the expected component recursively at typed sites."
 - **Fix:** The leads now say "the props of a descriptor of the expected component", which keeps the paragraph's condition.
+- **Verification:** Verified. Both leads now read "the props of a descriptor of the expected component", which matches the paragraph's condition and no longer conflicts with "cross-component descriptor behavior SHALL remain unchanged".
 
-### 🟡 Fixed - RF15 The new `environment-values` spec keeps the archive placeholder as its Purpose
+### ✅ Verified - RF15 The new `environment-values` spec keeps the archive placeholder as its Purpose
 - **Severity:** Low
 - **Evidence:** `openspec/specs/environment-values/spec.md` starts with "## Purpose / TBD - created by archiving change
   add-environment-values. Update Purpose after archive." The capability is new, and the proposal already has a one-line
@@ -255,8 +257,9 @@ and the archive sync of this change's deltas into `openspec/specs`.
 - **Recommendation:** Replace the placeholder with a one-sentence purpose, such as typed values with defaults that the
   host, the main module and any element can set for what is inside them.
 - **Fix:** `environment-values/spec.md` now has a real Purpose. The eleven older placeholders are out of scope here.
+- **Verification:** Verified. `openspec/specs/environment-values/spec.md` now has a one-sentence Purpose that matches the requirements: declaration with a type and a default, `env.name` reads, `env.` attributes and `provide` blocks, main-module provides and host root values. The spec passes strict validation.
 
-### 🟡 Fixed - RF16 No committed test covers the missing-`environment-v1` diagnostic in either runtime
+### ✅ Verified - RF16 No committed test covers the missing-`environment-v1` diagnostic in either runtime
 - **Severity:** Low
 - **Evidence:** The commit rewrites the TypeScript check, and nothing in `runtime/typescript/test/` or the Rust tests
   exercises it. A search for "does not list" and `environment-v1` found no refusal test. The equivalence above rests on my
@@ -265,6 +268,7 @@ and the archive sync of this change's deltas into `openspec/specs`.
 - **Recommendation:** Add the probe as a test in both runtimes: the corpus `main.nx.nxir` with its `environment-v1` string
   replaced by another known feature of the same length, refused with the single `nx-ir-malformed` diagnostic.
 - **Fix:** Added `an_environment_image_without_its_feature_is_refused` (Rust, `eval.rs` tests) and the matching check in `runtime/typescript/test/corpus.test.mjs`: each environment corpus image with `environment-v1` swapped for `constraints-v1` is refused with exactly that diagnostic.
+- **Verification:** Verified. Rust `eval::tests::an_environment_image_without_its_feature_is_refused` patches every occurrence of `environment-v1` in `main.nx.nxir` and `design.nx.nxir` and asserts the refusal names the feature; it passes. The TypeScript check in `corpus.test.mjs` does the same for each artifact of the `environment` corpus program and requires exactly one diagnostic with that message. Both artifacts print `ok`, and the whole `corpus.test.mjs` run exits 0. The Rust test doesn't assert that there is only one diagnostic, but the TypeScript one does, and the message is specific to this check.
 
 ## Questions
 - For RF1: should an external component be able to carry `$env`, for example for a future "host elements read the

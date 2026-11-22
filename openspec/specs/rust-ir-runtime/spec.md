@@ -610,7 +610,8 @@ these bounds and is not what the check looks for.
 - **AND** every case SHALL be within the bounds in an unoptimized build and in an optimized one
 
 ### Requirement: Rust runtime diagnostics name the argument a failure is in
-A Rust runtime diagnostic for a failure in a host-passed argument's value SHALL carry the parameter's name, for the failures listed below.
+A Rust runtime diagnostic for a failure in a host-passed argument's value SHALL carry the
+parameter's name, for the failures listed below.
 A diagnostic for a failure the Rust runtime finds in a value a host passed as an argument of the
 function it called, by name or by position, SHALL carry the name of the parameter the value was
 passed for, as data beside the message. It SHALL carry that name for the same failures the

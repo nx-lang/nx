@@ -1290,7 +1290,8 @@ its items add to a call that takes them as its positional arguments, content or 
 - **AND** no more than the limit allows of the list SHALL have been read
 
 ### Requirement: TypeScript runtime diagnostics name the argument a failure is in
-A TypeScript runtime diagnostic for a failure in a host-passed argument's value SHALL carry the parameter's name as `argument`.
+A TypeScript runtime diagnostic for a failure in a host-passed argument's value SHALL carry the
+parameter's name as `argument`.
 A diagnostic for a failure the runtime finds in a value a host passed as an argument of the
 function it called, through `callFunction` or `evaluateFunction`, SHALL carry `argument`: the name
 of the parameter the value was passed for. That covers a value that does not fit the parameter's
