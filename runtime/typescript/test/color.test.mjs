@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 import { nxStandardColor, nxStandardColorNames } from "../dist/src/color.js";
 const corpus = JSON.parse(readFileSync(new URL("../../../crates/nx-value/src/color-cases.json", import.meta.url), "utf8"));
 const call = (name, args) => nxStandardColor(nxStandardColorNames.indexOf(name), args);
+const channels = {
+  srgb: ["r", "g", "b", "alpha"],
+  displayP3: ["r", "g", "b", "alpha"],
+  oklab: ["l", "a", "b", "alpha"],
+  oklch: ["l", "c", "h", "alpha"],
+};
 function compare(actual, expected, context) {
   if (typeof expected === "number") assert.ok(Math.abs(actual - expected) <= 2e-6, `${context}: ${actual} vs ${expected}`);
   else if (expected !== null && typeof expected === "object") {
@@ -20,7 +26,7 @@ for (const [index, entry] of corpus.cases.entries()) {
   if (Array.isArray(entry.expected)) {
     const space = entry.space ?? "srgb";
     assert.equal(actual.$type, `Color.${space}`, context);
-    actual = { srgb: ["r", "g", "b", "alpha"], displayP3: ["r", "g", "b", "alpha"], oklab: ["l", "a", "b", "alpha"], oklch: ["l", "c", "h", "alpha"] }[space].map(key => actual[key]);
+    actual = channels[space].map(key => actual[key]);
   }
   if (entry.exact) assert.deepEqual(actual, entry.expected.map(Math.fround), context);
   else compare(actual, entry.expected, context);
