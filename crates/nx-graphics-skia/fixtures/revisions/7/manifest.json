@@ -3,7 +3,7 @@
   "image": "image.png",
   "profile": "graphics-core-v4",
   "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
-  "revision": "33d7188271b28918777ef1978f36853a5611bd6ace212411b44c0a873f56a930",
+  "revision": "5f50da7be5dc41c0b00d647fb5dcb7a663c60645b017e9e8deacf23a58103bc8",
   "scene": {
     "config": {
       "fonts": [
@@ -20,14 +20,14 @@
         "path_commands": 100000,
         "surface_pixels": 16777216.0
       },
-      "program_revision": "1bd7ddef40a98969",
+      "program_revision": "4418d504d10b7aaf",
       "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
       "scale": 1.0,
       "text_ink_padding": 0.0,
       "width": 400.0
     },
     "profile": "graphics-core-v4",
-    "revision": "33d7188271b28918777ef1978f36853a5611bd6ace212411b44c0a873f56a930",
+    "revision": "5f50da7be5dc41c0b00d647fb5dcb7a663c60645b017e9e8deacf23a58103bc8",
     "root": {
       "accessibility": null,
       "children": [

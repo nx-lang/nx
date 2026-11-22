@@ -1,6 +1,6 @@
 ## 1. The library
 
-- [x] 1.1 Replace `Color` in `crates/nx-program/src/std/color/color.nx` with the union in `api/color.nx` (`Unit`, `Hue`, `Gamut`, the four cases, `alpha`), keeping the named colors as hex literals. Remove `api/color.nx` from the change.
+- [x] 1.1 Replace `Color` in `crates/nx-program/src/std/color/color.nx` with the union in `api/color.nx` (`Hue`, `Gamut`, the four cases, `alpha`), keeping the named colors as hex literals. Remove `api/color.nx` from the change.
 - [x] 1.2 Update `crates/nx-program/src/std/color/operations.nx` to `api/operations.nx`: `displayP3`, `inGamut`, `toGamut`, `alpha` parameters, and the doc comments that say which functions map into sRGB. Remove `api/operations.nx`.
 - [x] 1.3 Lower hex literals to `Color.srgb` constants, and recognize the four cases wherever the compiler identifies the canonical Color (value printing in `nx-api`, `nx-hir` lowering).
 

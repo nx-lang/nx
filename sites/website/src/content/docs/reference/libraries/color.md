@@ -35,16 +35,35 @@ let root() = { accent overlay }
 `alpha` that defaults to 1 and is not premultiplied:
 
 ```nx
-export type Unit = float32 where in 0.0..=1.0
 export type Hue = float32 where >= 0.0 && < 360.0
 export type Color =
-  | srgb { r: Unit  g: Unit  b: Unit  alpha: Unit = 1 }
-  | displayP3 { r: Unit  g: Unit  b: Unit  alpha: Unit = 1 }
-  | oklab { l: Unit  a: float32  b: float32  alpha: Unit = 1 }
-  | oklch { l: Unit  c: float32 where >= 0.0  h: Hue  alpha: Unit = 1 }
+  | srgb {
+      r: float32 where in 0.0..=1.0
+      g: float32 where in 0.0..=1.0
+      b: float32 where in 0.0..=1.0
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
+  | displayP3 {
+      r: float32 where in 0.0..=1.0
+      g: float32 where in 0.0..=1.0
+      b: float32 where in 0.0..=1.0
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
+  | oklab {
+      l: float32 where in 0.0..=1.0
+      a: float32
+      b: float32
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
+  | oklch {
+      l: float32 where in 0.0..=1.0
+      c: float32 where >= 0.0
+      h: Hue
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
 ```
 
-`Unit` is `float32 where in 0.0..=1.0` and `Hue` is `float32 where >= 0.0 && < 360.0`, so a
+The ranges are value constraints on the fields, so a
 channel out of range is a compile error where it is written and a constraint failure where a
 computed or host value is bound. sRGB is the default: hex literals, `rgb`, `hsl` and the named
 colors all give `Color.srgb`. Display P3 holds the colors wide-gamut screens show. Oklab and Oklch

@@ -29,10 +29,30 @@ externals, swatch discovery and the picker, value printing, and SDK transport.
 
 ```nx
 export type Color =
-  | srgb { r: Unit  g: Unit  b: Unit  alpha: Unit = 1 }
-  | displayP3 { r: Unit  g: Unit  b: Unit  alpha: Unit = 1 }
-  | oklab { l: Unit  a: float32  b: float32  alpha: Unit = 1 }
-  | oklch { l: Unit  c: float32 where >= 0.0  h: Hue  alpha: Unit = 1 }
+  | srgb {
+      r: float32 where in 0.0..=1.0
+      g: float32 where in 0.0..=1.0
+      b: float32 where in 0.0..=1.0
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
+  | displayP3 {
+      r: float32 where in 0.0..=1.0
+      g: float32 where in 0.0..=1.0
+      b: float32 where in 0.0..=1.0
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
+  | oklab {
+      l: float32 where in 0.0..=1.0
+      a: float32
+      b: float32
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
+  | oklch {
+      l: float32 where in 0.0..=1.0
+      c: float32 where >= 0.0
+      h: Hue
+      alpha: float32 where in 0.0..=1.0 = 1
+    }
 ```
 
 Each case names its channels for what they mean, so an Oklch color has `l`, `c` and `h`, not an `r`
@@ -54,8 +74,10 @@ was the likely choice in `specs/future.md`. Rejected:
 
 ### Ranges are value constraints on the fields
 
-`Unit = float32 where in 0.0..=1.0` and `Hue = float32 where >= 0.0 && < 360.0`, as
-`add-value-constraints` allows. A literal out of range is a compile error, and a computed one fails
+Channels, lightness and alpha are `float32 where in 0.0..=1.0`, written on each field, and hue is
+`Hue = float32 where >= 0.0 && < 360.0`, as `add-value-constraints` allows. The 0 to 1 range has no
+alias: no name for it reads well to every audience (`Unit` reads as the unit type), and
+`@nx/graphics` already writes its opacities the same way. A literal out of range is a compile error, and a computed one fails
 with `nx-ir-constraint` where it is bound. This replaces the rule that "ordinary record construction
 does not enforce channel ranges". The library's `color-invalid-channel` check stays for SDK values
 and for non-finite intermediates. Hue is stored in [0, 360), and `oklch()` wraps it.

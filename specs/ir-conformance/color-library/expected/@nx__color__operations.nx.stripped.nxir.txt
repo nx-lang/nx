@@ -1,5 +1,5 @@
 module @nx/color/operations.nx fingerprint 7353843330997707954
-links @nx/color/color.nx version "468dfa208bad084c" fingerprint 347466089660937621
+links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
 requires standard-color-v2
 entrypoints functions [rgb rgba srgb linearRgb hsl hsv hwb displayP3 oklab oklch parse tryParse validate inGamut toGamut toHex toCss toRgb toHsl toHsv toHwb toLinearRgb toOklab toOklch withAlpha fadeIn fadeOut lighten darken saturate desaturate rotateHue complement grayscale invert mix composite relativeLuminance contrastRatio bestTextColor] components []
 

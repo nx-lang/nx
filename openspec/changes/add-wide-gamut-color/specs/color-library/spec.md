@@ -3,8 +3,8 @@
 ### Requirement: Color is a union of color spaces
 `Color` SHALL be a union with the cases `srgb { r g b alpha }`, `displayP3 { r g b alpha }`, `oklab
 { l a b alpha }` and `oklch { l c h alpha }`, each field float32 and each `alpha` non-premultiplied
-with default 1. The library SHALL export `Unit = float32 where in 0.0..=1.0` and `Hue = float32
-where >= 0.0 && < 360.0`. `r`, `g`, `b`, `l` and every `alpha` SHALL have type `Unit`. Oklch `c`
+with default 1. The library SHALL export `Hue = float32 where >= 0.0 && < 360.0`. `r`, `g`, `b`, `l` and every
+`alpha` SHALL have type `float32 where in 0.0..=1.0`. Oklch `c`
 SHALL be constrained to `>= 0.0` and `h` SHALL have type `Hue`. Oklab `a` and `b` SHALL be finite
 and otherwise unconstrained. `srgb` and `displayP3` channels SHALL be encoded with the sRGB transfer
 curve, using the sRGB and Display P3 primaries respectively. Because the ranges are value

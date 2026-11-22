@@ -1,8 +1,5 @@
 // Unstable renderer-independent color standard library.
 
-/// A normalized channel or alpha, in [0, 1].
-export type Unit = float32 where in 0.0..=1.0
-
 /// A hue in degrees, in [0, 360).
 export type Hue = float32 where >= 0.0 && < 360.0
 
@@ -13,31 +10,31 @@ export type Hue = float32 where >= 0.0 && < 360.0
 export type Color =
   /// Encoded sRGB, the space of hex literals and of `rgb`, `hsl` and `hwb`.
   | srgb {
-      r: Unit          /// Encoded red.
-      g: Unit          /// Encoded green.
-      b: Unit          /// Encoded blue.
-      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+      r: float32 where in 0.0..=1.0          /// Encoded red.
+      g: float32 where in 0.0..=1.0          /// Encoded green.
+      b: float32 where in 0.0..=1.0          /// Encoded blue.
+      alpha: float32 where in 0.0..=1.0 = 1  /// 0 is transparent and 1 is opaque.
     }
   /// Encoded Display P3: the same transfer curve as sRGB with wider primaries.
   | displayP3 {
-      r: Unit          /// Encoded red.
-      g: Unit          /// Encoded green.
-      b: Unit          /// Encoded blue.
-      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+      r: float32 where in 0.0..=1.0          /// Encoded red.
+      g: float32 where in 0.0..=1.0          /// Encoded green.
+      b: float32 where in 0.0..=1.0          /// Encoded blue.
+      alpha: float32 where in 0.0..=1.0 = 1  /// 0 is transparent and 1 is opaque.
     }
   /// Oklab: perceptual lightness and two opponent axes; can describe colors no screen shows.
   | oklab {
-      l: Unit          /// Lightness: 0 is black and 1 is white.
-      a: float32       /// Green (negative) to red (positive).
-      b: float32       /// Blue (negative) to yellow (positive).
-      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+      l: float32 where in 0.0..=1.0          /// Lightness: 0 is black and 1 is white.
+      a: float32                             /// Green (negative) to red (positive).
+      b: float32                             /// Blue (negative) to yellow (positive).
+      alpha: float32 where in 0.0..=1.0 = 1  /// 0 is transparent and 1 is opaque.
     }
   /// Oklch: Oklab as lightness, chroma and hue; can describe colors no screen shows.
   | oklch {
-      l: Unit                  /// Lightness: 0 is black and 1 is white.
-      c: float32 where >= 0.0  /// Chroma: 0 is gray.
-      h: Hue                   /// Hue in degrees.
-      alpha: Unit = 1          /// 0 is transparent and 1 is opaque.
+      l: float32 where in 0.0..=1.0          /// Lightness: 0 is black and 1 is white.
+      c: float32 where >= 0.0                /// Chroma: 0 is gray.
+      h: Hue                                 /// Hue in degrees.
+      alpha: float32 where in 0.0..=1.0 = 1  /// 0 is transparent and 1 is opaque.
     }
 
 /// A gamut that colors can be checked against and mapped into: what a kind of screen can show.

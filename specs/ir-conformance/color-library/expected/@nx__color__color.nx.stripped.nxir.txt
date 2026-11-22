@@ -1,8 +1,6 @@
-module @nx/color/color.nx fingerprint 347466089660937621
+module @nx/color/color.nx fingerprint 16291222639973348538
 requires update-records-v1 property-unions-v1 constraints-v1
 entrypoints functions [] components []
-
-alias Unit
 
 alias Hue
 

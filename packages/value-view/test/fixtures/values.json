@@ -748,7 +748,7 @@
         "end": 26,
         "role": "property",
         "parent": 1,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "alpha",
         "pointer": "/0/alpha"
       },
@@ -757,7 +757,7 @@
         "end": 32,
         "role": "property",
         "parent": 1,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "b",
         "pointer": "/0/b"
       },
@@ -766,7 +766,7 @@
         "end": 38,
         "role": "property",
         "parent": 1,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "g",
         "pointer": "/0/g"
       },
@@ -775,7 +775,7 @@
         "end": 44,
         "role": "property",
         "parent": 1,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "r",
         "pointer": "/0/r"
       },
@@ -793,7 +793,7 @@
         "end": 69,
         "role": "property",
         "parent": 6,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "alpha",
         "pointer": "/1/alpha"
       },
@@ -802,7 +802,7 @@
         "end": 75,
         "role": "property",
         "parent": 6,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "b",
         "pointer": "/1/b"
       },
@@ -811,7 +811,7 @@
         "end": 81,
         "role": "property",
         "parent": 6,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "g",
         "pointer": "/1/g"
       },
@@ -820,7 +820,7 @@
         "end": 87,
         "role": "property",
         "parent": 6,
-        "type": "Unit",
+        "type": "float32 where in 0.0..=1.0",
         "name": "r",
         "pointer": "/1/r"
       }

@@ -1,6 +1,6 @@
 module main.nx fingerprint 1064639780274523163
-links @nx/color/operations.nx version "468dfa208bad084c" fingerprint 7353843330997707954
-links @nx/color/color.nx version "468dfa208bad084c" fingerprint 347466089660937621
+links @nx/color/operations.nx version "346e014081a62e17" fingerprint 7353843330997707954
+links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
 entrypoints functions [root] components []
 
 function root() @3:1-14:2 =
