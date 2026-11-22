@@ -40,7 +40,7 @@
 
 ## 7. Tooling and docs
 
-- [ ] 7.1 Add completion after `env.` (expressions and attributes, then record fields), hover on reads and overrides, the "reads" list on function, value and component hovers, and go to definition, in `crates/nx-language-service`.
+- [ ] 7.1 Add completion after `env.` (expressions and attributes, then record fields), hover on reads and overrides, the "reads" list on function, value and component hovers, the "sets" list on top-level provides (bundles included), and go to definition, in `crates/nx-language-service`.
 - [ ] 7.2 Scope `environment`, `provide` and `env` in the TextMate grammar in `src/vscode`, with highlighting tests.
 - [ ] 7.3 Check that the Visual view shows an element with `env.` attributes without errors, and that the source tree reports them.
 - [ ] 7.4 Write the language reference page for environment values on the website, add `provide` layout to the style guide, and update `crates/nx-ir-runtime/README.md` (environment, read tracking, `set_environment`).
