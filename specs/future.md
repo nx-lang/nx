@@ -2360,6 +2360,12 @@ then pass a few hundred times in a row.
 - **Handlers lose local provides.** An action handler runs in its component's environment, not in
   the environment of a `provide` block written around the element that holds it. A handler that
   reads `env.` inside a local `provide` sees the value from outside the block.
+- **A cascaded read can cause one extra render.** When a body overrides a value and then reads
+  another value whose default reads it, the instance tree records the second value as read beneath
+  the body's overrides. A root change to the overridden value leaves the node alone, which is
+  right, but the recorded value is then stale, so the next equal visit renders the node once more
+  for nothing. A precise check would track which sources of the value lie outside the body's
+  overrides.
 - **Restored instances have no recorded reads.** An instance restored from saved state has no read
   list until it renders once, so a root value change does not reach it before then.
 - **A bundle is evaluated at every read.** A main-module `provide bundle` is evaluated each time a

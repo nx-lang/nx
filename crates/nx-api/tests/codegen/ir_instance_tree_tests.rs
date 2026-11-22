@@ -2124,6 +2124,29 @@ fn a_body_that_cascades_its_own_override_is_left_alone_by_an_equal_visit() {
     assert!(renders(&tree, "root/reader", "Label", "night"));
 }
 
+/// A read whose default fails beneath the body's own override still renders, and the node then
+/// renders again on every visit, since what it read cannot be checked there.
+#[test]
+fn a_read_that_fails_beneath_the_bodys_override_still_renders() {
+    let mut tree = open(
+        "
+environment divisor: int = 0
+environment ratio: int = { 10 / env.divisor }
+component <Card /> = {
+  <Stack>{ provide env.divisor=2 { <Label Text={\"\" + env.ratio} /> } }</Stack>
+}
+let root() = { <Card /> }
+",
+    );
+    assert!(renders(&tree, "root", "Label", "5"));
+    let card = rendered(&tree, "root");
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    assert!(renders(&tree, "root", "Label", "5"));
+    assert!(!Arc::ptr_eq(&card, &rendered(&tree, "root")));
+}
+
 #[test]
 fn the_tree_starts_from_the_root_values_a_host_gives() {
     let tree = environment_tree(&[("mode", "night")]);

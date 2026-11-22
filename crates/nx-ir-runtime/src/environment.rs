@@ -329,48 +329,53 @@ impl<'p> Machine<'p> {
     ///
     /// <para>A read recorded without a value is read again here, in a machine of its own over
     /// the same environment with none of this evaluation's overrides, which is the read the skip
-    /// check makes. It is not charged to this evaluation, as the check's reads are not.</para>
-    pub(crate) fn take_environment_reads(&self) -> Result<Vec<(Arc<str>, Value)>> {
+    /// check makes. It is not charged to this evaluation, as the check's reads are not. A read
+    /// that fails there, such as a default that is valid only under the body's own override, is
+    /// kept as `None`, which the skip check counts as changed, so tracking never fails a
+    /// render.</para>
+    pub(crate) fn take_environment_reads(&self) -> Vec<(Arc<str>, Option<Value>)> {
         let reads = self.env.borrow_mut().reads.take().unwrap_or_default();
         let index = self.environment_index();
-        let mut seen: Vec<(Arc<str>, Value)> = Vec::new();
-        let mut beneath: Option<Machine<'_>> = None;
+        let mut seen: Vec<(Arc<str>, Option<Value>)> = Vec::new();
+        let mut beneath: Option<Option<Machine<'_>>> = None;
         for (key, value) in reads {
             let name = index.qualified(key);
             if seen.iter().any(|(known, _)| *known == name) {
                 continue;
             }
             let value = match value {
-                Some(value) => value,
+                Some(value) => Some(value),
                 None => {
-                    let machine = match beneath.as_ref() {
-                        Some(machine) => machine,
-                        None => {
-                            let machine = Machine::new(self.program, self.options);
-                            machine.begin_environment()?;
-                            beneath.insert(machine)
-                        }
-                    };
+                    let machine = beneath.get_or_insert_with(|| {
+                        let machine = Machine::new(self.program, self.options);
+                        machine.begin_environment().ok().map(|()| machine)
+                    });
                     let cx = Cx {
                         module: key.0,
                         declaration: key.1,
                         depth: 0,
                     };
-                    machine.environment_value(cx, None, key)?
+                    machine
+                        .as_ref()
+                        .and_then(|machine| machine.environment_value(cx, None, key).ok())
                 }
             };
             seen.push((name, value));
         }
-        Ok(seen)
+        seen
     }
 
     /// Whether every recorded read gives the same value in this machine's environment, read at
-    /// its base. Each read re-evaluated is paid for as a read is.
-    pub(crate) fn environment_reads_hold(&self, reads: &[(Arc<str>, Value)]) -> Result<bool> {
+    /// its base. Each read re-evaluated is paid for as a read is. A read recorded as `None`, or
+    /// one that fails now, counts as changed, so the render runs again and reports any error.
+    pub(crate) fn environment_reads_hold(
+        &self,
+        reads: &[(Arc<str>, Option<Value>)],
+    ) -> Result<bool> {
         let index = self.environment_index();
         let meter = self.meter(crate::component::entry_cx(0), None);
         for (name, recorded) in reads {
-            let Some(key) = index.by_qualified(name) else {
+            let (Some(key), Some(recorded)) = (index.by_qualified(name), recorded) else {
                 return Ok(false);
             };
             let cx = Cx {
@@ -378,7 +383,9 @@ impl<'p> Machine<'p> {
                 declaration: key.1,
                 depth: 0,
             };
-            let current = self.environment_value(cx, None, key)?;
+            let Ok(current) = self.environment_value(cx, None, key) else {
+                return Ok(false);
+            };
             if !values_equal(&current, recorded, &meter, &self.stack)? {
                 return Ok(false);
             }
@@ -980,7 +987,7 @@ impl crate::program::Program {
     /// Whether every read gives the value it gave in `options`' environment.
     pub(crate) fn environment_reads_hold(
         &self,
-        reads: &[(Arc<str>, Value)],
+        reads: &[(Arc<str>, Option<Value>)],
         options: &crate::RuntimeOptions,
     ) -> Result<bool> {
         if reads.is_empty() {

@@ -38,8 +38,9 @@ pub(crate) struct InstanceData {
     /// The render generation the tokens belong to.
     pub generation: u64,
     /// The environment values the render read, by qualified name, each with the value it found
-    /// beneath the overrides the body itself wrote. An instance restored from storage has none.
-    pub reads: Arc<[(Arc<str>, Value)]>,
+    /// beneath the overrides the body itself wrote, or `None` where reading it there failed, so
+    /// it counts as changed on every visit. An instance restored from storage has none.
+    pub reads: Arc<[(Arc<str>, Option<Value>)]>,
 }
 
 /// A component instance: what dispatch needs to run a batch against a component that
@@ -57,7 +58,7 @@ pub struct ComponentInstance {
 
 impl ComponentInstance {
     /// The environment values the render behind this instance read, with what each found.
-    pub(crate) fn reads(&self) -> &Arc<[(Arc<str>, Value)]> {
+    pub(crate) fn reads(&self) -> &Arc<[(Arc<str>, Option<Value>)]> {
         &self.data.reads
     }
 
@@ -1127,7 +1128,7 @@ impl Program {
                 let output = machine.meter(cx, None);
                 machine.record_environment_reads();
                 let value = machine.eval(cx, &mut frame, body)?;
-                let reads = machine.take_environment_reads()?;
+                let reads = machine.take_environment_reads();
                 let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentInitResult {
                     rendered,
@@ -1358,7 +1359,7 @@ impl Program {
                 let output = machine.meter(entry_cx(index), None);
                 machine.record_environment_reads();
                 let value = machine.eval(entry_cx(index), &mut frame, body)?;
-                let reads = machine.take_environment_reads()?;
+                let reads = machine.take_environment_reads();
                 let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentDispatchResult {
                     rendered,
