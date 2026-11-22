@@ -2353,6 +2353,59 @@ should read and discard the rest of an oversized body before it answers, or answ
 `Connection: close` and end the socket only after the response is flushed, and the test should
 then pass a few hundred times in a row.
 
+## Environment Values: What `add-environment-values` Left For Later
+
+### Limitations of the first version
+
+- **Handlers lose local provides.** An action handler runs in its component's environment, not in
+  the environment of a `provide` block written around the element that holds it. A handler that
+  reads `env.` inside a local `provide` sees the value from outside the block.
+- **A cascaded read can cause one extra render.** When a body overrides a value and then reads
+  another value whose default reads it, the instance tree records the second value as read beneath
+  the body's overrides. A root change to the overridden value leaves the node alone, which is
+  right, but the recorded value is then stale, so the next equal visit renders the node once more
+  for nothing. A precise check would track which sources of the value lie outside the body's
+  overrides.
+- **A read that fails beneath a body's overrides is never skipped.** When the instance tree cannot
+  read a cascaded value without the body's own overrides (its default fails there, say), it keeps
+  the read as unknown, so the node renders again on every visit and on every root change to a
+  value it reads, for as long as its body keeps that pattern. The same precise check would let it
+  be skipped.
+- **Restored instances have no recorded reads.** An instance restored from saved state has no read
+  list until it renders once, so a root value change does not reach it before then.
+- **A bundle is evaluated at every read.** A main-module `provide bundle` is evaluated each time a
+  read reaches it, as a default is. Hoisting it, like memoizing defaults below, changes operation
+  counts and so the cost model.
+- **Generated values are evaluated at load.** A generated module evaluates its top-level values
+  when it loads, in the environment of that moment, where the IR runtimes evaluate them where they
+  are read.
+- **Generated path overrides are not checked.** Generated code applies `env.size.width=…` without
+  checking that the field exists in the value it patches, where the IR runtimes refuse a path that
+  does not.
+- **`environment-cycle` appears when a program is built.** The check runs in program building, so
+  the editor shows it with the build's diagnostics rather than as the default is typed.
+- **Go to definition.** Not offered for `env.` reads and overrides, because the language service has
+  no definition query yet (see "Editor Navigation" above). Hover shows the declaration meanwhile.
+- **The hover's "Reads" list follows calls by name.** It follows functions and values a body names,
+  not a function-component used as an element, and not a value passed around and called later.
+
+### Later work
+
+- **Lazy local overrides.** A local override is evaluated where it is written, even when nothing
+  under it reads the value. Evaluating it at the first read would save work for overrides that are
+  rarely read, at the cost of a less obvious evaluation order.
+- **Values only the host sets.** An environment value with no default, which a program can read but
+  only the host can give, such as the window size.
+- **Standard host inputs.** A library of environment values every host is expected to set, such as
+  the color scheme, the locale and the reduced-motion preference.
+- **`$env` on host elements.** A host element carries no `$env` today, so a host that wants to set
+  `dir` or a CSS color scheme from the environment asks the runtime. Stamping host elements is easy
+  to add if hosts want it.
+- **Memoizing defaults.** A body that reads `env.color` ten times evaluates its default ten times.
+  Memoizing per environment would change operation counts, so the cost model would change with it.
+- **Record `with`.** Updating a record value in place of a whole `*.Update` patch, deferred as
+  separate work.
+
 ## Running NX IR Files From The CLI
 
 `retire-hir-interpreter` keeps `nxlang run <file.nx>` and leaves out running an `.nxir` file

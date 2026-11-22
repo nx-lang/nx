@@ -1976,3 +1976,249 @@ fn nodes_a_host_holds_outside_a_pass_stay_until_it_removes_them() {
     cells.visit("cell/2", &fresh, None, &options()).unwrap();
     assert_eq!(state(&cells, "cell/2"), json(r#"{ "picks": 0 }"#));
 }
+
+// ------------------------------------------------------------------------------------------------
+// Each node renders in its environment
+// ------------------------------------------------------------------------------------------------
+
+/// `Reader` shows `env.mode`, `Plain` reads nothing, and `Shout` reads `env.loud`, whose default
+/// reads `env.mode`. `Page` keeps a `dark` flag and provides `mode` around one `Reader` from it,
+/// and a fixed `mode` around another.
+const ENVIRONMENT: &str = "
+environment mode: string = \"light\"
+environment loud: string = { env.mode + \"!\" }
+component <Reader extends Node /> = {
+  <Label Text={env.mode} />
+}
+component <Plain extends Node /> = {
+  state { taps:int = 0 }
+  <Button Text=\"Plain\" onTapped=<State.Update taps={taps + 1} /> />
+}
+component <Shout extends Node /> = {
+  <Label Text={env.loud} />
+}
+component <Cascade extends Node /> = {
+  <Stack>{ provide env.mode=\"dark\" { <Label Text={env.loud} /> } }</Stack>
+}
+component <Page /> = {
+  state { dark:boolean = false }
+  <Stack>
+    <Reader />
+    <Reader env.mode={if dark { \"dark\" } else { \"dim\" }} />
+    <Reader env.mode=\"fixed\" />
+    <Stack env.mode=\"hosted\"><Reader /></Stack>
+    <Plain env.mode={if dark { \"dark\" } else { \"dim\" }} />
+    <Shout />
+    <Cascade />
+    <Button Text=\"Dark\" onTapped=<State.Update dark={!dark} /> />
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+const ENVIRONMENT_CHILDREN: [(&str, &str); 7] = [
+    ("root/reader", "Reader"),
+    ("root/provided", "Reader"),
+    ("root/fixed", "Reader"),
+    ("root/hosted", "Reader"),
+    ("root/plain", "Plain"),
+    ("root/shout", "Shout"),
+    ("root/cascade", "Cascade"),
+];
+
+/// A pass over the Page at `root` and each of its children, in the order the Page renders them.
+fn environment_pass(tree: &mut InstanceTree) {
+    let root = evaluated(tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    let output = rendered(tree, "root");
+    let mut readers = Vec::new();
+    collect(&output, "Reader", &mut readers);
+    let items = [
+        readers[0],
+        readers[1],
+        readers[2],
+        readers[3],
+        find(&output, "Plain", None).expect("a Plain"),
+        find(&output, "Shout", None).expect("a Shout"),
+        find(&output, "Cascade", None).expect("a Cascade"),
+    ];
+    for ((key, _), item) in ENVIRONMENT_CHILDREN.iter().zip(items) {
+        tree.visit(key, item, Some("root"), &options()).unwrap();
+    }
+    tree.finish();
+}
+
+fn environment_tree(roots: &[(&str, &str)]) -> InstanceTree {
+    let program = program(&format!("{CONTROLS}{ENVIRONMENT}"));
+    let roots = nx_ir_runtime::Environment::root(
+        roots
+            .iter()
+            .map(|(name, value)| (*name, NxValue::String((*value).to_string()))),
+    );
+    let mut tree = InstanceTree::with_environment(program, roots);
+    environment_pass(&mut tree);
+    tree
+}
+
+fn roots(values: &[(&str, &str)]) -> nx_ir_runtime::Environment {
+    nx_ir_runtime::Environment::root(
+        values
+            .iter()
+            .map(|(name, value)| (*name, NxValue::String((*value).to_string()))),
+    )
+}
+
+#[test]
+fn each_node_renders_in_the_environment_its_place_gives_it() {
+    let tree = environment_tree(&[]);
+    assert!(renders(&tree, "root/reader", "Label", "light"));
+    assert!(renders(&tree, "root/provided", "Label", "dim"));
+    assert!(renders(&tree, "root/fixed", "Label", "fixed"));
+    assert!(renders(&tree, "root/shout", "Label", "light!"));
+    assert!(renders(&tree, "root/cascade", "Label", "dark!"));
+    // The override is not a prop: the Reader's descriptor carries it to the tree, not its props.
+    assert_eq!(
+        tree.environment_value("root/provided", "mode", &options())
+            .unwrap(),
+        NxValue::String("dim".to_string())
+    );
+    assert_eq!(
+        tree.environment_value("root", "mode", &options()).unwrap(),
+        NxValue::String("light".to_string())
+    );
+}
+
+/// Review RF1: an override on an external component reaches the authored components in its
+/// content, and the external component's own output carries no `$env`.
+#[test]
+fn an_override_on_a_host_component_reaches_the_components_inside_it() {
+    let tree = environment_tree(&[]);
+    assert!(renders(&tree, "root/hosted", "Label", "hosted"));
+    let output = rendered(&tree, "root");
+    let mut stacks = Vec::new();
+    collect(&output, "Stack", &mut stacks);
+    for stack in stacks {
+        let NxValue::Record { properties, .. } = stack else {
+            panic!("a Stack is a record");
+        };
+        assert!(!properties.contains_key("$env"), "{stack:?}");
+    }
+}
+
+/// Review RF2: a body whose own override cascades through a default is left alone on a visit
+/// with the same descriptor, and when a root value it does not depend on changes.
+#[test]
+fn a_body_that_cascades_its_own_override_is_left_alone_by_an_equal_visit() {
+    let mut tree = environment_tree(&[]);
+    let cascade = rendered(&tree, "root/cascade");
+    environment_pass(&mut tree);
+    assert!(Arc::ptr_eq(&cascade, &rendered(&tree, "root/cascade")));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("mode", NxValue::String("night".to_string()))]),
+        &options(),
+    )
+    .unwrap();
+    // The body overrides `mode` itself, so the root's `mode` reaches none of what it read.
+    assert!(Arc::ptr_eq(&cascade, &rendered(&tree, "root/cascade")));
+    assert!(renders(&tree, "root/reader", "Label", "night"));
+}
+
+/// A read whose default fails beneath the body's own override still renders, and the node then
+/// renders again on every visit, since what it read cannot be checked there.
+#[test]
+fn a_read_that_fails_beneath_the_bodys_override_still_renders() {
+    let mut tree = open(
+        "
+environment divisor: int = 0
+environment ratio: int = { 10 / env.divisor }
+component <Card /> = {
+  <Stack>{ provide env.divisor=2 { <Label Text={\"\" + env.ratio} /> } }</Stack>
+}
+let root() = { <Card /> }
+",
+    );
+    assert!(renders(&tree, "root", "Label", "5"));
+    let card = rendered(&tree, "root");
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    assert!(renders(&tree, "root", "Label", "5"));
+    assert!(!Arc::ptr_eq(&card, &rendered(&tree, "root")));
+}
+
+#[test]
+fn the_tree_starts_from_the_root_values_a_host_gives() {
+    let tree = environment_tree(&[("mode", "night")]);
+    assert!(renders(&tree, "root/reader", "Label", "night"));
+    assert!(renders(&tree, "root/provided", "Label", "dim"));
+    assert!(renders(&tree, "root/shout", "Label", "night!"));
+}
+
+#[test]
+fn a_child_whose_override_changed_renders_again_only_if_it_reads_the_value() {
+    let mut tree = environment_tree(&[]);
+    tap(&mut tree, "root/plain", "Plain").unwrap();
+    let plain = rendered(&tree, "root/plain");
+    let reader = rendered(&tree, "root/reader");
+    tap(&mut tree, "root", "Dark").unwrap();
+    environment_pass(&mut tree);
+    // The provided Reader's descriptor changed only in the override around it, which it reads.
+    assert!(renders(&tree, "root/provided", "Label", "dark"));
+    // The Plain was handed the same props under another override it never reads: it is kept.
+    assert!(Arc::ptr_eq(&plain, &rendered(&tree, "root/plain")));
+    assert_eq!(state(&tree, "root/plain"), json(r#"{ "taps": 1 }"#));
+    assert!(Arc::ptr_eq(&reader, &rendered(&tree, "root/reader")));
+}
+
+#[test]
+fn new_root_values_render_again_only_the_nodes_that_read_them() {
+    let mut tree = environment_tree(&[]);
+    tap(&mut tree, "root/plain", "Plain").unwrap();
+    environment_pass(&mut tree);
+    let held: BTreeMap<&str, Arc<NxValue>> = ENVIRONMENT_CHILDREN
+        .iter()
+        .map(|(key, _)| (*key, rendered(&tree, key)))
+        .chain([("root", rendered(&tree, "root"))])
+        .collect();
+
+    tree.set_environment(roots(&[("mode", "night")]), &options())
+        .unwrap();
+
+    assert!(renders(&tree, "root/reader", "Label", "night"));
+    // Through a default: `loud` reads `mode`.
+    assert!(renders(&tree, "root/shout", "Label", "night!"));
+    // Hidden by an override around them, and reading nothing.
+    for key in ["root", "root/provided", "root/fixed", "root/plain"] {
+        assert!(Arc::ptr_eq(&held[key], &rendered(&tree, key)), "{key}");
+    }
+    assert_eq!(state(&tree, "root/plain"), json(r#"{ "taps": 1 }"#));
+    assert!(!tree.is_settled("root/reader"));
+
+    // The same values again change nothing.
+    let reader = rendered(&tree, "root/reader");
+    tree.set_environment(roots(&[("mode", "night")]), &options())
+        .unwrap();
+    assert!(Arc::ptr_eq(&reader, &rendered(&tree, "root/reader")));
+    // A later pass renders with the new roots too.
+    environment_pass(&mut tree);
+    assert!(renders(&tree, "root/reader", "Label", "night"));
+}
+
+#[test]
+fn a_refused_root_value_leaves_the_tree_as_it_was() {
+    let mut tree = environment_tree(&[]);
+    let reader = rendered(&tree, "root/reader");
+    let wrong = nx_ir_runtime::Environment::root([("mode", NxValue::Int(5))]);
+    let error = tree.set_environment(wrong, &options()).unwrap_err();
+    assert_eq!(error.code(), "nx-ir-boundary-type", "{error}");
+    let unknown = roots(&[("colour", "red")]);
+    let error = tree.set_environment(unknown, &options()).unwrap_err();
+    assert_eq!(error.code(), "nx-ir-environment-name", "{error}");
+    assert!(Arc::ptr_eq(&reader, &rendered(&tree, "root/reader")));
+    assert_eq!(
+        tree.environment_value("root/reader", "mode", &options())
+            .unwrap(),
+        NxValue::String("light".to_string())
+    );
+}

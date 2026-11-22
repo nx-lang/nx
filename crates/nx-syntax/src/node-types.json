@@ -547,6 +547,10 @@
           "named": true
         },
         {
+          "type": "provide_expression",
+          "named": true
+        },
+        {
           "type": "values_braced_expression",
           "named": true
         }
@@ -930,6 +934,52 @@
     }
   },
   {
+    "type": "environment_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      },
+      "visibility": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "visibility_modifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "exists_expression",
     "named": true,
     "fields": {
@@ -1268,11 +1318,19 @@
           "named": true
         },
         {
+          "type": "environment_definition",
+          "named": true
+        },
+        {
           "type": "function_definition",
           "named": true
         },
         {
           "type": "import_statement",
+          "named": true
+        },
+        {
+          "type": "provide_definition",
           "named": true
         },
         {
@@ -1720,6 +1778,76 @@
         "types": [
           {
             "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "provide_definition",
+    "named": true,
+    "fields": {
+      "bundle": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "element",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "values_braced_expression",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "provide_expression",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "values_braced_expression",
+            "named": true
+          }
+        ]
+      },
+      "override": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "property_value",
             "named": true
           }
         ]
@@ -2658,6 +2786,10 @@
           "named": true
         },
         {
+          "type": "provide_expression",
+          "named": true
+        },
+        {
           "type": "unit_literal",
           "named": true
         },
@@ -2949,6 +3081,10 @@
     "named": true
   },
   {
+    "type": "environment",
+    "named": false
+  },
+  {
     "type": "escaped_at",
     "named": true
   },
@@ -3064,6 +3200,10 @@
   },
   {
     "type": "private",
+    "named": false
+  },
+  {
+    "type": "provide",
     "named": false
   },
   {

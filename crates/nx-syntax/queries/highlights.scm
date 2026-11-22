@@ -227,3 +227,10 @@
 
 ;; Error nodes
 (ERROR) @error
+
+;; Environment values: `environment` and `provide` are keywords only where they start these forms.
+(environment_definition "environment" @keyword)
+(environment_definition
+  name: (identifier) @variable)
+(provide_definition "provide" @keyword)
+(provide_expression "provide" @keyword)

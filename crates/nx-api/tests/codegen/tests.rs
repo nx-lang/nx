@@ -134,9 +134,11 @@ fn execute_generated_js_program_module_script(
     fs::write(dir.path().join("program.js"), module.source_text).expect("program module");
 
     let program_url = format!("file://{}", dir.path().join("program.js").display());
+    let runtime_url = format!("file://{}", dir.path().join("nx-runtime.js").display());
     let script = format!(
         "import({:?}).then((m) => {{ {} }});",
-        program_url, script_body
+        program_url,
+        script_body.replace("__NX_RUNTIME_URL__", &runtime_url)
     );
     let output = node_command()
         .arg("--input-type=module")
@@ -883,6 +885,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                 identity: "main.nx".to_string(),
             },
             imports: Vec::new(),
+            provides: Vec::new(),
             declarations: vec![CodegenDeclaration {
                 reference: root_reference.clone(),
                 span: TextSpan::default(),
@@ -3550,4 +3553,289 @@ fn conditional_properties_preserve_updates_numeric_matches_and_content() {
         );
         assert_generated_typescript_artifact_type_checks(&artifact);
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Environment values in generated code
+// ------------------------------------------------------------------------------------------------
+
+const ENVIRONMENT_SOURCE: &str = r#"
+type Mode = light | dark
+type Size = { width:int height:int }
+environment locale: string = "en-US"
+environment colorMode: Mode = light
+environment size: Size = <Size width=10 height=20 />
+environment label: string = { env.locale + "!" }
+let theme: env.Update = <env.Update locale="de-DE" />
+provide env.size.width = 12
+component <Badge /> = { <Text value={env.locale} /> }
+component <Swatch /> = { <Text value={if env.colorMode == Mode.dark { "night" } else { "day" }} /> }
+external component <Text value:string />
+let label() = { provide env.locale="fr-FR" { env.locale } }
+let shout() = { provide env.locale="fr-FR" { env.label } }
+let size() = { provide env.size.height=5 { env.size } }
+let mode() = { env.colorMode }
+let wrapped() = { provide env.colorMode=dark { <Badge env.locale="it-IT" /> } }
+let bundle() = { theme }
+"#;
+
+/// What the IR runtime gives for `function` under the root values `roots`, as JSON.
+fn ir_environment_result(function: &str, roots: &[(&str, serde_json::Value)]) -> Value {
+    let program = crate::ir_runtime_tests::program(ENVIRONMENT_SOURCE);
+    let environment = nx_ir_runtime::Environment::root(roots.iter().map(|(name, value)| {
+        (
+            *name,
+            nx_value::NxValue::from_json_str(&value.to_string()).expect("root value"),
+        )
+    }));
+    let options = nx_ir_runtime::RuntimeOptions {
+        environment,
+        ..nx_ir_runtime::RuntimeOptions::default()
+    };
+    let value = program
+        .evaluate_function(function, &[], &options)
+        .unwrap_or_else(|error| panic!("{function}: {error}"));
+    serde_json::from_str(&value.to_json_string().expect("json")).expect("json value")
+}
+
+#[test]
+fn a_generated_function_reads_a_provided_value() {
+    let artifact = artifact_from_source(ENVIRONMENT_SOURCE);
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        "console.log(JSON.stringify([m.label(), m.shout(), m.size(), m.mode(), m.wrapped(), m.bundle()]));",
+    );
+    let actual: Value = serde_json::from_str(&output).expect("json output");
+    let expected = Value::Array(
+        ["label", "shout", "size", "mode", "wrapped", "bundle"]
+            .iter()
+            .map(|function| ir_environment_result(function, &[]))
+            .collect(),
+    );
+    assert_eq!(actual, expected);
+    assert_eq!(actual[0], "fr-FR");
+    assert_eq!(
+        actual[2],
+        serde_json::json!({ "$type": "Size", "width": 12, "height": 5 })
+    );
+}
+
+#[test]
+fn a_generated_component_reads_a_root_value_as_the_ir_runtime_does() {
+    let artifact = artifact_from_source(ENVIRONMENT_SOURCE);
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"const dark = m.nxEnvironment({ colorMode: "dark" });
+           const swatch = m.SwatchSchema.initializeJson({}, { environment: dark }).rendered;
+           const mode = m.nxWithEnvironment(dark, () => m.mode());
+           const wrapped = m.wrapped();
+           const badge = m.BadgeSchema.evaluateJson(wrapped, undefined, { environment: m.nxEnvironment().enter(wrapped) });
+           // A `$env` entry with a path is checked against the field it names, as the runtimes check it.
+           const size = wrapped.$env.find((entry) => entry.value.endsWith("::colorMode")).value.replace("::colorMode", "::size");
+           const sized = (path, to) => m.nxEnvironment().enter({ $type: "Badge", $env: [{ value: size, path, to }] });
+           const narrow = m.nxWithEnvironment(sized(["width"], 3), () => m.size());
+           const errors = [];
+           for (const run of [
+             () => m.nxWithEnvironment(m.nxEnvironment({ colourMode: "dark" }), () => m.mode()),
+             () => m.nxWithEnvironment(m.nxEnvironment({ colorMode: "dim" }), () => m.mode()),
+             () => m.nxEnvironment().enter({ $type: "Badge", $env: 5 }),
+             () => m.nxWithEnvironment(sized(["width"], "wide"), () => m.size()),
+             () => m.nxWithEnvironment(sized(["depth"], 3), () => m.size()),
+           ]) {
+             try { run(); errors.push("none"); } catch (error) { errors.push(error.diagnostics[0].code); }
+           }
+           console.log(JSON.stringify({ swatch, mode, badge, narrow, errors }));"#,
+    );
+    let actual: Value = serde_json::from_str(&output).expect("json output");
+    assert_eq!(
+        actual["swatch"],
+        serde_json::json!({ "$type": "Text", "value": "night" })
+    );
+    assert_eq!(
+        actual["mode"],
+        ir_environment_result("mode", &[("colorMode", serde_json::json!("dark"))])
+    );
+    // The descriptor's `$env` is what `enter` reads, so the child renders in it.
+    assert_eq!(
+        actual["badge"],
+        serde_json::json!({ "$type": "Text", "value": "it-IT" })
+    );
+    assert_eq!(
+        actual["errors"],
+        serde_json::json!([
+            "nx-ir-environment-name",
+            "invalid-enum",
+            "nx-ir-boundary-type",
+            "invalid-field",
+            "nx-ir-environment"
+        ])
+    );
+    assert_eq!(
+        actual["narrow"],
+        serde_json::json!({ "$type": "Size", "width": 3, "height": 5 })
+    );
+}
+
+#[test]
+fn generated_environment_typescript_type_checks() {
+    assert_generated_typescript_artifact_type_checks(&artifact_from_source(ENVIRONMENT_SOURCE));
+}
+
+/// Spec: "A read of an imported value", through an alias, and "A later override applies on an
+/// earlier one", in generated JavaScript.
+#[test]
+fn a_read_through_an_alias_and_stacked_overrides_run_in_generated_code() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/design.nx",
+                "export type Size = { width:int height:int }\nexport environment space: int = 4\nexport environment size: Size = <Size width=10 height=20 />",
+            ),
+            (
+                "app/main.nx",
+                "import \"./design.nx\" as design\nlet gap() = { env.space }\nlet sized() = { provide env.size=<design.Size width=1 height=2 /> env.size.width=9 { \"\" + env.size.width + \",\" + env.size.height } }",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let output = execute_generated_js_program_module_script(
+        &artifact,
+        r#"console.log(JSON.stringify([m.gap(), m.sized()]));"#,
+    );
+    assert_eq!(output, r#"[4,"9,2"]"#);
+}
+
+/// Spec: "An unknown and an ambiguous read": the error names both modules.
+#[test]
+fn an_ambiguous_read_names_both_modules() {
+    let modules = [
+        ("a.nx", "export environment colorMode: string = \"light\""),
+        ("b.nx", "export environment colorMode: string = \"dark\""),
+        (
+            "app.nx",
+            "import \"./a.nx\"\nimport \"./b.nx\"\nlet root() = { env.colorMode }",
+        ),
+    ]
+    .iter()
+    .map(|(identity, source)| NxWorkspaceModule::from_source(*identity, *source).expect("module"))
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    let diagnostics =
+        build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+            .expect_err("the read is ambiguous");
+    let ambiguous = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code.as_deref() == Some("ambiguous-environment-value"))
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert!(
+        ambiguous.message.contains("a.nx") && ambiguous.message.contains("b.nx"),
+        "{}",
+        ambiguous.message
+    );
+}
+
+#[test]
+fn a_program_module_takes_the_entry_modules_provides() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/design.nx",
+                "export environment space: int = 4\nexport environment radius: int = 2",
+            ),
+            (
+                "app/main.nx",
+                "import \"./design.nx\"\nprovide env.space = 8\nlet sizes() = { \"\" + env.space + \",\" + env.radius }",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let output = execute_generated_js_program_module_script(
+        &artifact,
+        r#"import("__NX_RUNTIME_URL__").then((runtime) => {
+             const rooted = runtime.nxWithEnvironment(runtime.nxEnvironment({ radius: 3 }), () => m.sizes());
+             console.log(JSON.stringify([m.sizes(), rooted]));
+           });"#,
+    );
+    assert_eq!(output, r#"["8,2","8,3"]"#);
+}
+
+fn codegen_error_codes(artifact: &ProgramArtifact) -> Vec<String> {
+    match build_codegen_program(artifact) {
+        Ok(_) => Vec::new(),
+        Err(error) => error
+            .diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code().map(str::to_string))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_default_that_reads_itself_is_an_environment_cycle() {
+    let artifact = artifact_from_source(
+        "environment a: int = { env.b + 1 }
+environment b: int = { env.a + 1 }
+environment c: int = { twice() }
+let twice(): int = { env.c * 2 }
+environment d: int = 4
+provide env.d = { env.d + 1 }
+let root() = { env.d }",
+    );
+    let error = build_codegen_program(&artifact).expect_err("cycles are refused");
+    let messages = error
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.code().unwrap_or_default().to_string(),
+                diagnostic.message().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages.iter().all(|(code, _)| code == "environment-cycle"));
+    assert!(messages[0].1.contains("'a'") && messages[0].1.contains("'b'"));
+    assert!(messages[2].1.contains("'twice'"));
+    // A provide that reads the value it sets sees the sources after it, and is no cycle.
+    let artifact = artifact_from_source(
+        "environment d: int = 4\nprovide env.d = { env.d + 1 }\nlet root() = { env.d }",
+    );
+    assert_eq!(codegen_error_codes(&artifact), Vec::<String>::new());
+}
+
+#[test]
+fn a_provide_in_an_imported_module_is_refused() {
+    let modules = [
+        (
+            "theme.nx",
+            "export environment space: int = 4\nprovide env.space = 8",
+        ),
+        (
+            "app.nx",
+            "import \"./theme.nx\"\nlet root() = { env.space }",
+        ),
+    ]
+    .iter()
+    .map(|(identity, source)| NxWorkspaceModule::from_source(*identity, *source).expect("module"))
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    let diagnostics =
+        build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+            .expect_err("the provide is refused");
+    let refused = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code.as_deref() == Some("provide-outside-main-module"))
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(refused.labels[0].file, "theme.nx");
+    // The module nothing imports may hold them.
+    let modules = [(
+        "theme.nx",
+        "export environment space: int = 4\nprovide env.space = 8\nlet root() = { env.space }",
+    )]
+    .iter()
+    .map(|(identity, source)| NxWorkspaceModule::from_source(*identity, *source).expect("module"))
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    build_workspace_program_artifact(&workspace, "theme.nx", &ProgramBuildContext::empty())
+        .expect("a main module's provide is allowed");
 }

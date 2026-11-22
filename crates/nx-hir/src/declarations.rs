@@ -23,10 +23,20 @@ pub struct DuplicateDeclarationError {
 
 impl DuplicateDeclarationError {
     pub fn code(&self) -> &'static str {
-        "duplicate-declaration"
+        if crate::environment_value_name(self.name.as_str()).is_some() {
+            "duplicate-environment"
+        } else {
+            "duplicate-declaration"
+        }
     }
 
     pub fn message(&self) -> String {
+        if let Some(simple) = crate::environment_value_name(self.name.as_str()) {
+            return format!(
+                "Environment value '{simple}' is declared more than once in this module; each \
+                 needs its own name"
+            );
+        }
         format!(
             "'{}' is declared more than once in this module; top-level names must be unique",
             self.name

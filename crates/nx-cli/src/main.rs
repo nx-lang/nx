@@ -15,7 +15,9 @@ use nx_api::codegen::{
     emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
     NxIrEmitOptions,
 };
-use nx_api::ir_runtime::{FunctionValue, LinkOptions, PreparedModule, Program, RuntimeOptions};
+use nx_api::ir_runtime::{
+    Environment, FunctionValue, LinkOptions, PreparedModule, Program, RuntimeOptions,
+};
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
     NxDiagnostic, NxWorkspace, ProgramArtifact, ProgramBuildContext,
@@ -61,6 +63,11 @@ enum Commands {
         /// Write output to a file instead of stdout
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Set an environment value's root value, as `name=value`; may be repeated. The value is
+        /// a bare word for a union case or a string, or JSON for anything else
+        #[arg(long = "env", value_name = "NAME=VALUE")]
+        env: Vec<String>,
     },
 
     /// Generate language-specific type definitions from an NX file, library directory, or
@@ -190,7 +197,8 @@ fn main() -> ExitCode {
             file,
             format,
             output,
-        } => run_file(&file, format, output.as_ref()),
+            env,
+        } => run_file(&file, format, output.as_ref(), &env),
         Commands::Typegen {
             file,
             language,
@@ -239,7 +247,85 @@ fn explain_ir_artifact(path: &Path) -> ExitCode {
     }
 }
 
-fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> ExitCode {
+/// The `--env name=value` arguments, as name and value text.
+fn environment_args(args: &[String]) -> Result<Vec<(String, String)>, String> {
+    let mut values = Vec::with_capacity(args.len());
+    for arg in args {
+        let Some((name, text)) = arg.split_once('=') else {
+            return Err(format!(
+                "Error: --env '{arg}' is not of the form name=value"
+            ));
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(format!("Error: --env '{arg}' names no environment value"));
+        }
+        values.push((name.to_string(), text.to_string()));
+    }
+    Ok(values)
+}
+
+/// The root environment the `--env` arguments give. A value of an environment value declared
+/// `string` is its text as written, so `--env version=1.0` is the string `1.0`; any other value
+/// is JSON, or a bare word, which is a union case's name or a string. The runtime checks each
+/// against its declared type.
+fn environment_from_args(program: &ProgramArtifact, args: Vec<(String, String)>) -> Environment {
+    Environment::root(args.into_iter().map(|(name, text)| {
+        let value = if environment_is_string(program, &name) {
+            nx_value::NxValue::String(text)
+        } else {
+            nx_value::NxValue::from_json_str(&text).unwrap_or(nx_value::NxValue::String(text))
+        };
+        (name, value)
+    }))
+}
+
+/// Whether every environment value of the program `name` can name is declared `string`.
+fn environment_is_string(program: &ProgramArtifact, name: &str) -> bool {
+    let (module, simple) = match name.rsplit_once("::") {
+        Some((module, simple)) => (Some(module), simple),
+        None => (None, name),
+    };
+    let item_name = format!("env.{simple}");
+    let mut types = program
+        .root_modules
+        .iter()
+        .chain(
+            program
+                .libraries
+                .iter()
+                .flat_map(|library| library.modules.iter()),
+        )
+        .filter(|artifact| module.is_none_or(|module| artifact.file_name == module))
+        .filter_map(|artifact| artifact.lowered_module.as_deref())
+        .flat_map(|lowered| lowered.items().iter())
+        .filter_map(|item| match item {
+            Item::Value(value) if value.name.as_str() == item_name => value.ty.as_ref(),
+            _ => None,
+        })
+        .peekable();
+    types.peek().is_some()
+        && types.all(|ty| {
+            matches!(
+                nx_hir::ast::spell_type_ref(ty).as_str(),
+                "string" | "string?"
+            )
+        })
+}
+
+fn run_file(
+    path: &PathBuf,
+    format: OutputFormat,
+    output: Option<&PathBuf>,
+    env: &[String],
+) -> ExitCode {
+    let environment = match environment_args(env) {
+        Ok(environment) => environment,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::from(1);
+        }
+    };
     // Check if file exists
     if !path.exists() {
         eprintln!("Error: File not found: {}", path.display());
@@ -289,7 +375,8 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
         return ExitCode::from(1);
     }
 
-    let value = match execute_program(&program) {
+    let environment = environment_from_args(&program, environment);
+    let value = match execute_program(&program, environment) {
         Ok(value) => value,
         Err(message) => {
             eprintln!("{message}");
@@ -318,7 +405,10 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
 }
 
 /// Each invocation compiles, links and receives a fresh finite operation budget.
-fn execute_program(artifact: &ProgramArtifact) -> Result<FunctionValue, String> {
+fn execute_program(
+    artifact: &ProgramArtifact,
+    environment: Environment,
+) -> Result<FunctionValue, String> {
     let images = emit_nx_ir(
         artifact,
         &NxIrEmitOptions {
@@ -347,6 +437,7 @@ fn execute_program(artifact: &ProgramArtifact) -> Result<FunctionValue, String> 
             &[],
             &RuntimeOptions {
                 max_operations: Some(1_000_000),
+                environment,
                 ..RuntimeOptions::default()
             },
         )
@@ -1196,7 +1287,7 @@ mod tests {
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        let error = execute_program(&limited).unwrap_err();
+        let error = execute_program(&limited, Environment::default()).unwrap_err();
         assert!(error.contains("nx-ir-resource-limit"), "{error}");
         assert!(error.to_lowercase().contains("operation"), "{error}");
         let small = build_program_artifact_from_source(
@@ -1207,11 +1298,47 @@ mod tests {
         .unwrap();
         for _ in 0..2 {
             assert_eq!(
-                format_output(&small, &execute_program(&small).unwrap(), OutputFormat::Nx).unwrap(),
+                format_output(
+                    &small,
+                    &execute_program(&small, Environment::default()).unwrap(),
+                    OutputFormat::Nx
+                )
+                .unwrap(),
                 "42"
             );
         }
         assert_eq!(RuntimeOptions::default().max_operations, None);
+    }
+
+    /// Spec: "The CLI takes root environment values", and review RF7.
+    #[test]
+    fn env_arguments_give_root_values_read_against_their_declared_types() {
+        let artifact = build_program_artifact_from_source(
+            "type ColorMode = light | dark\n\
+             environment colorMode: ColorMode = light\n\
+             environment version: string = \"0\"\n\
+             environment scale: int = 1\n\
+             let mode() = { if env.colorMode is { light => \"light\" dark => \"dark\" } }\n\
+             let root() = { mode() + \" \" + env.version + \" \" + env.scale }",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .unwrap();
+        let run = |args: &[&str]| {
+            let args =
+                environment_args(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())?;
+            let value = execute_program(&artifact, environment_from_args(&artifact, args))?;
+            format_output(&artifact, &value, OutputFormat::Nx)
+        };
+        assert_eq!(
+            run(&["colorMode=dark", "version=1.0", "scale=3"]).unwrap(),
+            "dark 1.0 3"
+        );
+        let wrong = run(&["colorMode=dim"]).unwrap_err();
+        assert!(wrong.contains("colorMode"), "{wrong}");
+        let unknown = run(&["colourMode=dark"]).unwrap_err();
+        assert!(unknown.contains("nx-ir-environment-name"), "{unknown}");
+        assert!(run(&["colorMode"]).unwrap_err().contains("name=value"));
     }
 
     #[test]
@@ -1222,7 +1349,7 @@ mod tests {
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        let error = execute_program(&artifact).unwrap_err();
+        let error = execute_program(&artifact, Environment::default()).unwrap_err();
         assert!(
             error.contains("nx-ir-division-by-zero") && error.contains("main.nx:1:"),
             "{error}"
@@ -1253,7 +1380,7 @@ mod tests {
             ("let down(n:int): int = { if n == 0 { 0 } else { down(n - 1) } } let root() = { down(120) }", "nx-ir-resource-limit"),
         ] {
             let artifact = build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty()).unwrap();
-            let text = execute_program(&artifact).unwrap_err();
+            let text = execute_program(&artifact, Environment::default()).unwrap_err();
             assert!(text.contains("error") && text.contains(code) && text.contains("main.nx"), "{text}");
             assert!(!text.contains("<unknown>") && !text.contains(" : "), "{text}");
         }
@@ -1267,14 +1394,14 @@ mod tests {
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        assert!(execute_program(&artifact).is_ok());
+        assert!(execute_program(&artifact, Environment::default()).is_ok());
         let rejected = build_program_artifact_from_source(
             "type User = { age:int = 30 }\nlet root() = { User() }",
             "main.nx",
             &ProgramBuildContext::empty(),
         )
         .unwrap();
-        let error = execute_program(&rejected).unwrap_err();
+        let error = execute_program(&rejected, Environment::default()).unwrap_err();
         assert!(error.contains("record-construction-requires-element"));
     }
 
@@ -1291,7 +1418,7 @@ mod tests {
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
     }
@@ -1317,7 +1444,7 @@ let root() = { Math.addOne(41) }"#,
         .expect("root file");
 
         let program = build_import_resolved_program(&app_dir.join("main.nx"));
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
         let result = result.expect("qualified imported function should execute");
 
         assert_eq!(
@@ -1347,7 +1474,7 @@ let root() = { Ui.title() }"#,
         .expect("root file");
 
         let program = build_import_resolved_program(&app_dir.join("main.nx"));
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
         let result = result.expect("qualified imported function should execute");
 
         assert_eq!(
@@ -1389,7 +1516,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1411,7 +1538,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1433,7 +1560,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1463,7 +1590,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let output = format_output(&program, &result.unwrap(), OutputFormat::Nx).unwrap();
@@ -1484,7 +1611,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -1506,7 +1633,7 @@ let root() = { Ui.title() }"#,
 
         let source = fs::read_to_string(&path).unwrap();
         let program = load_source_program_for_run(&source, &path).unwrap();
-        let result = execute_program(&program);
+        let result = execute_program(&program, Environment::default());
 
         assert!(result.is_ok());
         let value = result.unwrap();
@@ -3502,7 +3629,7 @@ let z = {
         let evaluate = |source: &str| -> Result<(String, String), String> {
             fs::write(&main, source).expect("main file");
             let program = build_program_reporting_errors(&main)?;
-            let value = execute_program(&program)?;
+            let value = execute_program(&program, Environment::default())?;
             Ok((
                 format_output(&program, &value, OutputFormat::Nx)?,
                 format_output(&program, &value, OutputFormat::Json)?,
@@ -3528,7 +3655,7 @@ let z = {
         let (_dir, path) = create_temp_nx_file(source);
         let program =
             build_program_reporting_errors(&path).expect("the program should analyze cleanly");
-        execute_program(&program)
+        execute_program(&program, Environment::default())
             .expect("root should evaluate")
             .canonical()
             .clone()

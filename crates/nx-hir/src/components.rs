@@ -1001,6 +1001,52 @@ pub struct StringConversions {
 /// <para>Existing expressions keep their ids, so the types recorded for them stay valid. The nodes
 /// this creates are returned so the caller can record their type, which is `string` for every
 /// one.</para>
+/// Fills in the binding of every environment read and override the type checker resolved.
+///
+/// <para>`bindings` is keyed by the read's expression, and by an override's value expression.
+/// Code generation resolves the binding as it resolves any value reference, so an environment
+/// value is reached by its declaration wherever it was declared.</para>
+pub fn apply_environment_bindings(module: &mut PreparedModule, bindings: &FxHashMap<ExprId, Name>) {
+    if bindings.is_empty() {
+        return;
+    }
+    let raw_module = module.raw_module_mut();
+    let ids = raw_module
+        .exprs()
+        .filter(|(_, expr)| {
+            matches!(
+                expr,
+                ast::Expr::EnvRead { .. } | ast::Expr::Provide { .. } | ast::Expr::EnvUpdate { .. }
+            )
+        })
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    for id in ids {
+        match raw_module.expr_mut(id) {
+            ast::Expr::EnvRead { binding, .. } => {
+                if let Some(resolved) = bindings.get(&id) {
+                    *binding = Some(resolved.clone());
+                }
+            }
+            ast::Expr::Provide { overrides, .. } | ast::Expr::EnvUpdate { overrides, .. } => {
+                for provided in overrides {
+                    if let Some(resolved) = bindings.get(&provided.value) {
+                        provided.binding = Some(resolved.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for provide in raw_module.provides_mut() {
+        if let crate::ProvideDecl::Override(provided) = provide {
+            if let Some(resolved) = bindings.get(&provided.value) {
+                provided.binding = Some(resolved.clone());
+            }
+        }
+    }
+}
+
 pub fn apply_string_conversions(
     module: &mut PreparedModule,
     conversions: &StringConversions,
@@ -1490,6 +1536,20 @@ fn collect_handler_rewrites_in_expr(
         | ast::Expr::Error(_) => {}
         ast::Expr::ConstraintCheck { expr, .. } => {
             collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
+        }
+        ast::Expr::EnvRead { .. } => {}
+        ast::Expr::Provide {
+            overrides, body, ..
+        } => {
+            for provided in overrides {
+                collect_handler_rewrites_in_expr(module, provided.value, owner, rewrites);
+            }
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
+        }
+        ast::Expr::EnvUpdate { overrides, .. } => {
+            for provided in overrides {
+                collect_handler_rewrites_in_expr(module, provided.value, owner, rewrites);
+            }
         }
         ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);

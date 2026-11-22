@@ -191,6 +191,51 @@ let chartFade(): Paint =
 Preserve meaningful whitespace in textual content. Do not reflow prose, strings, or mixed
 text and elements solely to satisfy indentation or line length.
 
+## Environment values and `provide`
+
+Declare environment values together, after the types they use, with a doc comment on each. Put
+`env.` attributes first on an element, before its properties, so the overrides read as the context
+the element is shown in rather than as its data.
+
+Keep a short `provide` block on one line. When the body needs more, keep the overrides beside
+`provide` and the opening `{`, indent the body by 2 spaces, and put the closing `}` on its own line
+aligned with `provide`. When the overrides themselves no longer fit, put each on its own line,
+indented by 2 spaces, with the `{` on the line after them, aligned with `provide`.
+
+Put a main module's top-level provides after its imports and before its declarations, one per line
+and with no blank lines between them, bundles first so that the single values after them read as
+the exceptions to the bundle.
+
+```nx
+type ColorMode = light | dark
+
+/// The color scheme the program is shown in.
+environment colorMode: ColorMode = light
+
+/// The language text is shown in.
+environment locale: string = "en-US"
+
+external component <Text value: string />
+
+let banner() = { provide env.locale="fr-FR" { <Text value="Bonjour" /> } }
+
+let footer() = {
+  provide env.colorMode=dark env.locale="de-DE" {
+    <Text value="Impressum" />
+    <Text env.colorMode=light value="Kontakt" />
+  }
+}
+
+let legal() = {
+  provide
+    env.colorMode=dark
+    env.locale="fr-CA"
+  {
+    <Text value="Mentions légales" />
+  }
+}
+```
+
 ## Comments and documentation
 
 Use `//` for implementation notes and file overviews, and `///` for API documentation.

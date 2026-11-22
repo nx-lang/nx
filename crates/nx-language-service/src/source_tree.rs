@@ -186,6 +186,8 @@ pub enum SourceRole {
     Loop,
     /// A name a `for` binds: its item or its index.
     Binding,
+    /// A `provide` block, with its `env.` overrides as attributes and its body.
+    Provide,
     /// A comment, with its text.
     Comment,
     /// A `///` doc comment, with its text.
@@ -1130,6 +1132,7 @@ impl<'a> TreeBuilder<'a> {
             SyntaxKind::VALUE_FOR_EXPRESSION | SyntaxKind::ELEMENTS_FOR_EXPRESSION => {
                 self.for_loop(node, parent, segment, flags)
             }
+            SyntaxKind::PROVIDE_EXPRESSION => self.provide(node, parent, segment, flags),
             SyntaxKind::EMBED_BRACED_EXPRESSION => {
                 let index = self.push_expression(SourceRole::Embed, node, parent, segment, flags);
                 self.items(node, index, "");
@@ -1600,6 +1603,28 @@ impl<'a> TreeBuilder<'a> {
                     self.nodes[binding].name = Some(name);
                 }
                 Some("iterable") => self.expression(child, Some(index), "in".to_string(), &[]),
+                Some("body") => self.branch(child, index, ""),
+                _ => {}
+            }
+        }
+    }
+
+    /// `provide env.locale="fr-FR" { … }`: each override an attribute, as on an element, then
+    /// the body.
+    fn provide(
+        &mut self,
+        node: SyntaxNode<'_>,
+        parent: Option<usize>,
+        segment: String,
+        flags: &[SourceFlag],
+    ) {
+        let index = self.push_expression(SourceRole::Provide, node, parent, segment, flags);
+        for (field, child) in fields(node) {
+            if self.trivia(child, Some(index)) || !child.raw().is_named() {
+                continue;
+            }
+            match field {
+                Some("override") => self.attribute(child, index, "", &[]),
                 Some("body") => self.branch(child, index, ""),
                 _ => {}
             }

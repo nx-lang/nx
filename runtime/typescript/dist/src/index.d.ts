@@ -32,6 +32,11 @@ export declare const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
  * Value constraints: the `constrained` type kind, the `check` node and the `interval` pattern.
  */
 export declare const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
+/**
+ * Environment values: the `environment` and `provides` declaration kinds and the `envRead`,
+ * `envProvide` and `envUpdate` nodes.
+ */
+export declare const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export declare const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
 /**
@@ -133,6 +138,12 @@ export declare const nodeKinds: {
     readonly check: 28;
     /** `[29, type]`: a pattern-list entry that matches a scrutinee in the type's interval. */
     readonly interval: 29;
+    /** `env.name`: `[30, ref]`, the environment value the reference names at the read. */
+    readonly envRead: 30;
+    /** `provide overrides { body }`: `[31, overrides, body]`. */
+    readonly envProvide: 31;
+    /** `<env.Update … />`: `[32, overrides]`, the overrides as one bundle value. */
+    readonly envUpdate: 32;
 };
 /**
  * The type kinds. `2` (`array`) and `3` (`nullable`) were retired with schema 5, replaced by
@@ -166,6 +177,10 @@ export declare const declarationKinds: {
     readonly component: 3;
     readonly union: 4;
     readonly typeAlias: 5;
+    /** `env.name`: `[6, name, default, type]`. */
+    readonly environment: 6;
+    /** The entry module's top-level provides: `[7, "$provides", provides]`. */
+    readonly provides: 7;
 };
 export type NxDiagnosticSeverity = "error" | "warning" | "info" | "hint";
 export interface NxIrSourceSpan {
@@ -372,7 +387,25 @@ export type PreparedDeclarationKind = {
     readonly propertyTarget: NxIrReference | undefined;
 } | {
     readonly tag: "typeAlias";
+} | {
+    readonly tag: "environment";
+    /** Node index of the default, evaluated at each read that reaches it. */
+    readonly default: number;
+    readonly ty: PreparedType;
+} | {
+    readonly tag: "provides";
+    readonly provides: readonly PreparedProvide[];
 };
+/**
+ * One top-level provide of a module: `provide env.name.path = value` with a target, and
+ * `provide bundle` without one.
+ */
+export interface PreparedProvide {
+    readonly target: NxIrReference | undefined;
+    readonly path: readonly string[];
+    /** Node index of the value. */
+    readonly value: number;
+}
 export interface PreparedDeclaration {
     readonly index: number;
     readonly name: string;
@@ -530,6 +563,14 @@ export interface NxRuntimeOptions {
      * give each call its own.</para>
      */
     readonly origins?: NxRuntimeOrigins;
+    /**
+     * The environment the call runs in: the root values a host gives, and the overrides of each
+     * component descriptor down to the instance, made with {@link environment} and
+     * {@link NxEnvironment.enter}. Absent, the call runs with no root values, so every `env.` read
+     * finds an override, a provide of the entry module or the value's default. Its root values and
+     * the values of its overrides are checked against their declared types when the call begins.
+     */
+    readonly environment?: NxEnvironment;
 }
 /** Where the records of one call's value were constructed, as {@link NxRuntimeOptions.origins} reports it. */
 export interface NxRuntimeOrigins {
@@ -738,6 +779,42 @@ export type NxFunctionRecord = {
  * subset rule allows; a parameter it declares and the arguments lack is a diagnostic naming it.
  */
 export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxHostValue, args?: NxHostRecord, options?: NxRuntimeOptions): NxCanonicalValue;
+/** One override a component descriptor's `$env` carries, outermost first. */
+export interface NxEnvironmentEntry {
+    /** The environment value: its module identity and name, `identity::name`. */
+    readonly value: string;
+    /** The field path the override sets; empty for the whole value. */
+    readonly path: readonly string[];
+    /** The value it sets. */
+    readonly to: NxHostValue;
+}
+/**
+ * The environment a call runs in: the root values a host gives, then the overrides of each
+ * component descriptor down to an instance. Immutable: {@link NxEnvironment.enter} answers a new
+ * one. Make one with {@link environment}.
+ */
+export declare class NxEnvironment {
+    /** The root values, by the names the host gave them. */
+    readonly roots: readonly (readonly [string, NxHostValue])[];
+    /** The overrides entered, outermost first. */
+    readonly entries: readonly NxEnvironmentEntry[];
+    /** @internal Use {@link environment}. */
+    constructor(roots: readonly (readonly [string, NxHostValue])[], entries: readonly NxEnvironmentEntry[]);
+    /**
+     * This environment extended with the overrides a component descriptor's `$env` carries, inside
+     * the ones it holds: the environment to initialize, render or dispatch the descriptor's
+     * component in. A descriptor without `$env` answers this environment. A malformed `$env` is
+     * refused with `nx-ir-boundary-type`. The values are checked when a call is given the result.
+     */
+    enter(descriptor: NxHostValue): NxEnvironment;
+}
+/**
+ * An environment of root values, named as the program's environment values are: `colorMode`
+ * when exactly one module of the program declares one of that name, and `identity::colorMode`
+ * always. Each value is checked against its declared type when a call is given the environment;
+ * an unknown name fails it with `nx-ir-environment-name`.
+ */
+export declare function environment(values?: NxHostRecord): NxEnvironment;
 /** A record or update record as the runtime holds it: a `$type` and its fields. */
 export type NxRecordObject = {
     readonly $type: string;

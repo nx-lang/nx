@@ -18,7 +18,7 @@ use nx_ir::{
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 12] = [
+const KNOWN_FEATURES: [&str; 13] = [
     nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
     "standard-color-v1",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
@@ -31,6 +31,7 @@ const KNOWN_FEATURES: [&str; 12] = [
     NX_IR_REQUIRED_FEATURE_RANGES_V1,
     NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
+    nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
 ];
 
 /// How deeply one type may nest others. A type is a tree of shared nodes that is dropped
@@ -280,11 +281,37 @@ pub(crate) struct UnionDecl {
 #[derive(Debug)]
 pub(crate) enum DeclarationKind {
     Function(FunctionDecl),
-    Value { value: u32, ty: Option<Arc<Type>> },
+    Value {
+        value: u32,
+        ty: Option<Arc<Type>>,
+    },
     Record(RecordDecl),
     Component(ComponentDecl),
     Union(UnionDecl),
     TypeAlias,
+    /// An environment value: its default node, evaluated at each read that uses it, and its type.
+    Environment {
+        default: u32,
+        ty: Arc<Type>,
+    },
+    /// The module's top-level provides, in source order.
+    Provides(Box<[Provide]>),
+}
+
+/// One override of an `envProvide` or `envUpdate` node.
+#[derive(Debug)]
+pub(crate) struct Override {
+    pub target: Ref,
+    pub path: Box<[Arc<str>]>,
+    pub value: u32,
+}
+
+/// One top-level provide: an override, or with no target a bundle.
+#[derive(Debug)]
+pub(crate) struct Provide {
+    pub target: Option<Ref>,
+    pub path: Box<[Arc<str>]>,
+    pub value: u32,
 }
 
 #[derive(Debug)]
@@ -506,6 +533,15 @@ pub(crate) enum Node {
     UnionCase(Box<CaseConstruct>),
     Element(ElementNode),
     ActionHandler(Box<HandlerNode>),
+    /// `[30, ref]`: the value the environment gives an `environment` declaration.
+    EnvRead(Ref),
+    /// `[31, overrides, body]`.
+    EnvProvide {
+        overrides: Box<[Override]>,
+        body: u32,
+    },
+    /// `[32, overrides]`: a bundle.
+    EnvUpdate(Box<[Override]>),
 }
 
 impl Node {
@@ -580,6 +616,12 @@ impl Node {
                 element.content.iter().for_each(|node| visit(*node));
             }
             Node::ActionHandler(handler) => visit(handler.body),
+            Node::EnvRead(_) => {}
+            Node::EnvProvide { overrides, body } => {
+                overrides.iter().for_each(|entry| visit(entry.value));
+                visit(*body);
+            }
+            Node::EnvUpdate(overrides) => overrides.iter().for_each(|entry| visit(entry.value)),
         }
     }
 }
@@ -719,6 +761,27 @@ impl<'a> Decoder<'a> {
                 let name = self.string(reader.next()?)?;
                 let name = (name.as_ref() != "$spread").then_some(name);
                 Ok((name, reader.next()?))
+            })?
+            .into_boxed_slice())
+    }
+
+    fn path(&self, reader: &mut Reader<'_>) -> std::result::Result<Box<[Arc<str>]>, Malformed> {
+        Ok(reader
+            .list(|reader| self.string(reader.next()?))?
+            .into_boxed_slice())
+    }
+
+    fn overrides(
+        &self,
+        reader: &mut Reader<'_>,
+    ) -> std::result::Result<Box<[Override]>, Malformed> {
+        Ok(reader
+            .list(|reader| {
+                Ok(Override {
+                    target: self.reference(reader)?,
+                    path: self.path(reader)?,
+                    value: reader.next()?,
+                })
             })?
             .into_boxed_slice())
     }
@@ -924,6 +987,12 @@ impl<'a> Decoder<'a> {
                 owner: self.optional_reference(&mut reader)?,
                 body: reader.next()?,
             })),
+            node::ENV_READ => Node::EnvRead(self.reference(&mut reader)?),
+            node::ENV_PROVIDE => Node::EnvProvide {
+                overrides: self.overrides(&mut reader)?,
+                body: reader.next()?,
+            },
+            node::ENV_UPDATE => Node::EnvUpdate(self.overrides(&mut reader)?),
             other => return Err(format!("unknown node kind {other}")),
         })
     }
@@ -1161,6 +1230,21 @@ impl<'a> Decoder<'a> {
                 let _property_target = self.optional_reference(&mut reader)?;
                 DeclarationKind::Union(UnionDecl { cases, bases })
             }
+            declaration::ENVIRONMENT => DeclarationKind::Environment {
+                default: reader.next()?,
+                ty: type_at(types, reader.next()?)?,
+            },
+            declaration::PROVIDES => DeclarationKind::Provides(
+                reader
+                    .list(|reader| {
+                        Ok(Provide {
+                            target: self.optional_reference(reader)?,
+                            path: self.path(reader)?,
+                            value: reader.next()?,
+                        })
+                    })?
+                    .into_boxed_slice(),
+            ),
             _ => DeclarationKind::TypeAlias,
         };
         Ok(Declaration { name, kind })
@@ -1253,6 +1337,7 @@ impl PreparedModule {
 
         check_nodes(&image, &mut diagnostics);
         check_constraint_nodes(&image, &mut diagnostics);
+        check_environment_entries(&image, &mut diagnostics);
 
         let strings: Vec<OnceLock<Arc<str>>> =
             (0..image.string_count()).map(|_| OnceLock::new()).collect();
@@ -1565,6 +1650,42 @@ fn check_nodes(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
         if patterns.iter().any(is_empty_pattern) {
             diagnostics.push(missing(&format!("node {index} matches the '{{}}' pattern")));
         }
+    }
+}
+
+/// An environment node or declaration needs the feature `environment-v1`, so a module that has one
+/// without listing it is refused rather than run by a runtime that would read it as something else.
+fn check_environment_entries(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    use kinds::{declaration, node};
+    if image
+        .required_features()
+        .any(|feature| feature == nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1)
+    {
+        return;
+    }
+    let kind_of = |table: Table, index: u32| {
+        image
+            .entry(table, index)
+            .and_then(|entry| entry.get(0))
+            .map(i64::from)
+    };
+    let has_node = (0..image.entry_count(Table::Nodes) as u32).any(|index| {
+        matches!(
+            kind_of(Table::Nodes, index),
+            Some(node::ENV_READ | node::ENV_PROVIDE | node::ENV_UPDATE)
+        )
+    });
+    let has_declaration = (0..image.entry_count(Table::Declarations) as u32).any(|index| {
+        matches!(
+            kind_of(Table::Declarations, index),
+            Some(declaration::ENVIRONMENT | declaration::PROVIDES)
+        )
+    });
+    if has_node || has_declaration {
+        diagnostics.push(malformed(format!(
+            "the module uses environment values, which requires the feature '{}' the module does not list",
+            nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1
+        )));
     }
 }
 

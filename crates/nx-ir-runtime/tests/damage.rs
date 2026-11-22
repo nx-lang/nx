@@ -67,11 +67,7 @@ fn drive(linked: &Program, program: &CorpusProgram, identity: &str) -> (usize, u
     };
     for entrypoint in &program.entrypoints {
         if entrypoint.module == identity {
-            count(
-                linked
-                    .evaluate_function(&entrypoint.function, &entrypoint.arguments, &options)
-                    .err(),
-            );
+            count(entrypoint.evaluate(linked, &options).err());
         }
     }
     for lifecycle in &program.lifecycles {

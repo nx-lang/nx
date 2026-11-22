@@ -971,11 +971,12 @@ export function renderSource(
     let count = 0;
     for (const item of items) {
       const role = tree.nodes[item]!.role;
-      if (role === "condition" || role === "loop" || role === "match" || role === "matchArm") {
-        // A block's test, subject, pattern, list or variables are not what it writes. A loop's
-        // variables take their own names as their slots, so they are known by their role.
+      if (role === "condition" || role === "loop" || role === "match" || role === "matchArm" || role === "provide") {
+        // A block's test, subject, pattern, list, variables or overrides are not what it writes. A
+        // loop's variables and a provide's overrides take their own names as their slots, so they
+        // are known by their role.
         count += childCount(
-          childrenOf(item).filter((part) => tree.nodes[part]!.role !== "binding" && !BLOCK_HEADS.has(index.slots[part]!))
+          childrenOf(item).filter((part) => !["binding", "attribute"].includes(tree.nodes[part]!.role) && !BLOCK_HEADS.has(index.slots[part]!))
         );
       } else if (!isNote(item) && role !== "unparsed") {
         count += 1;
@@ -1053,7 +1054,7 @@ export function renderSource(
     }
     const child = content[0]!;
     const items = childrenOf(child);
-    const blocks = new Set(["element", "condition", "match", "matchArm", "loop", "sequence", "binding"]);
+    const blocks = new Set(["element", "condition", "match", "matchArm", "loop", "provide", "sequence", "binding"]);
     if (items.length === 0 || items.some((item) => blocks.has(tree.nodes[item]!.role))) {
       return undefined;
     }
@@ -1997,7 +1998,7 @@ export function renderSource(
   // and those of the blocks inside it, starts where its first line does: the rows it holds read level
   // with their siblings, framed by its lines.
   for (const item of root.querySelectorAll<HTMLElement>(".row-element > .sheet-held > .sheet-item.as-written")) {
-    const block = item.querySelector<HTMLElement>(':scope > .n:is([data-role="condition"], [data-role="loop"])');
+    const block = item.querySelector<HTMLElement>(':scope > .n:is([data-role="condition"], [data-role="loop"], [data-role="provide"])');
     if (block === null) {
       continue;
     }
@@ -2007,7 +2008,7 @@ export function renderSource(
     let lineStart = false;
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
       const owner = node.parentElement?.closest(".n");
-      if (owner?.matches('[data-role="condition"], [data-role="loop"]') !== true) {
+      if (owner?.matches('[data-role="condition"], [data-role="loop"], [data-role="provide"]') !== true) {
         lineStart = lineStart && node.textContent!.trim() === "";
         continue;
       }
@@ -2023,7 +2024,7 @@ export function renderSource(
     }
   }
   // The braces of an `if` or a `for` read quieter than the code they hold.
-  for (const token of root.querySelectorAll<HTMLElement>(':is(.n[data-role="condition"], .n[data-role="loop"]) > .t')) {
+  for (const token of root.querySelectorAll<HTMLElement>(':is(.n[data-role="condition"], .n[data-role="loop"], .n[data-role="provide"]) > .t')) {
     if (/^\s*[{}]\s*$/.test(token.textContent ?? "")) {
       token.classList.add("block-brace");
     }

@@ -1,0 +1,34 @@
+module design.nx fingerprint 9671487728751124515
+requires update-records-v1 environment-v1
+entrypoints functions [] components []
+
+union ColorMode @1:1-1:37
+  case light constant
+  case dark constant
+
+record Colors @2:1-2:54
+  accent: string required
+  surface: string required
+
+environment colorMode: ColorMode @5:1-5:48 =
+  ColorMode.light
+
+environment locale: string @6:1-6:44 =
+  "en-US"
+
+environment space: int @7:1-7:34 =
+  4
+
+environment radius: int @8:1-8:35 =
+  4
+
+environment color: Colors @9:1-14:2 =
+  if env.colorMode is
+    ColorMode.light =>
+      <Colors accent="blue" surface="white" />
+    ColorMode.dark =>
+      <Colors accent="navy" surface="black" />
+
+record Colors.Update update of Colors @2:1-2:54
+  accent: string
+  surface: string

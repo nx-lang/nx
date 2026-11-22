@@ -158,6 +158,9 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 27 | standardColor | `[27, operation, [node...]]` | A closed color body in a compiler-owned standard function. Requires `standard-color-v1`; see [Standard color bodies](#standard-color-bodies-standard-color-v1). |
 | 28 | check | `[28, node, type, str]` | A constraint check, written where a value is bound to a constrained site its type does not already satisfy: the operand, a `constrained` type entry, and the name of the site, such as a parameter or field. Yields the operand's value when the interval admits it, comparing at the base type, and otherwise fails with `nx-ir-constraint`, naming the site, the value and the interval. A sequence operand is checked item by item and the empty value passes, so one node serves an optional site and a `+` or `*` site whose item type is constrained. `NaN` fails. Requires `constraints-v1`. |
 | 29 | interval | `[29, type]` | A numeric pattern, `in 0.0..1.0` or `> 0 && <= 10`, in an `ifIs` arm's pattern list, and nowhere else: a `constrained` type entry whose base is the scrutinee's base type and whose interval is the pattern's. It matches when the scrutinee lies in the interval, and never matches `NaN` or the empty value. Requires `constraints-v1`. |
+| 30 | envRead | `[30, ref]` | `env.name`: the value the environment gives the `environment` declaration the reference names. A field read after it is an ordinary `member`. Requires `environment-v1`; see *Environment values*. |
+| 31 | envProvide | `[31, [override...], node]` | A `provide` block, or an element written with `env.` attributes: the overrides, each `[ref, [str...], node]` naming an `environment` declaration, a field path that may be empty and the value, evaluated in order outside the block, and the body, evaluated inside them. Requires `environment-v1`. |
+| 32 | envUpdate | `[32, [override...]]` | An `<env.Update>` bundle: the overrides, in the layout of `envProvide`, evaluated as one value for a top-level `provide`. Requires `environment-v1`. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
@@ -260,6 +263,8 @@ declarations use the names the language gives them: `User.Update`, `User.Propert
 | 3 | component | `[3, str, [field...], [field...], node?, flags, [[str, ref]...], ref?]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external, the emits: each an emit's local name and a reference to its action record, inherited emits included, in declaration order, and the component's state record, `<Component>.State`. An inherited emit's reference names the module that declared it. The state record is present only when the image emits it, which it does when the module references the state record, its update record or its property union; a component whose state no handler patches and nothing names has none. The state fields stay in the component's own list, with their defaults, since the state record carries none. |
 | 4 | union | `[4, str, [[str, [field...], isConstant]...], [ref...], ref?]` — name, cases (name, fields, `0` or `1`), abstract bases, and the property target when the union is a derived `T.Property`. |
 | 5 | typeAlias | `[5, str]` — name only. |
+| 6 | environment | `[6, str, node, type]` — an environment value: its name, `env.` and the value's name so it never collides with a `let` of the same name, its default and its declared type. Exported like any other declaration. Requires `environment-v1`. |
+| 7 | provides | `[7, str, [[ref?, [str...], node]...]]` — the module's top-level provides in source order, at most one entry per module, named `$provides`. Each is a reference to an `environment` declaration, absent for a bundle, a field path and the value node; a bundle's node is of `env.Update` type. Only the entry module's list takes effect. Requires `environment-v1`. |
 
 A field is `[str, type, node?, flags]`: name, type, default and flags: bit 0 content, bit 1
 required. Record and component fields arrive flattened, a derived record listing its inherited
@@ -519,7 +524,9 @@ predates the kind refuses the module by name rather than as malformed, and lists
 lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
 arm with the `{}` pattern, lists `occurrence-v1`; one that contains a `standardMath` node lists
 `standard-math-v1`; a `standardColor` node lists `standard-color-v1`; one whose type table holds a
-`constrained` entry, or whose nodes hold a `check` or an `interval`, lists `constraints-v1`. Constructing a range needs no feature: that is an
+`constrained` entry, or whose nodes hold a `check` or an `interval`, lists `constraints-v1`; one that
+declares an `environment` value, has a `provides` declaration, or contains an `envRead`,
+`envProvide` or `envUpdate` node lists `environment-v1`. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
 needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
 never tests, steps through or falls back from one lists nothing. A runtime that does not know a
@@ -666,6 +673,52 @@ substituted is the parent's handler value itself, so a host holding both instanc
 in the child's table. Initialization may also be given a complete state to use in place of the
 initial one, which is how a host re-renders an instance with new props and the state it holds;
 the runtime has no other "update props" operation and needs none.
+
+## Environment values
+
+An environment value is read with `envRead` and set for a part of the output with `envProvide`. A
+runtime finds the value at a read from, in order:
+
+1. the overrides of the `envProvide` nodes being evaluated around the read, nearest first;
+2. the entries of `$env` on the current component's descriptor, last first, then those of each
+   component above it, as the host entered them;
+3. the host's root value;
+4. the entry module's provides, last first;
+5. the declaration's default.
+
+An override with a field path applies its value at that path to what the later sources give, so
+`env.color.accent=X` reads as the color the rest of the lookup finds, with `accent` set to `X`. A
+default and an entry-module provide are evaluated at each read that reaches them, in the
+environment of the read. While an entry-module provide of a value is evaluated, a read of that
+value sees only the sources after it, so a provide that reads the value it sets cannot loop. A
+bundle provide applies each of its entries as an override; an entry whose value is a `*.Update`
+record is applied as a patch of the fields it sets.
+
+**`$env`.** Evaluating an `envProvide` node evaluates its overrides outside the node, then its body
+inside them, then adds the overrides to every component descriptor its result reaches. The walk
+goes through sequences, records, and the fields and content of elements that are not component
+descriptors, an external component's record among them, and stops at each descriptor of a
+component declared with a body, which receives the overrides in front of any
+it holds already. A descriptor carries them in the reserved field `$env`, a list outermost first of
+entries `{ "value": "<module identity>::<name>", "path": [...], "to": <value> }`, with `to` in
+canonical form. A descriptor without overrides has no `$env`, and an element that is not a component
+descriptor never gets one. A host renders a child component in the environment it gets by entering
+the child's descriptor (`Environment::enter` in Rust, `environment.enter(descriptor)` in
+TypeScript), and a component's props never include `$env`.
+
+**`env.Update`.** A bundle evaluates to `{ "$type": "env.Update", "$entries": [...] }`, each entry
+in the `$env` entry form. The qualified names make a bundle built in one module apply to the right
+values in an entry module that doesn't import them by those names.
+
+**Root values.** A host names each root value by its simple name when exactly one environment value
+in the program has it, and otherwise by its qualified name. An unknown or ambiguous name is
+`nx-ir-environment-name`, and a value is checked against the declared type with the usual boundary
+diagnostics. A malformed `$env` on a descriptor is refused with `nx-ir-boundary-type`.
+
+**Cost.** An `envRead` costs one operation, and a default or entry-module provide evaluated for it
+is charged node by node each time it is evaluated. An `envProvide` costs one operation, and its
+override values and body are charged as any other children. Adding the overrides to one component
+descriptor costs one operation. The lookup itself costs nothing beyond the nodes it evaluates.
 
 ## Evaluation cost
 

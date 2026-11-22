@@ -139,6 +139,25 @@ const kept = initializeComponent(program, "SearchBox", { placeholder: "Find" }, 
 The state is validated as a complete state for the component, as `evaluateComponent` validates
 its state argument, and the new instance's tokens start at generation 1 again.
 
+## Environment values
+
+A program that declares `environment` values reads them with `env.name`. A host gives an evaluation
+its root values with the `environment` option, an `NxEnvironment` that `environment(values)` makes
+from values named by their simple name, or by their qualified name, `identity::name`, where two
+environment values share one. An unknown or ambiguous name is `nx-ir-environment-name`, and a value
+of the wrong type is refused as any host value is. A rendered component descriptor carries the
+overrides written around it in `$env`; the host renders the child with
+`environment.enter(descriptor)`, which adds them inside the ones it holds, and a malformed `$env` is
+`nx-ir-boundary-type`. A component never sees `$env` among its props.
+
+```ts
+const dark = environment({ colorMode: "dark" });
+const { rendered } = initializeComponent(program, "Page", {}, { environment: dark });
+// A child descriptor in `rendered` may carry `$env`; render it in `dark.enter(child)`.
+```
+
+See *Environment values* in `docs/nx-ir-format.md` for the lookup order and the cost.
+
 ## Host values
 
 What a host passes to an evaluation API, and what it gets back, are plain JavaScript data: `null`,

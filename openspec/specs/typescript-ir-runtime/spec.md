@@ -584,6 +584,7 @@ and compute them numerically.
 - **THEN** the result SHALL be `true`
 
 ### Requirement: TypeScript runtime normalizes update records as patches
+The TypeScript runtime SHALL normalize an update record as a patch.
 When the TypeScript runtime normalizes a value whose declared type is an update record — from an
 IR construction expression or from host input at a boundary — it SHALL keep absent fields absent
 rather than filling them from defaults or with the empty value, SHALL decode a present `null` or
@@ -633,6 +634,7 @@ empty value for a state field that is not optional SHALL be rejected naming the 
 - **AND** a value whose `$type` is `Counter.Update`, which names no record a component has, SHALL fail the same way
 
 ### Requirement: TypeScript runtime normalizes property union values as constant cases
+The TypeScript runtime SHALL normalize a property union value as a constant case.
 When the TypeScript runtime normalizes a value whose declared type is a property union — from an
 IR union-case expression or from host input at a boundary — it SHALL accept the bare string of any
 case listed in the property union's declaration, SHALL reject any other value with a diagnostic
@@ -1288,6 +1290,8 @@ its items add to a call that takes them as its positional arguments, content or 
 - **AND** no more than the limit allows of the list SHALL have been read
 
 ### Requirement: TypeScript runtime diagnostics name the argument a failure is in
+A TypeScript runtime diagnostic for a failure in a host-passed argument's value SHALL carry the
+parameter's name as `argument`.
 A diagnostic for a failure the runtime finds in a value a host passed as an argument of the
 function it called, through `callFunction` or `evaluateFunction`, SHALL carry `argument`: the name
 of the parameter the value was passed for. That covers a value that does not fit the parameter's
@@ -1695,6 +1699,7 @@ occurrence, and dispatch.
   ordered effects match between the TypeScript runtime and the native runtime
 
 ### Requirement: Component descriptors are recursively validated at typed sites
+The TypeScript runtime SHALL validate the props of a descriptor of the expected component recursively at typed sites.
 When a component-typed value has no discriminator or names the expected component declaration,
 its props SHALL be recursively normalized against that declaration at host and program-internal
 typed sites. Defaults SHALL be filled, unknown props and invalid nested records SHALL be rejected,
@@ -1722,3 +1727,24 @@ reject reserved spread entries without the required feature and unsupported feat
 #### Scenario: Inactive branches remain lazy
 - **WHEN** an unselected property branch would fail during evaluation
 - **THEN** execution SHALL complete without evaluating it
+
+### Requirement: TypeScript runtime evaluates environment values
+The TypeScript IR runtime SHALL accept modules that require `environment-v1` and SHALL evaluate
+`envRead` and `envProvide` nodes, entry-module provides and `$env` as the format defines them, with
+the same results and operation counts as the Rust runtime. The runtime SHALL export an environment:
+an immutable value that `environment(values)` makes from root values, and that `enter(descriptor)`
+extends with a component descriptor's `$env`. Every evaluation, the component lifecycle included,
+SHALL take an environment through its options, and an evaluation given none SHALL run with no root
+values. Root values SHALL be named and checked as the environment-values capability defines, in
+their JavaScript form, and a malformed `$env` SHALL be refused with `nx-ir-boundary-type`.
+
+#### Scenario: A component reads the environment its host gives it
+- **WHEN** a host initializes `Badge`, whose body reads `env.colorMode`, with
+  `runtime.environment({ colorMode: "dark" })`
+- **THEN** the rendered output SHALL be the body with `colorMode` equal to `dark`
+
+#### Scenario: A host composes a child's environment
+- **WHEN** a host renders `Page`, whose output holds a `Card` descriptor with `$env` overriding
+  `colorMode`, and initializes `Card` with `pageEnvironment.enter(cardDescriptor)`
+- **THEN** `Card`'s body SHALL read the overriding value
+

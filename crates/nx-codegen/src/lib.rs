@@ -13,6 +13,7 @@
 
 mod builder;
 mod emit;
+mod environment_cycles;
 mod ir;
 mod ir_bundle;
 mod model;

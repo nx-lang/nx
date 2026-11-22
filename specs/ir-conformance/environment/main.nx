@@ -1,0 +1,30 @@
+import "./design.nx"
+
+type Size = { width:int height:int }
+
+environment size: Size = <Size width=10 height=20 />
+environment total: int = { 1 + 2 }
+
+let theme: env.Update = <env.Update radius=12 color=<Colors.Update surface="gray" /> />
+
+provide env.space = 8
+provide env.size.width = 12
+provide theme
+
+component <Badge /> = { <span text={env.locale} /> }
+external component <Stack content Children?: Element+ />
+
+let readDefault() = { env.total }
+let readProvided() = { env.space }
+let readPath() = { env.size }
+let readBundle() = { env.radius }
+let colors() = { env.color }
+let mode() = { env.colorMode }
+let provideExpr() = { provide env.locale="fr-FR" { env.locale } }
+let nestedPath() = { provide env.size.height=5 { env.size } }
+let readsOutside() = { provide env.space={env.space * 2} { env.space } }
+let cascade() = { provide env.colorMode=dark { env.color.accent } }
+let markup() = { <div env.colorMode=dark><Badge /><span mode={env.colorMode} /></div> }
+let stacked() = { provide env.colorMode=dark { <Badge env.colorMode=light /> } }
+let bundle() = { theme }
+let hosted() = { <Stack env.colorMode=dark><Badge /></Stack> }

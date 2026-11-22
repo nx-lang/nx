@@ -1,5 +1,8 @@
 //! Protocol-independent editor language service for NX.
 
+mod environment;
+#[cfg(test)]
+mod environment_tests;
 mod hover;
 mod positions;
 mod source_edit;
@@ -56,6 +59,9 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
     "match",
     "true",
     "false",
+    "environment",
+    "provide",
+    "env",
 ];
 
 const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &nx_syntax::PRIMITIVE_TYPE_NAMES;
@@ -505,11 +511,20 @@ impl WorkspaceSnapshot {
 
         // A doc link inside a doc comment answers as a reference to what it names. The comment is
         // trivia, so the position resolves to no construct, and nothing below would answer.
-        let answer = match self.doc_link_hover(&resolved) {
+        // An `env.` read or override names an environment value, whose declaration is the answer.
+        let answer = match self
+            .doc_link_hover(&resolved)
+            .or_else(|| self.environment_hover(&resolved))
+        {
             Some(answer) => Some(answer),
             None => self
                 .hover_contents(&resolved)
                 .and_then(|contents| Some((contents, resolved.context.span()?))),
+        };
+        // A top-level `provide` adds what it sets to whatever the position answers on its own.
+        let answer = match self.provide_hover(&resolved, answer.clone()) {
+            Some(answer) => Some(answer),
+            None => answer,
         };
         let Some((contents, span)) = answer else {
             return Ok(None);
@@ -770,6 +785,11 @@ impl WorkspaceSnapshot {
         // fabricated answer the conservative contract rules out, so a declaration whose module
         // has no lowered item reports nothing instead.
         let item = scope.item(declaration)?;
+        if let Item::Value(value) = item {
+            if nx_hir::environment_value_name(value.name.as_str()).is_some() {
+                return self.environment_declaration_hover(scope, declaration);
+            }
+        }
         // Only a declaration with nothing written for its type asks analysis what it is — D5.
         let inferred = match item {
             Item::Value(value) if value.ty.is_none() => scope
@@ -820,6 +840,9 @@ impl WorkspaceSnapshot {
                 "\n\nInherited from {bases}:\n\n{}",
                 hover::fenced(properties)
             ));
+        }
+        if let Some(note) = environment::reads_note(scope, declaration) {
+            content.push_str(&format!("\n\n{note}"));
         }
         Some(content)
     }
@@ -1047,6 +1070,14 @@ impl WorkspaceSnapshot {
     ) -> Result<CompletionList, SnapshotError> {
         let resolved = self.resolve_position(uri, position)?;
         let scope = &resolved.scope;
+        if let Some(items) = self.environment_completions(&resolved) {
+            return Ok(CompletionList {
+                uri: resolved.document.uri.clone(),
+                identity: resolved.document.identity.clone(),
+                version: resolved.document.version,
+                items,
+            });
+        }
 
         // A context the resolver classified but the scope cannot fill in — an unknown element, a
         // property with no union type — offers no contextual completions, and falls back to the
@@ -3117,6 +3148,8 @@ fn general_completion_items(scope: &DocumentScope) -> Vec<CompletionItem> {
         scope
             .visible_declarations()
             .into_iter()
+            // An environment value is written after `env.`, which offers it there.
+            .filter(|declaration| nx_hir::environment_binding_name(&declaration.name).is_none())
             .map(|declaration| CompletionItem {
                 label: declaration.name.clone(),
                 kind: if declaration.kind == DocumentSymbolKind::Component {

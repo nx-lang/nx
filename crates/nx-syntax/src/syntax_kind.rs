@@ -53,6 +53,9 @@ pub enum SyntaxKind {
 
     // === Visualizers ===
     VISUALIZER_DEFINITION,
+    ENVIRONMENT_DEFINITION,
+    PROVIDE_DEFINITION,
+    PROVIDE_EXPRESSION,
 
     // === Elements ===
     ELEMENT,
@@ -172,6 +175,8 @@ pub enum SyntaxKind {
     ACTION,
     COMPONENT,
     VISUALIZER,
+    ENVIRONMENT_KW,
+    PROVIDE_KW,
     EMITS,
     STATE,
     TYPE_KW,
@@ -253,6 +258,8 @@ impl SyntaxKind {
                 | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
                 | SyntaxKind::VISUALIZER
+                | SyntaxKind::ENVIRONMENT_KW
+                | SyntaxKind::PROVIDE_KW
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
@@ -331,6 +338,8 @@ impl SyntaxKind {
                 | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
                 | SyntaxKind::VISUALIZER
+                | SyntaxKind::ENVIRONMENT_KW
+                | SyntaxKind::PROVIDE_KW
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
@@ -409,6 +418,9 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "emit_reference" => SyntaxKind::EMIT_REFERENCE,
         "state_group" => SyntaxKind::STATE_GROUP,
         "visualizer_definition" => SyntaxKind::VISUALIZER_DEFINITION,
+        "environment_definition" => SyntaxKind::ENVIRONMENT_DEFINITION,
+        "provide_definition" => SyntaxKind::PROVIDE_DEFINITION,
+        "provide_expression" => SyntaxKind::PROVIDE_EXPRESSION,
         "function_signature" => SyntaxKind::FUNCTION_SIGNATURE,
         "markup_signature" => SyntaxKind::MARKUP_SIGNATURE,
         "param" => SyntaxKind::PARAM,
@@ -517,6 +529,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "action" => SyntaxKind::ACTION,
         "component" => SyntaxKind::COMPONENT,
         "visualizer" => SyntaxKind::VISUALIZER,
+        "environment" => SyntaxKind::ENVIRONMENT_KW,
+        "provide" => SyntaxKind::PROVIDE_KW,
         "emits" => SyntaxKind::EMITS,
         "state" => SyntaxKind::STATE,
         // Note: "type" already matched earlier as TYPE

@@ -328,6 +328,7 @@ fn is_documentable(node: &SyntaxNode, in_function_type: bool) -> bool {
         | SyntaxKind::UNION_DEFINITION
         | SyntaxKind::TYPE_DEFINITION
         | SyntaxKind::VALUE_DEFINITION
+        | SyntaxKind::ENVIRONMENT_DEFINITION
         | SyntaxKind::FUNCTION_DEFINITION
         | SyntaxKind::COMPONENT_DEFINITION
         | SyntaxKind::UNION_CASE

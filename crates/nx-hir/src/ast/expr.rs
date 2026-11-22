@@ -181,6 +181,23 @@ pub struct MatchArm {
     pub body: ExprId,
 }
 
+/// One override of an environment value: `env.name=value` or `env.name.field=value`, on an element
+/// or in a `provide` block or top-level provide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvOverride {
+    /// The environment value's name as written after `env.`.
+    pub name: Name,
+    /// The field path after the name, empty when the override replaces the whole value.
+    pub path: Vec<Name>,
+    /// The value, evaluated where the override is written.
+    pub value: ExprId,
+    /// The visible binding of the environment value's declaration, filled in by the type checker
+    /// once it has resolved `name` among the environment values the module can see.
+    pub binding: Option<Name>,
+    /// Where the override was written.
+    pub span: TextSpan,
+}
+
 /// Expression AST node.
 ///
 /// All expressions are stored in an arena and referenced by `ExprId`.
@@ -241,6 +258,42 @@ pub enum Expr {
         case: Name,
         module_identity: String,
         definition_id: LocalDefinitionId,
+        span: TextSpan,
+    },
+
+    /// A read of an environment value.
+    ///
+    /// <para>`name` is the name written after `env.`. Lowering produces the node with no binding;
+    /// the type checker resolves the name among the environment values the module can see and
+    /// fills in `binding`, the visible name of the declaration (`env.space`, or
+    /// `design.env.space` through an aliased import), which code generation resolves as it
+    /// resolves any other value reference.</para>
+    ///
+    /// Example: `env.colorMode`
+    EnvRead {
+        name: Name,
+        binding: Option<Name>,
+        span: TextSpan,
+    },
+
+    /// The body evaluated with environment overrides in effect: a `provide` block, or what an
+    /// element with `env.` attributes lowers to.
+    ///
+    /// Example: `provide env.locale="fr-FR" { formatDate(today) }`
+    Provide {
+        overrides: Vec<EnvOverride>,
+        body: ExprId,
+        span: TextSpan,
+    },
+
+    /// An `env.Update` bundle: overrides as one value, for a top-level `provide` to apply.
+    ///
+    /// <para>Each override's `name` is the attribute's first segment, without `env.`, and its
+    /// path the rest; the type checker binds each as it binds an `env.` read.</para>
+    ///
+    /// Example: `<env.Update space=8 color.accent=#e11d48 />`
+    EnvUpdate {
+        overrides: Vec<EnvOverride>,
         span: TextSpan,
     },
 
@@ -526,6 +579,9 @@ impl Expr {
             Expr::Ident(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)),
             Expr::ContextualName { span, .. } => *span,
             Expr::ResolvedUnionCase { span, .. } => *span,
+            Expr::EnvRead { span, .. } => *span,
+            Expr::Provide { span, .. } => *span,
+            Expr::EnvUpdate { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
             Expr::Range { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,

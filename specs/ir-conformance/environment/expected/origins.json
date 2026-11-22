@@ -1,0 +1,40 @@
+{
+  "main.nx::bundle": [
+    {"path": "", "module": "main.nx", "start": 173, "end": 236},
+    {"path": "/$entries/1/to", "module": "main.nx", "start": 201, "end": 233}
+  ],
+  "main.nx::cascade": [],
+  "main.nx::colors": [
+    {"path": "", "module": "design.nx", "start": 375, "end": 415}
+  ],
+  "main.nx::colors#rootDark": [
+    {"path": "", "module": "design.nx", "start": 428, "end": 468}
+  ],
+  "main.nx::hosted": [
+    {"path": "", "module": "main.nx", "start": 1087, "end": 1130},
+    {"path": "/Children/0", "module": "main.nx", "start": 1113, "end": 1122}
+  ],
+  "main.nx::markup": [
+    {"path": "", "module": "main.nx", "start": 893, "end": 961},
+    {"path": "/content/0", "module": "main.nx", "start": 917, "end": 926},
+    {"path": "/content/1", "module": "main.nx", "start": 926, "end": 955}
+  ],
+  "main.nx::mode": [],
+  "main.nx::mode#rootDark": [],
+  "main.nx::nestedPath": [
+    {"path": "", "module": "main.nx", "start": 85, "end": 112}
+  ],
+  "main.nx::provideExpr": [],
+  "main.nx::provideExpr#rootLocale": [],
+  "main.nx::readBundle": [],
+  "main.nx::readDefault": [],
+  "main.nx::readPath": [
+    {"path": "", "module": "main.nx", "start": 85, "end": 112}
+  ],
+  "main.nx::readProvided": [],
+  "main.nx::readProvided#rootSpace": [],
+  "main.nx::readsOutside": [],
+  "main.nx::stacked": [
+    {"path": "", "module": "main.nx", "start": 1011, "end": 1040}
+  ]
+}

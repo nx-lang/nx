@@ -221,6 +221,7 @@ impl Stored {
             state: reader.fields(&self.state)?,
             handlers: handlers(&mut self.handlers.iter().copied())?,
             generation: self.generation,
+            reads: Arc::from(Vec::new()),
         })
     }
 }
@@ -397,6 +398,10 @@ impl Reader<'_, '_> {
                                 .cases
                                 .iter()
                                 .for_each(|case| defaults(&case.fields, &mut pending));
+                        }
+                        DeclarationKind::Environment { default, .. } => pending.push(*default),
+                        DeclarationKind::Provides(provides) => {
+                            pending.extend(provides.iter().map(|provide| provide.value));
                         }
                         DeclarationKind::TypeAlias => {}
                     }

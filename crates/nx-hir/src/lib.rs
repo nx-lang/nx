@@ -54,13 +54,14 @@ pub use prepared::{
 
 pub use components::{
     apply_constant_folds, apply_constraint_checks, apply_contextual_name_resolutions,
-    apply_join_lifts, apply_join_widenings, apply_literal_conversions, apply_range_constructions,
-    apply_string_conversions, component_declaration_origin, effective_component_contract,
-    effective_component_contract_at, effective_component_contract_for_name, erase_type_parameters,
-    is_component_subtype, promote_component_handler_bindings, remove_property_entries,
-    resolve_component_definition, validate_component_definitions, ComponentAncestor,
-    ComponentResolutionError, ConstraintCheckRewrite, ContextualRewrite,
-    EffectiveComponentContract, InvalidComponentBaseReason, StringConversions,
+    apply_environment_bindings, apply_join_lifts, apply_join_widenings, apply_literal_conversions,
+    apply_range_constructions, apply_string_conversions, component_declaration_origin,
+    effective_component_contract, effective_component_contract_at,
+    effective_component_contract_for_name, erase_type_parameters, is_component_subtype,
+    promote_component_handler_bindings, remove_property_entries, resolve_component_definition,
+    validate_component_definitions, ComponentAncestor, ComponentResolutionError,
+    ConstraintCheckRewrite, ContextualRewrite, EffectiveComponentContract,
+    InvalidComponentBaseReason, StringConversions,
 };
 
 // Re-export database types
@@ -1349,6 +1350,69 @@ pub struct LoweredModule {
     /// of its own, nothing refers to it, and it never reaches the module's exports, declaration
     /// schema or NX IR. The type checker checks each value, and tools gather them.</para>
     visualizers: Vec<VisualizerDecl>,
+    /// The module's top-level `provide` declarations, in source order.
+    ///
+    /// <para>Only the main module of a program applies them, and a module another module imports
+    /// may not have any. Like visualizers they are kept apart from [`items`](Self::items): they
+    /// have no name and nothing refers to them.</para>
+    provides: Vec<ProvideDecl>,
+}
+
+/// The prefix of the item name an `environment` declaration is lowered under.
+///
+/// <para>An environment value lives in its own namespace, reached only through `env.`, so
+/// `environment space` and `let space` never collide. It is lowered to a value item named
+/// `env.space`: `env` is reserved, so no other declaration can have that name, and the item takes
+/// part in visibility, exports and imports as any value does. An aliased import binds it as
+/// `alias.env.space`.</para>
+pub const ENVIRONMENT_ITEM_PREFIX: &str = "env.";
+
+/// The name of the bundle type, an update record over the environment values visible where it
+/// is written.
+pub const ENVIRONMENT_UPDATE_TYPE: &str = "env.Update";
+
+/// The item name an environment value named `name` is lowered under.
+pub fn environment_item_name(name: &str) -> Name {
+    Name::new(&format!("{ENVIRONMENT_ITEM_PREFIX}{name}"))
+}
+
+/// The environment value's own name when `item_name` is the item name of an environment value.
+pub fn environment_value_name(item_name: &str) -> Option<&str> {
+    item_name.strip_prefix(ENVIRONMENT_ITEM_PREFIX)
+}
+
+/// The environment value's own name when `visible_name` binds one, directly (`env.space`) or
+/// through an aliased import (`design.env.space`).
+pub fn environment_binding_name(visible_name: &str) -> Option<&str> {
+    environment_value_name(visible_name).or_else(|| {
+        visible_name
+            .find(".env.")
+            .map(|index| &visible_name[index + ".env.".len()..])
+    })
+}
+
+/// One top-level `provide` declaration of a module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProvideDecl {
+    /// `provide env.name = value` or `provide env.name.field = value`.
+    Override(ast::EnvOverride),
+    /// `provide bundle`, where `bundle` is an `env.Update`.
+    Bundle {
+        /// The bundle expression.
+        value: ExprId,
+        /// Where the declaration was written.
+        span: TextSpan,
+    },
+}
+
+impl ProvideDecl {
+    /// Where the declaration was written.
+    pub fn span(&self) -> TextSpan {
+        match self {
+            ProvideDecl::Override(provided) => provided.span,
+            ProvideDecl::Bundle { span, .. } => *span,
+        }
+    }
 }
 
 /// A `visualizer Target = Value` declaration: how a viewer presents the declaration `Target`.
@@ -1381,7 +1445,23 @@ impl LoweredModule {
             type_name_spans: Vec::new(),
             annotation_spans: FxHashMap::default(),
             visualizers: Vec::new(),
+            provides: Vec::new(),
         }
+    }
+
+    /// The module's top-level `provide` declarations, in source order.
+    pub fn provides(&self) -> &[ProvideDecl] {
+        &self.provides
+    }
+
+    /// The module's top-level `provide` declarations, for rewrites after type checking.
+    pub fn provides_mut(&mut self) -> &mut [ProvideDecl] {
+        &mut self.provides
+    }
+
+    /// Adds a top-level `provide` declaration.
+    pub fn add_provide(&mut self, provide: ProvideDecl) {
+        self.provides.push(provide);
     }
 
     /// The module's `visualizer` declarations, in source order.
@@ -1627,11 +1707,22 @@ pub struct LoweringDiagnostic {
 impl LoweringDiagnostic {
     /// The stable diagnostic category for this lowering failure.
     pub fn code(&self) -> &'static str {
-        if self.message.starts_with("color-literal:") {
-            "color-literal"
-        } else {
-            "lowering-error"
-        }
+        const PREFIXED: &[&str] = &[
+            "color-literal",
+            "environment-default-required",
+            "environment-type-required",
+            "environment-path",
+            "reserved-name",
+        ];
+        PREFIXED
+            .iter()
+            .find(|code| {
+                self.message
+                    .strip_prefix(**code)
+                    .is_some_and(|rest| rest.starts_with(':'))
+            })
+            .copied()
+            .unwrap_or("lowering-error")
     }
 }
 

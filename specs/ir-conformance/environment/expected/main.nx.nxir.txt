@@ -1,0 +1,95 @@
+module main.nx fingerprint 4197849879551866255
+links design.nx version "" fingerprint 9671487728751124515
+requires environment-v1
+entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle hosted] components [Badge Stack]
+
+record Size @3:1-3:37
+  width: int required
+  height: int required
+
+environment size: Size @5:1-5:53 =
+  <Size width=10 height=20 />
+
+environment total: int @6:1-6:35 =
+  (1 add 2)
+
+value theme: object @8:1-8:88 =
+  <env.Update
+    design.nx:env.radius=12
+    design.nx:env.color=<design.nx:Colors.Update surface="gray" />
+  />
+
+component Badge @14:1-14:53
+  body =
+    <span text=design.nx:env.locale />
+
+component Stack external @15:1-15:57
+  props
+    content Children: object*
+
+function readDefault() @17:1-17:34 =
+  env.total
+
+function readProvided() @18:1-18:35 =
+  design.nx:env.space
+
+function readPath() @19:1-19:30 =
+  env.size
+
+function readBundle() @20:1-20:34 =
+  design.nx:env.radius
+
+function colors() @21:1-21:29 =
+  design.nx:env.color
+
+function mode() @22:1-22:31 =
+  design.nx:env.colorMode
+
+function provideExpr() @23:1-23:66 =
+  provide design.nx:env.locale="fr-FR" {
+    design.nx:env.locale
+  }
+
+function nestedPath() @24:1-24:62 =
+  provide env.size.height=5 {
+    env.size
+  }
+
+function readsOutside() @25:1-25:73 =
+  provide design.nx:env.space=(design.nx:env.space mul 2) {
+    design.nx:env.space
+  }
+
+function cascade() @26:1-26:68 =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    design.nx:env.color.accent
+  }
+
+function markup() @27:1-27:88 =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    <div>
+      <Badge />
+      <span mode=design.nx:env.colorMode />
+    </div>
+  }
+
+function stacked() @28:1-28:81 =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    provide design.nx:env.colorMode=design.nx:ColorMode.light {
+      <Badge />
+    }
+  }
+
+function bundle() @29:1-29:25 =
+  theme
+
+function hosted() @30:1-30:63 =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    <Stack>
+      <Badge />
+    </Stack>
+  }
+
+provide design.nx:env.space = 8
+provide env.size.width = 12
+provide theme

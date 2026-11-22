@@ -52,6 +52,28 @@ pub struct CodegenModule {
     pub provenance: CodegenModuleProvenance,
     pub declarations: Vec<CodegenDeclaration>,
     pub imports: Vec<CodegenReference>,
+    /// The module's top-level provides, in source order. Only the entry module's take effect.
+    pub provides: Vec<CodegenProvide>,
+}
+
+/// One top-level `provide`: an override of one environment value, or a bundle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenProvide {
+    /// The environment declaration set, or `None` for a bundle, whose value is an `env.Update`.
+    pub target: Option<CodegenReference>,
+    /// The field path the override sets, empty for the whole value and for a bundle.
+    pub path: Vec<String>,
+    pub value: CodegenExpression,
+}
+
+/// One override of a `provide` block, an element's `env.` attribute or an `env.Update` entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenEnvOverride {
+    /// The environment declaration the override sets.
+    pub target: CodegenReference,
+    /// The field path it sets, empty for the whole value.
+    pub path: Vec<String>,
+    pub value: CodegenExpression,
 }
 
 /// Origin of one generated module.
@@ -120,6 +142,12 @@ pub enum CodegenDeclarationKind {
         /// The declared type, which a runtime normalizes the value to; `None` for a value that
         /// declares none.
         declared_ty: Option<CodegenTypeRef>,
+    },
+    /// An environment value: its default, evaluated at each read that uses it, and its type.
+    Environment {
+        default: CodegenExpression,
+        ty: Option<Type>,
+        declared_ty: CodegenTypeRef,
     },
     Record {
         fields: Vec<CodegenRecordField>,
@@ -461,6 +489,20 @@ pub enum CodegenExpressionKind {
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),
+    /// `env.name`: the value the environment gives the declaration.
+    EnvRead {
+        reference: CodegenReference,
+    },
+    /// The body with the overrides in effect: a `provide` block, or an element with `env.`
+    /// attributes. The overrides are evaluated outside, in order.
+    Provide {
+        overrides: Vec<CodegenEnvOverride>,
+        body: Box<CodegenExpression>,
+    },
+    /// `<env.Update …/>`: the overrides, evaluated, as one bundle value.
+    EnvUpdate {
+        overrides: Vec<CodegenEnvOverride>,
+    },
     /// An action-handler binding, `onTapped=<State.Update count={count + 1} />`.
     ///
     /// <para>Nothing here is evaluated when the binding is built: the body runs when a host

@@ -6,8 +6,9 @@ pub fn javascript_runtime_abi() -> &'static str {
 
 pub fn javascript_runtime_helper_source() -> String {
     format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}",
         javascript_runtime(),
+        include_str!("runtime/environment.js"),
         standard_math_source(false),
         include_str!("../../../runtime/typescript/src/color.ts")
             .replace(": any", "")
@@ -18,8 +19,16 @@ pub fn javascript_runtime_helper_source() -> String {
 
 pub fn runtime_helper_source(target: CodegenTarget) -> String {
     let base = match target {
-        CodegenTarget::TypeScript => typescript_runtime(),
-        CodegenTarget::JavaScript => javascript_runtime(),
+        CodegenTarget::TypeScript => format!(
+            "{}\n{}",
+            typescript_runtime(),
+            include_str!("runtime/environment.ts")
+        ),
+        CodegenTarget::JavaScript => format!(
+            "{}\n{}",
+            javascript_runtime(),
+            include_str!("runtime/environment.js")
+        ),
     };
     format!(
         "{base}\n{}\n{}",
@@ -111,11 +120,14 @@ export type NxComponentSchema<TProps, TState, TRendered> = {
   readonly props: NxRecordSchema;
   readonly element: NxRecordSchema;
   readonly state?: NxRecordSchema;
-  initializeJson(props?: NxValue): { readonly rendered: TRendered; readonly state: TState };
-  evaluateJson(props?: NxValue, state?: NxValue): TRendered;
-  tryInitializeJson(props?: NxValue): NxResult<{ readonly rendered: TRendered; readonly state: TState }>;
-  tryEvaluateJson(props?: NxValue, state?: NxValue): NxResult<TRendered>;
+  initializeJson(props?: NxValue, options?: NxEvaluationOptions): { readonly rendered: TRendered; readonly state: TState };
+  evaluateJson(props?: NxValue, state?: NxValue, options?: NxEvaluationOptions): TRendered;
+  tryInitializeJson(props?: NxValue, options?: NxEvaluationOptions): NxResult<{ readonly rendered: TRendered; readonly state: TState }>;
+  tryEvaluateJson(props?: NxValue, state?: NxValue, options?: NxEvaluationOptions): NxResult<TRendered>;
 };
+
+/** What a host gives a component evaluation: the environment it runs in, made with `nxEnvironment`. */
+export type NxEvaluationOptions = { readonly environment?: NxEnvironment };
 
 export const nxAnySchema: NxSchema = "any";
 export const nxBooleanSchema: NxSchema = "boolean";
@@ -360,26 +372,30 @@ export function nxComponentSchema<TProps, TState, TRendered>(config: {
     props: config.props,
     element: nxElementRecordSchema(config.name, config.props),
     state: config.state,
-    initializeJson(props: NxValue = {}) {
-      return config.initialize(nxNormalizeBoundaryRecord<TProps>(props, config.props, `${config.name} props`));
+    initializeJson(props: NxValue = {}, options: NxEvaluationOptions = {}) {
+      return nxWithEnvironment(options.environment, () =>
+        config.initialize(nxNormalizeBoundaryRecord<TProps>(nxWithoutEnvironment(props), config.props, `${config.name} props`)),
+      );
     },
-    evaluateJson(props: NxValue = {}, state?: NxValue) {
-      const normalizedProps = nxNormalizeBoundaryRecord<TProps>(props, config.props, `${config.name} props`);
-      const normalizedState = state === undefined
-        ? undefined
-        : nxNormalizeBoundaryRecord<TState>(state, config.state ?? nxRecordSchema({}), `${config.name} state`);
-      return config.evaluate(normalizedProps, normalizedState);
+    evaluateJson(props: NxValue = {}, state?: NxValue, options: NxEvaluationOptions = {}) {
+      return nxWithEnvironment(options.environment, () => {
+        const normalizedProps = nxNormalizeBoundaryRecord<TProps>(nxWithoutEnvironment(props), config.props, `${config.name} props`);
+        const normalizedState = state === undefined
+          ? undefined
+          : nxNormalizeBoundaryRecord<TState>(state, config.state ?? nxRecordSchema({}), `${config.name} state`);
+        return config.evaluate(normalizedProps, normalizedState);
+      });
     },
-    tryInitializeJson(props: NxValue = {}) {
+    tryInitializeJson(props: NxValue = {}, options: NxEvaluationOptions = {}) {
       try {
-        return { ok: true, value: this.initializeJson(props) };
+        return { ok: true, value: this.initializeJson(props, options) };
       } catch (error) {
         return { ok: false, diagnostics: nxDiagnosticsFromError(error) };
       }
     },
-    tryEvaluateJson(props: NxValue = {}, state?: NxValue) {
+    tryEvaluateJson(props: NxValue = {}, state?: NxValue, options: NxEvaluationOptions = {}) {
       try {
-        return { ok: true, value: this.evaluateJson(props, state) };
+        return { ok: true, value: this.evaluateJson(props, state, options) };
       } catch (error) {
         return { ok: false, diagnostics: nxDiagnosticsFromError(error) };
       }
@@ -989,26 +1005,30 @@ export function nxComponentSchema(config) {
     props: config.props,
     element: nxElementRecordSchema(config.name, config.props),
     state: config.state,
-    initializeJson(props = {}) {
-      return config.initialize(nxNormalizeBoundaryRecord(props, config.props, `${config.name} props`));
+    initializeJson(props = {}, options = {}) {
+      return nxWithEnvironment(options.environment, () =>
+        config.initialize(nxNormalizeBoundaryRecord(nxWithoutEnvironment(props), config.props, `${config.name} props`)),
+      );
     },
-    evaluateJson(props = {}, state = undefined) {
-      const normalizedProps = nxNormalizeBoundaryRecord(props, config.props, `${config.name} props`);
-      const normalizedState = state === undefined
-        ? undefined
-        : nxNormalizeBoundaryRecord(state, config.state ?? nxRecordSchema({}), `${config.name} state`);
-      return config.evaluate(normalizedProps, normalizedState);
+    evaluateJson(props = {}, state = undefined, options = {}) {
+      return nxWithEnvironment(options.environment, () => {
+        const normalizedProps = nxNormalizeBoundaryRecord(nxWithoutEnvironment(props), config.props, `${config.name} props`);
+        const normalizedState = state === undefined
+          ? undefined
+          : nxNormalizeBoundaryRecord(state, config.state ?? nxRecordSchema({}), `${config.name} state`);
+        return config.evaluate(normalizedProps, normalizedState);
+      });
     },
-    tryInitializeJson(props = {}) {
+    tryInitializeJson(props = {}, options = {}) {
       try {
-        return { ok: true, value: this.initializeJson(props) };
+        return { ok: true, value: this.initializeJson(props, options) };
       } catch (error) {
         return { ok: false, diagnostics: nxDiagnosticsFromError(error) };
       }
     },
-    tryEvaluateJson(props = {}, state = undefined) {
+    tryEvaluateJson(props = {}, state = undefined, options = {}) {
       try {
-        return { ok: true, value: this.evaluateJson(props, state) };
+        return { ok: true, value: this.evaluateJson(props, state, options) };
       } catch (error) {
         return { ok: false, diagnostics: nxDiagnosticsFromError(error) };
       }

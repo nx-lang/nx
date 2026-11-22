@@ -352,6 +352,14 @@ impl<'a> UndefinedIdentifierChecker<'a> {
 
     fn check(&mut self) {
         for item in self.module.raw_module().items() {
+            if item.name().as_str() == "env" {
+                self.report_reserved_env(item.span(), Some(SymbolKind::Variable));
+            }
+            if item.name().as_str() == "provide" {
+                self.report_reserved_provide(item.span());
+            }
+        }
+        for item in self.module.raw_module().items() {
             match item {
                 Item::Function(function) => {
                     let scope = self.scope_manager.create_child(self.scope_manager.root());
@@ -436,8 +444,49 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         kind: SymbolKind,
         span: TextSpan,
     ) {
+        if name.as_str() == "env" {
+            self.report_reserved_env(span, Some(kind));
+        }
+        if name.as_str() == "provide" {
+            self.report_reserved_provide(span);
+        }
         self.scope_manager
             .define(scope, Symbol::new(name, kind, span));
+    }
+
+    /// Reports `env` used as a name: it only ever starts an environment read, `env.name`.
+    fn report_reserved_env(&mut self, span: TextSpan, binding: Option<SymbolKind>) {
+        let message = if binding.is_some() {
+            "'env' is reserved for environment values and can't be used as a name".to_string()
+        } else {
+            "'env' is reserved: read an environment value as `env.name`".to_string()
+        };
+        self.diagnostics.push(
+            Diagnostic::error("reserved-name")
+                .with_message(message)
+                .with_label(Label::primary(
+                    self.module.module_identity().to_string(),
+                    span,
+                ))
+                .build(),
+        );
+    }
+
+    /// Reports `provide` used as a name: at the start of an expression it always begins a
+    /// `provide` block, so a function or value of that name could never be called or read.
+    fn report_reserved_provide(&mut self, span: TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("reserved-name")
+                .with_message(
+                    "'provide' is reserved: at the start of an expression it begins a `provide` block, so a name 'provide' could never be read"
+                        .to_string(),
+                )
+                .with_label(Label::primary(
+                    self.module.module_identity().to_string(),
+                    span,
+                ))
+                .build(),
+        );
     }
 
     fn flattened_expr_name(&self, expr_id: ExprId) -> Option<Name> {
@@ -478,6 +527,23 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             | ast::Expr::ContextualName { .. }
             | ast::Expr::ResolvedUnionCase { .. }
             | ast::Expr::Error(_) => {}
+            ast::Expr::EnvRead { .. } => {}
+            ast::Expr::Provide {
+                overrides, body, ..
+            } => {
+                for provided in overrides {
+                    self.check_expr(provided.value, scope);
+                }
+                self.check_expr(*body, scope);
+            }
+            ast::Expr::EnvUpdate { overrides, .. } => {
+                for provided in overrides {
+                    self.check_expr(provided.value, scope);
+                }
+            }
+            ast::Expr::Ident(name) if name.as_str() == "env" => {
+                self.report_reserved_env(self.module.raw_module().expr_span(expr_id), None);
+            }
             ast::Expr::Ident(name) => {
                 if self.scope_manager.resolve(name, scope).is_none() {
                     self.report_undefined(name, self.module.raw_module().expr_span(expr_id));

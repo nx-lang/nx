@@ -1,0 +1,27 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "design.nx"
+  ],
+  "entrypoints": [
+    { "module": "main.nx", "function": "readDefault" },
+    { "module": "main.nx", "function": "readProvided" },
+    { "module": "main.nx", "function": "readPath" },
+    { "module": "main.nx", "function": "readBundle" },
+    { "module": "main.nx", "function": "colors" },
+    { "module": "main.nx", "function": "mode" },
+    { "module": "main.nx", "function": "provideExpr" },
+    { "module": "main.nx", "function": "nestedPath" },
+    { "module": "main.nx", "function": "readsOutside" },
+    { "module": "main.nx", "function": "cascade" },
+    { "module": "main.nx", "function": "markup" },
+    { "module": "main.nx", "function": "stacked" },
+    { "module": "main.nx", "function": "bundle" },
+    { "module": "main.nx", "function": "hosted" },
+    { "module": "main.nx", "function": "mode", "case": "rootDark", "arguments": [], "environment": { "colorMode": "dark" } },
+    { "module": "main.nx", "function": "colors", "case": "rootDark", "arguments": [], "environment": { "colorMode": "dark" } },
+    { "module": "main.nx", "function": "readProvided", "case": "rootSpace", "arguments": [], "environment": { "space": 2 } },
+    { "module": "main.nx", "function": "provideExpr", "case": "rootLocale", "arguments": [], "environment": { "locale": "de-DE" } }
+  ]
+}

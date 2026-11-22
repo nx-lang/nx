@@ -22,11 +22,11 @@ use nx_hir::UpdateIntrinsic;
 use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
-    NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1, NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
@@ -264,7 +264,7 @@ fn selected_modules<'a>(
     }
 }
 
-fn module_identity(module: &CodegenModule) -> String {
+pub(crate) fn module_identity(module: &CodegenModule) -> String {
     match &module.provenance {
         CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
         // The prelude is a library whose root is its reserved identity rather than a directory, so
@@ -327,9 +327,45 @@ fn module_fingerprint(program: &CodegenProgram, module: &CodegenModule) -> u64 {
     hasher.finish()
 }
 
+/// `module` with its top-level provides' values gathered into one synthetic value declaration,
+/// so a walk over declarations reaches every expression the module emits.
+fn with_provide_values(module: &CodegenModule) -> std::borrow::Cow<'_, CodegenModule> {
+    let Some(first) = module.provides.first() else {
+        return std::borrow::Cow::Borrowed(module);
+    };
+    let mut view = module.clone();
+    view.declarations.push(CodegenDeclaration {
+        reference: CodegenReference {
+            module_id: module.id,
+            definition_id: nx_hir::LocalDefinitionId::new(u32::MAX),
+            name: "$provides".to_string(),
+            kind: ResolvedItemKind::Value,
+        },
+        span: first.value.span,
+        kind: CodegenDeclarationKind::Value {
+            value: CodegenExpression {
+                expr_id: first.value.expr_id,
+                span: first.value.span,
+                ty: None,
+                kind: CodegenExpressionKind::Array(
+                    module
+                        .provides
+                        .iter()
+                        .map(|provide| provide.value.clone())
+                        .collect(),
+                ),
+            },
+            ty: None,
+            declared_ty: None,
+        },
+    });
+    std::borrow::Cow::Owned(view)
+}
+
 /// The features a runtime must support to run `module`.
 fn required_features(module: &CodegenModule) -> Vec<String> {
     let mut features: Vec<String> = Vec::new();
+    let module = &*with_provide_values(module);
     if module.declarations.iter().any(|declaration| declaration_contains(declaration, |expression| {
         matches!(&expression.kind, CodegenExpressionKind::Element(element) if element.tag == "$bindings")
     })) {
@@ -421,6 +457,21 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
     }) {
         features.push(NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1.to_string());
     }
+    if !module.provides.is_empty()
+        || module.declarations.iter().any(|declaration| {
+            matches!(declaration.kind, CodegenDeclarationKind::Environment { .. })
+                || declaration_contains(declaration, |expression| {
+                    matches!(
+                        expression.kind,
+                        CodegenExpressionKind::EnvRead { .. }
+                            | CodegenExpressionKind::Provide { .. }
+                            | CodegenExpressionKind::EnvUpdate { .. }
+                    )
+                })
+        })
+    {
+        features.push(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1.to_string());
+    }
     features
 }
 
@@ -497,6 +548,7 @@ pub(crate) fn visit_declaration_expressions(
             visit_expression(body, visit)
         }
         CodegenDeclarationKind::Value { value, .. } => visit_expression(value, visit),
+        CodegenDeclarationKind::Environment { default, .. } => visit_expression(default, visit),
         CodegenDeclarationKind::Record { fields: items, .. } => fields(items),
         CodegenDeclarationKind::Union { cases, .. } => {
             for case in cases {
@@ -655,6 +707,18 @@ pub(crate) fn visit_expression(
             visit_expressions(&element.content, visit);
         }
         CodegenExpressionKind::ActionHandler(handler) => visit_expression(&handler.body, visit),
+        CodegenExpressionKind::EnvRead { .. } => {}
+        CodegenExpressionKind::Provide { overrides, body } => {
+            for provided in overrides {
+                visit_expression(&provided.value, visit);
+            }
+            visit_expression(body, visit);
+        }
+        CodegenExpressionKind::EnvUpdate { overrides } => {
+            for provided in overrides {
+                visit_expression(&provided.value, visit);
+            }
+        }
     }
 }
 
@@ -663,6 +727,7 @@ pub(crate) fn visit_expression(
 fn validate_ir_program(program: &CodegenProgram) -> Result<(), CodegenError> {
     let mut diagnostics = Vec::new();
     for module in &program.modules {
+        let module = &*with_provide_values(module);
         for declaration in &module.declarations {
             if let CodegenDeclarationKind::Unsupported(unsupported) = &declaration.kind {
                 diagnostics.push(unsupported_diagnostic(
@@ -831,6 +896,9 @@ impl<'a> ModuleEmitter<'a> {
                 _ => {}
             }
             self.declaration(declaration);
+        }
+        if !self.module.provides.is_empty() {
+            self.provides();
         }
         if !self.diagnostics.is_empty() {
             return Err(CodegenError::new(self.diagnostics));
@@ -1134,6 +1202,15 @@ impl<'a> ModuleEmitter<'a> {
                 let declared = self.declared_type(declared_ty);
                 IrItem::ints([kinds::declaration::VALUE, name, value, declared])
             }
+            CodegenDeclarationKind::Environment {
+                default,
+                declared_ty,
+                ..
+            } => {
+                let default = self.expression(default);
+                let declared = self.type_ref(declared_ty);
+                IrItem::ints([kinds::declaration::ENVIRONMENT, name, default, declared])
+            }
             CodegenDeclarationKind::Record {
                 fields,
                 // IR carries no type parameters: each field's resolved type already has them
@@ -1323,9 +1400,76 @@ impl<'a> ModuleEmitter<'a> {
         );
     }
 
+    /// The module's top-level provides, as one `provides` declaration named `$provides` after
+    /// every other declaration.
+    fn provides(&mut self) {
+        self.frame = Frame::new();
+        self.span_module = self.module.id;
+        let name = self.string("$provides");
+        let span = self.module.provides[0].value.span;
+        let provides = self.module.provides.clone();
+        let entries = provides
+            .iter()
+            .map(|provide| {
+                let target = self.optional_reference(provide.target.as_ref());
+                let path = self.path(&provide.path);
+                let value = self.expression(&provide.value);
+                IrItem::list([target, path, IrItem::Int(value)])
+            })
+            .collect::<Vec<_>>();
+        self.declarations.push(IrItem::list([
+            IrItem::Int(kinds::declaration::PROVIDES),
+            IrItem::Int(name),
+            IrItem::List(entries),
+        ]));
+        let span = self.span(span);
+        self.declaration_spans.push(span);
+    }
+
+    /// A field path as a list of string indices.
+    fn path(&mut self, path: &[String]) -> IrItem {
+        IrItem::List(
+            path.iter()
+                .map(|field| IrItem::Int(self.string(field)))
+                .collect(),
+        )
+    }
+
+    /// The overrides of an `envProvide` or `envUpdate` node.
+    fn env_overrides(&mut self, overrides: &[crate::model::CodegenEnvOverride]) -> IrItem {
+        IrItem::List(
+            overrides
+                .iter()
+                .map(|provided| {
+                    let target = self.reference_item(&provided.target);
+                    let path = self.path(&provided.path);
+                    let value = self.expression(&provided.value);
+                    IrItem::list([target, path, IrItem::Int(value)])
+                })
+                .collect(),
+        )
+    }
+
     fn expression(&mut self, expression: &CodegenExpression) -> i64 {
         let span = expression.span;
         let entry = match &expression.kind {
+            CodegenExpressionKind::EnvRead { reference } => {
+                let (slot, name) = self.reference(reference);
+                IrItem::ints([kinds::node::ENV_READ, slot, name])
+            }
+            CodegenExpressionKind::Provide { overrides, body } => {
+                let overrides = self.env_overrides(overrides);
+                let body = self.expression(body);
+                IrItem::list([
+                    IrItem::Int(kinds::node::ENV_PROVIDE),
+                    overrides,
+                    IrItem::Int(body),
+                ])
+            }
+            CodegenExpressionKind::EnvUpdate { overrides } => {
+                let overrides = self.env_overrides(overrides);
+                IrItem::list([IrItem::Int(kinds::node::ENV_UPDATE), overrides])
+            }
             CodegenExpressionKind::Literal(literal) => self.literal(literal),
             CodegenExpressionKind::Identifier { name, reference } => match reference {
                 Some(reference) => {

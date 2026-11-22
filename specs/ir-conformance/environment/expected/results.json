@@ -1,0 +1,99 @@
+{
+  "main.nx::bundle": {
+    "$entries": [
+      {
+        "path": [],
+        "to": 12,
+        "value": "design.nx::radius"
+      },
+      {
+        "path": [],
+        "to": {
+          "$type": "Colors.Update",
+          "surface": "gray"
+        },
+        "value": "design.nx::color"
+      }
+    ],
+    "$type": "env.Update"
+  },
+  "main.nx::cascade": "navy",
+  "main.nx::colors": {
+    "$type": "Colors",
+    "accent": "blue",
+    "surface": "gray"
+  },
+  "main.nx::colors#rootDark": {
+    "$type": "Colors",
+    "accent": "navy",
+    "surface": "gray"
+  },
+  "main.nx::hosted": {
+    "$type": "Stack",
+    "Children": [
+      {
+        "$env": [
+          {
+            "path": [],
+            "to": "dark",
+            "value": "design.nx::colorMode"
+          }
+        ],
+        "$type": "Badge"
+      }
+    ]
+  },
+  "main.nx::markup": {
+    "$type": "div",
+    "content": [
+      {
+        "$env": [
+          {
+            "path": [],
+            "to": "dark",
+            "value": "design.nx::colorMode"
+          }
+        ],
+        "$type": "Badge"
+      },
+      {
+        "$type": "span",
+        "mode": "dark"
+      }
+    ]
+  },
+  "main.nx::mode": "light",
+  "main.nx::mode#rootDark": "dark",
+  "main.nx::nestedPath": {
+    "$type": "Size",
+    "height": 5,
+    "width": 12
+  },
+  "main.nx::provideExpr": "fr-FR",
+  "main.nx::provideExpr#rootLocale": "fr-FR",
+  "main.nx::readBundle": 12,
+  "main.nx::readDefault": 3,
+  "main.nx::readPath": {
+    "$type": "Size",
+    "height": 20,
+    "width": 12
+  },
+  "main.nx::readProvided": 8,
+  "main.nx::readProvided#rootSpace": 2,
+  "main.nx::readsOutside": 16,
+  "main.nx::stacked": {
+    "$env": [
+      {
+        "path": [],
+        "to": "dark",
+        "value": "design.nx::colorMode"
+      },
+      {
+        "path": [],
+        "to": "light",
+        "value": "design.nx::colorMode"
+      }
+    ],
+    "$type": "Badge"
+  }
+}

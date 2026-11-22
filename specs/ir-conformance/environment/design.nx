@@ -1,0 +1,14 @@
+export type ColorMode = light | dark
+export type Colors = { accent:string surface:string }
+
+/// Whether the app shows light or dark colors.
+export environment colorMode: ColorMode = light
+export environment locale: string = "en-US"
+export environment space: int = 4
+export environment radius: int = 4
+export environment color: Colors = {
+  if env.colorMode is {
+    light => <Colors accent="blue" surface="white" />
+    dark => <Colors accent="navy" surface="black" />
+  }
+}

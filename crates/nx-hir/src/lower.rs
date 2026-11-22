@@ -4,18 +4,19 @@
 //! our typed High-level Intermediate Representation (HIR).
 
 use crate::ast::{
-    BinOp, CompareOp, Expr, FunctionParam, Literal, MatchArm, NumericPattern, Occurrence,
-    OrderedFloat, PatternBound, PatternTerm, RecordLiteralProperty, Stmt, TypeRef, UnOp,
-    UnsupportedTerm,
+    BinOp, CompareOp, EnvOverride, Expr, FunctionParam, Literal, MatchArm, NumericPattern,
+    Occurrence, OrderedFloat, PatternBound, PatternTerm, RecordLiteralProperty, Stmt, TypeRef,
+    UnOp, UnsupportedTerm,
 };
 use crate::{
-    property_union_name, props_record_name, state_record_name, update_record_name, Component,
-    ComponentEmit, ComponentEmitKind, Doc, Element, ExprId, Function, FunctionForm, Import,
-    ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
-    PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
-    SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField, UnionDef,
-    ValueDef, Visibility, VisualizerDecl, WhitespaceRun, PROPERTY_UNION_SUFFIX,
-    PROPS_RECORD_SUFFIX, STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
+    environment_item_name, property_union_name, props_record_name, state_record_name,
+    update_record_name, Component, ComponentEmit, ComponentEmitKind, Doc, Element, ExprId,
+    Function, FunctionForm, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name,
+    Param, Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, ProvideDecl, RecordDef,
+    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef,
+    UnionCaseField, UnionDef, ValueDef, Visibility, VisualizerDecl, WhitespaceRun,
+    ENVIRONMENT_ITEM_PREFIX, ENVIRONMENT_UPDATE_TYPE, PROPERTY_UNION_SUFFIX, PROPS_RECORD_SUFFIX,
+    STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -1877,6 +1878,23 @@ impl LoweringContext {
                 let object = node
                     .child_by_field("object")
                     .or_else(|| node.children().next());
+                // `env.name` reads an environment value. `env` is reserved, so the head of a
+                // member chain spelled `env` is never a local.
+                if let Some(object) = object.filter(|object| Self::is_env_head(*object)) {
+                    let _ = object;
+                    let member = node
+                        .child_by_field("property")
+                        .or_else(|| node.children().nth(1))
+                        .map(|n| Name::new(n.text()))
+                        .unwrap_or_else(|| Name::new(""));
+                    let expr = self.alloc_expr(Expr::EnvRead {
+                        name: member,
+                        binding: None,
+                        span: node.span(),
+                    });
+                    self.module.set_expr_span(expr, node.span());
+                    return expr;
+                }
                 let base = match object {
                     Some(object) if self.is_bare_state_base(object) => {
                         self.lower_bare_state_base(object)
@@ -1928,45 +1946,36 @@ impl LoweringContext {
             SyntaxKind::ELEMENT | SyntaxKind::TEXT_CHILD_ELEMENT => {
                 let span = node.span();
                 let element = self.lower_element(node);
-
-                // A record written with a property-list condition or match stays an element, which
-                // binds its entries as written; a record literal holds only direct properties.
-                let conditional = element
-                    .property_entries
-                    .iter()
-                    .any(|entry| !matches!(entry, PropertyEntry::Value(_)));
-                if element.content.is_empty() && !conditional {
-                    if let Some(record_def) = self
-                        .module
-                        .find_item(element.tag.as_str())
-                        .and_then(|item| match item {
-                            Item::Record(record_def) => Some(record_def),
-                            _ => None,
-                        })
-                        .or_else(|| self.find_predeclared_record(element.tag.as_str()))
-                    {
-                        let props = element
-                            .properties
-                            .iter()
-                            .map(|p| RecordLiteralProperty {
-                                name: p.key.clone(),
-                                value: p.value,
-                                span: p.span,
-                            })
-                            .collect();
-                        return self.alloc_expr(Expr::RecordLiteral {
-                            record: record_def.name.clone(),
-                            properties: props,
-                            span,
-                        });
-                    }
+                if element.tag.as_str() == ENVIRONMENT_UPDATE_TYPE {
+                    return self.environment_update_expr(element, span);
                 }
+                let (element, overrides) = self.take_env_overrides(element);
+                let expr = self.element_or_record_expr(element, span);
+                self.wrap_in_provide(expr, overrides, span)
+            }
 
-                let element_id = self.module.alloc_element(element);
-                self.alloc_expr(Expr::Element {
-                    element: element_id,
-                    span,
-                })
+            SyntaxKind::PROVIDE_EXPRESSION => {
+                let overrides = node
+                    .children()
+                    .filter(|child| child.kind() == SyntaxKind::PROPERTY_VALUE)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|child| {
+                        let property = self.lower_property_value(child, None);
+                        self.env_override_from_property(property)
+                    })
+                    .collect::<Vec<_>>();
+                let body = node
+                    .child_by_field("body")
+                    .map(|body| self.lower_expr(body))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+                let expr = self.alloc_expr(Expr::Provide {
+                    overrides: overrides.into_iter().flatten().collect(),
+                    body,
+                    span: node.span(),
+                });
+                self.module.set_expr_span(expr, node.span());
+                expr
             }
 
             // Sequence (array) expression
@@ -2437,6 +2446,90 @@ impl LoweringContext {
             doc: self.doc_for(node),
             span: node.span(),
         }
+    }
+
+    /// Lowers an `environment name: Type = default` declaration to the value item it is kept as,
+    /// named `env.name` (see [`ENVIRONMENT_ITEM_PREFIX`]).
+    fn lower_environment_definition(&mut self, node: SyntaxNode) -> ValueDef {
+        let name_node = node.child_by_field("name");
+        let plain = name_node
+            .map(|n| n.text().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        if plain == "Update" {
+            self.add_diagnostic(
+                "reserved-name: an environment value can't be named 'Update', since `env.Update` \
+                 names the bundle type"
+                    .to_string(),
+                name_node.map(|n| n.span()).unwrap_or_else(|| node.span()),
+            );
+        }
+        let ty = match node.child_by_field("type") {
+            Some(type_node) => {
+                self.module
+                    .set_annotation_span(node.span(), type_node.span());
+                Some(self.lower_type(type_node))
+            }
+            None => {
+                self.add_diagnostic(
+                    format!(
+                        "environment-type-required: environment value '{plain}' needs a type, \
+                         as in `environment {plain}: Type = default`"
+                    ),
+                    name_node.map(|n| n.span()).unwrap_or_else(|| node.span()),
+                );
+                None
+            }
+        };
+        let value = match node.child_by_field("value") {
+            Some(value_node) => self.lower_expr(value_node),
+            None => {
+                self.add_diagnostic(
+                    format!(
+                        "environment-default-required: environment value '{plain}' needs a \
+                         default, as in `environment {plain}: Type = default`, so every read has \
+                         a value"
+                    ),
+                    name_node.map(|n| n.span()).unwrap_or_else(|| node.span()),
+                );
+                self.error_expr(node.span())
+            }
+        };
+        ValueDef {
+            name: environment_item_name(&plain),
+            visibility: Self::lower_visibility(node),
+            ty,
+            value,
+            doc: self.doc_for(node),
+            span: node.span(),
+        }
+    }
+
+    /// Lowers a top-level `provide` declaration.
+    fn lower_provide_definition(&mut self, node: SyntaxNode) -> Option<ProvideDecl> {
+        if let Some(target) = node.child_by_field("target") {
+            let value = node
+                .child_by_field("value")
+                .map(|value_node| self.lower_expr(value_node))
+                .unwrap_or_else(|| self.error_expr(node.span()));
+            let property = Property {
+                key: Name::new(target.text()),
+                value,
+                span: node.span(),
+            };
+            return self
+                .env_override_from_property(property)
+                .map(ProvideDecl::Override);
+        }
+        let bundle = node.child_by_field("bundle")?;
+        let value = if matches!(bundle.kind(), SyntaxKind::QUALIFIED_NAME) {
+            self.lower_qualified_name_expr(bundle)
+        } else {
+            self.lower_expr(bundle)
+        };
+        Some(ProvideDecl::Bundle {
+            value,
+            span: node.span(),
+        })
     }
 
     /// Lowers a `visualizer Target = Value` declaration.
@@ -3206,6 +3299,234 @@ impl LoweringContext {
         }
     }
 
+    /// The expression an element lowers to without its `env.` attributes: a record literal when
+    /// it constructs a record with direct properties and no content, and an element otherwise.
+    fn element_or_record_expr(&mut self, element: Element, span: TextSpan) -> ExprId {
+        // A record written with a property-list condition or match stays an element, which
+        // binds its entries as written; a record literal holds only direct properties.
+        let conditional = element
+            .property_entries
+            .iter()
+            .any(|entry| !matches!(entry, PropertyEntry::Value(_)));
+        if element.content.is_empty() && !conditional {
+            if let Some(record_def) = self
+                .module
+                .find_item(element.tag.as_str())
+                .and_then(|item| match item {
+                    Item::Record(record_def) => Some(record_def),
+                    _ => None,
+                })
+                .or_else(|| self.find_predeclared_record(element.tag.as_str()))
+            {
+                let props = element
+                    .properties
+                    .iter()
+                    .map(|p| RecordLiteralProperty {
+                        name: p.key.clone(),
+                        value: p.value,
+                        span: p.span,
+                    })
+                    .collect();
+                return self.alloc_expr(Expr::RecordLiteral {
+                    record: record_def.name.clone(),
+                    properties: props,
+                    span,
+                });
+            }
+        }
+
+        let element_id = self.module.alloc_element(element);
+        self.alloc_expr(Expr::Element {
+            element: element_id,
+            span,
+        })
+    }
+
+    /// Whether `node` is the identifier `env` at the head of a member chain.
+    fn is_env_head(node: SyntaxNode) -> bool {
+        let mut node = node;
+        while matches!(
+            node.kind(),
+            SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_LIST_ITEM_EXPRESSION
+        ) {
+            let mut children = node.children();
+            match (children.next(), children.next()) {
+                (Some(only), None) => node = only,
+                _ => return false,
+            }
+        }
+        matches!(
+            node.kind(),
+            SyntaxKind::IDENTIFIER | SyntaxKind::IDENTIFIER_EXPRESSION
+        ) && node.text() == "env"
+    }
+
+    /// Splits an element's `env.` attributes from its properties. They are not properties: the
+    /// element means what a `provide` of them around the element without them means.
+    fn take_env_overrides(&mut self, mut element: Element) -> (Element, Vec<EnvOverride>) {
+        let is_env = |key: &Name| key.as_str().starts_with(ENVIRONMENT_ITEM_PREFIX);
+        self.reject_conditional_env_overrides(&element.property_entries);
+        if !element.property_entries.iter().any(|entry| match entry {
+            PropertyEntry::Value(property) => is_env(&property.key),
+            _ => false,
+        }) {
+            return (element, Vec::new());
+        }
+        let mut overrides = Vec::new();
+        element.property_entries.retain(|entry| match entry {
+            PropertyEntry::Value(property) if is_env(&property.key) => {
+                overrides.push(property.clone());
+                false
+            }
+            _ => true,
+        });
+        element.properties.retain(|property| !is_env(&property.key));
+        let overrides = overrides
+            .into_iter()
+            .filter_map(|property| self.env_override_from_property(property))
+            .collect();
+        (element, overrides)
+    }
+
+    /// Reports an `env.` attribute inside a conditional or match property fragment: an override
+    /// applies to the whole element, so it is written directly on it.
+    fn reject_conditional_env_overrides(&mut self, entries: &[PropertyEntry]) {
+        for entry in entries {
+            match entry {
+                PropertyEntry::Value(_) => {}
+                PropertyEntry::If {
+                    then_entries,
+                    else_entries,
+                    ..
+                } => {
+                    self.reject_env_entries(then_entries);
+                    self.reject_env_entries(else_entries);
+                }
+                PropertyEntry::ConditionList { arms, .. } => {
+                    for arm in arms {
+                        self.reject_env_entries(&arm.entries);
+                    }
+                }
+                PropertyEntry::Match { arms, .. } => {
+                    for arm in arms {
+                        self.reject_env_entries(&arm.entries);
+                    }
+                }
+            }
+        }
+    }
+
+    fn reject_env_entries(&mut self, entries: &[PropertyEntry]) {
+        for entry in entries {
+            if let PropertyEntry::Value(property) = entry {
+                if property.key.as_str().starts_with(ENVIRONMENT_ITEM_PREFIX) {
+                    self.add_diagnostic(
+                        format!(
+                            "environment-path: '{}' can't be set conditionally; an environment \
+                             override applies to the whole element, so write it on the element \
+                             or use a `provide` block",
+                            property.key
+                        ),
+                        property.span,
+                    );
+                }
+            }
+        }
+        self.reject_conditional_env_overrides(
+            &entries
+                .iter()
+                .filter(|entry| !matches!(entry, PropertyEntry::Value(_)))
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    /// The override an `env.name.path=value` attribute or block entry means, or `None` with a
+    /// diagnostic when the name does not start with `env.`.
+    fn env_override_from_property(&mut self, property: Property) -> Option<EnvOverride> {
+        let Some(rest) = property.key.as_str().strip_prefix(ENVIRONMENT_ITEM_PREFIX) else {
+            self.add_diagnostic(
+                format!(
+                    "environment-path: a `provide` override names an environment value as \
+                     `env.name=value`; '{}' does not start with `env.`",
+                    property.key
+                ),
+                property.span,
+            );
+            return None;
+        };
+        let mut parts = rest.split('.').map(Name::new);
+        let name = parts.next().unwrap_or_else(|| Name::new(""));
+        Some(EnvOverride {
+            name,
+            path: parts.collect(),
+            value: property.value,
+            binding: None,
+            span: property.span,
+        })
+    }
+
+    /// The bundle `<env.Update a=1 b.c=2 />` constructs: each attribute names an environment value
+    /// without `env.`, and a dotted one a field path in it. Content and conditional attributes are
+    /// rejected, since a bundle is a flat list of overrides.
+    fn environment_update_expr(&mut self, element: Element, span: TextSpan) -> ExprId {
+        if !element.content.is_empty() {
+            self.add_diagnostic(
+                "environment-path: `<env.Update>` takes no content; set each value as an attribute"
+                    .to_string(),
+                span,
+            );
+        }
+        let mut overrides = Vec::new();
+        for entry in &element.property_entries {
+            match entry {
+                PropertyEntry::Value(property) => {
+                    let key = property
+                        .key
+                        .as_str()
+                        .strip_prefix(ENVIRONMENT_ITEM_PREFIX)
+                        .unwrap_or(property.key.as_str());
+                    let mut parts = key.split('.').map(Name::new);
+                    let name = parts.next().unwrap_or_else(|| Name::new(""));
+                    overrides.push(EnvOverride {
+                        name,
+                        path: parts.collect(),
+                        value: property.value,
+                        binding: None,
+                        span: property.span,
+                    });
+                }
+                _ => self.add_diagnostic(
+                    "environment-path: an `<env.Update>` attribute can't be set conditionally"
+                        .to_string(),
+                    span,
+                ),
+            }
+        }
+        let expr = self.alloc_expr(Expr::EnvUpdate { overrides, span });
+        self.module.set_expr_span(expr, span);
+        expr
+    }
+
+    /// `expr` with `overrides` in effect, or `expr` itself when there are none.
+    fn wrap_in_provide(
+        &mut self,
+        expr: ExprId,
+        overrides: Vec<EnvOverride>,
+        span: TextSpan,
+    ) -> ExprId {
+        if overrides.is_empty() {
+            return expr;
+        }
+        let provided = self.alloc_expr(Expr::Provide {
+            overrides,
+            body: expr,
+            span,
+        });
+        self.module.set_expr_span(provided, span);
+        provided
+    }
+
     /// Rewrites a bare `State` at the head of a dotted name to the enclosing component's
     /// `<Component>.State`, so `State.Property.name` lowers exactly as
     /// `Counter.State.Property.name` does.
@@ -3386,10 +3707,20 @@ impl LoweringContext {
                         self.module.add_visualizer(visualizer);
                     }
                 }
+                SyntaxKind::ENVIRONMENT_DEFINITION => {
+                    let value = self.lower_environment_definition(child);
+                    self.module.add_item(Item::Value(value));
+                }
+                SyntaxKind::PROVIDE_DEFINITION => {
+                    if let Some(provide) = self.lower_provide_definition(child) {
+                        self.module.add_provide(provide);
+                    }
+                }
                 SyntaxKind::ELEMENT => {
                     // Top-level element becomes an implicit 'root' function
                     let span = child.span();
                     let element = self.lower_element(child);
+                    let (element, overrides) = self.take_env_overrides(element);
                     let element_id = self.module.alloc_element(element);
 
                     // Create an Expr::Element that references the element
@@ -3397,6 +3728,7 @@ impl LoweringContext {
                         element: element_id,
                         span,
                     });
+                    let body = self.wrap_in_provide(body, overrides, span);
 
                     // Create the implicit 'root' function. This entry point must remain
                     // discoverable by the runtime even though omitted source visibility

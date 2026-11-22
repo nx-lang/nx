@@ -1,11 +1,11 @@
 use crate::builder::build_codegen_program;
-use crate::ir::{visit_declaration_expressions, visit_expression};
+use crate::ir::{module_identity, visit_declaration_expressions, visit_expression};
 use crate::model::{
     CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
     CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
-    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance, CodegenParam,
-    CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenStatement,
-    CodegenTypeRef, CodegenUnionCase,
+    CodegenEnvOverride, CodegenExpression, CodegenExpressionKind, CodegenModule,
+    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
+    CodegenReference, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
 };
 use crate::options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenTarget, GeneratedFile,
@@ -42,12 +42,18 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxComponentSchema",
     "nxDiagnosticsFromError",
     "nxDiffRecords",
+    "nxDeclareComponents",
     "nxDiv",
     "nxElement",
     "nxBindings",
     "nxPatternMatches",
     "nxEmpty",
+    "nxEntryProvides",
     "nxEnumSchema",
+    "nxEnvironment",
+    "nxEnvironmentDeclaration",
+    "nxEnvRead",
+    "nxEnvUpdate",
     "nxExists",
     "nxExternalComponentSchema",
     "nxField",
@@ -65,6 +71,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxNumberSchema",
     "nxOptional",
     "nxOptionalSchema",
+    "nxProvide",
     "nxRejectUnknownFields",
     "nxRangeMap",
     "nxRecordSchema",
@@ -73,6 +80,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxStringSchema",
     "nxUnionSchema",
     "nxValuesEqual",
+    "nxWithEnvironment",
 ];
 
 /// Builds and emits executable files directly from a program artifact.
@@ -201,6 +209,9 @@ fn collect_source_codegen_diagnostics(
                 collect_record_field_source_codegen_diagnostics(module, &case.fields, diagnostics);
             }
         }
+        CodegenDeclarationKind::Environment { default, .. } => {
+            collect_expression_source_codegen_diagnostics(module, default, diagnostics);
+        }
         CodegenDeclarationKind::TypeAlias { .. } | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
@@ -235,6 +246,18 @@ fn collect_expression_source_codegen_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &expression.kind {
+        CodegenExpressionKind::EnvRead { .. } => {}
+        CodegenExpressionKind::Provide { overrides, body } => {
+            for entry in overrides {
+                collect_expression_source_codegen_diagnostics(module, &entry.value, diagnostics);
+            }
+            collect_expression_source_codegen_diagnostics(module, body, diagnostics);
+        }
+        CodegenExpressionKind::EnvUpdate { overrides } => {
+            for entry in overrides {
+                collect_expression_source_codegen_diagnostics(module, &entry.value, diagnostics);
+            }
+        }
         // A handler is an unevaluated body a host dispatches later; these targets have no
         // instance to dispatch against, so the binding is refused before anything is emitted.
         CodegenExpressionKind::ActionHandler(_) => {
@@ -849,6 +872,7 @@ impl SchemaDeclaration {
             },
             CodegenDeclarationKind::Function { .. }
             | CodegenDeclarationKind::Value { .. }
+            | CodegenDeclarationKind::Environment { .. }
             | CodegenDeclarationKind::TypeAlias { .. }
             | CodegenDeclarationKind::Unsupported(_) => return None,
         };
@@ -892,7 +916,10 @@ fn emit_module(
         }
     }
     out.push('\n');
-    let runtime_helpers = collect_module_runtime_helpers(module, target);
+    let mut runtime_helpers = collect_module_runtime_helpers(module, target);
+    runtime_helpers.extend(module_environment_runtime_helpers(program, module, false));
+    runtime_helpers.sort_unstable();
+    runtime_helpers.dedup();
     if !runtime_helpers.is_empty() {
         out.push_str(&format!(
             "import {{ {} }} from \"./{}\";\n",
@@ -991,8 +1018,116 @@ fn emit_module(
         );
         out.push('\n');
     }
+    emit_module_environment(program, &[module], module, context, &mut out);
 
     out
+}
+
+/// Whether a module of the program declares an environment value: only then does generated code
+/// add `$env` to component descriptors and take the entry module's provides.
+fn program_uses_environment(program: &CodegenProgram) -> bool {
+    program.modules.iter().any(|module| {
+        module.declarations.iter().any(|declaration| {
+            matches!(declaration.kind, CodegenDeclarationKind::Environment { .. })
+        })
+    })
+}
+
+fn is_entry_module(program: &CodegenProgram, module: &CodegenModule) -> bool {
+    module_identity(module) == program.entry_identity
+}
+
+/// The runtime helpers the statements `emit_module_environment` writes need: for `module`, or for
+/// every module of the program when `all` is set.
+fn module_environment_runtime_helpers(
+    program: &CodegenProgram,
+    module: &CodegenModule,
+    all: bool,
+) -> Vec<&'static str> {
+    let mut helpers = FxHashSet::default();
+    if !program_uses_environment(program) {
+        return Vec::new();
+    }
+    let modules: Vec<&CodegenModule> = if all {
+        program.modules.iter().collect()
+    } else {
+        vec![module]
+    };
+    if modules.iter().any(|module| {
+        module
+            .declarations
+            .iter()
+            .any(|declaration| matches!(declaration.kind, CodegenDeclarationKind::Component(_)))
+    }) {
+        helpers.insert("nxDeclareComponents");
+    }
+    for module in modules {
+        if is_entry_module(program, module) && !module.provides.is_empty() {
+            helpers.insert("nxEntryProvides");
+            for provide in &module.provides {
+                collect_expression_runtime_helpers(&provide.value, &mut helpers);
+            }
+        }
+    }
+    helpers.into_iter().collect()
+}
+
+/// The module-level statements environment values need: the names of the components of
+/// `modules`, which a provide adds `$env` to the descriptors of, and the entry module's
+/// top-level provides, each value evaluated at a read that reaches it.
+fn emit_module_environment(
+    program: &CodegenProgram,
+    modules: &[&CodegenModule],
+    current: &CodegenModule,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    if !program_uses_environment(program) {
+        return;
+    }
+    let components = modules
+        .iter()
+        .flat_map(|module| module.declarations.iter())
+        // An external component's descriptor is the host's to interpret, like an intrinsic
+        // element, so only an authored component takes `$env`.
+        .filter(|declaration| {
+            matches!(&declaration.kind, CodegenDeclarationKind::Component(component) if component.body.is_some())
+        })
+        .map(|declaration| js_string(&declaration.reference.name))
+        .collect::<Vec<_>>();
+    if !components.is_empty() {
+        out.push_str(&format!(
+            "nxDeclareComponents([{}]);\n",
+            components.join(", ")
+        ));
+    }
+    for module in modules {
+        if !is_entry_module(program, module) || module.provides.is_empty() {
+            continue;
+        }
+        let provides = module
+            .provides
+            .iter()
+            .map(|provide| {
+                format!(
+                    "[{}, [{}], () => {}]",
+                    provide
+                        .target
+                        .as_ref()
+                        .map(|target| context.reference_name(current.id, target))
+                        .unwrap_or_else(|| "null".to_string()),
+                    provide
+                        .path
+                        .iter()
+                        .map(|field| js_string(field))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    emit_expression(current.id, &provide.value, context)
+                )
+            })
+            .collect::<Vec<_>>();
+        out.push_str(&format!("nxEntryProvides([{}]);\n", provides.join(", ")));
+    }
 }
 
 fn emit_js_program_module_source(
@@ -1009,7 +1144,12 @@ fn emit_js_program_module_source(
     out.push_str(&format!("// nx-fingerprint: {}\n", program.fingerprint));
     out.push_str(&format!("// nx-runtime-abi: {}\n\n", NX_JS_RUNTIME_ABI));
 
-    let runtime_helpers = collect_js_program_module_runtime_helpers(program);
+    let mut runtime_helpers = collect_js_program_module_runtime_helpers(program);
+    if let Some(first) = program.modules.first() {
+        runtime_helpers.extend(module_environment_runtime_helpers(program, first, true));
+    }
+    runtime_helpers.sort_unstable();
+    runtime_helpers.dedup();
     if !runtime_helpers.is_empty() {
         out.push_str(&format!(
             "import {{ {} }} from {};\n\n",
@@ -1034,6 +1174,11 @@ fn emit_js_program_module_source(
             );
             out.push('\n');
         }
+    }
+
+    if let Some(first) = program.modules.first() {
+        let modules = program.modules.iter().collect::<Vec<_>>();
+        emit_module_environment(program, &modules, first, context, &mut out);
     }
 
     emit_js_program_module_manifest(program, context, options, &mut out);
@@ -1413,6 +1558,34 @@ fn emit_declaration(
                 );
                 out.push('\n');
             }
+        }
+        CodegenDeclarationKind::Environment {
+            default,
+            ty,
+            declared_ty,
+        } => {
+            let key = environment_key(module, &declaration.reference.name);
+            let value = emit_declared_result(module.id, default, Some(declared_ty), context);
+            let schema = emit_type_schema(module.id, declared_ty, context);
+            let type_argument = if target.is_typescript() {
+                format!(
+                    "<{}>",
+                    ty.as_ref()
+                        .map(|ty| emit_type(module.id, ty, module, context))
+                        .unwrap_or_else(|| "unknown".to_string())
+                )
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "{}const {} = nxEnvironmentDeclaration{}({}, () => {}, {});\n",
+                export_prefix,
+                name,
+                type_argument,
+                js_string(&key),
+                value,
+                schema
+            ));
         }
         // A signature or field names an alias as written, so TypeScript needs the alias itself.
         CodegenDeclarationKind::TypeAlias { target: aliased } => {
@@ -3338,6 +3511,10 @@ fn emit_named_type(
         "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),
         "string" => "string".to_string(),
         "boolean" => "boolean".to_string(),
+        // A bundle of environment overrides, as `nxEnvUpdate` makes it.
+        "env.Update" => {
+            "{ readonly $type: \"env.Update\"; readonly $entries: readonly unknown[] }".to_string()
+        }
         // `void` is not an NX type name and no longer a type in the checker either, so a `void`
         // here is a user declaration and falls through to the reference lookup.
         _ => context
@@ -3600,6 +3777,19 @@ fn emit_expression(
             format!("(() => {{ const __nx$callee = {}; const __nx$args = {input}; return __nx$callee({arguments}); }})()",
                 emit_expression(current_module_id, callee, context))
         }
+        CodegenExpressionKind::EnvRead { reference } => format!(
+            "nxEnvRead({})",
+            context.reference_name(current_module_id, reference)
+        ),
+        CodegenExpressionKind::Provide { overrides, body } => format!(
+            "nxProvide({}, () => {})",
+            emit_env_overrides(current_module_id, overrides, context),
+            emit_expression(current_module_id, body, context)
+        ),
+        CodegenExpressionKind::EnvUpdate { overrides } => format!(
+            "nxEnvUpdate({})",
+            emit_env_overrides(current_module_id, overrides, context)
+        ),
         CodegenExpressionKind::IntervalPattern { .. } => {
             "nxRuntimeError(\"numeric patterns are not supported by executable source codegen yet\")"
                 .to_string()
@@ -4440,6 +4630,13 @@ fn emit_index(program: &CodegenProgram, context: &EmitContext, target: CodegenTa
     let mut out = String::new();
     out.push_str("// <auto-generated/>\n");
     out.push_str(&format!("// nx-fingerprint: {}\n\n", program.fingerprint));
+    if program_uses_environment(program) {
+        // A host makes the environment a call runs in with these.
+        out.push_str(&format!(
+            "export {{ NxEnvironment, nxEnvironment, nxWithEnvironment }} from \"./{}\";\n",
+            runtime_import_file(target)
+        ));
+    }
     for entrypoint in &program.entrypoints {
         out.push_str(&format!(
             "export {{ {} }} from \"./{}\";\n",
@@ -4519,6 +4716,14 @@ fn collect_module_value_references(module: &CodegenModule) -> Vec<CodegenReferen
     for declaration in &module.declarations {
         collect_declaration_value_references(module, declaration, &mut references);
     }
+    for provide in &module.provides {
+        if let Some(target) = provide.target.as_ref() {
+            if target.module_id != module.id {
+                references.push(target.clone());
+            }
+        }
+        collect_expression_value_references(module.id, &provide.value, &mut references);
+    }
     sort_and_dedup_references(&mut references);
     references
 }
@@ -4596,6 +4801,14 @@ fn collect_declaration_value_references(
         CodegenDeclarationKind::Component(component) => {
             collect_component_value_references(module, component, output);
         }
+        CodegenDeclarationKind::Environment {
+            default,
+            declared_ty,
+            ..
+        } => {
+            let _ = declared_ty;
+            collect_expression_value_references(module.id, default, output);
+        }
         CodegenDeclarationKind::Unsupported(_) => {}
         CodegenDeclarationKind::Record { .. }
         | CodegenDeclarationKind::Union { .. }
@@ -4652,6 +4865,7 @@ fn collect_declaration_type_references(
                 collect_expression_render_type_references(module.id, body, output);
             }
         }
+        CodegenDeclarationKind::Environment { .. } => {}
         CodegenDeclarationKind::TypeAlias { target } => {
             collect_type_ref_references(module, target, output);
         }
@@ -4909,6 +5123,18 @@ fn collect_expression_value_references(
         | CodegenExpressionKind::ToText { expr, .. }
         | CodegenExpressionKind::ConstraintCheck { operand: expr, .. } => {
             collect_expression_value_references(current_module_id, expr, output);
+        }
+        CodegenExpressionKind::EnvRead { reference } => {
+            if reference.module_id != current_module_id {
+                output.push(reference.clone());
+            }
+        }
+        CodegenExpressionKind::Provide { overrides, body } => {
+            collect_env_override_value_references(current_module_id, overrides, output);
+            collect_expression_value_references(current_module_id, body, output);
+        }
+        CodegenExpressionKind::EnvUpdate { overrides } => {
+            collect_env_override_value_references(current_module_id, overrides, output);
         }
         CodegenExpressionKind::IntervalPattern { .. } => {}
         CodegenExpressionKind::Call { callee, args } => {
@@ -5198,6 +5424,15 @@ fn collect_declaration_runtime_helpers(
                 output.insert("NxEmpty");
             }
         }
+        CodegenDeclarationKind::Environment {
+            default,
+            declared_ty,
+            ..
+        } => {
+            output.insert("nxEnvironmentDeclaration");
+            collect_expression_runtime_helpers(default, output);
+            collect_codegen_type_schema_helpers(declared_ty, output);
+        }
         CodegenDeclarationKind::TypeAlias { target } => {
             if type_ref_has_optional(target) {
                 output.insert("NxEmpty");
@@ -5341,6 +5576,22 @@ fn collect_expression_runtime_helpers(
             }
             for content in &element.content {
                 collect_expression_runtime_helpers(content, output);
+            }
+        }
+        CodegenExpressionKind::EnvRead { .. } => {
+            output.insert("nxEnvRead");
+        }
+        CodegenExpressionKind::Provide { overrides, body } => {
+            output.insert("nxProvide");
+            for entry in overrides {
+                collect_expression_runtime_helpers(&entry.value, output);
+            }
+            collect_expression_runtime_helpers(body, output);
+        }
+        CodegenExpressionKind::EnvUpdate { overrides } => {
+            output.insert("nxEnvUpdate");
+            for entry in overrides {
+                collect_expression_runtime_helpers(&entry.value, output);
             }
         }
         CodegenExpressionKind::Unsupported(_) | CodegenExpressionKind::IntervalPattern { .. } => {
@@ -5765,6 +6016,105 @@ fn is_reserved_word(identifier: &str) -> bool {
             | "with"
             | "yield"
     )
+}
+
+/// The key an environment value is named by in `$env` and by a host: `identity::name`.
+fn environment_key(module: &CodegenModule, declaration_name: &str) -> String {
+    format!(
+        "{}::{}",
+        module_identity(module),
+        declaration_name
+            .strip_prefix("env.")
+            .unwrap_or(declaration_name)
+    )
+}
+
+/// The overrides of a provide or a bundle as the runtime helpers take them:
+/// `[[declaration, [path], value], …]`, each value evaluated in order.
+fn emit_env_overrides(
+    current_module_id: RuntimeModuleId,
+    overrides: &[CodegenEnvOverride],
+    context: &EmitContext,
+) -> String {
+    let entries = overrides
+        .iter()
+        .map(|entry| {
+            format!(
+                "[{}, [{}], {}]",
+                context.reference_name(current_module_id, &entry.target),
+                entry
+                    .path
+                    .iter()
+                    .map(|field| js_string(field))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                emit_expression(current_module_id, &entry.value, context)
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", entries.join(", "))
+}
+
+fn collect_env_override_value_references(
+    current_module_id: RuntimeModuleId,
+    overrides: &[CodegenEnvOverride],
+    output: &mut Vec<CodegenReference>,
+) {
+    for entry in overrides {
+        if entry.target.module_id != current_module_id {
+            output.push(entry.target.clone());
+        }
+        collect_expression_value_references(current_module_id, &entry.value, output);
+    }
+}
+
+/// The schema helpers `emit_type_schema` writes for a type.
+fn collect_codegen_type_schema_helpers(ty: &CodegenTypeRef, output: &mut FxHashSet<&'static str>) {
+    match ty {
+        CodegenTypeRef::Primitive { name } => match name.as_str() {
+            "int" | "int32" | "int64" | "float64" => {
+                output.insert("nxNumberSchema");
+            }
+            "float32" => {
+                output.insert("nxFloat32Schema");
+            }
+            "string" => {
+                output.insert("nxStringSchema");
+            }
+            "boolean" => {
+                output.insert("nxBooleanSchema");
+            }
+            _ => {}
+        },
+        CodegenTypeRef::Nominal { .. } => {
+            for helper in [
+                "nxNamedRecordSchema",
+                "nxEnumSchema",
+                "nxUnionSchema",
+                "nxAnySchema",
+                "nxArraySchema",
+                "nxNonEmptyArraySchema",
+                "nxBooleanSchema",
+                "nxFloat32Schema",
+                "nxOptionalSchema",
+                "nxNumberSchema",
+                "nxStringSchema",
+            ] {
+                output.insert(helper);
+            }
+        }
+        CodegenTypeRef::Seq { item, occ } => {
+            output.insert(occurrence_schema_helper(*occ));
+            collect_codegen_type_schema_helpers(item, output);
+        }
+        CodegenTypeRef::Function { .. } | CodegenTypeRef::AnyFunction { .. } => {
+            output.insert("nxAnySchema");
+        }
+        CodegenTypeRef::Constrained { base, .. } => collect_codegen_type_schema_helpers(
+            &CodegenTypeRef::Primitive { name: base.clone() },
+            output,
+        ),
+    }
 }
 
 fn js_string(value: &str) -> String {

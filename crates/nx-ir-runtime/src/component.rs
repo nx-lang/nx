@@ -37,6 +37,10 @@ pub(crate) struct InstanceData {
     pub handlers: Vec<Arc<Handler>>,
     /// The render generation the tokens belong to.
     pub generation: u64,
+    /// The environment values the render read, by qualified name, each with the value it found
+    /// beneath the overrides the body itself wrote, or `None` where reading it there failed, so
+    /// it counts as changed on every visit. An instance restored from storage has none.
+    pub reads: Arc<[(Arc<str>, Option<Value>)]>,
 }
 
 /// A component instance: what dispatch needs to run a batch against a component that
@@ -53,6 +57,11 @@ pub struct ComponentInstance {
 }
 
 impl ComponentInstance {
+    /// The environment values the render behind this instance read, with what each found.
+    pub(crate) fn reads(&self) -> &Arc<[(Arc<str>, Option<Value>)]> {
+        &self.data.reads
+    }
+
     /// The name of the component the instance is of.
     pub fn component(&self) -> &str {
         &self.data.component
@@ -337,6 +346,7 @@ impl ComponentInstance {
                 state: state.unwrap_or_else(|| data.state.clone()),
                 handlers: handlers.unwrap_or_else(|| data.handlers.clone()),
                 generation: data.generation,
+                reads: Arc::clone(&data.reads),
             }),
         }))
     }
@@ -356,6 +366,7 @@ impl Program {
         work: impl FnOnce(&Meter<'_, '_>, &Stack) -> Result<T>,
     ) -> Result<T> {
         let machine = Machine::new(&self.data, options);
+        machine.begin_environment()?;
         let (index, _, _) = machine.component(component)?;
         let meter = machine.meter(entry_cx(index), None);
         work(&meter, &machine.stack)
@@ -814,7 +825,7 @@ impl<'p> Machine<'p> {
     }
 }
 
-fn entry_cx(declaration: u32) -> Cx {
+pub(crate) fn entry_cx(declaration: u32) -> Cx {
     Cx {
         module: 0,
         declaration,
@@ -899,7 +910,7 @@ impl Program {
             }
         };
         let machine = Machine::new(&self.data, options);
-        let result = body(&machine);
+        let result = machine.begin_environment().and_then(|()| body(&machine));
         if let Some(usage) = usage {
             usage.record(machine.used(), input_size);
         }
@@ -1069,7 +1080,8 @@ impl Program {
                     belongs(&self.data, &parent.data.program, &parent.data.component)?;
                 }
                 let path = Labeled(name, " props");
-                let supplied = Value::record(None, fields_from_host(props, &machine.stack)?);
+                let props = crate::environment::without_env(props);
+                let supplied = Value::record(None, fields_from_host(&props, &machine.stack)?);
                 let resolved = resolve_parent_handlers(
                     &supplied,
                     init.parent.map(|parent| &*parent.data),
@@ -1114,11 +1126,10 @@ impl Program {
                 };
                 let mut tokens = Tokens::new(1);
                 let output = machine.meter(cx, None);
-                let rendered = machine.report(
-                    &machine.eval(cx, &mut frame, body)?,
-                    Some(&mut tokens),
-                    &output,
-                )?;
+                machine.record_environment_reads();
+                let value = machine.eval(cx, &mut frame, body)?;
+                let reads = machine.take_environment_reads();
+                let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentInitResult {
                     rendered,
                     state: fields_to_host(&state, &output, &machine.stack)?,
@@ -1131,6 +1142,7 @@ impl Program {
                             state,
                             handlers: tokens.handlers,
                             generation: 1,
+                            reads: Arc::from(reads),
                         }),
                     },
                 })
@@ -1160,10 +1172,11 @@ impl Program {
                     );
                 };
                 let path = Labeled(name, " props");
+                let props = crate::environment::without_env(props);
                 let (fields, _) = machine.split_handler_properties(
                     0,
                     index,
-                    fields_from_host(props, &machine.stack)?,
+                    fields_from_host(&props, &machine.stack)?,
                     &path,
                 )?;
                 let cx = entry_cx(index);
@@ -1344,11 +1357,10 @@ impl Program {
                 let generation = instance.generation.saturating_add(1);
                 let mut tokens = Tokens::new(generation);
                 let output = machine.meter(entry_cx(index), None);
-                let rendered = machine.report(
-                    &machine.eval(entry_cx(index), &mut frame, body)?,
-                    Some(&mut tokens),
-                    &output,
-                )?;
+                machine.record_environment_reads();
+                let value = machine.eval(entry_cx(index), &mut frame, body)?;
+                let reads = machine.take_environment_reads();
+                let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentDispatchResult {
                     rendered,
                     effects: effects
@@ -1365,6 +1377,7 @@ impl Program {
                             state: working,
                             handlers: tokens.handlers,
                             generation,
+                            reads: Arc::from(reads),
                         }),
                     },
                 })
