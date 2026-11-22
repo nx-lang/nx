@@ -42,6 +42,9 @@ environment outside the node, then evaluate the body with the overrides in effec
 overrides to every component descriptor its result reaches. The walk SHALL go through sequences,
 records, and the fields and content of elements that are not component descriptors, and SHALL stop
 at each component descriptor, which SHALL receive the overrides in front of any it already holds.
+A component descriptor here SHALL be a record whose `$type` names a component declared with a body;
+the record of an external component is the host's to interpret, so the walk SHALL go through its
+fields and content as through any other element, and it SHALL never get `$env`.
 A component descriptor SHALL carry its overrides in the reserved field `$env`, as a list of entries
 outermost first, each holding `value` (the qualified name of the environment value: its module
 identity and name), `path` (a list of field names) and `to` (the value in canonical form). A
@@ -54,6 +57,12 @@ descriptor SHALL never get one.
 - **THEN** the `Card` descriptor in the result SHALL hold `$env` with one entry naming `colorMode`,
   an empty `path` and `to` equal to `dark`
 - **AND** the `div` SHALL hold no `$env`
+
+#### Scenario: An override on an external component reaches the components inside it
+- **WHEN** a body evaluates to `<Stack env.colorMode=dark><Card /></Stack>`, where `Stack` is an
+  external component and `Card` an authored one
+- **THEN** the `Card` descriptor SHALL hold `$env` with the `dark` entry
+- **AND** the `Stack` SHALL hold no `$env`
 
 #### Scenario: The overrides where a use is built are innermost
 - **WHEN** `<Label env.colorMode=light />` is built in one body and placed by another inside

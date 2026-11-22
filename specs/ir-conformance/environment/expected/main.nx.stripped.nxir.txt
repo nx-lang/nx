@@ -1,7 +1,7 @@
-module main.nx fingerprint 13739068466247490779
+module main.nx fingerprint 4197849879551866255
 links design.nx version "" fingerprint 9671487728751124515
 requires environment-v1
-entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle] components [Badge]
+entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle hosted] components [Badge Stack]
 
 record Size
   width: int required
@@ -22,6 +22,10 @@ value theme: object =
 component Badge
   body =
     <span text=design.nx:env.locale />
+
+component Stack external
+  props
+    content Children: object*
 
 function readDefault() =
   env.total
@@ -78,6 +82,13 @@ function stacked() =
 
 function bundle() =
   theme
+
+function hosted() =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    <Stack>
+      <Badge />
+    </Stack>
+  }
 
 provide design.nx:env.space = 8
 provide env.size.width = 12

@@ -1,7 +1,7 @@
-module main.nx fingerprint 13739068466247490779
+module main.nx fingerprint 4197849879551866255
 links design.nx version "" fingerprint 9671487728751124515
 requires environment-v1
-entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle] components [Badge]
+entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle hosted] components [Badge Stack]
 
 record Size @3:1-3:37
   width: int required
@@ -23,45 +23,49 @@ component Badge @14:1-14:53
   body =
     <span text=design.nx:env.locale />
 
-function readDefault() @16:1-16:34 =
+component Stack external @15:1-15:57
+  props
+    content Children: object*
+
+function readDefault() @17:1-17:34 =
   env.total
 
-function readProvided() @17:1-17:35 =
+function readProvided() @18:1-18:35 =
   design.nx:env.space
 
-function readPath() @18:1-18:30 =
+function readPath() @19:1-19:30 =
   env.size
 
-function readBundle() @19:1-19:34 =
+function readBundle() @20:1-20:34 =
   design.nx:env.radius
 
-function colors() @20:1-20:29 =
+function colors() @21:1-21:29 =
   design.nx:env.color
 
-function mode() @21:1-21:31 =
+function mode() @22:1-22:31 =
   design.nx:env.colorMode
 
-function provideExpr() @22:1-22:66 =
+function provideExpr() @23:1-23:66 =
   provide design.nx:env.locale="fr-FR" {
     design.nx:env.locale
   }
 
-function nestedPath() @23:1-23:62 =
+function nestedPath() @24:1-24:62 =
   provide env.size.height=5 {
     env.size
   }
 
-function readsOutside() @24:1-24:73 =
+function readsOutside() @25:1-25:73 =
   provide design.nx:env.space=(design.nx:env.space mul 2) {
     design.nx:env.space
   }
 
-function cascade() @25:1-25:68 =
+function cascade() @26:1-26:68 =
   provide design.nx:env.colorMode=design.nx:ColorMode.dark {
     design.nx:env.color.accent
   }
 
-function markup() @26:1-26:88 =
+function markup() @27:1-27:88 =
   provide design.nx:env.colorMode=design.nx:ColorMode.dark {
     <div>
       <Badge />
@@ -69,15 +73,22 @@ function markup() @26:1-26:88 =
     </div>
   }
 
-function stacked() @27:1-27:81 =
+function stacked() @28:1-28:81 =
   provide design.nx:env.colorMode=design.nx:ColorMode.dark {
     provide design.nx:env.colorMode=design.nx:ColorMode.light {
       <Badge />
     }
   }
 
-function bundle() @28:1-28:25 =
+function bundle() @29:1-29:25 =
   theme
+
+function hosted() @30:1-30:63 =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    <Stack>
+      <Badge />
+    </Stack>
+  }
 
 provide design.nx:env.space = 8
 provide env.size.width = 12

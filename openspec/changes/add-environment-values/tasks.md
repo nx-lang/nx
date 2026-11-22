@@ -24,7 +24,7 @@
 - [x] 4.1 Add the `Environment` type (`root`, `enter`), root-value naming and checking (`nx-ir-environment-name`), and an environment in the runtime options for every evaluation and the lifecycle.
 - [x] 4.2 Evaluate `envRead` with the lookup order, evaluating defaults and entry-module provides at the read (with the "sources after it" rule), and `envProvide` with overrides evaluated outside, the body inside and `$env` added to the component descriptors of the result.
 - [x] 4.3 Record the slots and values each evaluation reads, for the instance tree.
-- [x] 4.4 Add `--env name=value` to `nxlang run` in `crates/nx-cli`, parsing the value as JSON or a bare word (a union case's name or a string) against the declared type.
+- [x] 4.4 Add `--env name=value` to `nxlang run` in `crates/nx-cli`, taking a `string` value's text as written and parsing any other value as JSON or a bare word (a union case's name or a string), checked against the declared type.
 
 ## 5. Instance tree
 

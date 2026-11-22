@@ -1088,7 +1088,11 @@ fn emit_module_environment(
     let components = modules
         .iter()
         .flat_map(|module| module.declarations.iter())
-        .filter(|declaration| matches!(declaration.kind, CodegenDeclarationKind::Component(_)))
+        // An external component's descriptor is the host's to interpret, like an intrinsic
+        // element, so only an authored component takes `$env`.
+        .filter(|declaration| {
+            matches!(&declaration.kind, CodegenDeclarationKind::Component(component) if component.body.is_some())
+        })
         .map(|declaration| js_string(&declaration.reference.name))
         .collect::<Vec<_>>();
     if !components.is_empty() {

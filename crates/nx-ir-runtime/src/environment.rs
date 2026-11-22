@@ -268,8 +268,10 @@ pub(crate) struct EnvState {
     pub roots: HashMap<EnvKey, Value>,
     /// The reads the evaluation made, those made for a default or a provide included, with the
     /// value each found beneath the overrides the evaluation pushed itself, when the caller
-    /// records them.
-    pub reads: Option<Vec<(EnvKey, Value)>>,
+    /// records them. A read whose default or provide was evaluated while overrides the
+    /// evaluation pushed were in effect has no value here: what it found depends on those
+    /// overrides, so its value beneath them is read again once the evaluation is done.
+    pub reads: Option<Vec<(EnvKey, Option<Value>)>>,
 }
 
 impl<'p> Machine<'p> {
@@ -324,17 +326,42 @@ impl<'p> Machine<'p> {
     }
 
     /// The reads recorded since [`Self::record_environment_reads`], by qualified name.
-    pub(crate) fn take_environment_reads(&self) -> Vec<(Arc<str>, Value)> {
+    ///
+    /// <para>A read recorded without a value is read again here, in a machine of its own over
+    /// the same environment with none of this evaluation's overrides, which is the read the skip
+    /// check makes. It is not charged to this evaluation, as the check's reads are not.</para>
+    pub(crate) fn take_environment_reads(&self) -> Result<Vec<(Arc<str>, Value)>> {
         let reads = self.env.borrow_mut().reads.take().unwrap_or_default();
         let index = self.environment_index();
         let mut seen: Vec<(Arc<str>, Value)> = Vec::new();
+        let mut beneath: Option<Machine<'_>> = None;
         for (key, value) in reads {
             let name = index.qualified(key);
-            if !seen.iter().any(|(known, _)| *known == name) {
-                seen.push((name, value));
+            if seen.iter().any(|(known, _)| *known == name) {
+                continue;
             }
+            let value = match value {
+                Some(value) => value,
+                None => {
+                    let machine = match beneath.as_ref() {
+                        Some(machine) => machine,
+                        None => {
+                            let machine = Machine::new(self.program, self.options);
+                            machine.begin_environment()?;
+                            beneath.insert(machine)
+                        }
+                    };
+                    let cx = Cx {
+                        module: key.0,
+                        declaration: key.1,
+                        depth: 0,
+                    };
+                    machine.environment_value(cx, None, key)?
+                }
+            };
+            seen.push((name, value));
         }
-        seen
+        Ok(seen)
     }
 
     /// Whether every recorded read gives the same value in this machine's environment, read at
@@ -457,9 +484,16 @@ impl<'p> Machine<'p> {
         let mut base: Option<Value> = None;
         let mut cap: Option<usize> = None;
         let record;
+        let pushed;
         {
             let state = self.env.borrow();
             record = state.reads.is_some();
+            pushed = state
+                .layers
+                .get(state.base..)
+                .unwrap_or_default()
+                .iter()
+                .any(|layer| matches!(layer, Layer::Set { .. }));
             for (position, layer) in state.layers.iter().enumerate().rev() {
                 match layer {
                     Layer::Set {
@@ -496,6 +530,7 @@ impl<'p> Machine<'p> {
                 base = state.roots.get(&key).cloned();
             }
         }
+        let evaluated = base.is_none();
         let base = match base {
             Some(base) => base,
             None => self.provided_or_default(cx, node, key, cap.unwrap_or(usize::MAX))?,
@@ -505,8 +540,11 @@ impl<'p> Machine<'p> {
         let own: Vec<Pending> = pending.drain(..local.min(pending.len())).collect();
         let beneath = self.apply_pending(cx, node, base, pending)?;
         if record && cap.is_none() {
+            // A default or provide evaluated under the evaluation's own overrides of other
+            // values found what those overrides made it; beneath them it may differ.
+            let found = (!(evaluated && pushed)).then(|| beneath.clone());
             if let Some(reads) = self.env.borrow_mut().reads.as_mut() {
-                reads.push((key, beneath.clone()));
+                reads.push((key, found));
             }
         }
         self.apply_pending(cx, node, beneath, own)

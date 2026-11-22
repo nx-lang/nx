@@ -867,6 +867,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "function-references",
         "function-values",

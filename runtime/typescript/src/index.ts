@@ -4597,7 +4597,7 @@ interface EnvironmentDeclaration {
   readonly ty: PreparedType;
 }
 
-/** Every environment declaration of a linked program, its entry module's provides and its component names. */
+/** Every environment declaration of a linked program, its entry module's provides and the names of its authored components. */
 interface EnvironmentIndex {
   readonly qualified: ReadonlyMap<string, EnvironmentDeclaration>;
   readonly simple: ReadonlyMap<string, readonly EnvironmentDeclaration[]>;
@@ -4625,7 +4625,8 @@ function environmentIndex(program: NxPreparedProgram): EnvironmentIndex {
   const modules = new Set<LinkedModule>([program.entry, ...program.modulesByIdentity.values()]);
   for (const linked of modules) {
     for (const declaration of linked.module.declarations) {
-      if (declaration.kind.tag === "component") {
+      // An external component's descriptor is the host's to interpret, like an intrinsic element.
+      if (declaration.kind.tag === "component" && declaration.kind.body >= 0) {
         componentNames.add(declaration.name);
       }
       if (declaration.kind.tag !== "environment" || !declaration.name.startsWith(environmentPrefix)) {

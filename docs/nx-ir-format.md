@@ -697,7 +697,8 @@ record is applied as a patch of the fields it sets.
 **`$env`.** Evaluating an `envProvide` node evaluates its overrides outside the node, then its body
 inside them, then adds the overrides to every component descriptor its result reaches. The walk
 goes through sequences, records, and the fields and content of elements that are not component
-descriptors, and stops at each component descriptor, which receives the overrides in front of any
+descriptors, an external component's record among them, and stops at each descriptor of a
+component declared with a body, which receives the overrides in front of any
 it holds already. A descriptor carries them in the reserved field `$env`, a list outermost first of
 entries `{ "value": "<module identity>::<name>", "path": [...], "to": <value> }`, with `to` in
 canonical form. A descriptor without overrides has no `$env`, and an element that is not a component

@@ -355,6 +355,9 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             if item.name().as_str() == "env" {
                 self.report_reserved_env(item.span(), Some(SymbolKind::Variable));
             }
+            if item.name().as_str() == "provide" {
+                self.report_reserved_provide(item.span());
+            }
         }
         for item in self.module.raw_module().items() {
             match item {
@@ -444,6 +447,9 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         if name.as_str() == "env" {
             self.report_reserved_env(span, Some(kind));
         }
+        if name.as_str() == "provide" {
+            self.report_reserved_provide(span);
+        }
         self.scope_manager
             .define(scope, Symbol::new(name, kind, span));
     }
@@ -458,6 +464,23 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         self.diagnostics.push(
             Diagnostic::error("reserved-name")
                 .with_message(message)
+                .with_label(Label::primary(
+                    self.module.module_identity().to_string(),
+                    span,
+                ))
+                .build(),
+        );
+    }
+
+    /// Reports `provide` used as a name: at the start of an expression it always begins a
+    /// `provide` block, so a function or value of that name could never be called or read.
+    fn report_reserved_provide(&mut self, span: TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("reserved-name")
+                .with_message(
+                    "'provide' is reserved: at the start of an expression it begins a `provide` block, so a name 'provide' could never be read"
+                        .to_string(),
+                )
                 .with_label(Label::primary(
                     self.module.module_identity().to_string(),
                     span,

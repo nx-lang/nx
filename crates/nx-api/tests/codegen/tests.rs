@@ -3630,15 +3630,21 @@ fn a_generated_component_reads_a_root_value_as_the_ir_runtime_does() {
            const mode = m.nxWithEnvironment(dark, () => m.mode());
            const wrapped = m.wrapped();
            const badge = m.BadgeSchema.evaluateJson(wrapped, undefined, { environment: m.nxEnvironment().enter(wrapped) });
+           // A `$env` entry with a path is checked against the field it names, as the runtimes check it.
+           const size = wrapped.$env.find((entry) => entry.value.endsWith("::colorMode")).value.replace("::colorMode", "::size");
+           const sized = (path, to) => m.nxEnvironment().enter({ $type: "Badge", $env: [{ value: size, path, to }] });
+           const narrow = m.nxWithEnvironment(sized(["width"], 3), () => m.size());
            const errors = [];
            for (const run of [
              () => m.nxWithEnvironment(m.nxEnvironment({ colourMode: "dark" }), () => m.mode()),
              () => m.nxWithEnvironment(m.nxEnvironment({ colorMode: "dim" }), () => m.mode()),
              () => m.nxEnvironment().enter({ $type: "Badge", $env: 5 }),
+             () => m.nxWithEnvironment(sized(["width"], "wide"), () => m.size()),
+             () => m.nxWithEnvironment(sized(["depth"], 3), () => m.size()),
            ]) {
              try { run(); errors.push("none"); } catch (error) { errors.push(error.diagnostics[0].code); }
            }
-           console.log(JSON.stringify({ swatch, mode, badge, errors }));"#,
+           console.log(JSON.stringify({ swatch, mode, badge, narrow, errors }));"#,
     );
     let actual: Value = serde_json::from_str(&output).expect("json output");
     assert_eq!(
@@ -3659,14 +3665,73 @@ fn a_generated_component_reads_a_root_value_as_the_ir_runtime_does() {
         serde_json::json!([
             "nx-ir-environment-name",
             "invalid-enum",
-            "nx-ir-boundary-type"
+            "nx-ir-boundary-type",
+            "invalid-field",
+            "nx-ir-environment"
         ])
+    );
+    assert_eq!(
+        actual["narrow"],
+        serde_json::json!({ "$type": "Size", "width": 3, "height": 5 })
     );
 }
 
 #[test]
 fn generated_environment_typescript_type_checks() {
     assert_generated_typescript_artifact_type_checks(&artifact_from_source(ENVIRONMENT_SOURCE));
+}
+
+/// Spec: "A read of an imported value", through an alias, and "A later override applies on an
+/// earlier one", in generated JavaScript.
+#[test]
+fn a_read_through_an_alias_and_stacked_overrides_run_in_generated_code() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/design.nx",
+                "export type Size = { width:int height:int }\nexport environment space: int = 4\nexport environment size: Size = <Size width=10 height=20 />",
+            ),
+            (
+                "app/main.nx",
+                "import \"./design.nx\" as design\nlet gap() = { env.space }\nlet sized() = { provide env.size=<design.Size width=1 height=2 /> env.size.width=9 { \"\" + env.size.width + \",\" + env.size.height } }",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let output = execute_generated_js_program_module_script(
+        &artifact,
+        r#"console.log(JSON.stringify([m.gap(), m.sized()]));"#,
+    );
+    assert_eq!(output, r#"[4,"9,2"]"#);
+}
+
+/// Spec: "An unknown and an ambiguous read": the error names both modules.
+#[test]
+fn an_ambiguous_read_names_both_modules() {
+    let modules = [
+        ("a.nx", "export environment colorMode: string = \"light\""),
+        ("b.nx", "export environment colorMode: string = \"dark\""),
+        (
+            "app.nx",
+            "import \"./a.nx\"\nimport \"./b.nx\"\nlet root() = { env.colorMode }",
+        ),
+    ]
+    .iter()
+    .map(|(identity, source)| NxWorkspaceModule::from_source(*identity, *source).expect("module"))
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    let diagnostics =
+        build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+            .expect_err("the read is ambiguous");
+    let ambiguous = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code.as_deref() == Some("ambiguous-environment-value"))
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert!(
+        ambiguous.message.contains("a.nx") && ambiguous.message.contains("b.nx"),
+        "{}",
+        ambiguous.message
+    );
 }
 
 #[test]

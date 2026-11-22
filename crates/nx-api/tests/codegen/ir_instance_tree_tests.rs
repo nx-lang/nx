@@ -1997,26 +1997,33 @@ component <Plain extends Node /> = {
 component <Shout extends Node /> = {
   <Label Text={env.loud} />
 }
+component <Cascade extends Node /> = {
+  <Stack>{ provide env.mode=\"dark\" { <Label Text={env.loud} /> } }</Stack>
+}
 component <Page /> = {
   state { dark:boolean = false }
   <Stack>
     <Reader />
     <Reader env.mode={if dark { \"dark\" } else { \"dim\" }} />
     <Reader env.mode=\"fixed\" />
+    <Stack env.mode=\"hosted\"><Reader /></Stack>
     <Plain env.mode={if dark { \"dark\" } else { \"dim\" }} />
     <Shout />
+    <Cascade />
     <Button Text=\"Dark\" onTapped=<State.Update dark={!dark} /> />
   </Stack>
 }
 let root() = { <Page /> }
 ";
 
-const ENVIRONMENT_CHILDREN: [(&str, &str); 5] = [
+const ENVIRONMENT_CHILDREN: [(&str, &str); 7] = [
     ("root/reader", "Reader"),
     ("root/provided", "Reader"),
     ("root/fixed", "Reader"),
+    ("root/hosted", "Reader"),
     ("root/plain", "Plain"),
     ("root/shout", "Shout"),
+    ("root/cascade", "Cascade"),
 ];
 
 /// A pass over the Page at `root` and each of its children, in the order the Page renders them.
@@ -2031,8 +2038,10 @@ fn environment_pass(tree: &mut InstanceTree) {
         readers[0],
         readers[1],
         readers[2],
+        readers[3],
         find(&output, "Plain", None).expect("a Plain"),
         find(&output, "Shout", None).expect("a Shout"),
+        find(&output, "Cascade", None).expect("a Cascade"),
     ];
     for ((key, _), item) in ENVIRONMENT_CHILDREN.iter().zip(items) {
         tree.visit(key, item, Some("root"), &options()).unwrap();
@@ -2067,6 +2076,7 @@ fn each_node_renders_in_the_environment_its_place_gives_it() {
     assert!(renders(&tree, "root/provided", "Label", "dim"));
     assert!(renders(&tree, "root/fixed", "Label", "fixed"));
     assert!(renders(&tree, "root/shout", "Label", "light!"));
+    assert!(renders(&tree, "root/cascade", "Label", "dark!"));
     // The override is not a prop: the Reader's descriptor carries it to the tree, not its props.
     assert_eq!(
         tree.environment_value("root/provided", "mode", &options())
@@ -2077,6 +2087,41 @@ fn each_node_renders_in_the_environment_its_place_gives_it() {
         tree.environment_value("root", "mode", &options()).unwrap(),
         NxValue::String("light".to_string())
     );
+}
+
+/// Review RF1: an override on an external component reaches the authored components in its
+/// content, and the external component's own output carries no `$env`.
+#[test]
+fn an_override_on_a_host_component_reaches_the_components_inside_it() {
+    let tree = environment_tree(&[]);
+    assert!(renders(&tree, "root/hosted", "Label", "hosted"));
+    let output = rendered(&tree, "root");
+    let mut stacks = Vec::new();
+    collect(&output, "Stack", &mut stacks);
+    for stack in stacks {
+        let NxValue::Record { properties, .. } = stack else {
+            panic!("a Stack is a record");
+        };
+        assert!(!properties.contains_key("$env"), "{stack:?}");
+    }
+}
+
+/// Review RF2: a body whose own override cascades through a default is left alone on a visit
+/// with the same descriptor, and when a root value it does not depend on changes.
+#[test]
+fn a_body_that_cascades_its_own_override_is_left_alone_by_an_equal_visit() {
+    let mut tree = environment_tree(&[]);
+    let cascade = rendered(&tree, "root/cascade");
+    environment_pass(&mut tree);
+    assert!(Arc::ptr_eq(&cascade, &rendered(&tree, "root/cascade")));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("mode", NxValue::String("night".to_string()))]),
+        &options(),
+    )
+    .unwrap();
+    // The body overrides `mode` itself, so the root's `mode` reaches none of what it read.
+    assert!(Arc::ptr_eq(&cascade, &rendered(&tree, "root/cascade")));
+    assert!(renders(&tree, "root/reader", "Label", "night"));
 }
 
 #[test]

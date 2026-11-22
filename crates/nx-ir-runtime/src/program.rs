@@ -244,8 +244,10 @@ impl ProgramData {
             .get_or_init(|| crate::environment::EnvironmentIndex::build(self))
     }
 
-    /// Whether a component of the program is declared with this name: what a record's `$type`
-    /// says when the record is a component descriptor.
+    /// Whether a component of the program with a body is declared with this name: what a
+    /// record's `$type` says when the record is the descriptor of an authored component, which a
+    /// host renders as a node of its own. An external component's descriptor is the host's to
+    /// interpret, like an intrinsic element, so it is not one.
     pub(crate) fn is_component_name(&self, name: &str) -> bool {
         self.component_names
             .get_or_init(|| {
@@ -254,8 +256,9 @@ impl ProgramData {
                     .flat_map(|linked| linked.module.declarations.iter())
                     .filter(|declaration| {
                         matches!(
-                            declaration.kind,
-                            crate::module::DeclarationKind::Component(_)
+                            &declaration.kind,
+                            crate::module::DeclarationKind::Component(component)
+                                if component.body.is_some()
                         )
                     })
                     .map(|declaration| Arc::clone(&declaration.name))

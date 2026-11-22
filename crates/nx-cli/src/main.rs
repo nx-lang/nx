@@ -247,9 +247,8 @@ fn explain_ir_artifact(path: &Path) -> ExitCode {
     }
 }
 
-/// The root environment `--env name=value` arguments give: each value is JSON, or a bare word,
-/// which is a union case's name or a string.
-fn environment_from_args(args: &[String]) -> Result<Environment, String> {
+/// The `--env name=value` arguments, as name and value text.
+fn environment_args(args: &[String]) -> Result<Vec<(String, String)>, String> {
     let mut values = Vec::with_capacity(args.len());
     for arg in args {
         let Some((name, text)) = arg.split_once('=') else {
@@ -261,11 +260,57 @@ fn environment_from_args(args: &[String]) -> Result<Environment, String> {
         if name.is_empty() {
             return Err(format!("Error: --env '{arg}' names no environment value"));
         }
-        let value = nx_value::NxValue::from_json_str(text)
-            .unwrap_or_else(|_| nx_value::NxValue::String(text.to_string()));
-        values.push((name.to_string(), value));
+        values.push((name.to_string(), text.to_string()));
     }
-    Ok(Environment::root(values))
+    Ok(values)
+}
+
+/// The root environment the `--env` arguments give. A value of an environment value declared
+/// `string` is its text as written, so `--env version=1.0` is the string `1.0`; any other value
+/// is JSON, or a bare word, which is a union case's name or a string. The runtime checks each
+/// against its declared type.
+fn environment_from_args(program: &ProgramArtifact, args: Vec<(String, String)>) -> Environment {
+    Environment::root(args.into_iter().map(|(name, text)| {
+        let value = if environment_is_string(program, &name) {
+            nx_value::NxValue::String(text)
+        } else {
+            nx_value::NxValue::from_json_str(&text).unwrap_or(nx_value::NxValue::String(text))
+        };
+        (name, value)
+    }))
+}
+
+/// Whether every environment value of the program `name` can name is declared `string`.
+fn environment_is_string(program: &ProgramArtifact, name: &str) -> bool {
+    let (module, simple) = match name.rsplit_once("::") {
+        Some((module, simple)) => (Some(module), simple),
+        None => (None, name),
+    };
+    let item_name = format!("env.{simple}");
+    let mut types = program
+        .root_modules
+        .iter()
+        .chain(
+            program
+                .libraries
+                .iter()
+                .flat_map(|library| library.modules.iter()),
+        )
+        .filter(|artifact| module.is_none_or(|module| artifact.file_name == module))
+        .filter_map(|artifact| artifact.lowered_module.as_deref())
+        .flat_map(|lowered| lowered.items().iter())
+        .filter_map(|item| match item {
+            Item::Value(value) if value.name.as_str() == item_name => value.ty.as_ref(),
+            _ => None,
+        })
+        .peekable();
+    types.peek().is_some()
+        && types.all(|ty| {
+            matches!(
+                nx_hir::ast::spell_type_ref(ty).as_str(),
+                "string" | "string?"
+            )
+        })
 }
 
 fn run_file(
@@ -274,7 +319,7 @@ fn run_file(
     output: Option<&PathBuf>,
     env: &[String],
 ) -> ExitCode {
-    let environment = match environment_from_args(env) {
+    let environment = match environment_args(env) {
         Ok(environment) => environment,
         Err(message) => {
             eprintln!("{message}");
@@ -330,6 +375,7 @@ fn run_file(
         return ExitCode::from(1);
     }
 
+    let environment = environment_from_args(&program, environment);
     let value = match execute_program(&program, environment) {
         Ok(value) => value,
         Err(message) => {
@@ -1262,6 +1308,37 @@ mod tests {
             );
         }
         assert_eq!(RuntimeOptions::default().max_operations, None);
+    }
+
+    /// Spec: "The CLI takes root environment values", and review RF7.
+    #[test]
+    fn env_arguments_give_root_values_read_against_their_declared_types() {
+        let artifact = build_program_artifact_from_source(
+            "type ColorMode = light | dark\n\
+             environment colorMode: ColorMode = light\n\
+             environment version: string = \"0\"\n\
+             environment scale: int = 1\n\
+             let mode() = { if env.colorMode is { light => \"light\" dark => \"dark\" } }\n\
+             let root() = { mode() + \" \" + env.version + \" \" + env.scale }",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .unwrap();
+        let run = |args: &[&str]| {
+            let args =
+                environment_args(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())?;
+            let value = execute_program(&artifact, environment_from_args(&artifact, args))?;
+            format_output(&artifact, &value, OutputFormat::Nx)
+        };
+        assert_eq!(
+            run(&["colorMode=dark", "version=1.0", "scale=3"]).unwrap(),
+            "dark 1.0 3"
+        );
+        let wrong = run(&["colorMode=dim"]).unwrap_err();
+        assert!(wrong.contains("colorMode"), "{wrong}");
+        let unknown = run(&["colourMode=dark"]).unwrap_err();
+        assert!(unknown.contains("nx-ir-environment-name"), "{unknown}");
+        assert!(run(&["colorMode"]).unwrap_err().contains("name=value"));
     }
 
     #[test]

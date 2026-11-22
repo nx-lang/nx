@@ -7694,7 +7694,7 @@ impl<'a> InferenceContext<'a> {
         let mut candidates: Vec<(Name, ResolvedPreparedItem)> = Vec::new();
         let bindings = self
             .module
-            .bindings(PreparedNamespace::Value)
+            .environment_bindings()
             .filter(|binding| {
                 nx_hir::environment_binding_name(binding.visible_name.as_str())
                     == Some(name.as_str())

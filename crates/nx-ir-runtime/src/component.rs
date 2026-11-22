@@ -56,12 +56,12 @@ pub struct ComponentInstance {
 }
 
 impl ComponentInstance {
-    /// The name of the component the instance is of.
     /// The environment values the render behind this instance read, with what each found.
     pub(crate) fn reads(&self) -> &Arc<[(Arc<str>, Value)]> {
         &self.data.reads
     }
 
+    /// The name of the component the instance is of.
     pub fn component(&self) -> &str {
         &self.data.component
     }
@@ -1127,7 +1127,7 @@ impl Program {
                 let output = machine.meter(cx, None);
                 machine.record_environment_reads();
                 let value = machine.eval(cx, &mut frame, body)?;
-                let reads = machine.take_environment_reads();
+                let reads = machine.take_environment_reads()?;
                 let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentInitResult {
                     rendered,
@@ -1358,7 +1358,7 @@ impl Program {
                 let output = machine.meter(entry_cx(index), None);
                 machine.record_environment_reads();
                 let value = machine.eval(entry_cx(index), &mut frame, body)?;
-                let reads = machine.take_environment_reads();
+                let reads = machine.take_environment_reads()?;
                 let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentDispatchResult {
                     rendered,

@@ -123,9 +123,25 @@ function nxEnvironmentByHostName(name) {
   throw nxEnvironmentError("nx-ir-environment-name", `The program declares no environment value named '${name}'.`);
 }
 
+/** The schema of the field `path` names in a value of `schema`, as a `$env` entry's path names it. */
+function nxEnvironmentSchemaAt(schema, path) {
+  let current = schema;
+  for (const field of path) {
+    while (typeof current === "object" && "optional" in current) {
+      current = current.optional;
+    }
+    const found = typeof current === "object" && "fields" in current ? current.fields.find((entry) => entry.name === field) : undefined;
+    if (found === undefined) {
+      throw nxEnvironmentError("nx-ir-environment", `Environment path field '${field}' names no record field.`);
+    }
+    current = found.schema;
+  }
+  return current;
+}
+
 /**
  * Runs `run` in `environment`, or with no root values when it is `undefined`, and restores the
- * environment around it afterwards. Root values and whole-value overrides are checked against
+ * environment around it afterwards. Root values and overrides are checked against
  * their declared types first.
  */
 export function nxWithEnvironment(environment, run) {
@@ -143,7 +159,11 @@ export function nxWithEnvironment(environment, run) {
       if (declaration === undefined) {
         throw nxEnvironmentError("nx-ir-environment-name", `A '$env' entry names '${entry.value}', which the program does not declare.`);
       }
-      const value = entry.path.length === 0 ? nxNormalizeValue(entry.to, declaration.schema, `environment value '${entry.value}'`) : entry.to;
+      const value = nxNormalizeValue(
+        entry.to,
+        nxEnvironmentSchemaAt(declaration.schema, entry.path),
+        `environment value '${[entry.value, ...entry.path].join(".")}'`,
+      );
       state.layers.push({ set: true, key: declaration.key, path: entry.path, value });
     }
     state.base = state.layers.length;

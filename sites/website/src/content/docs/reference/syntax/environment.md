@@ -69,6 +69,8 @@ component <Footer /> = {
 }
 ```
 
+- The override reaches the components inside any element, an external component's content
+  included, though the element's own output carries nothing for it.
 - The attribute is not a property: it is not checked against the element's props, doesn't satisfy a
   required one, and doesn't appear in the element's fields.
 - `env.name.field=value` overrides one field of a record value and keeps the rest.
@@ -86,6 +88,9 @@ environment locale: string = "en-US"
 let label() = { env.locale }
 let french() = { provide env.locale="fr-FR" { label() } }
 ```
+
+`provide` begins a block wherever it starts an expression, so it can't be the name of a
+declaration, parameter or binding (`reserved-name`); a record field named `provide` still works.
 
 `french()` is `"fr-FR"`: a function has no environment of its own, and reads in the environment of
 the call. An element with `env.` attributes means a `provide` with the same overrides around the
@@ -111,8 +116,8 @@ provide env.space = 8
 provide env.color.accent = "#e11d48"
 ```
 
-A module that another module imports can't contain a top-level `provide`; each one is
-`provide-outside-main-module`. A module nothing imports, such as a library's own `app.nx` for
+A module that another module imports, or a library module that exports a declaration, can't
+contain a top-level `provide`; each one is `provide-outside-main-module`. A module nothing imports, such as a library's own `app.nx` for
 previews, may contain them, and they take effect only when it is the entry module.
 
 ### Bundles
@@ -184,7 +189,8 @@ declared types. `nxlang run` takes them with `--env`:
 nxlang run app.nx --env colorMode=dark --env locale=fr-FR
 ```
 
-The value is JSON, or a bare word, read as a union case's name or a string. An unknown name, or one
+A value declared `string` is its text as written, so `--env version=1.0` is the string `1.0`. Any
+other value is JSON, or a bare word, read as a union case's name or a string. An unknown name, or one
 two environment values share, is an error before the program runs. NX code has no way to read the
 operating system's environment.
 

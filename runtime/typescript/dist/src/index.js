@@ -3480,7 +3480,8 @@ function environmentIndex(program) {
     const modules = new Set([program.entry, ...program.modulesByIdentity.values()]);
     for (const linked of modules) {
         for (const declaration of linked.module.declarations) {
-            if (declaration.kind.tag === "component") {
+            // An external component's descriptor is the host's to interpret, like an intrinsic element.
+            if (declaration.kind.tag === "component" && declaration.kind.body >= 0) {
                 componentNames.add(declaration.name);
             }
             if (declaration.kind.tag !== "environment" || !declaration.name.startsWith(environmentPrefix)) {

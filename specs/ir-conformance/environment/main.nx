@@ -12,6 +12,7 @@ provide env.size.width = 12
 provide theme
 
 component <Badge /> = { <span text={env.locale} /> }
+external component <Stack content Children?: Element+ />
 
 let readDefault() = { env.total }
 let readProvided() = { env.space }
@@ -26,3 +27,4 @@ let cascade() = { provide env.colorMode=dark { env.color.accent } }
 let markup() = { <div env.colorMode=dark><Badge /><span mode={env.colorMode} /></div> }
 let stacked() = { provide env.colorMode=dark { <Badge env.colorMode=light /> } }
 let bundle() = { theme }
+let hosted() = { <Stack env.colorMode=dark><Badge /></Stack> }

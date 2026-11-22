@@ -83,6 +83,20 @@ fn an_unknown_read_is_rejected() {
 fn env_cannot_be_bound_or_read_alone() {
     assert_code("let describe(env: string) = { 1 }", "reserved-name");
     assert_code("let describe() = { env }", "reserved-name");
+    assert_code(
+        "let xs = { 1 2 }\nlet each() = { for env in xs { env } }",
+        "reserved-name",
+    );
+    assert_code("let env = 1", "reserved-name");
+}
+
+/// Review RF4: `provide` begins a block at the start of an expression, so a name `provide`
+/// could never be read and is refused where it is declared.
+#[test]
+fn provide_cannot_be_declared_as_a_name() {
+    assert_code("let provide(a: int) = { a }", "reserved-name");
+    assert_code("let f(provide: int) = { 1 }", "reserved-name");
+    assert_clean("type Feed = { provide: string }\nlet read(f: Feed) = { f.provide }");
 }
 
 #[test]

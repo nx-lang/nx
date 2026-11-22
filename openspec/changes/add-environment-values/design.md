@@ -62,7 +62,7 @@ component <Footer /> = {
   </Section>
 }
 
-let caption(when: date) = provide env.locale="fr-FR" { formatDate(when) }
+let caption(when: date) = { provide env.locale="fr-FR" { formatDate(when) } }
 
 // app.nx, the main module
 import "@acme/brand" as brand
@@ -236,8 +236,9 @@ These are rules both runtimes can follow exactly, and the corpus records them.
     The program's `index.js` exports `nxEnvironment`, `NxEnvironment` and `nxWithEnvironment`
     when it uses environment values.
   - Evaluation in JavaScript is synchronous, so a module-level stack is safe.
-- **CLI.** `nxlang run --env name=value` can be repeated. The value is JSON, or a bare word read
-  as a union case's name or a string, checked against the declared type, so `--env colorMode=dark`
+- **CLI.** `nxlang run --env name=value` can be repeated. A value declared `string` is its text as
+  written; any other value is JSON, or a bare word read as a union case's name or a string, checked
+  against the declared type, so `--env colorMode=dark`
   and `--env locale=fr-FR` both work.
 
 ### 8. Read tracking in the instance tree

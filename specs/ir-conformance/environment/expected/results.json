@@ -28,6 +28,21 @@
     "accent": "navy",
     "surface": "gray"
   },
+  "main.nx::hosted": {
+    "$type": "Stack",
+    "Children": [
+      {
+        "$env": [
+          {
+            "path": [],
+            "to": "dark",
+            "value": "design.nx::colorMode"
+          }
+        ],
+        "$type": "Badge"
+      }
+    ]
+  },
   "main.nx::markup": {
     "$type": "div",
     "content": [

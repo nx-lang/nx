@@ -27,8 +27,9 @@ defines, and a malformed `$env` SHALL be refused with `nx-ir-boundary-type`.
 
 ### Requirement: The CLI takes root environment values
 `nxlang run` SHALL accept `--env name=value`, any number of times. `name` SHALL be named as a host
-names a root value, and `value` SHALL be JSON, or a bare word read as a union case's name or a
-string, checked against the value's declared type as any root value is. A malformed or mistyped value, and an unknown or ambiguous name, SHALL be reported
+names a root value, and `value` SHALL be its text as written when the value is declared `string`,
+and otherwise JSON, or a bare word read as a union case's name or a string, checked against the
+value's declared type as any root value is. A malformed or mistyped value, and an unknown or ambiguous name, SHALL be reported
 as a diagnostic before the program runs, and the command SHALL exit with failure.
 
 #### Scenario: A root value from the command line

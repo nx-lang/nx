@@ -101,7 +101,10 @@ the same overrides, in the same order, around the element without them means.
 The language SHALL accept `provide overrides { body }` wherever an expression or markup content
 is, where `overrides` is one or more overrides in the attribute form (`env.name=value` or
 `env.name.field=value`). Its value and type SHALL be its body's. The overrides SHALL be checked as an
-element's `env.` attributes are, and a block without an override SHALL be a syntax error.
+element's `env.` attributes are, and a block without an override SHALL be a syntax error. Since
+`provide` at the start of an expression always begins a block, a declaration, parameter or binding
+named `provide` SHALL be rejected with `reserved-name`; a record field named `provide`, read as
+`x.provide`, SHALL keep working.
 
 #### Scenario: A provide in an expression
 - **WHEN** a module declares `environment locale: string = "en-US"` and
@@ -136,9 +139,10 @@ A module SHALL be able to contain, at its top level, `provide env.name = value`,
 for an app. A program SHALL apply the top-level provides of its main module alone, in the order
 written, and a module that another module of the program imports SHALL NOT contain a top-level
 provide: each one SHALL be rejected with `provide-outside-main-module`, whose message says that
-app-wide provides belong in the main module. A module that nothing imports, such as a library's
-own `app.nx` for previews, SHALL be allowed to contain them, and they SHALL take effect only when
-it is the entry module.
+app-wide provides belong in the main module. A library module that exports a declaration SHALL
+count as imported, since a program that imports the library reaches it. A module that nothing
+imports, such as a library's own `app.nx` for previews, SHALL be allowed to contain them, and they
+SHALL take effect only when it is the entry module.
 
 #### Scenario: The main module sets a value app-wide
 - **WHEN** `app.nx` imports `design.nx`, which declares `export environment space: int = 4`,

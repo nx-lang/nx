@@ -4,6 +4,7 @@
     "main.nx::cascade": 26,
     "main.nx::colors": 32,
     "main.nx::colors#rootDark": 26,
+    "main.nx::hosted": 15,
     "main.nx::markup": 19,
     "main.nx::mode": 11,
     "main.nx::mode#rootDark": 3,

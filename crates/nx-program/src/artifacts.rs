@@ -1157,6 +1157,8 @@ fn build_library_artifact_from_sources(
         modules.push(artifact);
     }
 
+    diagnostics.extend(add_library_provide_diagnostics(&mut modules));
+
     let sources = source_files
         .iter()
         .map(|source_file| {
@@ -2307,6 +2309,38 @@ fn add_duplicate_visualizer_diagnostics(
 /// imports would apply or not depending on which module is the entry. A module nothing imports,
 /// such as a library's `app.nx` for previews, may hold them.</para>
 fn add_provide_outside_main_module_diagnostics(modules: &mut [ModuleArtifact]) {
+    add_provide_diagnostics_where(modules, |_| false);
+}
+
+/// The `provide-outside-main-module` check over one library's modules: a module another module
+/// of the library imports, or one that exports a declaration, which is what a program importing
+/// the library reaches, can never be a program's entry module. Returns the diagnostics added.
+fn add_library_provide_diagnostics(modules: &mut [ModuleArtifact]) -> Vec<Diagnostic> {
+    let before = modules
+        .iter()
+        .map(|module| module.diagnostics.len())
+        .collect::<Vec<_>>();
+    add_provide_diagnostics_where(modules, |module| {
+        module.lowered_module.as_deref().is_some_and(|lowered| {
+            lowered
+                .items()
+                .iter()
+                .any(|item| item.visibility() == Visibility::Export)
+        })
+    });
+    modules
+        .iter()
+        .zip(before)
+        .flat_map(|(module, count)| module.diagnostics[count..].iter().cloned())
+        .collect()
+}
+
+/// Reports each top-level provide of a module that another of `modules` imports, or that
+/// `reached` says a program reaches some other way.
+fn add_provide_diagnostics_where(
+    modules: &mut [ModuleArtifact],
+    reached: impl Fn(&ModuleArtifact) -> bool,
+) {
     let has_provides = |module: &ModuleArtifact| {
         module
             .lowered_module
@@ -2330,7 +2364,7 @@ fn add_provide_outside_main_module_diagnostics(modules: &mut [ModuleArtifact]) {
         .filter(|target| workspace.contains(target))
         .collect::<FxHashSet<_>>();
     for module in modules.iter_mut() {
-        if !imported.contains(&module.file_name) {
+        if !imported.contains(&module.file_name) && !reached(module) {
             continue;
         }
         let Some(lowered) = module.lowered_module.clone() else {
@@ -3265,6 +3299,18 @@ fn add_workspace_item_bindings(
 
     for (namespace, kind) in binding_specs_for_item(item) {
         if module.has_binding(namespace, &visible_name_ref) {
+            module.hide_environment_binding(PreparedBinding {
+                visible_name: visible_name_ref.clone(),
+                namespace,
+                kind,
+                origin: PreparedBindingOrigin::Peer {
+                    module_identity: target_module_identity.to_string(),
+                },
+                target: PreparedBindingTarget::Peer {
+                    module_identity: target_module_identity.to_string(),
+                    definition_id: local_definition_id(item_index),
+                },
+            });
             continue;
         }
 
@@ -3745,6 +3791,24 @@ fn add_imported_interface_bindings(
         };
         let visible_name_ref = Name::new(visible_name);
         if module.has_binding(namespace, &visible_name_ref) {
+            if let [index] = indices.as_slice() {
+                let interface_item = library.interface_items[*index].clone();
+                module.hide_environment_binding(PreparedBinding {
+                    visible_name: visible_name_ref,
+                    namespace,
+                    kind: interface_item.item.kind(),
+                    origin: PreparedBindingOrigin::Imported {
+                        module_identity: interface_item.module_identity.clone(),
+                    },
+                    target: PreparedBindingTarget::Imported {
+                        raw: Some(ImportedRawRef {
+                            module_identity: interface_item.module_identity.clone(),
+                            definition_id: interface_item.definition_id,
+                        }),
+                        item: Box::new(interface_item),
+                    },
+                });
+            }
             continue;
         }
 
@@ -4863,6 +4927,41 @@ mod tests {
             normalize_workspace_import_identity(&identity, "../question-flow"),
             Ok("Users/runneradmin/AppData/Local/Temp/nx-prepared/question-flow".to_string())
         );
+    }
+
+    /// Review RF3: a library module a program reaches can't be an entry module, so its top-level
+    /// provides are refused; one nothing reaches, such as a preview `app.nx`, keeps them.
+    #[test]
+    fn a_library_module_a_program_reaches_cannot_hold_a_top_level_provide() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::write(
+            ui_dir.join("design.nx"),
+            "export environment space: int = 4\n",
+        )
+        .expect("design");
+        fs::write(
+            ui_dir.join("theme.nx"),
+            "export let gap = 2\nprovide env.space = 8\n",
+        )
+        .expect("theme");
+        fs::write(
+            ui_dir.join("app.nx"),
+            "provide env.space = 6\nlet root() = { env.space }\n",
+        )
+        .expect("app");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+        let refused = artifact
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == Some("provide-outside-main-module"))
+            .map(|diagnostic| diagnostic.labels()[0].file.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].ends_with("theme.nx"), "{refused:?}");
     }
 
     #[test]

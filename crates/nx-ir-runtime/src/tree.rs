@@ -1323,8 +1323,6 @@ fn copy(value: &NxValue, depth: u32, stack: &Stack) -> Result<NxValue> {
     })
 }
 
-/// Whether two values are the same value, as `==` on them says, for a descriptor a node holds
-/// and one a visit brings.
 /// Whether two descriptors are the same leaving out the overrides both carry in `$env`.
 fn same_descriptor(left: &NxValue, right: &NxValue, stack: &Stack) -> Result<bool> {
     match (left, right) {
@@ -1357,6 +1355,8 @@ fn same_descriptor(left: &NxValue, right: &NxValue, stack: &Stack) -> Result<boo
     }
 }
 
+/// Whether two values are the same value, as `==` on them says, for a descriptor a node holds
+/// and one a visit brings.
 fn same(left: &NxValue, right: &NxValue, depth: u32, stack: &Stack) -> Result<bool> {
     enter(right, depth, stack)?;
     let deeper = depth.saturating_add(1);

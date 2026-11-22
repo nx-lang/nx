@@ -466,6 +466,10 @@ pub struct PreparedModule {
     /// The spans of the imports whose names are not all there: ones that did not resolve, and
     /// ones whose target module lost a declaration to an error.
     incomplete_imports: Vec<TextSpan>,
+    /// Bindings of environment values that another binding of the same visible name kept out of
+    /// the namespace: a second import of `env.colorMode`. An `env.` read sees every one of them,
+    /// so it can report the name as ambiguous rather than resolve it to whichever came first.
+    hidden_environment_bindings: Vec<PreparedBinding>,
 }
 
 impl PreparedModule {
@@ -480,6 +484,7 @@ impl PreparedModule {
             peer_namespaces: FxHashMap::default(),
             diagnostics: Vec::new(),
             incomplete_imports: Vec::new(),
+            hidden_environment_bindings: Vec::new(),
         };
         prepared.add_local_bindings();
         prepared
@@ -652,6 +657,24 @@ impl PreparedModule {
         self.bindings
             .map_mut(binding.namespace)
             .insert(binding.visible_name.clone(), binding);
+    }
+
+    /// Keeps a binding of an environment value that a binding of the same visible name kept out
+    /// of the namespace, for [`Self::environment_bindings`].
+    pub fn hide_environment_binding(&mut self, binding: PreparedBinding) {
+        if crate::environment_binding_name(binding.visible_name.as_str()).is_some() {
+            self.hidden_environment_bindings.push(binding);
+        }
+    }
+
+    /// Every value binding of an environment value, those another binding of the same visible
+    /// name kept out of the namespace included.
+    pub fn environment_bindings(&self) -> impl Iterator<Item = &PreparedBinding> {
+        self.bindings(PreparedNamespace::Value)
+            .filter(|binding| {
+                crate::environment_binding_name(binding.visible_name.as_str()).is_some()
+            })
+            .chain(self.hidden_environment_bindings.iter())
     }
 
     /// Returns true when a visible binding already exists in the given namespace.
