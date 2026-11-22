@@ -797,11 +797,15 @@ impl<'a> Explainer<'a> {
             )?],
             kinds::node::ENV_PROVIDE => {
                 let mut lines = self.overrides(self.list_operand(entry, 1, "envProvide")?)?;
+                if lines.is_empty() {
+                    lines.push(String::new());
+                }
                 if let Some(first) = lines.first_mut() {
                     first.insert_str(0, "provide ");
                 }
-                let last = lines.len() - 1;
-                lines[last].push_str(" {");
+                if let Some(last) = lines.last_mut() {
+                    last.push_str(" {");
+                }
                 lines.extend(indent(self.node(self.int_operand(
                     entry,
                     2,

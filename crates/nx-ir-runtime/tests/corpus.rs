@@ -148,9 +148,7 @@ fn every_corpus_entrypoint_and_lifecycle_matches_its_recorded_result() {
                 let expected = value(&program.results[&key]);
                 checked += 1;
                 let linked = link(&modules, &entrypoint.module);
-                let run = |options: &RuntimeOptions| {
-                    linked.evaluate_function(&entrypoint.function, &entrypoint.arguments, options)
-                };
+                let run = |options: &RuntimeOptions| entrypoint.evaluate(&linked, options);
                 if entrypoint.fails {
                     // The diagnostic is all a failing case records: no result, count or size.
                     let recorded = &program.diagnostics[&key];
@@ -333,11 +331,7 @@ fn every_recorded_failure_stops_at_its_recorded_node() {
                 checked += 1;
                 let operations = record["budget"].as_u64().expect("a budget");
                 let label = format!("{} {key} under {operations} operations", program.name);
-                let error = match linked.evaluate_function(
-                    &entrypoint.function,
-                    &entrypoint.arguments,
-                    &budget(operations),
-                ) {
+                let error = match entrypoint.evaluate(&linked, &budget(operations)) {
                     Ok(_) => {
                         failures.push(format!("{label}: succeeds"));
                         continue;
@@ -466,9 +460,7 @@ fn every_corpus_origins_report_gives_its_recorded_entries() {
                 let key = entrypoint.key();
                 let label = format!("{} ({variant}) {key}", program.name);
                 let linked = link(&modules, &entrypoint.module);
-                let run = |options: &RuntimeOptions| {
-                    linked.evaluate_function(&entrypoint.function, &entrypoint.arguments, options)
-                };
+                let run = |options: &RuntimeOptions| entrypoint.evaluate(&linked, options);
                 checked += 1;
                 if entrypoint.fails {
                     let origins = Arc::new(Origins::new());

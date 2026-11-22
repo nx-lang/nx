@@ -7,6 +7,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -98,6 +99,7 @@
       ],
       "mul": [
         "constraints",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -145,6 +147,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -170,6 +173,7 @@
         "components",
         "conditional-properties",
         "constraints",
+        "environment",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -182,6 +186,9 @@
         "trailing-element",
         "two-module"
       ],
+      "environment": [
+        "environment"
+      ],
       "function": [
         "agent-library",
         "agent-tool-context",
@@ -192,6 +199,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -214,6 +222,9 @@
         "trailing-element",
         "two-module"
       ],
+      "provides": [
+        "environment"
+      ],
       "record": [
         "agent-library",
         "agent-tool-context",
@@ -222,6 +233,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "function-references",
         "function-values",
@@ -253,6 +265,7 @@
         "color-library",
         "conditional-properties",
         "constraints",
+        "environment",
         "evaluation-cost",
         "expressions",
         "geometry-library",
@@ -269,6 +282,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-values",
@@ -406,6 +420,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -477,6 +492,7 @@
         "components",
         "conditional-properties",
         "constraints",
+        "environment",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -492,9 +508,19 @@
       "element": [
         "conditional-function-values",
         "conditional-properties",
+        "environment",
         "evaluation-cost",
         "expressions",
         "handlers"
+      ],
+      "envProvide": [
+        "environment"
+      ],
+      "envRead": [
+        "environment"
+      ],
+      "envUpdate": [
+        "environment"
       ],
       "exists": [
         "occurrences",
@@ -527,6 +553,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "occurrence-patterns"
@@ -548,6 +575,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-values",
@@ -579,6 +607,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -610,6 +639,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "function-references",
         "function-values",
@@ -636,6 +666,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -703,6 +734,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -737,6 +769,7 @@
         "color-library",
         "conditional-properties",
         "constraints",
+        "environment",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -773,6 +806,7 @@
         "components",
         "conditional-properties",
         "constraints",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -802,6 +836,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "environment",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -870,6 +905,7 @@
     "conditional-properties",
     "constraints",
     "conversions",
+    "environment",
     "evaluation-cost",
     "expressions",
     "function-references",

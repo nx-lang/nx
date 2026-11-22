@@ -22,8 +22,8 @@ use nx_codegen::{build_codegen_program, build_nx_ir_artifacts};
 use nx_ir::{explain_nx_ir, explain_nx_ir_image};
 use nx_ir::{kinds, write_nx_ir_image, NxIrArtifact, NxIrImage};
 use nx_ir_runtime::{
-    ComponentInit, LinkOptions, NxIrRuntimeError, OriginEntry, Origins, PreparedModule, Program,
-    RuntimeOptions, Usage,
+    ComponentInit, Environment, LinkOptions, NxIrRuntimeError, OriginEntry, Origins,
+    PreparedModule, Program, RuntimeOptions, Usage,
 };
 use nx_value::NxValue;
 use serde::Deserialize;
@@ -71,9 +71,29 @@ struct Entrypoint {
     case: Option<String>,
     #[serde(default)]
     fails: bool,
+    /// The root environment values a case is evaluated with, by the name a host gives them.
+    #[serde(default)]
+    environment: Option<BTreeMap<String, Value>>,
 }
 
 impl Entrypoint {
+    /// `options` with the case's root environment values, when it names any.
+    fn options(&self, options: &RuntimeOptions) -> RuntimeOptions {
+        let mut options = options.clone();
+        if let Some(environment) = &self.environment {
+            assert!(
+                self.case.is_some(),
+                "an entrypoint with an environment must be a case"
+            );
+            options.environment = Environment::root(
+                environment
+                    .iter()
+                    .map(|(name, value)| (name.clone(), nx_value(value))),
+            );
+        }
+        options
+    }
+
     /// The key results, counts and failures are kept under: `identity::function`, and
     /// `identity::function#case` for a case.
     fn key(&self) -> String {
@@ -483,7 +503,7 @@ fn corpus_results_match_the_rust_ir_runtime() {
                 let outcome = linked_program(modules, &entrypoint.module).evaluate_function(
                     &entrypoint.function,
                     &entrypoint.arguments(),
-                    &RuntimeOptions::default(),
+                    &entrypoint.options(&RuntimeOptions::default()),
                 );
                 match (outcome, entrypoint.fails) {
                     (Ok(value), false) => {
@@ -680,7 +700,11 @@ fn measure_operations(program: &CorpusProgram) -> Value {
         let linked = linked_program(&modules, &entrypoint.module);
         let arguments = entrypoint.arguments();
         let run = |options: &RuntimeOptions| {
-            linked.evaluate_function(&entrypoint.function, &arguments, options)
+            linked.evaluate_function(
+                &entrypoint.function,
+                &arguments,
+                &entrypoint.options(options),
+            )
         };
         let (operations, input_size) = measure(&label, run);
         counts.insert(key.clone(), operations.into());
@@ -846,7 +870,11 @@ fn report_origins(program: &CorpusProgram) -> Value {
     {
         let key = entrypoint.key();
         linked_program(&modules, &entrypoint.module)
-            .evaluate_function(&entrypoint.function, &entrypoint.arguments(), &options)
+            .evaluate_function(
+                &entrypoint.function,
+                &entrypoint.arguments(),
+                &entrypoint.options(&options),
+            )
             .unwrap_or_else(|error| {
                 panic!(
                     "corpus program '{}' entrypoint {key} fails with an origins report: {error}",

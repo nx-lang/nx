@@ -38,6 +38,9 @@ pub struct EnvironmentEntry {
     pub to: NxValue,
 }
 
+/// An evaluated override: the key it sets, the field path inside the value, and the value.
+type EvaluatedOverride = (EnvKey, Arc<[Arc<str>]>, Value);
+
 /// The environment an evaluation runs in: the host's root values, and the overrides of every
 /// component descriptor entered on the way to the component being evaluated, outermost first.
 ///
@@ -263,10 +266,9 @@ pub(crate) struct EnvState {
     /// How many of `layers` came from the host's environment, below any `envProvide`.
     pub base: usize,
     pub roots: HashMap<EnvKey, Value>,
-    /// How deeply reads are nested in defaults and provides being evaluated for a read.
-    pub nested: u32,
-    /// The reads the evaluation made at its own level, with the value each found beneath the
-    /// overrides the evaluation pushed itself, when the caller records them.
+    /// The reads the evaluation made, those made for a default or a provide included, with the
+    /// value each found beneath the overrides the evaluation pushed itself, when the caller
+    /// records them.
     pub reads: Option<Vec<(EnvKey, Value)>>,
 }
 
@@ -457,7 +459,7 @@ impl<'p> Machine<'p> {
         let record;
         {
             let state = self.env.borrow();
-            record = state.nested == 0 && state.reads.is_some();
+            record = state.reads.is_some();
             for (position, layer) in state.layers.iter().enumerate().rev() {
                 match layer {
                     Layer::Set {
@@ -483,6 +485,7 @@ impl<'p> Machine<'p> {
                         });
                     }
                     Layer::Cap { key: capped, index } if *capped == key => {
+                        // A provide reading the value it sets: not a read of the environment.
                         cap = Some(*index);
                         break;
                     }
@@ -495,23 +498,13 @@ impl<'p> Machine<'p> {
         }
         let base = match base {
             Some(base) => base,
-            None => {
-                {
-                    let mut state = self.env.borrow_mut();
-                    state.nested = state.nested.saturating_add(1);
-                }
-                let found = self.provided_or_default(cx, node, key, cap.unwrap_or(usize::MAX));
-                let mut state = self.env.borrow_mut();
-                state.nested = state.nested.saturating_sub(1);
-                drop(state);
-                found?
-            }
+            None => self.provided_or_default(cx, node, key, cap.unwrap_or(usize::MAX))?,
         };
         // The pending overrides were collected innermost first; the evaluation's own are the
         // first `local` of them, and are applied last.
         let own: Vec<Pending> = pending.drain(..local.min(pending.len())).collect();
         let beneath = self.apply_pending(cx, node, base, pending)?;
-        if record {
+        if record && cap.is_none() {
             if let Some(reads) = self.env.borrow_mut().reads.as_mut() {
                 reads.push((key, beneath.clone()));
             }
@@ -699,7 +692,7 @@ impl<'p> Machine<'p> {
         cx: Cx,
         node: u32,
         bundle: &Value,
-    ) -> Result<Vec<(EnvKey, Arc<[Arc<str>]>, Value)>> {
+    ) -> Result<Vec<EvaluatedOverride>> {
         let entries = match bundle {
             Value::Record(record) if record.type_name() == Some(BUNDLE_TYPE) => {
                 record.get(BUNDLE_ENTRIES).cloned()
@@ -764,7 +757,7 @@ impl<'p> Machine<'p> {
         frame: &mut crate::eval::Frame,
         node: u32,
         overrides: &[Override],
-    ) -> Result<Vec<(EnvKey, Arc<[Arc<str>]>, Value)>> {
+    ) -> Result<Vec<EvaluatedOverride>> {
         let mut out = Vec::with_capacity(overrides.len());
         for entry in overrides {
             let (module, index, declaration) = self
@@ -833,7 +826,7 @@ impl<'p> Machine<'p> {
     }
 
     /// The `$env` entries for evaluated overrides.
-    fn entry_values(&self, evaluated: &[(EnvKey, Arc<[Arc<str>]>, Value)]) -> Vec<Value> {
+    fn entry_values(&self, evaluated: &[EvaluatedOverride]) -> Vec<Value> {
         let index = self.environment_index();
         evaluated
             .iter()
@@ -926,5 +919,66 @@ pub(crate) fn without_env(
         std::borrow::Cow::Owned(properties)
     } else {
         std::borrow::Cow::Borrowed(properties)
+    }
+}
+
+impl crate::program::Program {
+    /// The value of the environment value `name` in `options`' environment, with no override
+    /// of an evaluation around it: what a body evaluated there reads for `env.name`. `name` is
+    /// named as a host names a root value.
+    pub fn environment_value(
+        &self,
+        name: &str,
+        options: &crate::RuntimeOptions,
+    ) -> Result<NxValue> {
+        let machine = Machine::new(&self.data, options);
+        machine.begin_environment()?;
+        let key = machine.environment_index().by_host_name(name)?;
+        let cx = Cx {
+            module: key.0,
+            declaration: key.1,
+            depth: 0,
+        };
+        let value = machine.environment_value(cx, None, key)?;
+        let meter = machine.meter(cx, None);
+        machine.report(&value, None, &meter)
+    }
+
+    /// Whether every read gives the value it gave in `options`' environment.
+    pub(crate) fn environment_reads_hold(
+        &self,
+        reads: &[(Arc<str>, Value)],
+        options: &crate::RuntimeOptions,
+    ) -> Result<bool> {
+        if reads.is_empty() {
+            return Ok(true);
+        }
+        let machine = Machine::new(&self.data, options);
+        machine.begin_environment()?;
+        machine.environment_reads_hold(reads)
+    }
+
+    /// The root values of `environment`, checked, by qualified name.
+    pub(crate) fn root_values(
+        &self,
+        environment: &Environment,
+        options: &crate::RuntimeOptions,
+    ) -> Result<Vec<(Arc<str>, Value)>> {
+        let options = crate::RuntimeOptions {
+            environment: Environment {
+                roots: Arc::clone(&environment.roots),
+                entries: Arc::from(Vec::new()),
+            },
+            ..options.clone()
+        };
+        let machine = Machine::new(&self.data, &options);
+        machine.begin_environment()?;
+        let index = machine.environment_index();
+        let state = machine.env.borrow();
+        Ok(state
+            .roots
+            .iter()
+            .map(|(key, value)| (index.qualified(*key), value.clone()))
+            .collect())
     }
 }

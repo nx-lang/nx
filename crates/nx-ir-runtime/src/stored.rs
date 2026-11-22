@@ -221,6 +221,7 @@ impl Stored {
             state: reader.fields(&self.state)?,
             handlers: handlers(&mut self.handlers.iter().copied())?,
             generation: self.generation,
+            reads: Arc::from(Vec::new()),
         })
     }
 }

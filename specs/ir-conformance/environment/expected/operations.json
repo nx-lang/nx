@@ -1,0 +1,21 @@
+{
+  "counts": {
+    "main.nx::bundle": 18,
+    "main.nx::cascade": 26,
+    "main.nx::colors": 32,
+    "main.nx::colors#rootDark": 26,
+    "main.nx::markup": 19,
+    "main.nx::mode": 11,
+    "main.nx::mode#rootDark": 3,
+    "main.nx::nestedPath": 22,
+    "main.nx::provideExpr": 4,
+    "main.nx::provideExpr#rootLocale": 5,
+    "main.nx::readBundle": 9,
+    "main.nx::readDefault": 13,
+    "main.nx::readPath": 20,
+    "main.nx::readProvided": 10,
+    "main.nx::readProvided#rootSpace": 3,
+    "main.nx::readsOutside": 14,
+    "main.nx::stacked": 17
+  }
+}

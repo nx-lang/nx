@@ -37,6 +37,9 @@ pub(crate) struct InstanceData {
     pub handlers: Vec<Arc<Handler>>,
     /// The render generation the tokens belong to.
     pub generation: u64,
+    /// The environment values the render read, by qualified name, each with the value it found
+    /// beneath the overrides the body itself wrote. An instance restored from storage has none.
+    pub reads: Arc<[(Arc<str>, Value)]>,
 }
 
 /// A component instance: what dispatch needs to run a batch against a component that
@@ -54,6 +57,11 @@ pub struct ComponentInstance {
 
 impl ComponentInstance {
     /// The name of the component the instance is of.
+    /// The environment values the render behind this instance read, with what each found.
+    pub(crate) fn reads(&self) -> &Arc<[(Arc<str>, Value)]> {
+        &self.data.reads
+    }
+
     pub fn component(&self) -> &str {
         &self.data.component
     }
@@ -337,6 +345,7 @@ impl ComponentInstance {
                 state: state.unwrap_or_else(|| data.state.clone()),
                 handlers: handlers.unwrap_or_else(|| data.handlers.clone()),
                 generation: data.generation,
+                reads: Arc::clone(&data.reads),
             }),
         }))
     }
@@ -1116,11 +1125,10 @@ impl Program {
                 };
                 let mut tokens = Tokens::new(1);
                 let output = machine.meter(cx, None);
-                let rendered = machine.report(
-                    &machine.eval(cx, &mut frame, body)?,
-                    Some(&mut tokens),
-                    &output,
-                )?;
+                machine.record_environment_reads();
+                let value = machine.eval(cx, &mut frame, body)?;
+                let reads = machine.take_environment_reads();
+                let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentInitResult {
                     rendered,
                     state: fields_to_host(&state, &output, &machine.stack)?,
@@ -1133,6 +1141,7 @@ impl Program {
                             state,
                             handlers: tokens.handlers,
                             generation: 1,
+                            reads: Arc::from(reads),
                         }),
                     },
                 })
@@ -1347,11 +1356,10 @@ impl Program {
                 let generation = instance.generation.saturating_add(1);
                 let mut tokens = Tokens::new(generation);
                 let output = machine.meter(entry_cx(index), None);
-                let rendered = machine.report(
-                    &machine.eval(entry_cx(index), &mut frame, body)?,
-                    Some(&mut tokens),
-                    &output,
-                )?;
+                machine.record_environment_reads();
+                let value = machine.eval(entry_cx(index), &mut frame, body)?;
+                let reads = machine.take_environment_reads();
+                let rendered = machine.report(&value, Some(&mut tokens), &output)?;
                 Ok(ComponentDispatchResult {
                     rendered,
                     effects: effects
@@ -1368,6 +1376,7 @@ impl Program {
                             state: working,
                             handlers: tokens.handlers,
                             generation,
+                            reads: Arc::from(reads),
                         }),
                     },
                 })

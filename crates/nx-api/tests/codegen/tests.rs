@@ -883,6 +883,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                 identity: "main.nx".to_string(),
             },
             imports: Vec::new(),
+            provides: Vec::new(),
             declarations: vec![CodegenDeclaration {
                 reference: root_reference.clone(),
                 span: TextSpan::default(),

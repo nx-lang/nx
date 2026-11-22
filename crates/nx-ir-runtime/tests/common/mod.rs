@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use nx_ir_runtime::{LinkOptions, PreparedModule, Program};
+use nx_ir_runtime::{Environment, LinkOptions, PreparedModule, Program, RuntimeOptions};
 use nx_value::NxValue;
 use std::collections::BTreeMap;
 use std::fs;
@@ -18,9 +18,24 @@ pub struct Entrypoint {
     /// Whether the case is one every runtime fails alike. Its diagnostic is recorded, and no
     /// result, count or input size.
     pub fails: bool,
+    /// The root environment values a case is evaluated with.
+    pub environment: Environment,
 }
 
 impl Entrypoint {
+    /// Evaluates the entrypoint in `program` under `options`, with its root environment values.
+    pub fn evaluate(
+        &self,
+        program: &Program,
+        options: &RuntimeOptions,
+    ) -> nx_ir_runtime::Result<NxValue> {
+        let options = RuntimeOptions {
+            environment: self.environment.clone(),
+            ..options.clone()
+        };
+        program.evaluate_function(&self.function, &self.arguments, &options)
+    }
+
     /// The key results, counts, failures and input sizes are kept under: `identity::function`,
     /// and `identity::function#case` for a case.
     pub fn key(&self) -> String {
@@ -150,12 +165,21 @@ pub fn load_corpus() -> Vec<CorpusProgram> {
                                     !fails || arguments.is_some(),
                                     "{name} {module}::{function}: only a case is marked `fails`"
                                 );
+                                let environment = Environment::root(
+                                    entrypoint
+                                        .get("environment")
+                                        .and_then(|environment| environment.as_object())
+                                        .into_iter()
+                                        .flatten()
+                                        .map(|(name, entry)| (name.clone(), value(entry))),
+                                );
                                 Entrypoint {
                                     module,
                                     function,
                                     case,
                                     arguments: arguments.unwrap_or_default(),
                                     fails,
+                                    environment,
                                 }
                             })
                             .collect()
