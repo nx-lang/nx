@@ -1,0 +1,169 @@
+// Draft of `@nx/color/operations.nx` after this change. Every function accepts a color in any space.
+// A function that needs sRGB (hex output, the sRGB channel records, WCAG contrast) maps its input
+// into the sRGB gamut first, as an sRGB screen would; every other function keeps wide colors wide.
+
+import "./color.nx"
+
+// ------------------------------------------------------------------------------------------------
+// Constructors
+// ------------------------------------------------------------------------------------------------
+
+/// Constructs `Color.srgb` from channels in [0, 255], with opaque alpha.
+export external rgb(r: float64, g: float64, b: float64): Color
+
+/// Constructs `Color.srgb` from channels in [0, 255] and alpha in [0, 1].
+export external rgba(r: float64, g: float64, b: float64, a: float64): Color
+
+/// Constructs `Color.srgb` from encoded channels and alpha in [0, 1].
+export external srgb(r: float64, g: float64, b: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.srgb` from linear-light channels and alpha in [0, 1].
+export external linearRgb(r: float64, g: float64, b: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.srgb` from hue in degrees and saturation, lightness, and alpha in [0, 1].
+export external hsl(h: float64, s: float64, l: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.srgb` from hue in degrees and saturation, value, and alpha in [0, 1].
+export external hsv(h: float64, s: float64, v: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.srgb` from hue in degrees and whiteness, blackness, and alpha in [0, 1].
+/// Normalizes whiteness and blackness when their sum exceeds 1.
+export external hwb(h: float64, w: float64, b: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.displayP3` from encoded channels and alpha in [0, 1].
+export external displayP3(r: float64, g: float64, b: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.oklab` from lightness in [0, 1], finite opponent channels, and alpha in [0, 1].
+/// Keeps the color as given, even outside every screen's gamut.
+export external oklab(l: float64, a: float64, b: float64, alpha: float64 = 1): Color
+
+/// Constructs `Color.oklch` from lightness in [0, 1], nonnegative chroma, hue in degrees, and alpha
+/// in [0, 1]. Wraps the hue into [0, 360) and keeps the color as given, even outside every screen's
+/// gamut.
+export external oklch(l: float64, c: float64, h: float64, alpha: float64 = 1): Color
+
+/// Parses supported standalone CSS color text; fails with color-invalid-text on invalid input.
+export external parse(text: string): Color
+
+/// Parses supported standalone CSS color text, returning a parsed value or an invalid result.
+export external tryParse(text: string): ParseResult
+
+/// Returns the color if its channels are valid for its space; otherwise fails with
+/// color-invalid-channel.
+export external validate(value: Color): Color
+
+// ------------------------------------------------------------------------------------------------
+// Gamut
+// ------------------------------------------------------------------------------------------------
+
+/// Whether a screen with this gamut can show the color without changing it.
+export external inGamut(value: Color, gamut: Gamut = srgb): boolean
+
+/// Converts the color into the gamut's space, as `Color.srgb` or `Color.displayP3`. A color inside
+/// the gamut converts exactly; one outside it is mapped with the CSS Color 4 gamut-mapping
+/// algorithm, which keeps lightness and hue and reduces chroma.
+export external toGamut(value: Color, gamut: Gamut = srgb): Color
+
+// ------------------------------------------------------------------------------------------------
+// Output and conversion
+// ------------------------------------------------------------------------------------------------
+
+/// Formats lowercase #rrggbbaa from the color mapped into sRGB, quantizing channels to bytes.
+export external toHex(value: Color): string
+
+/// Formats standalone CSS text in the color's own space, retaining float32 channel precision:
+/// `rgb(…)`, `color(display-p3 …)`, `oklab(…)` or `oklch(…)`. A host that needs an sRGB fallback
+/// formats `toGamut(value)` as well.
+export external toCss(value: Color): string
+
+/// Converts to encoded sRGB channels in [0, 255], with alpha in [0, 1], after mapping into sRGB.
+export external toRgb(value: Color): RgbChannels
+
+/// Converts to HSL after mapping into sRGB.
+export external toHsl(value: Color): HslChannels
+
+/// Converts to HSV after mapping into sRGB.
+export external toHsv(value: Color): HsvChannels
+
+/// Converts to HWB after mapping into sRGB.
+export external toHwb(value: Color): HwbChannels
+
+/// Converts to linear-light sRGB channels after mapping into sRGB.
+export external toLinearRgb(value: Color): LinearRgbChannels
+
+/// Converts to Oklab exactly, with no gamut mapping.
+export external toOklab(value: Color): OklabChannels
+
+/// Converts to Oklch exactly, with no gamut mapping.
+export external toOklch(value: Color): OklchChannels
+
+// ------------------------------------------------------------------------------------------------
+// Transformations: each returns a color in its input's space
+// ------------------------------------------------------------------------------------------------
+
+/// Replaces alpha with a value in [0, 1].
+export external withAlpha(value: Color, alpha: float64): Color
+
+/// Adds amount in [0, 1] to alpha, clamping the result to [0, 1].
+export external fadeIn(value: Color, amount: float64): Color
+
+/// Subtracts amount in [0, 1] from alpha, clamping the result to [0, 1].
+export external fadeOut(value: Color, amount: float64): Color
+
+/// Adds amount in [0, 1] to Oklch lightness, clamping the result to [0, 1].
+export external lighten(value: Color, amount: float64): Color
+
+/// Subtracts amount in [0, 1] from Oklch lightness, clamping the result to [0, 1].
+export external darken(value: Color, amount: float64): Color
+
+/// Multiplies Oklch chroma by 1 + amount, for amount in [0, 1].
+export external saturate(value: Color, amount: float64): Color
+
+/// Multiplies Oklch chroma by 1 − amount, for amount in [0, 1].
+export external desaturate(value: Color, amount: float64): Color
+
+/// Rotates Oklch hue by degrees, wrapping modulo 360.
+export external rotateHue(value: Color, degrees: float64): Color
+
+/// Rotates Oklch hue by 180 degrees.
+export external complement(value: Color): Color
+
+/// Sets Oklch chroma to zero, preserving lightness and alpha.
+export external grayscale(value: Color): Color
+
+/// Blends encoded RGB toward its inverse by amount in [0, 1], preserving alpha. Works in the color's
+/// own RGB space; an Oklab or Oklch color is mapped into Display P3 first and returned there.
+export external invert(value: Color, amount: float64 = 1): Color
+
+// ------------------------------------------------------------------------------------------------
+// Mixing, compositing and contrast
+// ------------------------------------------------------------------------------------------------
+
+/// Mixes colors using premultiplied alpha in the selected space. Weight in [0, 1] is the
+/// contribution of the second color; endpoints preserve their inputs. The result is in the wider of
+/// the two inputs' spaces.
+export external mix(
+  first: Color,
+  second: Color,
+  weight: float64 = 0.5,
+  space: InterpolationSpace = oklab
+): Color
+
+/// Composites foreground over background in linear light using source-over. The result is in the
+/// wider of the two inputs' spaces.
+export external composite(foreground: Color, background: Color): Color
+
+/// Returns WCAG relative luminance for an opaque color, after mapping into sRGB.
+export external relativeLuminance(value: Color): float64
+
+/// Returns the WCAG contrast ratio of two opaque colors, after mapping each into sRGB.
+export external contrastRatio(first: Color, second: Color): float64
+
+/// Returns the candidate with higher WCAG contrast against an opaque background, measured after
+/// mapping into sRGB. Candidates must be opaque; defaults to black and white, and chooses first on
+/// ties. Returns the candidate itself, unmapped.
+export external bestTextColor(
+  background: Color,
+  first: Color = { black },
+  second: Color = { white }
+): Color

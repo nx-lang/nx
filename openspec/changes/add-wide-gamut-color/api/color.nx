@@ -1,0 +1,117 @@
+// Draft of `@nx/color/color.nx` after this change. The named-color constants (`aliceBlue` …
+// `transparent`) stay hex literals, which now give `Color.srgb` values. Only `black` and `white`
+// are drafted here, as records, because a hex literal always means the standard library's `Color`
+// rather than this draft's.
+
+/// A normalized channel or alpha, in [0, 1].
+export type Unit = float32 where in 0.0..=1.0
+
+/// A hue in degrees, in [0, 360).
+export type Hue = float32 where >= 0.0 && < 360.0
+
+/// A color, in the color space it was written in. Alpha is non-premultiplied in every space.
+///
+/// Read a color's channels by matching on its space, or convert it first with `toGamut`, `toRgb` or
+/// `toOklch`; nothing reads a channel without naming the space it belongs to.
+export type Color =
+  /// Encoded sRGB, the space of hex literals and of `rgb`, `hsl` and `hwb`.
+  | srgb {
+      r: Unit          /// Encoded red.
+      g: Unit          /// Encoded green.
+      b: Unit          /// Encoded blue.
+      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+    }
+  /// Encoded Display P3: the same transfer curve as sRGB with wider primaries.
+  | displayP3 {
+      r: Unit          /// Encoded red.
+      g: Unit          /// Encoded green.
+      b: Unit          /// Encoded blue.
+      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+    }
+  /// Oklab: perceptual lightness and two opponent axes; can describe colors no screen shows.
+  | oklab {
+      l: Unit          /// Lightness: 0 is black and 1 is white.
+      a: float32       /// Green (negative) to red (positive).
+      b: float32       /// Blue (negative) to yellow (positive).
+      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+    }
+  /// Oklch: Oklab as lightness, chroma and hue; can describe colors no screen shows.
+  | oklch {
+      l: Unit                  /// Lightness: 0 is black and 1 is white.
+      c: float32 where >= 0.0  /// Chroma: 0 is gray.
+      h: Hue                   /// Hue in degrees.
+      alpha: Unit = 1          /// 0 is transparent and 1 is opaque.
+    }
+
+/// A gamut that colors can be checked against and mapped into: what a kind of screen can show.
+export type Gamut = srgb | displayP3
+
+/// Recoverable parsing result.
+export type ParseResult =
+  | parsed { value: Color }
+  | invalid { message: string }
+
+/// Rectangular interpolation space.
+export type InterpolationSpace = srgb | linearSrgb | oklab
+
+// The channel records are unchanged.
+
+/// Encoded sRGB channels in [0, 255]; alpha is in [0, 1].
+export type RgbChannels = {
+  r: float64      /// Red in [0, 255].
+  g: float64      /// Green in [0, 255].
+  b: float64      /// Blue in [0, 255].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Hsl channels; alpha is in [0, 1].
+export type HslChannels = {
+  h: float64      /// Hue in degrees, in [0, 360).
+  s: float64      /// Saturation in [0, 1].
+  l: float64      /// Lightness in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Hsv channels; alpha is in [0, 1].
+export type HsvChannels = {
+  h: float64      /// Hue in degrees, in [0, 360).
+  s: float64      /// Saturation in [0, 1].
+  v: float64      /// Value in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Hwb channels; alpha is in [0, 1].
+export type HwbChannels = {
+  h: float64      /// Hue in degrees, in [0, 360).
+  w: float64      /// Whiteness in [0, 1].
+  b: float64      /// Blackness in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical LinearRgb channels; alpha is in [0, 1].
+export type LinearRgbChannels = {
+  r: float64      /// Linear-light red in [0, 1].
+  g: float64      /// Linear-light green in [0, 1].
+  b: float64      /// Linear-light blue in [0, 1].
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Oklab channels; alpha is in [0, 1].
+export type OklabChannels = {
+  l: float64      /// Lightness in [0, 1].
+  a: float64      /// Green-red opponent channel.
+  b: float64      /// Blue-yellow opponent channel.
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+/// Numerical Oklch channels; alpha is in [0, 1].
+export type OklchChannels = {
+  l: float64      /// Lightness in [0, 1].
+  c: float64      /// Nonnegative chroma.
+  h: float64      /// Hue in degrees, in [0, 360).
+  alpha: float64  /// Alpha in [0, 1].
+}
+
+// CSS named colors and transparent, using camelCase NX identifiers. All are hex literals; two shown.
+export let black: Color = <Color.srgb r=0 g=0 b=0 />
+export let white: Color = <Color.srgb r=1 g=1 b=1 />
