@@ -1,11 +1,11 @@
 <Drawing
   background=<Paint.color
-    color=<Color a=1.0 b=1.0 g=1.0 r=1.0 />
+    color=<Color.srgb alpha=1.0 b=1.0 g=1.0 r=1.0 />
   />
   children={<Polygon
     clipRule=nonzero
     fill=<Paint.color
-      color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
+      color=<Color.srgb alpha=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=nonzero
     opacity=1.0
@@ -13,7 +13,7 @@
   /> <Polygon
     clipRule=nonzero
     fill=<Paint.color
-      color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
+      color=<Color.srgb alpha=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=nonzero
     opacity=1.0
@@ -21,7 +21,7 @@
   /> <Polygon
     clipRule=nonzero
     fill=<Paint.color
-      color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
+      color=<Color.srgb alpha=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=nonzero
     opacity=1.0
@@ -38,7 +38,7 @@
       lineJoin=miter
       miterLimit=4.0
       paint=<Paint.color
-        color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+        color=<Color.srgb alpha=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
       />
       width=2.0
     />
@@ -46,7 +46,7 @@
     clipRule=nonzero
     data="M 110 160 A 40 40 0 0 1 30 160 A 40 40 0 0 1 110 160 Z M 92 160 A 22 22 0 0 0 48 160 A 22 22 0 0 0 92 160 Z"
     fill=<Paint.color
-      color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
+      color=<Color.srgb alpha=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
     />
     fillRule=evenodd
     opacity=1.0
@@ -54,7 +54,7 @@
     children={<Rectangle
       clipRule=nonzero
       fill=<Paint.color
-        color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
+        color=<Color.srgb alpha=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
       />
       fillRule=nonzero
       height=60.0
@@ -68,7 +68,7 @@
       cx=200.0
       cy=160.0
       fill=<Paint.color
-        color=<Color a=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
+        color=<Color.srgb alpha=1.0 b=0.92156863 g=0.3882353 r=0.14509805 />
       />
       fillRule=nonzero
       opacity=1.0

@@ -36,3 +36,6 @@ export const nested = fixture("nested");
 
 /** A top-level string, which has no declaration. */
 export const greeting = fixture("greeting");
+
+/** A Display P3 red, outside sRGB, then an sRGB red. */
+export const colors = fixture("colors");

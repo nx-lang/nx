@@ -26,14 +26,3 @@ numerical channel precision from the prepared color until backend conversion.
 #### Scenario: A wide color is mapped at preparation
 - **WHEN** a Rectangle is filled with `displayP3(1, 0, 0)`
 - **THEN** its prepared paint SHALL hold the channels of `toGamut(displayP3(1, 0, 0), srgb)`
-
-### Requirement: Changed graphics color semantics have a new profile
-Graphics SHALL identify the shared-color, gradient paint, and shared-geometry contract, with colors
-in any space mapped into sRGB at preparation, as graphics-core-v5 in documentation, preparation
-metadata, previews, and fixtures. Existing geometry, solid/none paint behavior, opacity, and
-unsupported-effect diagnostics SHALL remain applicable. Supported native and browser paths SHALL
-consume the prepared sRGB color consistently.
-
-#### Scenario: Matching native and browser color semantics
-- **WHEN** a scene with a translucent `Color.oklch` is prepared for native Skia and browser Canvas
-- **THEN** both SHALL report graphics-core-v5 and draw the same mapped sRGB-plus-alpha color

@@ -710,10 +710,10 @@ impl<'a> NxIrImage<'a> {
         if has_color
             && !module.features.iter().any(|i| {
                 let (start, end) = strings.offsets.range(i as usize).unwrap();
-                &strings.blob[start..end] == b"standard-color-v1"
+                &strings.blob[start..end] == b"standard-color-v2"
             })
         {
-            return Err(malformed("standardColor requires standard-color-v1"));
+            return Err(malformed("standardColor requires standard-color-v2"));
         }
         let has_math = (0..tables[2].offsets.count).any(|i| {
             let (start, end) = tables[2].offsets.range(i).unwrap();

@@ -2424,12 +2424,11 @@ function call styles and first-class calling conventions remain a separate desig
 
 ## Wide-Gamut Color
 
-Proposed as the OpenSpec change `add-wide-gamut-color`: `Color` becomes a union of color spaces
-(`srgb`, `displayP3`, `oklab`, `oklch`) with explicit `inGamut` and `toGamut`. Left for later after
-it lands:
+`Color` is a union of color spaces (`srgb`, `displayP3`, `oklab`, `oklch`) with explicit `inGamut`
+and `toGamut`. Left for later:
 
 - Drawing on P3 surfaces in Skia and Canvas, instead of mapping into sRGB at preparation.
 - An OKLCH picker, so wide colors can be edited and not only shown.
 - Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
 
-`@nx/design`'s palette uses Tailwind v3's sRGB values until the change lands.
+- `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.

@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "reference": "CSS Color 4 2026-10-29 / WCAG 2.2 2024-12-12; analytical primaries, endpoints, transfer functions",
+  "version": 2,
+  "reference": "CSS Color 4 2026-10-29 (gamut mapping 13.2) / WCAG 2.2 2024-12-12; analytical primaries, endpoints, transfer functions; wide-gamut cases from an independent NumPy reference",
   "cases": [
     {
       "op": "parse",
@@ -123,10 +123,11 @@
       ],
       "expected": [
         1,
-        1,
-        1,
+        0,
+        0,
         1
-      ]
+      ],
+      "space": "oklab"
     },
     {
       "op": "parse",
@@ -138,7 +139,8 @@
         0,
         0,
         1
-      ]
+      ],
+      "space": "oklch"
     },
     {
       "op": "parse",
@@ -213,7 +215,14 @@
       "args": [
         "color(display-p3 1 0 0)"
       ],
-      "error": "color-invalid-text"
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "space": "displayP3",
+      "exact": true
     },
     {
       "op": "parse",
@@ -353,10 +362,11 @@
       ],
       "expected": [
         1,
-        1,
-        1,
+        0,
+        0,
         1
-      ]
+      ],
+      "space": "oklab"
     },
     {
       "op": "oklch",
@@ -371,7 +381,8 @@
         0,
         0,
         1
-      ]
+      ],
+      "space": "oklch"
     },
     {
       "op": "withAlpha",
@@ -442,7 +453,7 @@
         0.5
       ],
       "expected": [
-        0,
+        0.10891313697645119,
         0,
         0,
         1
@@ -457,9 +468,9 @@
         1
       ],
       "expected": [
-        1,
-        0.00392156862745098,
-        0.00392156862745098,
+        0.5019607797700019,
+        0.5019607797700019,
+        0.5019607797700019,
         1
       ]
     },
@@ -472,9 +483,9 @@
         1
       ],
       "expected": [
-        0.5,
-        0.5,
-        0.5,
+        0.5347438557463811,
+        0.5347438557463812,
+        0.5347438557463811,
         1
       ]
     },
@@ -488,8 +499,8 @@
       ],
       "expected": [
         0,
-        1,
-        0,
+        0.6594672594843862,
+        0.21058627601889263,
         1
       ]
     },
@@ -502,8 +513,8 @@
       ],
       "expected": [
         0,
-        1,
-        1,
+        0.6132928103699856,
+        0.69808772028092,
         1
       ]
     },
@@ -515,9 +526,9 @@
         }
       ],
       "expected": [
-        0.5,
-        0.5,
-        0.5,
+        0.5347438557463811,
+        0.5347438557463812,
+        0.5347438557463811,
         1
       ]
     },
@@ -941,14 +952,14 @@
     {
       "op": "parse",
       "args": [
-        "rgb(255\u00a00 0)"
+        "rgb(255 0 0)"
       ],
       "error": "color-invalid-text"
     },
     {
       "op": "parse",
       "args": [
-        "\u00a0red"
+        " red"
       ],
       "error": "color-invalid-text"
     },
@@ -3140,6 +3151,7 @@
       "op": "validate",
       "args": [
         {
+          "$type": "Color.srgb",
           "r": 1,
           "g": 0,
           "b": 0
@@ -3180,6 +3192,388 @@
         "hsl(120.deg 100% 50%)"
       ],
       "error": "color-invalid-text"
+    },
+    {
+      "op": "displayP3",
+      "args": [
+        1,
+        0,
+        0.25,
+        0.5
+      ],
+      "expected": [
+        1,
+        0,
+        0.25,
+        0.5
+      ],
+      "space": "displayP3",
+      "exact": true
+    },
+    {
+      "op": "displayP3",
+      "args": [
+        1.01,
+        0,
+        0,
+        1
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "oklch",
+      "args": [
+        0.7,
+        0.3,
+        505,
+        1
+      ],
+      "expected": [
+        0.7,
+        0.3,
+        145,
+        1
+      ],
+      "space": "oklch"
+    },
+    {
+      "op": "oklab",
+      "args": [
+        0.5,
+        -0.3,
+        0.4,
+        1
+      ],
+      "expected": [
+        0.5,
+        -0.3,
+        0.4,
+        1
+      ],
+      "space": "oklab"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "oklch(70% 0.3 145)"
+      ],
+      "expected": [
+        0.7,
+        0.3,
+        145,
+        1
+      ],
+      "space": "oklch"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "color(display-p3 100% 50% 0 / 50%)"
+      ],
+      "expected": [
+        1,
+        0.5,
+        0,
+        0.5
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "color(rec2020 1 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "inGamut",
+      "args": [
+        {
+          "color": "#2563eb"
+        },
+        "srgb"
+      ],
+      "expected": true
+    },
+    {
+      "op": "inGamut",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        },
+        "srgb"
+      ],
+      "expected": false
+    },
+    {
+      "op": "inGamut",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        },
+        "displayP3"
+      ],
+      "expected": true
+    },
+    {
+      "op": "inGamut",
+      "args": [
+        {
+          "color": "oklch(0.7 0.3 145)"
+        },
+        "displayP3"
+      ],
+      "expected": false
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "#2563eb"
+        },
+        "srgb"
+      ],
+      "expected": [
+        0.1450980392156863,
+        0.38823529411764707,
+        0.9215686274509803,
+        1.0
+      ],
+      "exact": true
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        },
+        "srgb"
+      ],
+      "expected": [
+        1,
+        0.04456946924601524,
+        0.04593126463237377,
+        1
+      ]
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "oklch(0.7 0.3 145)"
+        },
+        "displayP3"
+      ],
+      "expected": [
+        0.10098924449508662,
+        0.7711538369997508,
+        0,
+        1
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "oklch(1 0.2 30)"
+        },
+        "srgb"
+      ],
+      "expected": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "#2563eb"
+        },
+        "oklch"
+      ],
+      "error": "color-invalid-channel"
+    },
+    {
+      "op": "toHex",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        }
+      ],
+      "expected": "#ff0b0cff"
+    },
+    {
+      "op": "toCss",
+      "args": [
+        {
+          "color": "#ff000080"
+        }
+      ],
+      "expected": "rgb(255 0 0 / 0.501960813999176)"
+    },
+    {
+      "op": "toCss",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0.5)"
+        }
+      ],
+      "expected": "color(display-p3 1 0 0.5 / 1)"
+    },
+    {
+      "op": "toCss",
+      "args": [
+        {
+          "color": "oklch(0.5 0.25 30)"
+        }
+      ],
+      "expected": "oklch(0.5 0.25 30 / 1)"
+    },
+    {
+      "op": "toRgb",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        }
+      ],
+      "expected": {
+        "r": 255.0,
+        "g": 11.365214847028255,
+        "b": 11.712472513318062,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "toOklch",
+      "args": [
+        {
+          "color": "oklch(0.7 0.3 145)"
+        }
+      ],
+      "expected": {
+        "l": 0.699999988079071,
+        "c": 0.30000001192092896,
+        "h": 145,
+        "alpha": 1
+      }
+    },
+    {
+      "op": "lighten",
+      "args": [
+        {
+          "color": "color(display-p3 0.2 0.6 0.3)"
+        },
+        0.1
+      ],
+      "expected": [
+        0.33397367362264185,
+        0.7249970442893573,
+        0.4153549719329283,
+        1
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        {
+          "color": "color(display-p3 0 1 0)"
+        },
+        0.5,
+        "oklab"
+      ],
+      "expected": [
+        0.7351746991205217,
+        0.6820286737257634,
+        0.11874701062705034,
+        1
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "oklab(0.5 0.1 0)"
+        },
+        {
+          "color": "oklab(0.7 -0.1 0)"
+        },
+        0.5,
+        "oklab"
+      ],
+      "expected": [
+        0.6,
+        0,
+        0,
+        1
+      ],
+      "space": "oklab"
+    },
+    {
+      "op": "invert",
+      "args": [
+        {
+          "color": "oklch(0.7 0.3 145)"
+        },
+        1
+      ],
+      "expected": [
+        0.899010868528286,
+        0.22884617410619645,
+        1,
+        1
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "contrastRatio",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        },
+        {
+          "color": "#fff"
+        }
+      ],
+      "expected": 3.9572378315823484
+    },
+    {
+      "op": "bestTextColor",
+      "args": [
+        {
+          "color": "oklch(0.3 0.1 260)"
+        },
+        {
+          "color": "#000"
+        },
+        {
+          "color": "oklch(0.98 0.01 90)"
+        }
+      ],
+      "expected": [
+        0.98,
+        0.01,
+        90,
+        1
+      ],
+      "space": "oklch"
+    },
+    {
+      "op": "relativeLuminance",
+      "args": [
+        {
+          "color": "oklch(0.7 0.3 145)"
+        }
+      ],
+      "expected": 0.39185346312909936
     }
   ]
 }

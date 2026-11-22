@@ -155,7 +155,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 24 | optionalMember | `[24, node, str]` | `x?.m`: the named member of the base when the base holds a value, and the empty value when the base is empty. Requires `occurrence-v1`. |
 | 25 | coalesce | `[25, node, node]` | `x ?? y`: the left operand when it holds at least one item, otherwise the right, which is evaluated only when the left is empty. Requires `occurrence-v1`. |
 | 26 | standardMath | `[26, operation, [node...]]` | A closed numerical body in a compiler-owned standard function. Requires `standard-math-v1`; see [Standard math bodies](#standard-math-bodies-standard-math-v1) for operation IDs and arities. |
-| 27 | standardColor | `[27, operation, [node...]]` | A closed color body in a compiler-owned standard function. Requires `standard-color-v1`; see [Standard color bodies](#standard-color-bodies-standard-color-v1). |
+| 27 | standardColor | `[27, operation, [node...]]` | A closed color body in a compiler-owned standard function. Requires `standard-color-v2`; see [Standard color bodies](#standard-color-bodies-standard-color-v2). |
 | 28 | check | `[28, node, type, str]` | A constraint check, written where a value is bound to a constrained site its type does not already satisfy: the operand, a `constrained` type entry, and the name of the site, such as a parameter or field. Yields the operand's value when the interval admits it, comparing at the base type, and otherwise fails with `nx-ir-constraint`, naming the site, the value and the interval. A sequence operand is checked item by item and the empty value passes, so one node serves an optional site and a `+` or `*` site whose item type is constrained. `NaN` fails. Requires `constraints-v1`. |
 | 29 | interval | `[29, type]` | A numeric pattern, `in 0.0..1.0` or `> 0 && <= 10`, in an `ifIs` arm's pattern list, and nowhere else: a `constrained` type entry whose base is the scrutinee's base type and whose interval is the pattern's. It matches when the scrutinee lies in the interval, and never matches `NaN` or the empty value. Requires `constraints-v1`. |
 | 30 | envRead | `[30, ref]` | `env.name`: the value the environment gives the `environment` declaration the reference names. A field read after it is an ordinary `member`. Requires `environment-v1`; see *Environment values*. |
@@ -523,7 +523,7 @@ predates the kind refuses the module by name rather than as malformed, and lists
 `function-values-v1` too only on that feature's own terms; one that contains a `forRange`
 lists `ranges-v1`; one that contains an `exists`, `optionalMember` or `coalesce` node, or an `ifIs`
 arm with the `{}` pattern, lists `occurrence-v1`; one that contains a `standardMath` node lists
-`standard-math-v1`; a `standardColor` node lists `standard-color-v1`; one whose type table holds a
+`standard-math-v1`; a `standardColor` node lists `standard-color-v2`; one whose type table holds a
 `constrained` entry, or whose nodes hold a `check` or an `interval`, lists `constraints-v1`; one that
 declares an `environment` value, has a `provides` declaration, or contains an `envRead`,
 `envProvide` or `envUpdate` node lists `environment-v1`. Constructing a range needs no feature: that is an
@@ -1559,14 +1559,15 @@ The math library's version extends the existing source hash with each ordered ru
 byte. Source-only standard-library versions are unchanged. Parameter names/order, operation mapping,
 result type and semantic revision all participate in this deterministic version.
 
-## Standard color bodies (`standard-color-v1`)
+## Standard color bodies (`standard-color-v2`)
 
 Node kind **27**, `standardColor`, has logical layout `[27, operation, [argumentNode...]]`
 and flat cells `[27, operation, argumentCount, argumentNode...]`. Arguments reference earlier nodes.
-A module carrying it must declare `standard-color-v1`; readers validate the operation, exact arity,
+A module carrying it must declare `standard-color-v2`; readers validate the operation, exact arity,
 argument references, and feature declaration before execution. The compiler synthesizes bodies only
 for its registered color operations module. Calls remain ordinary references and colors remain
-ordinary records with float32 fields; no color value tag is introduced. The contracts-only color
+ordinary union-case records (`Color.srgb`, `Color.displayP3`, `Color.oklab`, `Color.oklch`) with
+float32 fields; no color value tag is introduced. The contracts-only color
 image can be linked without these function bodies for a literal-only program.
 
 | Operation | Name | Arity |
@@ -1578,36 +1579,39 @@ image can be linked without these function bodies for a literal-only program.
 | 4 | `hsl` | 4 |
 | 5 | `hsv` | 4 |
 | 6 | `hwb` | 4 |
-| 7 | `oklab` | 4 |
-| 8 | `oklch` | 4 |
-| 9 | `parse` | 1 |
-| 10 | `tryParse` | 1 |
-| 11 | `validate` | 1 |
-| 12 | `toHex` | 1 |
-| 13 | `toCss` | 1 |
-| 14 | `toRgb` | 1 |
-| 15 | `toHsl` | 1 |
-| 16 | `toHsv` | 1 |
-| 17 | `toHwb` | 1 |
-| 18 | `toLinearRgb` | 1 |
-| 19 | `toOklab` | 1 |
-| 20 | `toOklch` | 1 |
-| 21 | `withAlpha` | 2 |
-| 22 | `fadeIn` | 2 |
-| 23 | `fadeOut` | 2 |
-| 24 | `lighten` | 2 |
-| 25 | `darken` | 2 |
-| 26 | `saturate` | 2 |
-| 27 | `desaturate` | 2 |
-| 28 | `rotateHue` | 2 |
-| 29 | `complement` | 1 |
-| 30 | `grayscale` | 1 |
-| 31 | `invert` | 2 |
-| 32 | `mix` | 4 |
-| 33 | `composite` | 2 |
-| 34 | `relativeLuminance` | 1 |
-| 35 | `contrastRatio` | 2 |
-| 36 | `bestTextColor` | 3 |
+| 7 | `displayP3` | 4 |
+| 8 | `oklab` | 4 |
+| 9 | `oklch` | 4 |
+| 10 | `parse` | 1 |
+| 11 | `tryParse` | 1 |
+| 12 | `validate` | 1 |
+| 13 | `inGamut` | 2 |
+| 14 | `toGamut` | 2 |
+| 15 | `toHex` | 1 |
+| 16 | `toCss` | 1 |
+| 17 | `toRgb` | 1 |
+| 18 | `toHsl` | 1 |
+| 19 | `toHsv` | 1 |
+| 20 | `toHwb` | 1 |
+| 21 | `toLinearRgb` | 1 |
+| 22 | `toOklab` | 1 |
+| 23 | `toOklch` | 1 |
+| 24 | `withAlpha` | 2 |
+| 25 | `fadeIn` | 2 |
+| 26 | `fadeOut` | 2 |
+| 27 | `lighten` | 2 |
+| 28 | `darken` | 2 |
+| 29 | `saturate` | 2 |
+| 30 | `desaturate` | 2 |
+| 31 | `rotateHue` | 2 |
+| 32 | `complement` | 1 |
+| 33 | `grayscale` | 1 |
+| 34 | `invert` | 2 |
+| 35 | `mix` | 4 |
+| 36 | `composite` | 2 |
+| 37 | `relativeLuminance` | 1 |
+| 38 | `contrastRatio` | 2 |
+| 39 | `bestTextColor` | 3 |
 
 Each body costs one operation plus ordinary argument/call costs. Numerical parameters/intermediates
 are float64; stored Color channels round to float32. Failures use `color-invalid-text` or

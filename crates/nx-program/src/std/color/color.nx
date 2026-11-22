@@ -1,12 +1,47 @@
 // Unstable renderer-independent color standard library.
 
-/// Encoded non-premultiplied sRGB channels and alpha, each in [0, 1].
-export type Color = {
-  r: float32      /// Encoded red in [0, 1].
-  g: float32      /// Encoded green in [0, 1].
-  b: float32      /// Encoded blue in [0, 1].
-  a: float32 = 1  /// Alpha in [0, 1]; 0 is transparent and 1 is opaque.
-}
+/// A normalized channel or alpha, in [0, 1].
+export type Unit = float32 where in 0.0..=1.0
+
+/// A hue in degrees, in [0, 360).
+export type Hue = float32 where >= 0.0 && < 360.0
+
+/// A color, in the color space it was written in. Alpha is non-premultiplied in every space.
+///
+/// Read a color's channels by matching on its space, or convert it first with `toGamut`, `toRgb` or
+/// `toOklch`; nothing reads a channel without naming the space it belongs to.
+export type Color =
+  /// Encoded sRGB, the space of hex literals and of `rgb`, `hsl` and `hwb`.
+  | srgb {
+      r: Unit          /// Encoded red.
+      g: Unit          /// Encoded green.
+      b: Unit          /// Encoded blue.
+      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+    }
+  /// Encoded Display P3: the same transfer curve as sRGB with wider primaries.
+  | displayP3 {
+      r: Unit          /// Encoded red.
+      g: Unit          /// Encoded green.
+      b: Unit          /// Encoded blue.
+      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+    }
+  /// Oklab: perceptual lightness and two opponent axes; can describe colors no screen shows.
+  | oklab {
+      l: Unit          /// Lightness: 0 is black and 1 is white.
+      a: float32       /// Green (negative) to red (positive).
+      b: float32       /// Blue (negative) to yellow (positive).
+      alpha: Unit = 1  /// 0 is transparent and 1 is opaque.
+    }
+  /// Oklch: Oklab as lightness, chroma and hue; can describe colors no screen shows.
+  | oklch {
+      l: Unit                  /// Lightness: 0 is black and 1 is white.
+      c: float32 where >= 0.0  /// Chroma: 0 is gray.
+      h: Hue                   /// Hue in degrees.
+      alpha: Unit = 1          /// 0 is transparent and 1 is opaque.
+    }
+
+/// A gamut that colors can be checked against and mapped into: what a kind of screen can show.
+export type Gamut = srgb | displayP3
 
 /// Recoverable parsing result.
 export type ParseResult =
@@ -15,6 +50,8 @@ export type ParseResult =
 
 /// Rectangular interpolation space.
 export type InterpolationSpace = srgb | linearSrgb | oklab
+
+// The channel records are unchanged.
 
 /// Encoded sRGB channels in [0, 255]; alpha is in [0, 1].
 export type RgbChannels = {

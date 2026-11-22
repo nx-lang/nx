@@ -49,9 +49,9 @@ path the only path.
   `grayscale` work in OKLCH instead of HSL.** HSL exists only inside sRGB, so keeping it would push
   every wide color back into sRGB. OKLCH also gives the even steps these functions are meant for.
 - **Runtime feature `standard-color-v2`** replaces `standard-color-v1` for the new operation set.
-- **Graphics accepts any color.** Scene preparation maps each color into sRGB, so prepared paints and
-  both renderers keep their current sRGB contract. The input color shape changes, so the profile
-  becomes `graphics-core-v5`. Drawing on P3 surfaces is later work.
+- **Graphics accepts any color.** Scene preparation maps each color into sRGB, so prepared paints,
+  both renderers and the `graphics-core-v4` profile keep their current sRGB contract. Drawing on P3
+  surfaces is later work.
 - **Tooling:**
   - Swatches are shown for the new constructors and case records. Browsers draw them from `toCss`
     text, which they map for the screen.
@@ -72,15 +72,13 @@ None.
 - `color-literals`: hex literals give `Color.srgb`.
 - `color-tooling`: discovery, diagnostics and swatches for the new forms; picker edits only sRGB
   colors.
-- `graphics-library`: graphics accepts any `Color` and maps it into sRGB at preparation, under
-  `graphics-core-v5`.
+- `graphics-library`: graphics accepts any `Color` and maps it into sRGB at preparation.
 
 ## Impact
 
-- **Standard library:** `crates/nx-program/src/std/color/color.nx` and `operations.nx` (drafted in
-  this change's `api/`).
+- **Standard library:** `crates/nx-program/src/std/color/color.nx` and `operations.nx`.
 - **Runtimes:** the color externals in `crates/nx-value/src/color.rs` (Rust) and
-  `runtime/typescript/src/color.ts`. Conversions go through extended linear sRGB and XYZ. Gamut
+  `runtime/typescript/src/color.ts`. Conversions go through unclamped linear-light sRGB. Gamut
   mapping follows CSS Color 4, and the two runtimes agree within the existing tolerance.
 - **Compiler:** hex literals lower to `Color.srgb`. Swatch discovery and value printing in
   `nx-language-service` and `nx-api` recognize the four cases.

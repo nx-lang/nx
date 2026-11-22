@@ -6,9 +6,6 @@ Colors outside sRGB can't be held: `oklab` and `oklch` clip after converting, an
 `color(display-p3 …)`. Consumers are `@nx/graphics` (Skia and Canvas), the IR runtimes' color
 externals, swatch discovery and the picker, value printing, and SDK transport.
 
-The proposed API is written as NX source in `api/color.nx` and `api/operations.nx`. The types check.
-The externals have no runtime implementation yet, which is the only error the compiler reports.
-
 ## Goals / Non-Goals
 
 **Goals:**
@@ -132,12 +129,13 @@ The new blue is closer to "the same color, lighter", because OKLCH keeps hue and
 HSL does not.
 
 *Alternative:* keep HSL for sRGB inputs and use OKLCH only for wide ones. Rejected: the same call
-would mean different things depending on how its input was written. See Open Questions.
+would mean different things depending on how its input was written. See Decided Questions.
 
 ### Literals, transport and the runtime feature
 
-- Hex literals lower to a `Color.srgb` constant. Value printing shows that case as hex when it is
-  byte-exact, as today, and every other color as its constructor.
+- Hex literals lower to a `Color.srgb` constant. Value printing writes every color as its case
+  record, as `<Color.srgb r=1.0 g=0.0 b=0.0 alpha=1.0 />`, with a swatch painted from its CSS text
+  and the outside-sRGB mark where it applies.
 - Transport is the ordinary union-case record, `{"$type": "Color.srgb", "r": 1, "g": 0, "b": 0,
   "alpha": 1}`, through IR, JSON, MessagePack and the SDKs. No new value tag.
 - The operation set changes, so emitted programs require `standard-color-v2`. A runtime without it
@@ -148,7 +146,8 @@ would mean different things depending on how its input was written. See Open Que
 
 Scene preparation applies `toGamut(c, srgb)` to every paint color and gradient stop. Prepared paints
 keep their sRGB float contract, so `graphics-rendering`'s interpolation rules and both renderers are
-unchanged. The input shape changes, so the profile is `graphics-core-v5`. P3 surfaces are a follow-up
+unchanged, and the profile stays `graphics-core-v4`: it names what renderers consume, which this
+change keeps. P3 surfaces are a follow-up
 (Skia `Color4f` with a P3 `ColorSpace`, and Canvas `{ colorSpace: "display-p3" }`).
 
 ### Tooling
@@ -181,13 +180,14 @@ No back-compat. In one change:
 - the library and both runtimes move;
 - literals lower to `Color.srgb`;
 - graphics, tooling, examples, tests and fixtures move to the new shape;
-- `graphics-core-v5` and `standard-color-v2` replace their predecessors.
+- `standard-color-v2` replaces `standard-color-v1`.
 
-## Open Questions
+## Decided Questions
 
-- **OKLCH for `lighten` and its kin.** OKLCH for every input (recommended), or keep HSL for sRGB
-  inputs?
-- **Oklab as a stored space.** Oklch covers authoring. Oklab mainly matters as an interpolation
-  space. Keep both cases (recommended, since CSS has both), or only Oklch?
-- **P3 drawing now or later.** I'd leave Skia and Canvas P3 surfaces for a follow-up, so this change
-  is about the value and the library.
+Settled with Bret on 2026-11-22:
+- **OKLCH for `lighten` and its kin, for every input,** rather than HSL for sRGB inputs. One meaning
+  per function, wide colors stay wide, and OKLCH keeps hue steady.
+- **Oklab stays a stored space beside Oklch.** It matches CSS, keeps authored text exact, and is
+  where `mix` interpolates by default.
+- **P3 drawing in Skia and Canvas is a follow-up.** Mapping into sRGB at preparation is what an sRGB
+  screen shows, and it keeps this change to the value model and the library.

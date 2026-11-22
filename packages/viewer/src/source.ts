@@ -337,6 +337,14 @@ export function renderSource(
       return undefined;
     }
     square.setAttribute("aria-hidden", "true");
+    // A color an sRGB screen cannot show is marked, since this screen may be drawing it mapped.
+    if (tree.nodes[at]?.colorOutsideSrgb === true) {
+      square.classList.add("outside-srgb");
+      square.title = "Outside sRGB: shows differently on sRGB screens";
+      square.removeAttribute("aria-hidden");
+      square.setAttribute("role", "img");
+      square.setAttribute("aria-label", "Outside sRGB");
+    }
     return square;
   };
 

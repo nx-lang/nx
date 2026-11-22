@@ -1,7 +1,7 @@
-module @nx/color/operations.nx fingerprint 148550021078355564
-links @nx/color/color.nx version "66a4d2b1d49a6436" fingerprint 6839805114163841305
-requires standard-color-v1
-entrypoints functions [rgb rgba srgb linearRgb hsl hsv hwb oklab oklch parse tryParse validate toHex toCss toRgb toHsl toHsv toHwb toLinearRgb toOklab toOklch withAlpha fadeIn fadeOut lighten darken saturate desaturate rotateHue complement grayscale invert mix composite relativeLuminance contrastRatio bestTextColor] components []
+module @nx/color/operations.nx fingerprint 7353843330997707954
+links @nx/color/color.nx version "b78dd74abd7ad6a5" fingerprint 1499878461758878924
+requires standard-color-v2
+entrypoints functions [rgb rgba srgb linearRgb hsl hsv hwb displayP3 oklab oklch parse tryParse validate inGamut toGamut toHex toCss toRgb toHsl toHsv toHwb toLinearRgb toOklab toOklch withAlpha fadeIn fadeOut lighten darken saturate desaturate rotateHue complement grayscale invert mix composite relativeLuminance contrastRatio bestTextColor] components []
 
 function rgb(r: float64, g: float64, b: float64): @nx/color/color.nx:Color =
   color.rgb(r, g, b)
@@ -9,20 +9,23 @@ function rgb(r: float64, g: float64, b: float64): @nx/color/color.nx:Color =
 function rgba(r: float64, g: float64, b: float64, a: float64): @nx/color/color.nx:Color =
   color.rgba(r, g, b, a)
 
-function srgb(r: float64, g: float64, b: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
-  color.srgb(r, g, b, a)
+function srgb(r: float64, g: float64, b: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.srgb(r, g, b, alpha)
 
-function linearRgb(r: float64, g: float64, b: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
-  color.linearRgb(r, g, b, a)
+function linearRgb(r: float64, g: float64, b: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.linearRgb(r, g, b, alpha)
 
-function hsl(h: float64, s: float64, l: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
-  color.hsl(h, s, l, a)
+function hsl(h: float64, s: float64, l: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.hsl(h, s, l, alpha)
 
-function hsv(h: float64, s: float64, v: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
-  color.hsv(h, s, v, a)
+function hsv(h: float64, s: float64, v: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.hsv(h, s, v, alpha)
 
-function hwb(h: float64, w: float64, b: float64, a: float64 = 1.0): @nx/color/color.nx:Color =
-  color.hwb(h, w, b, a)
+function hwb(h: float64, w: float64, b: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.hwb(h, w, b, alpha)
+
+function displayP3(r: float64, g: float64, b: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
+  color.displayP3(r, g, b, alpha)
 
 function oklab(l: float64, a: float64, b: float64, alpha: float64 = 1.0): @nx/color/color.nx:Color =
   color.oklab(l, a, b, alpha)
@@ -38,6 +41,12 @@ function tryParse(text: string): @nx/color/color.nx:ParseResult =
 
 function validate(value: @nx/color/color.nx:Color): @nx/color/color.nx:Color =
   color.validate(value)
+
+function inGamut(value: @nx/color/color.nx:Color, gamut: @nx/color/color.nx:Gamut = @nx/color/color.nx:Gamut.srgb): boolean =
+  color.inGamut(value, gamut)
+
+function toGamut(value: @nx/color/color.nx:Color, gamut: @nx/color/color.nx:Gamut = @nx/color/color.nx:Gamut.srgb): @nx/color/color.nx:Color =
+  color.toGamut(value, gamut)
 
 function toHex(value: @nx/color/color.nx:Color): string =
   color.toHex(value)

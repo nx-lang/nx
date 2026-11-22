@@ -1254,6 +1254,7 @@ function normalizeValueNode(raw: unknown): NxValueNode {
     end: typeof value["end"] === "number" ? value["end"] : 0,
     role: role as NxValueRole,
     ...(typeof value["color"] === "string" ? { color: value["color"] } : {}),
+    ...(value["colorOutsideSrgb"] === true ? { colorOutsideSrgb: true } : {}),
     ...(typeof value["parent"] === "number" ? { parent: value["parent"] } : {}),
     ...(typeof value["type"] === "string" ? { type: value["type"] } : {}),
     ...(typeof value["name"] === "string" ? { name: value["name"] } : {}),

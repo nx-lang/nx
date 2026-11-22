@@ -8,4 +8,7 @@ let root() = {
   c.toHsl(c.hsl(360, 1, 0.5))
   c.tryParse("hsl(180 100% 50%)")
   c.tryParse("var(--accent)")
+  c.toCss(c.toGamut(c.displayP3(1, 0, 0)))
+  c.inGamut(c.oklch(0.7, 0.3, 145), c.Gamut.displayP3)
+  c.toCss(c.lighten(c.displayP3(1, 0, 0), 0.1))
 }

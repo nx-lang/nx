@@ -114,6 +114,9 @@ pub struct SourceNode {
     /// A validation failure for a statically recognized color constructor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_error: Option<String>,
+    /// Whether the color in `color` is outside sRGB, so an sRGB screen shows it differently.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub color_outside_srgb: bool,
     /// The text type of a typed body, as `markdown` in `<Note:markdown>`, on the element and on
     /// each run of its text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -530,6 +533,16 @@ impl WorkspaceSnapshot {
             if !canonical || nodes[at].role != SourceRole::Element {
                 continue;
             }
+            // A `Color` element names its space as the union case: `<c.Color.oklch … />`.
+            let Some(space) = nodes[at]
+                .name
+                .as_deref()
+                .and_then(|name| name.rsplit_once('.'))
+                .and_then(|(_, case)| nx_value::color::Space::from_case(case))
+            else {
+                continue;
+            };
+            let keys = space.keys();
             let mut channels = [0.0, 0.0, 0.0, 1.0];
             let mut seen = [false, false, false, true];
             for attribute in 0..nodes.len() {
@@ -538,7 +551,7 @@ impl WorkspaceSnapshot {
                 {
                     continue;
                 }
-                let Some(channel) = ["r", "g", "b", "a"]
+                let Some(channel) = keys
                     .iter()
                     .position(|name| Some(*name) == nodes[attribute].name.as_deref())
                 else {
@@ -559,22 +572,7 @@ impl WorkspaceSnapshot {
                 }
             }
             if seen.iter().all(|seen| *seen) {
-                match nx_value::color::make(channels) {
-                    Ok(value) => {
-                        if let Ok([r, g, b, a]) = nx_value::color::channels(&value) {
-                            nodes[at].color = Some(format!(
-                                "#{:02x}{:02x}{:02x}{:02x}",
-                                (r * 255.0).round() as u8,
-                                (g * 255.0).round() as u8,
-                                (b * 255.0).round() as u8,
-                                (a * 255.0).round() as u8
-                            ));
-                        }
-                    }
-                    Err(error) => {
-                        nodes[at].color_error = Some(format!("{}: {}", error.code, error.message))
-                    }
-                }
+                set_swatch(&mut nodes[at], nx_value::color::make_in(space, channels));
             }
         }
 
@@ -684,6 +682,7 @@ impl<'a> TreeBuilder<'a> {
             value: None,
             color: None,
             color_error: None,
+            color_outside_srgb: false,
             text_type: None,
             ty: None,
             declaration: None,
@@ -1277,8 +1276,10 @@ impl<'a> TreeBuilder<'a> {
                 if matches!(
                     entry.module.as_str(),
                     "@nx/color/color.nx" | "@nx/color/operations.nx"
-                ) && matches!(entry.name.as_str(), "parse" | "rgb" | "rgba" | "srgb")
-                {
+                ) && matches!(
+                    entry.name.as_str(),
+                    "parse" | "rgb" | "rgba" | "srgb" | "displayP3" | "oklab" | "oklch"
+                ) {
                     self.nodes[index].declaration = Some(declaration);
                     let name = entry.name.clone();
                     let args: Option<Vec<nx_value::NxValue>> = fields(node)
@@ -1309,26 +1310,17 @@ impl<'a> TreeBuilder<'a> {
                             .iter()
                             .position(|candidate| *candidate == name)
                         {
-                            if matches!(name.as_str(), "srgb" | "rgba") && args.len() == 3 {
+                            if matches!(
+                                name.as_str(),
+                                "srgb" | "rgba" | "displayP3" | "oklab" | "oklch"
+                            ) && args.len() == 3
+                            {
                                 args.push(nx_value::NxValue::Float(1.0));
                             }
-                            match nx_value::color::evaluate(op as u32, &args) {
-                                Ok(value) => {
-                                    if let Ok([r, g, b, a]) = nx_value::color::channels(&value) {
-                                        self.nodes[index].color = Some(format!(
-                                            "#{:02x}{:02x}{:02x}{:02x}",
-                                            (r * 255.0).round() as u8,
-                                            (g * 255.0).round() as u8,
-                                            (b * 255.0).round() as u8,
-                                            (a * 255.0).round() as u8
-                                        ));
-                                    }
-                                }
-                                Err(error) => {
-                                    self.nodes[index].color_error =
-                                        Some(format!("{}: {}", error.code, error.message))
-                                }
-                            }
+                            set_swatch(
+                                &mut self.nodes[index],
+                                nx_value::color::evaluate(op as u32, &args),
+                            );
                         }
                     }
                 }
@@ -1653,7 +1645,22 @@ impl<'a> TreeBuilder<'a> {
         let declaration = match origin.as_ref() {
             Some(origin) => self.entry(origin),
             None => self.case_declaration(node.span()),
-        };
+        }
+        // A case of a union reached through an alias, `<g.Color.srgb … />`, refers to the alias
+        // when the union's own module is not one this document reaches.
+        .or_else(|| {
+            let (union, _) = tag.rsplit_once('.')?;
+            let id = self.expr_at(node.span())?;
+            let is_case = matches!(
+                self.analysis.as_ref()?.type_env().get_expr_type(id),
+                Some(nx_types::Type::UnionCase(_))
+            );
+            if is_case {
+                self.visible_declaration(union)
+            } else {
+                None
+            }
+        });
         if self.is_state_update(origin.as_ref()) {
             self.nodes[index].flags.push(SourceFlag::StateUpdate);
         }
@@ -3234,4 +3241,15 @@ fn spell(node: SyntaxNode<'_>) -> String {
         end = Some(leaf.end_byte());
     }
     spelled
+}
+
+/// Gives a node the swatch for a statically known color, or the reason it is not a color.
+fn set_swatch(node: &mut SourceNode, value: Result<nx_value::NxValue, nx_value::color::Error>) {
+    match value.and_then(|value| nx_value::color::read(&value)) {
+        Ok(color) => {
+            node.color = Some(nx_value::color::swatch(color));
+            node.color_outside_srgb = nx_value::color::outside_srgb(color);
+        }
+        Err(error) => node.color_error = Some(format!("{}: {}", error.code, error.message)),
+    }
 }

@@ -376,7 +376,7 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
             matches!(e.kind, CodegenExpressionKind::StandardColor { .. })
         })
     }) {
-        features.push("standard-color-v1".into());
+        features.push("standard-color-v2".into());
     }
     if module.declarations.iter().any(|d| {
         declaration_contains(d, |e| {

@@ -3,7 +3,7 @@
     "#800080ff",
     "#ffbbbbff",
     21.0,
-    "rgba(31.481481716036797, 102.00000151991844, 204.00000303983688, 0.5)",
+    "rgb(31.481481716036797 102.00000151991844 204.00000303983688 / 0.5)",
     {
       "$type": "HslChannels",
       "alpha": 1.0,
@@ -14,8 +14,8 @@
     {
       "$type": "ParseResult.parsed",
       "value": {
-        "$type": "Color",
-        "a": 1.0,
+        "$type": "Color.srgb",
+        "alpha": 1.0,
         "b": 1.0,
         "g": 1.0,
         "r": 0.0
@@ -24,6 +24,9 @@
     {
       "$type": "ParseResult.invalid",
       "message": "invalid standalone color: var(--accent)"
-    }
+    },
+    "rgb(255 11.365214847028255 11.712472513318062 / 1)",
+    false,
+    "color(display-p3 1 0.45074331760406494 0.3693942427635193 / 1)"
   ]
 }

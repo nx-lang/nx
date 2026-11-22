@@ -215,7 +215,7 @@ fn graphics_solid_paint_rejects_noncanonical_color_payloads() {
 fn graphics_only_import_retains_transitive_color_type_context() {
     let program = crate::ir_runtime_tests::program(
         r#"import "@nx/graphics" as g
-let shade: g.Color = <g.Color r=1 g=0 b=0 />
+let shade: g.Color = <g.Color.srgb r=1 g=0 b=0 />
 let root() = <g.Paint.color color={shade} />"#,
     );
     let NxValue::Record { properties, .. } = program
@@ -313,7 +313,7 @@ let format(value: g.Color): string = { c.toHex(value) }
 let root() = {
   format(#5b6ef5)
   format(c.parse("red"))
-  c.toHex(<g.Color r=0 g=0 b=1 />)
+  c.toHex(<g.Color.srgb r=0 g=0 b=1 />)
 }"##,
     );
     assert_eq!(
@@ -358,8 +358,11 @@ fn color_transport_json_and_messagepack_restore_float32_against_schema() {
         else {
             panic!("Color record")
         };
-        assert_eq!(type_name.as_deref(), Some("Color"));
-        assert_eq!(properties["a"], NxValue::Float(f64::from(68.0_f32 / 255.0)));
+        assert_eq!(type_name.as_deref(), Some("Color.srgb"));
+        assert_eq!(
+            properties["alpha"],
+            NxValue::Float(f64::from(68.0_f32 / 255.0))
+        );
         assert_eq!(properties["r"], NxValue::Float(f64::from(17.0_f32 / 255.0)));
     }
 }
@@ -367,24 +370,27 @@ fn color_transport_json_and_messagepack_restore_float32_against_schema() {
 #[test]
 fn color_transport_default_alpha_and_invalid_channels() {
     let program = crate::ir_runtime_tests::program(SOURCE);
-    let input = NxValue::from_json_str(r#"{"accent":{"r":0.1,"g":0.2,"b":0.3}}"#).unwrap();
+    let input =
+        NxValue::from_json_str(r#"{"accent":{"$type":"Color.srgb","r":0.1,"g":0.2,"b":0.3}}"#)
+            .unwrap();
     let result = program
         .evaluate_function("validateBrand", &[input], &RuntimeOptions::default())
         .unwrap();
     let NxValue::Record { properties, .. } = result else {
         panic!("Color")
     };
-    assert_eq!(properties["a"], NxValue::Float(1.0));
+    assert_eq!(properties["alpha"], NxValue::Float(1.0));
     assert_eq!(properties["r"], NxValue::Float(f64::from(0.1_f32)));
-    let invalid = NxValue::from_json_str(r#"{"accent":{"r":2,"g":0,"b":0}}"#).unwrap();
+    let invalid =
+        NxValue::from_json_str(r#"{"accent":{"$type":"Color.srgb","r":2,"g":0,"b":0}}"#).unwrap();
     let error = program
         .evaluate_function("validateBrand", &[invalid], &RuntimeOptions::default())
         .unwrap_err();
-    assert_eq!(error.code(), "color-invalid-channel");
+    assert_eq!(error.code(), "nx-ir-boundary-constraint");
 }
 
 #[test]
-fn color_schema_exports_numerical_fields_and_alpha_default() {
+fn color_schema_exports_each_space_with_ranges_and_alpha_default() {
     let artifact =
         build_program_artifact_from_source(SOURCE, "main.nx", &ProgramBuildContext::empty())
             .unwrap();
@@ -395,20 +401,34 @@ fn color_schema_exports_numerical_fields_and_alpha_default() {
     )
     .unwrap();
     let schema = serde_json::to_value(schema.input_schema.unwrap()).unwrap();
-    let color = schema["$defs"]
-        .as_object()
+    let spaces: Vec<_> = schema["$defs"]["Color"]["anyOf"]
+        .as_array()
         .unwrap()
-        .values()
-        .find(|definition| definition["properties"]["r"]["type"] == "number")
-        .expect("Color definition");
-    for channel in ["r", "g", "b", "a"] {
+        .iter()
+        .map(|case| case["$ref"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        spaces,
+        [
+            "#/$defs/Color.srgb",
+            "#/$defs/Color.displayP3",
+            "#/$defs/Color.oklab",
+            "#/$defs/Color.oklch"
+        ]
+    );
+    let color = &schema["$defs"]["Color.srgb"];
+    assert_eq!(color["properties"]["$type"]["const"], "Color.srgb");
+    for channel in ["r", "g", "b", "alpha"] {
         assert_eq!(color["properties"][channel]["type"], "number");
+        assert_eq!(color["properties"][channel]["minimum"], 0.0);
+        assert_eq!(color["properties"][channel]["maximum"], 1.0);
     }
-    assert_eq!(color["properties"]["a"]["default"], 1.0);
+    assert_eq!(color["properties"]["alpha"]["default"], 1.0);
     assert!(!color["required"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|name| name == "a"));
-    assert!(color["properties"]["r"].get("minimum").is_none());
+        .any(|name| name == "alpha"));
+    let oklab = &schema["$defs"]["Color.oklab"];
+    assert!(oklab["properties"]["a"].get("minimum").is_none());
 }

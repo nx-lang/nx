@@ -1,18 +1,18 @@
 <Drawing
   background=<Paint.color
-    color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+    color=<Color.srgb alpha=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
   />
   children={<Rectangle
     clipRule=nonzero
     fill=<Paint.linearGradient
       stops={<GradientStop
-        color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+        color=<Color.srgb alpha=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
         offset=0.0
       /> <GradientStop
-        color=<Color a=1.0 b=0.92941177 g=0.22745098 r=0.4862745 />
+        color=<Color.srgb alpha=1.0 b=0.92941177 g=0.22745098 r=0.4862745 />
         offset=0.55
       /> <GradientStop
-        color=<Color a=1.0 b=0.52156866 g=0.44313726 r=0.9843137 />
+        color=<Color.srgb alpha=1.0 b=0.52156866 g=0.44313726 r=0.9843137 />
         offset=1.0
       />}
       x1=0.0
@@ -36,10 +36,10 @@
       cy=45.0
       radius=35.0
       stops={<GradientStop
-        color=<Color a=1.0 b=0.92941177 g=0.96862745 r=1.0 />
+        color=<Color.srgb alpha=1.0 b=0.92941177 g=0.96862745 r=1.0 />
         offset=0.0
       /> <GradientStop
-        color=<Color a=0.0 b=0.45490196 g=0.7294118 r=0.99215686 />
+        color=<Color.srgb alpha=0.0 b=0.45490196 g=0.7294118 r=0.99215686 />
         offset=1.0
       />}
     />
@@ -50,13 +50,13 @@
     clipRule=nonzero
     fill=<Paint.linearGradient
       stops={<GradientStop
-        color=<Color a=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
+        color=<Color.srgb alpha=1.0 b=0.16470589 g=0.09019608 r=0.05882353 />
         offset=0.0
       /> <GradientStop
-        color=<Color a=1.0 b=0.92941177 g=0.22745098 r=0.4862745 />
+        color=<Color.srgb alpha=1.0 b=0.92941177 g=0.22745098 r=0.4862745 />
         offset=0.55
       /> <GradientStop
-        color=<Color a=1.0 b=0.52156866 g=0.44313726 r=0.9843137 />
+        color=<Color.srgb alpha=1.0 b=0.52156866 g=0.44313726 r=0.9843137 />
         offset=1.0
       />}
       x1=0.0
@@ -73,14 +73,14 @@
       lineJoin=miter
       miterLimit=4.0
       paint=<Paint.color
-        color=<Color a=1.0 b=1.0 g=1.0 r=1.0 />
+        color=<Color.srgb alpha=1.0 b=1.0 g=1.0 r=1.0 />
       />
       width=2.0
     />
   /> <Text
     clipRule=nonzero
     fill=<Paint.color
-      color=<Color a=1.0 b=1.0 g=1.0 r=1.0 />
+      color=<Color.srgb alpha=1.0 b=1.0 g=1.0 r=1.0 />
     />
     fontFamily="Fixture"
     fontSize=18.0
@@ -96,10 +96,10 @@
     data="M20 225 L70 200 L120 210 L170 170 L220 185 L300 160 L300 240 L20 240 Z"
     fill=<Paint.linearGradient
       stops={<GradientStop
-        color=<Color a=0.7529412 b=0.972549 g=0.7411765 r=0.21960784 />
+        color=<Color.srgb alpha=0.7529412 b=0.972549 g=0.7411765 r=0.21960784 />
         offset=0.0
       /> <GradientStop
-        color=<Color a=0.0 b=0.972549 g=0.7411765 r=0.21960784 />
+        color=<Color.srgb alpha=0.0 b=0.972549 g=0.7411765 r=0.21960784 />
         offset=1.0
       />}
       x1=0.0
@@ -121,7 +121,7 @@
       lineJoin=miter
       miterLimit=4.0
       paint=<Paint.color
-        color=<Color a=1.0 b=0.972549 g=0.7411765 r=0.21960784 />
+        color=<Color.srgb alpha=1.0 b=0.972549 g=0.7411765 r=0.21960784 />
       />
       width=2.0
     />

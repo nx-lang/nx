@@ -67,9 +67,15 @@ pub struct NxValueNode {
     /// The RFC 6901 JSON pointer of the node's value within the value's canonical JSON form: the
     /// empty string for the whole value. A property's is its value's.
     pub pointer: String,
-    /// CSS presentation of a validated canonical Color value.
+    /// CSS presentation of a validated canonical Color value, in the color's own space.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Whether `color` is outside sRGB, so an sRGB screen shows it differently.
+    #[serde(
+        rename = "colorOutsideSrgb",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub color_outside_srgb: bool,
 }
 
 /// The kinds of thing an [`NxValueNode`] can be.
@@ -141,6 +147,7 @@ pub(crate) fn annotate_nx_text(
 /// A node as the writer records it: byte offsets, and a key to look its declaration up by.
 struct RawNode {
     color: Option<String>,
+    color_outside_srgb: bool,
     start: usize,
     end: usize,
     parent: Option<usize>,
@@ -190,6 +197,7 @@ impl Writer {
         let index = self.nodes.len();
         self.nodes.push(RawNode {
             color: None,
+            color_outside_srgb: false,
             start: self.output.len(),
             end: self.output.len(),
             parent: self.open.last().copied(),
@@ -332,31 +340,10 @@ impl Writer {
             None,
             DeclarationKey::Record(tag_name.clone()),
         );
-        if tag_name.as_str() == "Color" {
-            let channels: Option<Vec<f64>> = ["r", "g", "b", "a"]
-                .iter()
-                .map(|name| match fields.get(*name)? {
-                    Value::Float32(value) => Some(*value as f64),
-                    Value::Float(value) => Some(*value),
-                    Value::Int(value) => Some(*value as f64),
-                    _ => None,
-                })
-                .collect();
-            if let Some(channels) = channels {
-                if channels
-                    .iter()
-                    .all(|x| x.is_finite() && (0.0..=1.0).contains(x) && (*x as f32) as f64 == *x)
-                {
-                    if let Some(index) = self.open.last().copied() {
-                        self.nodes[index].color = Some(format!(
-                            "rgba({}, {}, {}, {})",
-                            channels[0] * 255.0,
-                            channels[1] * 255.0,
-                            channels[2] * 255.0,
-                            channels[3]
-                        ));
-                    }
-                }
+        if let Some(color) = color_value(tag_name, fields) {
+            if let Some(index) = self.open.last().copied() {
+                self.nodes[index].color = Some(nx_value::color::css(color));
+                self.nodes[index].color_outside_srgb = nx_value::color::outside_srgb(color);
             }
         }
         write!(self.output, "<{}", tag_name).unwrap();
@@ -584,7 +571,6 @@ fn sequence_type(elements: &[Value]) -> String {
 /// declared the way a record's fields are.
 #[derive(Clone, Copy)]
 struct Shape<'a> {
-    canonical_color: bool,
     span: TextRange,
     fields: &'a [RecordField],
     base: Option<&'a Name>,
@@ -602,6 +588,8 @@ struct Declarations<'a> {
     aliases: FxHashMap<&'a str, &'a TypeRef>,
     /// Each union, and whether the entry module declares it.
     unions: FxHashMap<&'a str, (&'a UnionDef, bool)>,
+    /// Whether the `Color` this value's names reach is `@nx/color`'s, so its cases get swatches.
+    canonical_color: bool,
     functions: FxHashMap<&'a str, TextRange>,
     source: &'a str,
     lines: LineIndex,
@@ -616,6 +604,7 @@ impl<'a> Declarations<'a> {
             states: FxHashMap::default(),
             aliases: FxHashMap::default(),
             unions: FxHashMap::default(),
+            canonical_color: false,
             functions: FxHashMap::default(),
             source,
             lines: LineIndex::new(source),
@@ -632,15 +621,6 @@ impl<'a> Declarations<'a> {
             match item {
                 Item::Record(record) => {
                     self.shapes.entry(record.name.as_str()).or_insert(Shape {
-                        canonical_color: record.name.as_str() == "Color"
-                            && crate::standard_library("@nx/color").is_some_and(|library| {
-                                library.modules.iter().any(|artifact| {
-                                    artifact.file_name == "@nx/color/color.nx"
-                                        && artifact.lowered_module.as_ref().is_some_and(|lowered| {
-                                            lowered.source_id == module.source_id
-                                        })
-                                })
-                            }),
                         span: record.span,
                         fields: &record.properties,
                         base: record.base.as_ref(),
@@ -655,7 +635,6 @@ impl<'a> Declarations<'a> {
                             .insert(component.name.as_str(), component.state.as_slice());
                     }
                     self.shapes.entry(component.name.as_str()).or_insert(Shape {
-                        canonical_color: false,
                         span: component.span,
                         fields: &component.props,
                         base: component.base.as_ref(),
@@ -663,9 +642,14 @@ impl<'a> Declarations<'a> {
                     });
                 }
                 Item::Union(union) => {
-                    self.unions
-                        .entry(union.name.as_str())
-                        .or_insert((union, local));
+                    if let std::collections::hash_map::Entry::Vacant(entry) =
+                        self.unions.entry(union.name.as_str())
+                    {
+                        entry.insert((union, local));
+                        if union.name.as_str() == "Color" {
+                            self.canonical_color = is_canonical_color_module(module);
+                        }
+                    }
                 }
                 Item::TypeAlias(alias) => {
                     self.aliases.entry(alias.name.as_str()).or_insert(&alias.ty);
@@ -697,13 +681,19 @@ impl<'a> Declarations<'a> {
             declaration: None,
             pointer: node.pointer,
             color: node.color,
+            color_outside_srgb: node.color_outside_srgb,
         };
 
         match node.key {
             DeclarationKey::None => {}
             DeclarationKey::Record(name) => {
-                if !self.shape(&name).is_some_and(|shape| shape.canonical_color) {
+                let canonical = match name.as_str().split_once('.') {
+                    Some(("Color", _)) => self.canonical_color,
+                    _ => false,
+                };
+                if !canonical {
                     annotated.color = None;
+                    annotated.color_outside_srgb = false;
                 }
                 annotated.declaration = self
                     .shape(&name)
@@ -1253,6 +1243,50 @@ fn escape_string(s: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t")
+}
+
+/// The color a `Color.<space>` record holds, when every channel is a valid float32 for its space.
+/// Whether the record's `Color` is `@nx/color`'s is checked against the declarations afterwards.
+fn color_value(
+    tag_name: &Name,
+    fields: &FxHashMap<SmolStr, Value>,
+) -> Option<nx_value::color::Color> {
+    let ("Color", case) = tag_name.as_str().split_once('.')? else {
+        return None;
+    };
+    let space = nx_value::color::Space::from_case(case)?;
+    let mut c = [0.0, 0.0, 0.0, 1.0];
+    for (i, key) in space.keys().iter().enumerate() {
+        let x = match fields.get(*key) {
+            Some(Value::Float32(value)) => *value as f64,
+            Some(Value::Float(value)) => *value,
+            Some(Value::Int(value)) => *value as f64,
+            None if *key == "alpha" => 1.0,
+            _ => return None,
+        };
+        if (x as f32) as f64 != x {
+            return None;
+        }
+        c[i] = x;
+    }
+    if fields.len() > 4 {
+        return None;
+    }
+    let value = nx_value::color::make_in(space, c).ok()?;
+    nx_value::color::read(&value).ok()
+}
+
+/// Whether `module` is `@nx/color`'s own `color.nx`.
+fn is_canonical_color_module(module: &LoweredModule) -> bool {
+    crate::standard_library("@nx/color").is_some_and(|library| {
+        library.modules.iter().any(|artifact| {
+            artifact.file_name == "@nx/color/color.nx"
+                && artifact
+                    .lowered_module
+                    .as_ref()
+                    .is_some_and(|lowered| lowered.source_id == module.source_id)
+        })
+    })
 }
 
 #[cfg(test)]
@@ -2385,15 +2419,31 @@ mod tests {
             .as_ref()
             .unwrap();
         let value = Value::Record {
-            type_name: Name::new("Color"),
-            fields: [("r", 0.125_f32), ("g", 0.5), ("b", 1.0), ("a", 0.5)]
+            type_name: Name::new("Color.srgb"),
+            fields: [("r", 0.125_f32), ("g", 0.5), ("b", 1.0), ("alpha", 0.5)]
                 .into_iter()
                 .map(|(name, value)| (SmolStr::new(name), Value::Float32(value)))
                 .collect(),
         };
         let rendered = annotate_nx_text(&value, &entry, &[color], "").unwrap();
-        assert!(rendered.nodes[0].color.is_some());
-        let source = "type Color = { r:float32 g:float32 b:float32 a:float32 }";
+        assert_eq!(
+            rendered.nodes[0].color.as_deref(),
+            Some("rgb(31.875 127.5 255 / 0.5)")
+        );
+        let wide = Value::Record {
+            type_name: Name::new("Color.oklch"),
+            fields: [("l", 0.7_f32), ("c", 0.3), ("h", 145.0)]
+                .into_iter()
+                .map(|(name, value)| (SmolStr::new(name), Value::Float32(value)))
+                .collect(),
+        };
+        let rendered = annotate_nx_text(&wide, &entry, &[color], "").unwrap();
+        assert!(rendered.nodes[0]
+            .color
+            .as_deref()
+            .is_some_and(|css| css.starts_with("oklch(")));
+        assert!(rendered.nodes[0].color_outside_srgb);
+        let source = "type Color = | srgb { r:float32 g:float32 b:float32 alpha:float32 }";
         let decoy = nx_types::analyze_str(source, "decoy.nx")
             .lowered_module
             .unwrap();

@@ -1254,12 +1254,12 @@ mod tests {
         }
     }
     fn drawing(data: &str) -> Value {
-        json!({"viewBox":{"width":100,"height":100},"children":[{"data":data,"fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}]})
+        json!({"viewBox":{"width":100,"height":100},"children":[{"data":data,"fill":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 1.0, "g": 0.0, "b": 0.0, "alpha": 1.0}}}]})
     }
     fn gradient() -> Value {
         json!({"$type":"Paint.linearGradient","x1":0,"y1":0,"x2":100,"y2":0,"stops":[
-            {"offset":0,"color":{"r":1,"g":0,"b":0,"a":1}},
-            {"offset":1,"color":{"r":0,"g":0,"b":1,"a":0}}
+            {"offset":0,"color":{"$type":"Color.srgb","r":1,"g":0,"b":0,"alpha":1}},
+            {"offset":1,"color":{"$type":"Color.srgb","r":0,"g":0,"b":1,"alpha":0}}
         ]})
     }
     #[test]
@@ -1279,7 +1279,7 @@ mod tests {
             .message
             .contains("gradient_stops"));
         value["children"].as_array_mut().unwrap().pop();
-        value["children"][0]["fill"]["stops"][0]["color"]["a"] = json!(0);
+        value["children"][0]["fill"]["stops"][0]["color"]["alpha"] = json!(0);
         let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
         assert!(scene.root.children[0].painted.rect.is_none());
         assert!(scene.root.children[0].fill.is_some());
@@ -1295,10 +1295,10 @@ mod tests {
             ("/stops/0/offset", json!(-0.1)),
             ("/stops/1/offset", json!(1.1)),
             ("/stops/0/color/r", json!(2.0)),
-            ("/stops/1/color/a", json!(-1.0)),
+            ("/stops/1/color/alpha", json!(-1.0)),
             (
                 "/stops",
-                json!([{ "offset":0,"color":{"r":1,"g":0,"b":0} }]),
+                json!([{ "offset":0,"color":{"$type":"Color.srgb","r":1,"g":0,"b":0} }]),
             ),
         ] {
             let mut value = drawing("M0 0H10V10Z");
@@ -1336,8 +1336,8 @@ mod tests {
             (
                 "stops",
                 json!([
-                    {"offset":0.8,"color":{"r":1,"g":0,"b":0}},
-                    {"offset":0.2,"color":{"r":0,"g":0,"b":1}}
+                    {"offset":0.8,"color":{"$type":"Color.srgb","r":1,"g":0,"b":0}},
+                    {"offset":0.2,"color":{"$type":"Color.srgb","r":0,"g":0,"b":1}}
                 ]),
             ),
         ] {
@@ -1366,7 +1366,7 @@ mod tests {
         value["children"].as_array_mut().unwrap().push(valid);
         for invalid in [
             json!("red"),
-            json!({"r": 2.0, "g": 0.0, "b": 0.0, "a": 1.0}),
+            json!({"$type": "Color.srgb", "r": 2.0, "g": 0.0, "b": 0.0, "alpha": 1.0}),
         ] {
             value["children"][1]["fill"]["color"] = invalid;
             let failure =
@@ -1376,9 +1376,23 @@ mod tests {
         }
     }
     #[test]
+    fn wide_colors_are_mapped_into_srgb_at_preparation() {
+        let mut value = drawing("M0 0H10V10Z");
+        value["children"][0]["fill"]["color"] =
+            json!({"$type":"Color.displayP3","r":1.0,"g":0.0,"b":0.0,"alpha":0.5});
+        let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
+        let Some(Paint::Color { color }) = scene.root.children[0].fill else {
+            panic!("a color paint");
+        };
+        assert!(color.iter().all(|channel| (0.0..=1.0).contains(channel)));
+        assert!(color[0] > 0.99 && color[1] < 0.2 && color[2] < 0.2);
+        assert_eq!(color[3], 0.5);
+    }
+    #[test]
     fn raw_color_records_use_the_default_alpha() {
         let mut value = drawing("M0 0H10V10Z");
-        value["children"][0]["fill"]["color"] = json!({"r":1.0,"g":0.0,"b":0.0});
+        value["children"][0]["fill"]["color"] =
+            json!({"$type":"Color.srgb","r":1.0,"g":0.0,"b":0.0});
         let scene = prepare(&value, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
         assert_eq!(
             scene.root.children[0].fill,
@@ -1537,7 +1551,7 @@ mod tests {
     #[test]
     fn limits_numbers_strokes_and_clips() {
         let mut v = drawing("M10 10L20 20");
-        v["children"][0]["stroke"] = json!({"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0}},"width":4,"dashArray":[1,2,3]});
+        v["children"][0]["stroke"] = json!({"paint":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 0.0, "g": 0.0, "b": 1.0, "alpha": 1.0}},"width":4,"dashArray":[1,2,3]});
         v["children"][0]["clipPath"] = json!("M0 0H5V5H0Z");
         let scene = prepare(&v, &Resolver { spoof: false }, &mut NoText, config()).unwrap();
         let child = &scene.root.children[0];
@@ -1657,7 +1671,7 @@ mod boundary_tests {
     }
     #[test]
     fn preflight_boundaries_and_zero_strokes() {
-        let v = json!({"viewBox":{"width":100,"height":100},"children":[{"width":10,"height":10,"fill":"none","stroke":{"paint":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":0}}]});
+        let v = json!({"viewBox":{"width":100,"height":100},"children":[{"width":10,"height":10,"fill":"none","stroke":{"paint":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 1.0, "g": 0.0, "b": 0.0, "alpha": 1.0}},"width":0}}]});
         let c = Config {
             graphics_version: "v".into(),
             ..Config::default()
@@ -2086,7 +2100,7 @@ mod layer_budget_tests {
         }
     }
     fn path() -> Value {
-        serde_json::json!({"data":"M0 0H5V5Z","opacity":0.5,"fill":{"$type":"Paint.color","color":{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}})
+        serde_json::json!({"data":"M0 0H5V5Z","opacity":0.5,"fill":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 1.0, "g": 0.0, "b": 0.0, "alpha": 1.0}}})
     }
     struct NoText;
     impl TextService for NoText {
@@ -2208,9 +2222,9 @@ mod full_review_tests {
     #[test]
     fn closed_moveto_caps_have_bounds_and_zero_radii_do_not_paint() {
         let s = scene(json!([
-            {"$type":"Path","data":"M30 50Z","fill":"none","stroke":{"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":10,"lineCap":"round"}},
-            {"$type":"Circle","cx":50,"cy":50,"r":0,"stroke":{"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}},
-            {"$type":"Ellipse","cx":50,"cy":50,"rx":0,"ry":30,"stroke":{"paint":{"$type":"Paint.color","color":{"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},"width":8}}
+            {"$type":"Path","data":"M30 50Z","fill":"none","stroke":{"paint":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 0.0, "g": 0.0, "b": 0.0, "alpha": 1.0}},"width":10,"lineCap":"round"}},
+            {"$type":"Circle","cx":50,"cy":50,"r":0,"stroke":{"paint":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 0.0, "g": 0.0, "b": 0.0, "alpha": 1.0}},"width":8}},
+            {"$type":"Ellipse","cx":50,"cy":50,"rx":0,"ry":30,"stroke":{"paint":{"$type":"Paint.color","color":{"$type": "Color.srgb", "r": 0.0, "g": 0.0, "b": 0.0, "alpha": 1.0}},"width":8}}
         ]));
         assert!(s.root.children[0]
             .painted

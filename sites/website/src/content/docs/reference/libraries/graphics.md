@@ -27,7 +27,7 @@ relative forms. Open paths close for filling and remain open for strokes.
 
 Transforms concatenate in SVG order: translate(10,0), then scale(2,2) maps local (1,0) to (12,0).
 Closed shapes and Text default to black; Line and Polyline default to no fill. This Polyline default
-differs from SVG. Colors use the shared float32 sRGB [`@nx/color`](/reference/libraries/color) record; write hex literals such as `color=#2563eb`. Rectangle's omitted ry uses rx; corner radii clamp
+differs from SVG. Colors are the shared [`@nx/color`](/reference/libraries/color) `Color`, in any of its spaces; write hex literals such as `color=#2563eb`. Preparation maps each paint color and gradient stop into sRGB, so a Display P3 or Oklch color draws as an sRGB screen shows it. Rectangle's omitted ry uses rx; corner radii clamp
 to half the corresponding dimension. Clip paths are path-data strings in the node's local space.
 
 Text is a shaped single-line run at an alphabetic baseline, with an explicit supplied font family,

@@ -17,7 +17,11 @@ for (const [index, entry] of corpus.cases.entries()) {
     continue;
   }
   let actual = call(entry.op, args);
-  if (Array.isArray(entry.expected)) actual = [actual.r, actual.g, actual.b, actual.a];
+  if (Array.isArray(entry.expected)) {
+    const space = entry.space ?? "srgb";
+    assert.equal(actual.$type, `Color.${space}`, context);
+    actual = { srgb: ["r", "g", "b", "alpha"], displayP3: ["r", "g", "b", "alpha"], oklab: ["l", "a", "b", "alpha"], oklch: ["l", "c", "h", "alpha"] }[space].map(key => actual[key]);
+  }
   if (entry.exact) assert.deepEqual(actual, entry.expected.map(Math.fround), context);
   else compare(actual, entry.expected, context);
 }

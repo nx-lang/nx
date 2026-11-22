@@ -47,7 +47,7 @@ export const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
 export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
 
 const knownFeatures = new Set([
-  "standard-color-v1",
+  "standard-color-v2",
   NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
   NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
   NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
@@ -1768,7 +1768,7 @@ class TableReader {
     if (table === "nodes") {
       this.#validateOccurrenceFeature(entry, kind, what);
       if (kind === nodeKinds.standardColor) {
-        if (!this.#image.requiredFeatures.includes("standard-color-v1")) this.#fail(`${what} requires standard-color-v1.`);
+        if (!this.#image.requiredFeatures.includes("standard-color-v2")) this.#fail(`${what} requires standard-color-v2.`);
         if (entry[2] !== nxStandardColorArities[entry[1]!]) this.#fail(`${what} has wrong color arity.`);
       }
       if (kind === nodeKinds.standardMath) {

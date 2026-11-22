@@ -138,7 +138,8 @@ darkOliveGreen, and rebeccaPurple; CSS text parsing SHALL remain ASCII case-inse
 constants SHALL use hex literals in a compact group with one shared comment. Fully transparent
 colors SHALL retain hidden channels except operations explicitly producing zero channels at zero
 alpha. Conversion matrices and transfer functions SHALL follow the pinned CSS Color 4 reference,
-converting between spaces through linear-light XYZ D65 without clamping intermediates; HSV SHALL use
+converting between spaces through linear light without clamping intermediates (the RGB matrices
+derived from the reference's XYZ D65 matrices); HSV SHALL use
 conventional six-sector conversion. Non-finite inputs or intermediates SHALL fail with
 color-invalid-channel. Equivalent input decoding SHALL yield identical float32 channels on Rust and
 TypeScript; nonlinear transformations SHALL agree within absolute channel error 2e-6 and SHALL not
@@ -219,7 +220,8 @@ The result space of mix and composite SHALL be the wider of the inputs' spaces, 
 the first input's space. A result in `srgb` or `displayP3` SHALL be mapped into that gamut as
 `toGamut` does.
 
-Endpoints SHALL preserve the respective input. Interior zero-alpha results SHALL use zero
+At weight 0 or 1, mix SHALL return the respective input unchanged, in its own space. Interior
+zero-alpha results SHALL use zero
 channels. composite(foreground,background) SHALL implement source-over in linear light, using
 premultiplied intermediate channels and zero channels when output alpha is zero. Invalid weights
 SHALL fail. Neither function SHALL mutate inputs.
