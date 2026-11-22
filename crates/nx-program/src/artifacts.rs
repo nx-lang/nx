@@ -2226,6 +2226,7 @@ fn analyze_logical_module_graph(
         &libraries,
     ));
     add_duplicate_visualizer_diagnostics(&mut modules, &libraries, build_context);
+    add_provide_outside_main_module_diagnostics(&mut modules);
 
     LogicalProgramAnalysis {
         modules,
@@ -2297,6 +2298,57 @@ fn add_duplicate_visualizer_diagnostics(
         .collect::<Vec<_>>();
     for (index, diagnostics) in found {
         modules[index].diagnostics.extend(diagnostics);
+    }
+}
+
+/// Reports each top-level provide of a workspace module that another workspace module imports.
+///
+/// <para>Only the main module's top-level provides take effect, so a provide in a module another
+/// imports would apply or not depending on which module is the entry. A module nothing imports,
+/// such as a library's `app.nx` for previews, may hold them.</para>
+fn add_provide_outside_main_module_diagnostics(modules: &mut [ModuleArtifact]) {
+    let has_provides = |module: &ModuleArtifact| {
+        module
+            .lowered_module
+            .as_deref()
+            .is_some_and(|lowered| !lowered.provides().is_empty())
+    };
+    if !modules.iter().any(has_provides) {
+        return;
+    }
+    let workspace = modules
+        .iter()
+        .map(|module| module.file_name.clone())
+        .collect::<FxHashSet<_>>();
+    let imported = modules
+        .iter()
+        .flat_map(|module| {
+            module.imports.iter().filter_map(|import| {
+                workspace_import_target_identity(&module.file_name, &import.library_path).ok()
+            })
+        })
+        .filter(|target| workspace.contains(target))
+        .collect::<FxHashSet<_>>();
+    for module in modules.iter_mut() {
+        if !imported.contains(&module.file_name) {
+            continue;
+        }
+        let Some(lowered) = module.lowered_module.clone() else {
+            continue;
+        };
+        for provide in lowered.provides() {
+            module.diagnostics.push(
+                Diagnostic::error("provide-outside-main-module")
+                    .with_message(
+                        "A top-level provide applies only in the program's main module, and another module imports this one",
+                    )
+                    .with_label(Label::primary(&module.file_name, provide.span()))
+                    .with_help(
+                        "App-wide provides belong in the main module; use a `provide` block around the content it should apply to here.",
+                    )
+                    .build(),
+            );
+        }
     }
 }
 

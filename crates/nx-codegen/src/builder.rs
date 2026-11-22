@@ -83,6 +83,9 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         .collect::<Vec<_>>();
     component_entrypoints.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
+    diagnostics.extend(crate::environment_cycles::environment_cycle_diagnostics(
+        &modules,
+    ));
     if !diagnostics.is_empty() {
         return Err(CodegenError::new(diagnostics));
     }

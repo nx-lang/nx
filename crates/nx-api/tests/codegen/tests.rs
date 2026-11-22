@@ -3693,3 +3693,84 @@ fn a_program_module_takes_the_entry_modules_provides() {
     );
     assert_eq!(output, r#"["8,2","8,3"]"#);
 }
+
+fn codegen_error_codes(artifact: &ProgramArtifact) -> Vec<String> {
+    match build_codegen_program(artifact) {
+        Ok(_) => Vec::new(),
+        Err(error) => error
+            .diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code().map(str::to_string))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_default_that_reads_itself_is_an_environment_cycle() {
+    let artifact = artifact_from_source(
+        "environment a: int = { env.b + 1 }
+environment b: int = { env.a + 1 }
+environment c: int = { twice() }
+let twice(): int = { env.c * 2 }
+environment d: int = 4
+provide env.d = { env.d + 1 }
+let root() = { env.d }",
+    );
+    let error = build_codegen_program(&artifact).expect_err("cycles are refused");
+    let messages = error
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.code().unwrap_or_default().to_string(),
+                diagnostic.message().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages.iter().all(|(code, _)| code == "environment-cycle"));
+    assert!(messages[0].1.contains("'a'") && messages[0].1.contains("'b'"));
+    assert!(messages[2].1.contains("'twice'"));
+    // A provide that reads the value it sets sees the sources after it, and is no cycle.
+    let artifact = artifact_from_source(
+        "environment d: int = 4\nprovide env.d = { env.d + 1 }\nlet root() = { env.d }",
+    );
+    assert_eq!(codegen_error_codes(&artifact), Vec::<String>::new());
+}
+
+#[test]
+fn a_provide_in_an_imported_module_is_refused() {
+    let modules = [
+        (
+            "theme.nx",
+            "export environment space: int = 4\nprovide env.space = 8",
+        ),
+        (
+            "app.nx",
+            "import \"./theme.nx\"\nlet root() = { env.space }",
+        ),
+    ]
+    .iter()
+    .map(|(identity, source)| NxWorkspaceModule::from_source(*identity, *source).expect("module"))
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    let diagnostics =
+        build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+            .expect_err("the provide is refused");
+    let refused = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code.as_deref() == Some("provide-outside-main-module"))
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(refused.labels[0].file, "theme.nx");
+    // The module nothing imports may hold them.
+    let modules = [(
+        "theme.nx",
+        "export environment space: int = 4\nprovide env.space = 8\nlet root() = { env.space }",
+    )]
+    .iter()
+    .map(|(identity, source)| NxWorkspaceModule::from_source(*identity, *source).expect("module"))
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    build_workspace_program_artifact(&workspace, "theme.nx", &ProgramBuildContext::empty())
+        .expect("a main module's provide is allowed");
+}
