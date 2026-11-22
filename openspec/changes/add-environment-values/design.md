@@ -32,8 +32,8 @@ change specifies and builds it. What the code has today:
   including content that a caller builds and another component places.
 - Overrides cascade through defaults: `env.colorMode=dark` changes `env.color` inside, because
   `color`'s default is evaluated where it is read.
-- The three runtimes give the same results and operation counts, and so does generated
-  JavaScript.
+- The Rust IR runtime and the TypeScript IR runtime give the same results and operation counts,
+  and generated JavaScript gives the same results.
 - A change to a root value renders again only the nodes that read something that changed, found
   through an index without a walk of the tree.
 
