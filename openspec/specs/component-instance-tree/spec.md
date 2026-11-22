@@ -80,11 +80,15 @@ node under it, with `nx-ir-instance-key`.
   visit of the pass reached SHALL be dropped when the pass ends
 
 ### Requirement: Props flow down and state stays with the node
-A node visited with a descriptor equal to the one it was last initialized from SHALL NOT be
-initialized again: it SHALL keep its instance's state, and its rendered output and tokens SHALL be
-unchanged. A node visited with any other descriptor of its component SHALL be initialized again
-from that descriptor's fields with the state the node holds, so that the output reflects the new
-props and the kept state, and its tokens SHALL be those of the new render.
+A node SHALL NOT be initialized again when it is visited with a descriptor equal to the one it
+was last initialized from, leaving out the overrides both carry in `$env`, and its environment at
+its new place gives every environment value its last render read the value it read then: it SHALL
+keep its instance's state, and its rendered output and tokens SHALL be unchanged. When only the overrides
+differ, the node SHALL take the new descriptor and the new environment, so that a later change is
+judged against them. A node visited with any other descriptor of its component, or whose new
+environment gives a value it read another value, SHALL be initialized again from that descriptor's
+fields, in its new environment, with the state the node holds, so that the output reflects the new
+props, the environment and the kept state, and its tokens SHALL be those of the new render.
 
 Two descriptors are equal when they hold the same values at the same places, with handlers
 compared as follows:
@@ -142,6 +146,18 @@ emitted action reached, SHALL NOT render again because of it.
   `Stack` node with `Page`'s new descriptor
 - **THEN** the `Stack` node SHALL be initialized again with the state it held, because the handler
   in its content captures another value of `taps`
+
+#### Scenario: A new override of a value the child didn't read keeps the child
+- **WHEN** a parent renders `<Card title="x" />` and then, after a change to its state,
+  `<Card title="x" env.locale="fr-FR" />`, and `Card`'s body reads no environment value
+- **THEN** a pass that visits the `Card` node with the new descriptor SHALL keep it and its rendered
+  output
+
+#### Scenario: A new override of a value the child read renders it again
+- **WHEN** a parent renders `<Card title="x" />` and then `<Card title="x" env.colorMode=dark />`,
+  and `Card`'s body reads `env.colorMode`, whose value outside was `light`
+- **THEN** the visit SHALL initialize the `Card` node again with the state it held, and its output
+  SHALL reflect `dark`
 
 ### Requirement: A pass drops the nodes whose places left the output
 The tree SHALL let a host mark the start and the end of a pass, and an instance SHALL live as long
@@ -447,4 +463,57 @@ reports as they were.
   instance's own handler through the inner node
 - **THEN** the inner node's state SHALL be patched
 - **AND** the outer node's state SHALL be unchanged
+
+### Requirement: Each node renders in the environment of its place
+The tree SHALL give each node the environment of its place: the environment of the node it was
+visited under, entered with the node's descriptor, or, for a node under no node, the tree's root
+values entered with the descriptor. The tree SHALL hold root values that a host sets when it creates
+the tree and changes with `set_environment`, checked as the environment-values capability defines.
+Every initialization, render and dispatch the tree makes for a node SHALL run in the node's
+environment. A host SHALL be able to ask the tree for the value of an environment value at a node.
+
+#### Scenario: A node sees the override its parent placed around it
+- **WHEN** `Page` renders `<div env.colorMode=dark><Card /></div>` and a host visits the `Card`
+  descriptor under the `Page` node
+- **THEN** the `Card` node's body SHALL read `dark` for `env.colorMode`
+- **AND** the tree SHALL answer `dark` for `colorMode` at the `Card` node
+
+#### Scenario: A dispatch renders in the node's environment
+- **WHEN** a `Card` node whose environment has `colorMode` equal to `dark` is dispatched against
+- **THEN** the render after the handlers SHALL read `dark`
+
+### Requirement: A change to a root value reaches only the nodes that read it
+Each node SHALL record the environment values its last render read, including those read while
+evaluating a default or an entry-module provide for another read, together with the value each one
+had. The tree SHALL keep an index from each environment value to the nodes whose last render read
+it, and SHALL keep it current as nodes render, are replaced, removed and dropped. `set_environment`
+SHALL replace the tree's root values and SHALL find the nodes to check through the index alone, from
+the values whose root value changed, without walking the tree. For each of those nodes, the tree
+SHALL look the values the node read up again in its environment, and SHALL render again, with the
+state it holds, each node for which any of them differs. It SHALL leave the others alone. A node
+rendered this way SHALL hold rendered output no pass has walked, as after a dispatch, so that the
+host's next pass walks it and what is under it. `set_environment` SHALL be all or nothing: when a
+root value is refused or a render fails, the tree SHALL be as it was.
+
+#### Scenario: Only readers render again
+- **WHEN** a tree holds `Page`, a `Header` node and a `Body` node under it, only `Header`'s body
+  reads `env.colorMode`, and a host calls `set_environment` with `colorMode` changed from `light` to
+  `dark`
+- **THEN** the `Header` node SHALL render again with the state it held and read `dark`
+- **AND** `Page` and `Body` SHALL hold the rendered output they held, and `Body` SHALL be settled
+
+#### Scenario: A reader under an override that hides the change is left alone
+- **WHEN** a `Card` node reads `env.colorMode` under `<div env.colorMode=light>`, and a host changes
+  the root value of `colorMode` to `dark`
+- **THEN** the `Card` node SHALL NOT render again
+
+#### Scenario: A reader through a default renders again
+- **WHEN** a `Footer` node reads `env.color`, whose default reads `env.colorMode`, and a host
+  changes the root value of `colorMode`
+- **THEN** the `Footer` node SHALL render again and read the colors of the new mode
+
+#### Scenario: A refused root value changes nothing
+- **WHEN** a host calls `set_environment` with a value of the wrong type for one value and a valid
+  change to another
+- **THEN** the call SHALL fail and every node SHALL hold what it held
 

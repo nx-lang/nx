@@ -147,7 +147,7 @@ type-check tests. Findings RF1 and RF2 were reproduced with throwaway tests, sin
 
 ## New Findings Discovered During 2026-11-22 04:20 Verification
 
-### 🟡 Fixed - RF10 Re-reading a cascaded value beneath the body's overrides can fail, so a valid component can no longer be initialized
+### ✅ Verified - RF10 Re-reading a cascaded value beneath the body's overrides can fail, so a valid component can no longer be initialized
 - **Severity:** Medium
 - **Evidence:** To fix RF2, `take_environment_reads` (`crates/nx-ir-runtime/src/environment.rs`) now re-evaluates each read
   recorded without a value, in a fresh machine with none of the body's overrides, and propagates any error with `?` from
@@ -163,6 +163,7 @@ type-check tests. Findings RF1 and RF2 were reproduced with throwaway tests, sin
   the read as "always differs" (for example a sentinel that `environment_reads_hold` treats as changed) instead of
   returning the error, and do the same in `environment_reads_hold` when re-reading fails. Add the repro as a test.
 - **Fix:** Recorded reads are now `Option<Value>`. `take_environment_reads` no longer returns an error: a read that fails beneath the body's overrides is kept as `None`, and `environment_reads_hold` counts `None`, or a read that fails at the node now, as changed, so the node renders again and any real error comes from the render. Test `a_read_that_fails_beneath_the_bodys_override_still_renders` (fails without the fix).
+- **Verification:** Verified in b2017863. `take_environment_reads` is now infallible: a failing `begin_environment` or re-read becomes `None` (`environment.rs` `take_environment_reads`), and both `initialize_component` and dispatch dropped the `?`. `environment_reads_hold` treats `None`, or a re-read that fails now, as changed, so the render runs again and any real error comes from the render itself. Errors in `values_equal` and in the outer `begin_environment` still propagate, but those are the same checks the render makes. The new test reproduces my case (renders `5`, then re-renders on an equal visit) and passes, along with the cascade, host-component and environment tree tests (`codegen_parity`, 6 filtered tests). See RF12 for the remaining always-re-render cost.
 
 ### ✅ Resolved - RF11 A value recorded beneath the overrides goes stale when a value it hides changes, causing one spurious re-render
 - **Severity:** Low
@@ -176,6 +177,20 @@ type-check tests. Findings RF1 and RF2 were reproduced with throwaway tests, sin
   values change. Alternatively, for such reads track only whether a root value or `$env` entry for the key itself exists.
   Add a test: `set_environment` of the hidden value, then an equal visit.
 - **Status:** Deferred. The cost is one extra render, never a wrong one, and a precise fix means tracking which sources of a value sit outside the body's overrides. Recorded in `specs/future.md` under the environment-values section.
+- **Verification:** Deferral accepted. `specs/future.md` (environment section, "A cascaded read can cause one extra render") describes the stale value and the one extra render, and says a precise fix needs source tracking.
+
+## New Findings Discovered During 2026-11-22 04:30 Verification
+
+### ✅ Resolved - RF12 A node whose cascaded read can't be re-read beneath its overrides renders again on every visit, and `specs/future.md` doesn't say so
+- **Severity:** Low
+- **Evidence:** With the RF10 fix, a read recorded as `None` makes `environment_reads_hold` return `false` every time. The
+  node is then re-initialized on every equal visit and by every `set_environment` that changes any value it reads, for as
+  long as its body keeps that pattern. The new test asserts this (`!Arc::ptr_eq` after an equal visit), and its doc
+  comment states it, but the known-limitations list in `specs/future.md` only records RF11's single extra render.
+- **Recommendation:** Add a line to the environment section of `specs/future.md`, next to the RF11 entry. Or, more
+  precisely, record such a read as hidden by the body's own override when that override covers every source the default
+  reads, so the node can still be skipped.
+- **Status:** Deferred with RF11. It costs extra renders, never a wrong one, and only for a body whose cascaded default fails outside its own override. Recorded in `specs/future.md` ("A read that fails beneath a body's overrides is never skipped").
 
 ## Questions
 - For RF1: should an external component be able to carry `$env`, for example for a future "host elements read the

@@ -610,6 +610,7 @@ these bounds and is not what the check looks for.
 - **AND** every case SHALL be within the bounds in an unoptimized build and in an optimized one
 
 ### Requirement: Rust runtime diagnostics name the argument a failure is in
+A Rust runtime diagnostic for a bad argument SHALL name the argument.
 A diagnostic for a failure the Rust runtime finds in a value a host passed as an argument of the
 function it called, by name or by position, SHALL carry the name of the parameter the value was
 passed for, as data beside the message. It SHALL carry that name for the same failures the
@@ -832,6 +833,7 @@ component lifecycle.
 - **AND** SHALL NOT be computed by evaluating the program another way
 
 ### Requirement: Component descriptors are recursively validated at typed sites
+The Rust runtime SHALL validate a component descriptor's props recursively at typed sites.
 When a component-typed value has no discriminator or names the expected component declaration,
 its props SHALL be recursively normalized against that declaration at host and program-internal
 typed sites. Defaults SHALL be filled, unknown props and invalid nested records SHALL be rejected,
@@ -856,3 +858,45 @@ reserved spread entries without the required feature and unsupported features by
 - **WHEN** a selected bag omits a field or explicitly supplies an empty value
 - **THEN** omission SHALL remain distinct from the supplied empty value until normalization
 - **AND** an inactive branch SHALL not evaluate its value expressions
+
+### Requirement: Rust runtime evaluates environment values
+The Rust IR runtime SHALL accept modules that require `environment-v1` and SHALL evaluate
+`envRead` and `envProvide` nodes, entry-module provides and `$env` as the format defines them,
+with the same results and operation counts as the TypeScript runtime. The runtime SHALL export an
+environment type: an immutable value made from root values by `Environment::root`, and extended
+with a component descriptor's `$env` by `enter`. Every evaluation, the component lifecycle
+included, SHALL take an environment through its options, and an evaluation given none SHALL run
+with no root values. Root values SHALL be named and checked as the environment-values capability
+defines, and a malformed `$env` SHALL be refused with `nx-ir-boundary-type`.
+
+#### Scenario: A function reads a root value
+- **WHEN** a host evaluates `let mode() = { env.colorMode }` with the root value `colorMode` equal to
+  `dark`
+- **THEN** the result SHALL be `dark`
+
+#### Scenario: A host composes a child's environment
+- **WHEN** a host initializes `Page`, whose output holds a `Card` descriptor with `$env` overriding
+  `colorMode` to `dark`, and initializes `Card` from that descriptor with the environment `enter`
+  gives for it from `Page`'s environment
+- **THEN** `Card`'s body SHALL read `dark` for `env.colorMode`
+
+#### Scenario: Operation counts match the TypeScript runtime
+- **WHEN** both runtimes evaluate the environment cases of the conformance corpus
+- **THEN** their results and operation counts SHALL be the same
+
+### Requirement: The CLI takes root environment values
+`nxlang run` SHALL accept `--env name=value`, any number of times. `name` SHALL be named as a host
+names a root value, and `value` SHALL be its text as written when the value is declared `string`,
+and otherwise JSON, or a bare word read as a union case's name or a string, checked against the
+value's declared type as any root value is. A malformed or mistyped value, and an unknown or ambiguous name, SHALL be reported
+as a diagnostic before the program runs, and the command SHALL exit with failure.
+
+#### Scenario: A root value from the command line
+- **WHEN** a file declares `environment colorMode: ColorMode = light` and its root element reads it,
+  and the user runs `nxlang run app.nx --env colorMode=dark`
+- **THEN** the output SHALL be the root rendered with `colorMode` equal to `dark`
+
+#### Scenario: A value of the wrong type from the command line
+- **WHEN** the user runs `nxlang run app.nx --env colorMode=dim`
+- **THEN** the command SHALL fail with a diagnostic naming `colorMode` and its type
+

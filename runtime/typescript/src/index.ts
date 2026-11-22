@@ -1682,6 +1682,8 @@ class TableReader {
   readonly localReferences = new Map<number, Set<string>>();
   readonly #image: NxIrImage;
   readonly #diagnostics: NxIrDiagnostic[];
+  /** Whether an entry that uses environment values has been checked against the feature list. */
+  #environmentFeature = false;
   readonly #types = new Map<number, PreparedType>();
 
   constructor(image: NxIrImage, diagnostics: NxIrDiagnostic[]) {
@@ -1703,30 +1705,22 @@ class TableReader {
     }
     if (this.#diagnostics.length === 0) {
       this.#validateIntervalPlacement();
-      this.#validateEnvironmentFeature();
     }
   }
 
   /** A module whose entries use environment values lists `environment-v1`. */
-  #validateEnvironmentFeature(): void {
-    if (this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1)) {
-      return;
-    }
-    const uses = (table: NxIrTable, kinds: readonly number[]): boolean => {
-      for (let index = 0; index < this.#image.entryCount(table); index += 1) {
-        if (kinds.includes(this.#image.entry(table, index)[0]!)) {
-          return true;
-        }
+  #validateEnvironmentFeature(table: NxIrTable, kind: number): void {
+    const environmental =
+      table === "nodes"
+        ? kind === nodeKinds.envRead || kind === nodeKinds.envProvide || kind === nodeKinds.envUpdate
+        : table === "declarations" && (kind === declarationKinds.environment || kind === declarationKinds.provides);
+    if (environmental && !this.#environmentFeature) {
+      this.#environmentFeature = true;
+      if (!this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1)) {
+        this.#fail(
+          `the module uses environment values, which requires the feature '${NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1}' the module does not list.`,
+        );
       }
-      return false;
-    };
-    if (
-      uses("nodes", [nodeKinds.envRead, nodeKinds.envProvide, nodeKinds.envUpdate]) ||
-      uses("declarations", [declarationKinds.environment, declarationKinds.provides])
-    ) {
-      this.#fail(
-        `the module uses environment values, which requires the feature '${NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1}' the module does not list.`,
-      );
     }
   }
 
@@ -1761,6 +1755,7 @@ class TableReader {
       this.#fail(`${what} has ${cursor.cells.length - cursor.position} cell(s) more than its layout.`);
       return;
     }
+    this.#validateEnvironmentFeature(table, kind);
     if (table === "types" && kind === typeKinds.constrained) {
       this.#validateConstrained(entry, what);
     }

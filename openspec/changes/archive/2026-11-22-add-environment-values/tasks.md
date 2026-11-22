@@ -48,5 +48,5 @@
 
 ## 8. Tests and completion
 
-- [ ] 8.1 Add source-level tests for every scenario of the environment-values spec, through both runtimes and generated JavaScript, and instance-tree tests for the new and modified tree scenarios.
-- [ ] 8.2 Run the Rust, TypeScript and codegen test suites, `cargo fmt` and `cargo clippy`, then the review loop, then validate strictly, sync and archive.
+- [x] 8.1 Add source-level tests for every scenario of the environment-values spec, through both runtimes and generated JavaScript, and instance-tree tests for the new and modified tree scenarios.
+- [x] 8.2 Run the Rust, TypeScript and codegen test suites, `cargo fmt` and `cargo clippy`, then the review loop, then validate strictly, sync and archive.

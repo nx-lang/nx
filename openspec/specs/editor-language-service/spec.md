@@ -4,7 +4,6 @@
 Define the Rust editor language-service API for NX documents, including workspace snapshots,
 diagnostics, document symbols, hover, completions, and stale-result rejection independent of LSP
 protocol types.
-
 ## Requirements
 ### Requirement: Language service owns logical editor workspace snapshots
 The system SHALL expose a Rust editor language-service API that accepts NX documents as logical
@@ -420,6 +419,7 @@ remain UTF-8 byte offsets into the document text.
   requirement
 
 ### Requirement: Language service offers and describes handler properties
+The language service SHALL treat a handler property as a declared property.
 This requirement refines "Language service exposes conservative completions" and "Language service
 exposes hover information" for one kind of property rather than stating a second rule for them: a
 component accepts an `on<Emit>` property for each action it emits, its own and those it inherits,
@@ -448,6 +448,7 @@ name the action the handler handles, which is what a declared property's type wo
 - **AND** it SHALL name `Toggle.Toggled` as the action the handler handles
 
 ### Requirement: Hover shows a declaration's documentation
+A hover SHALL show a documented declaration's documentation.
 Where a hover reports a documented declaration or member — at the place it is declared or at any
 position that refers to it, including a reference into another module, an imported library, or the
 prelude — the hover content SHALL include the documentation after the fenced NX fragment. The
@@ -585,4 +586,30 @@ declaration and names the library. Completion of an import path SHALL NOT be req
 #### Scenario: An unknown standard library is reported in the editor
 - **WHEN** a snapshot document contains `import "@nx/automation"`
 - **THEN** diagnostics SHALL carry the unknown-standard-library diagnostic at the import
+
+### Requirement: Language service completes and describes environment values
+The language service SHALL offer, after `env.` in an expression and in an element's attribute
+position, the environment values the module can see, each with its type and its documentation,
+and after `env.name.` the fields of the value's record type. Hover on an `env.` read or override
+SHALL show the declaration with its type and default, and its documentation. Hover on a function,
+value or component SHALL list the environment values its body reads directly or through the
+functions and values it calls. Hover on a top-level `provide` SHALL list the environment values and
+field paths it sets, and for a bundle SHALL list what the bundle sets, so the line can be read
+without opening the bundle. Go to definition is not part of this requirement: the language service
+has no definition query yet, and environment values get one when it does.
+
+#### Scenario: Completion after `env.`
+- **WHEN** a module that imports `design.nx`, which exports `environment space: int = 4`, has the
+  cursor after `env.` inside an element's attributes
+- **THEN** the completions SHALL include `space` with the type `int`
+
+#### Scenario: Hover lists what a component reads
+- **WHEN** `component <Badge /> = { <Text value={label()} /> }`, `let label() = { env.locale }`,
+  and the cursor is on `Badge`
+- **THEN** the hover SHALL say that `Badge` reads `env.locale`
+
+#### Scenario: Hover on a bundle provide lists what it sets
+- **WHEN** `brand.nx` exports `let theme: env.Update = <env.Update radius=12 color=<SemanticColors.Update accent=#e11d48 /> />`,
+  the main module contains `provide brand.theme`, and the cursor is on that line
+- **THEN** the hover SHALL say that it sets `env.radius` and `env.color.accent`
 

@@ -47,6 +47,7 @@ the `float32` binary operators `16` to `19`, and by `concat` taking string opera
 - **THEN** preparation SHALL fail with a diagnostic saying the input is not an NX IR image
 
 ### Requirement: NX IR program fingerprints are lossless for JavaScript consumers
+An NX IR fingerprint SHALL survive JavaScript `number` precision.
 Every fingerprint in an NX IR artifact, whether of the artifact's own module or of a module in its
 table, SHALL be encoded in a form that represents the native fingerprint without JavaScript `number`
 precision loss.
@@ -462,6 +463,7 @@ program rather than misreading the declaration.
 - **AND** the emitted canonical value SHALL carry `$type` `Counter.State.Update` and only the `count` key
 
 ### Requirement: NX IR declares the property unions a program references
+Emitted NX IR SHALL declare each property union the program references.
 When a program references a derived property union `T.Property` — by naming one of its cases, by
 naming it in a type annotation, or by declaring a state or prop field of that type — emitted NX IR
 SHALL contain a union declaration for it. The declaration SHALL identify itself as a property
@@ -741,6 +743,7 @@ spelling, parenthesized when it sits under an occurrence.
 - **THEN** the type table SHALL contain that function type once
 
 ### Requirement: NX IR erases type parameters inside function types
+Type-parameter erasure SHALL reach inside function types.
 Where a component's type parameter occurs inside a function type — as a parameter type or the
 result type — the erasure that replaces the parameter with `object` SHALL reach it, so no emitted
 type mentions the parameter.
@@ -1489,6 +1492,7 @@ entries add to a call, since a call counts the entries and not the list.
 - **THEN** the size SHALL be three, the size that value has as the props of a call
 
 ### Requirement: The conformance corpus evaluates entrypoints with arguments
+The conformance corpus SHALL be able to evaluate a function entrypoint with arguments.
 A corpus program MAY name, for a function entrypoint, the arguments to evaluate it with, written as
 canonical values, together with a case name, and MAY name several cases of one function. An
 entrypoint with arguments SHALL have a case name; one without SHALL have none and keeps the key it
@@ -1873,3 +1877,110 @@ SHALL contribute no keys; empty field values SHALL retain key presence until tar
 #### Scenario: A spread does not declare its feature
 - **WHEN** a property list contains a spread without `conditional-properties-v1`
 - **THEN** preparation SHALL reject the malformed module
+
+### Requirement: NX IR encodes environment values behind a required feature
+NX IR SHALL encode an environment value as a declaration of kind `environment` holding its type and
+its default node, and exported as other declarations are. A read SHALL be an `envRead` node, kind
+`30`, holding a reference to the declaration, with any field read after it encoded as ordinary
+`member` nodes. A `provide` block, and an element with `env.` attributes, SHALL be an `envProvide`
+node, kind `31`, holding a list of overrides and a body, where each override holds a reference to
+the declaration, a list of field names that may be empty, and a value node. An `env.Update` bundle
+SHALL be an `envUpdate` node, kind `32`, holding a list of overrides of the same shape. A module
+with top-level provides SHALL hold one declaration of kind `provides`, named `$provides`, listing
+them in source order, each holding an optional reference to the declaration, a list of field names
+and a value node: an override names its declaration, and a bundle names none and its node is of
+`env.Update` type. A module that declares an environment value, contains an `envRead`,
+`envProvide` or `envUpdate` node or has top-level provides SHALL list the required feature
+`environment-v1`, and a module that does none of these SHALL NOT. The `explain` text SHALL
+read the nodes as `env.` reads and `provide` blocks. Adding the declaration kind, the node kinds and
+the feature SHALL NOT change the IR schema version.
+
+#### Scenario: A read and a provide are their own nodes
+- **WHEN** NX source contains `environment locale: string = "en-US"` and
+  `let label() = { provide env.locale="fr-FR" { env.locale } }`, and NX IR is emitted
+- **THEN** the module SHALL declare `locale` as an `environment` declaration with the default
+  `"en-US"`
+- **AND** the body of `label` SHALL be an `envProvide` node with one override of `locale` with an
+  empty path, whose body is an `envRead` of `locale`
+- **AND** the module SHALL list `environment-v1`
+
+#### Scenario: An element's `env.` attributes are a provide around it
+- **WHEN** NX source renders `<Section env.colorMode=dark title="x" />`
+- **THEN** the IR SHALL be an `envProvide` node overriding `colorMode` whose body builds `Section`
+  with `title` alone
+
+#### Scenario: A program without environment values needs no feature
+- **WHEN** NX source declares no environment value and contains no `env.` read or `provide`
+- **THEN** the emitted module SHALL NOT list `environment-v1` and SHALL be the IR emitted before
+  this change
+
+### Requirement: A component descriptor carries the overrides around it in `$env`
+A runtime that evaluates an `envProvide` node SHALL evaluate the override values in order, in the
+environment outside the node, then evaluate the body with the overrides in effect, then add the
+overrides to every component descriptor its result reaches. The walk SHALL go through sequences,
+records, and the fields and content of elements that are not component descriptors, and SHALL stop
+at each component descriptor, which SHALL receive the overrides in front of any it already holds.
+A component descriptor here SHALL be a record whose `$type` names a component declared with a body;
+the record of an external component is the host's to interpret, so the walk SHALL go through its
+fields and content as through any other element, and it SHALL never get `$env`.
+A component descriptor SHALL carry its overrides in the reserved field `$env`, as a list of entries
+outermost first, each holding `value` (the qualified name of the environment value: its module
+identity and name), `path` (a list of field names) and `to` (the value in canonical form). A
+descriptor without overrides SHALL have no `$env` field, and an element that is not a component
+descriptor SHALL never get one.
+
+#### Scenario: An override reaches a descriptor through a host element
+- **WHEN** a body evaluates to `<div env.colorMode=dark><Card /></div>`, where `Card` is an authored
+  component
+- **THEN** the `Card` descriptor in the result SHALL hold `$env` with one entry naming `colorMode`,
+  an empty `path` and `to` equal to `dark`
+- **AND** the `div` SHALL hold no `$env`
+
+#### Scenario: An override on an external component reaches the components inside it
+- **WHEN** a body evaluates to `<Stack env.colorMode=dark><Card /></Stack>`, where `Stack` is an
+  external component and `Card` an authored one
+- **THEN** the `Card` descriptor SHALL hold `$env` with the `dark` entry
+- **AND** the `Stack` SHALL hold no `$env`
+
+#### Scenario: The overrides where a use is built are innermost
+- **WHEN** `<Label env.colorMode=light />` is built in one body and placed by another inside
+  `<div env.colorMode=dark>`
+- **THEN** the `Label` descriptor SHALL hold `$env` with the `dark` entry first and the `light`
+  entry last
+
+### Requirement: Environment lookups follow precedence and evaluate defaults at the read
+A runtime SHALL find the value of an environment value at a read from, in order: the overrides of
+the `envProvide` nodes being evaluated around the read, nearest first; the overrides in `$env` of
+the current component's descriptor, last entry first, and then those of each component above it;
+the host's root value; the entry module's provides, last first; and the declaration's default.
+An override with a non-empty path SHALL apply its value at that path to the value the later sources
+give. A default and an entry-module provide SHALL be evaluated at each read that uses it, in the
+environment of the read, and while an entry-module provide of a value is evaluated, a read of that
+value SHALL see only the sources after it. The provides of a module that is not the entry module
+SHALL be ignored.
+
+#### Scenario: A default is evaluated in the reader's environment
+- **WHEN** `color`'s default reads `env.colorMode`, and `env.color` is read under an `envProvide`
+  overriding `colorMode` to `dark`
+- **THEN** the default SHALL be evaluated with `colorMode` equal to `dark`
+
+### Requirement: Environment values have a defined cost
+The format's documentation SHALL state the cost of the environment feature, and the runtimes SHALL
+count it alike:
+
+- an `envRead` node costs one operation, and a default or entry-module provide evaluated for it is
+  charged node by node each time it is evaluated;
+- an `envProvide` node costs one operation, and its override values and its body are charged as any
+  other children;
+- adding the overrides of an `envProvide` to one component descriptor costs one operation;
+- finding a value through the environment costs nothing beyond the nodes it evaluates.
+
+The conformance corpus SHALL hold cases for reads, defaults, field paths, `provide` around
+expressions and markup, entry-module provides and bundles, and root values, with their results and
+operation counts.
+
+#### Scenario: Both runtimes count a read of a default alike
+- **WHEN** both runtimes evaluate a corpus case that reads an environment value whose default is
+  `1 + 2`
+- **THEN** both SHALL count one operation for the `envRead` node and three for the default
+

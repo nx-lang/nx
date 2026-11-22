@@ -2366,6 +2366,11 @@ then pass a few hundred times in a row.
   right, but the recorded value is then stale, so the next equal visit renders the node once more
   for nothing. A precise check would track which sources of the value lie outside the body's
   overrides.
+- **A read that fails beneath a body's overrides is never skipped.** When the instance tree cannot
+  read a cascaded value without the body's own overrides (its default fails there, say), it keeps
+  the read as unknown, so the node renders again on every visit and on every root change to a
+  value it reads, for as long as its body keeps that pattern. The same precise check would let it
+  be skipped.
 - **Restored instances have no recorded reads.** An instance restored from saved state has no read
   list until it renders once, so a root value change does not reach it before then.
 - **A bundle is evaluated at every read.** A main-module `provide bundle` is evaluated each time a
