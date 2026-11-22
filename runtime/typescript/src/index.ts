@@ -40,6 +40,11 @@ export const NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1 = "occurrence-v1";
  * Value constraints: the `constrained` type kind, the `check` node and the `interval` pattern.
  */
 export const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
+/**
+ * Environment values: the `environment` and `provides` declaration kinds and the `envRead`,
+ * `envProvide` and `envUpdate` nodes.
+ */
+export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
 
 const knownFeatures = new Set([
   "standard-color-v1",
@@ -54,6 +59,7 @@ const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_RANGES_V1,
   NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
   NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
+  NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
 ]);
 
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
@@ -584,6 +590,12 @@ export const nodeKinds = {
   check: 28,
   /** `[29, type]`: a pattern-list entry that matches a scrutinee in the type's interval. */
   interval: 29,
+  /** `env.name`: `[30, ref]`, the environment value the reference names at the read. */
+  envRead: 30,
+  /** `provide overrides { body }`: `[31, overrides, body]`. */
+  envProvide: 31,
+  /** `<env.Update … />`: `[32, overrides]`, the overrides as one bundle value. */
+  envUpdate: 32,
 } as const;
 
 /**
@@ -670,6 +682,10 @@ export const declarationKinds = {
   component: 3,
   union: 4,
   typeAlias: 5,
+  /** `env.name`: `[6, name, default, type]`. */
+  environment: 6,
+  /** The entry module's top-level provides: `[7, "$provides", provides]`. */
+  provides: 7,
 } as const;
 const binaryOperators = [
   "add",
@@ -1008,7 +1024,25 @@ export type PreparedDeclarationKind =
       readonly bases: readonly NxIrReference[];
       readonly propertyTarget: NxIrReference | undefined;
     }
-  | { readonly tag: "typeAlias" };
+  | { readonly tag: "typeAlias" }
+  | {
+      readonly tag: "environment";
+      /** Node index of the default, evaluated at each read that reaches it. */
+      readonly default: number;
+      readonly ty: PreparedType;
+    }
+  | { readonly tag: "provides"; readonly provides: readonly PreparedProvide[] };
+
+/**
+ * One top-level provide of a module: `provide env.name.path = value` with a target, and
+ * `provide bundle` without one.
+ */
+export interface PreparedProvide {
+  readonly target: NxIrReference | undefined;
+  readonly path: readonly string[];
+  /** Node index of the value. */
+  readonly value: number;
+}
 
 export interface PreparedDeclaration {
   readonly index: number;
@@ -1174,6 +1208,14 @@ export interface NxRuntimeOptions {
    * give each call its own.</para>
    */
   readonly origins?: NxRuntimeOrigins;
+  /**
+   * The environment the call runs in: the root values a host gives, and the overrides of each
+   * component descriptor down to the instance, made with {@link environment} and
+   * {@link NxEnvironment.enter}. Absent, the call runs with no root values, so every `env.` read
+   * finds an override, a provide of the entry module or the value's default. Its root values and
+   * the values of its overrides are checked against their declared types when the call begins.
+   */
+  readonly environment?: NxEnvironment;
 }
 
 /** Where the records of one call's value were constructed, as {@link NxRuntimeOptions.origins} reports it. */
@@ -1544,6 +1586,8 @@ const DECLARED_PARAM: readonly Op[] = ["str", "type", "optNode", "int"];
 const ARM: readonly Op[] = [{ list: NODES }, "node"];
 const UNION_CASE: readonly Op[] = ["str", { list: FIELD }, "int"];
 const EMIT: readonly Op[] = ["str", "ref"];
+const OVERRIDE: readonly Op[] = ["ref", { list: STRS }, "node"];
+const PROVIDE: readonly Op[] = ["optRef", { list: STRS }, "node"];
 
 /**
  * The operands after the kind cell, by table and kind number. A hole is a kind number that is
@@ -1594,6 +1638,9 @@ const layouts: Record<NxIrTable, readonly (readonly Op[] | undefined)[]> = {
     ["standardColor", { list: NODES }],
     ["node", "type", "str"],
     ["type"],
+    ["ref"],
+    [{ list: OVERRIDE }, "node"],
+    [{ list: OVERRIDE }],
   ],
   declarations: [
     ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
@@ -1602,6 +1649,8 @@ const layouts: Record<NxIrTable, readonly (readonly Op[] | undefined)[]> = {
     ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }, "optRef"],
     ["str", { list: UNION_CASE }, { list: REFS }, "optRef"],
     ["str"],
+    ["str", "node", "type"],
+    ["str", { list: PROVIDE }],
   ],
 };
 
@@ -1654,6 +1703,30 @@ class TableReader {
     }
     if (this.#diagnostics.length === 0) {
       this.#validateIntervalPlacement();
+      this.#validateEnvironmentFeature();
+    }
+  }
+
+  /** A module whose entries use environment values lists `environment-v1`. */
+  #validateEnvironmentFeature(): void {
+    if (this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1)) {
+      return;
+    }
+    const uses = (table: NxIrTable, kinds: readonly number[]): boolean => {
+      for (let index = 0; index < this.#image.entryCount(table); index += 1) {
+        if (kinds.includes(this.#image.entry(table, index)[0]!)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (
+      uses("nodes", [nodeKinds.envRead, nodeKinds.envProvide, nodeKinds.envUpdate]) ||
+      uses("declarations", [declarationKinds.environment, declarationKinds.provides])
+    ) {
+      this.#fail(
+        `the module uses environment values, which requires the feature '${NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1}' the module does not list.`,
+      );
     }
   }
 
@@ -2084,6 +2157,20 @@ class TableReader {
         prepared = { tag: "union", cases, bases, propertyTarget };
         break;
       }
+      case declarationKinds.environment: {
+        const defaultNode = cursor.next();
+        prepared = { tag: "environment", default: defaultNode, ty: this.type(cursor.next()) };
+        break;
+      }
+      case declarationKinds.provides: {
+        const provides = this.#list(cursor, (): PreparedProvide => {
+          const target = this.#optRef(cursor);
+          const path = this.#list(cursor, () => this.#image.string(cursor.next()));
+          return { target, path, value: cursor.next() };
+        });
+        prepared = { tag: "provides", provides };
+        break;
+      }
       default:
         prepared = { tag: "typeAlias" };
         break;
@@ -2338,6 +2425,7 @@ export function evaluateFunction(
   return evaluate(options, (input) => measureValues(input, args), (evaluation) => {
     requireHostList(args, `the arguments of '${name}'`);
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const declaration = linkedProgram.functionEntrypoints.get(name);
     if (declaration === undefined || declaration.kind.tag !== "function") {
       fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
@@ -2366,6 +2454,7 @@ export function constructComponentDescriptor(
     const readProps = readHostRecord(props, `${name} props`);
     const readContent = readHostValues(content, `${name} content`, (index) => `${name} content[${index}]`);
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     const { fields: input, handlers } = splitHandlerProperties(linkedProgram.entry, declaration, readProps, `${name} props`);
     const contentField = component.props.find((field) => field.isContent);
@@ -2407,9 +2496,10 @@ export function initializeComponent(
   };
   return evaluate(options, measured, (evaluation) => {
     const path = `${name} props`;
-    const readProps = readHostRecord(props, path);
+    const readProps = withoutEnvironment(readHostRecord(props, path));
     const readState = options.state === undefined ? undefined : readHostRecord(options.state, `${name} state`);
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     if (component.isAbstract || component.body < 0) {
       fail("nx-ir-component", `Component '${name}' cannot be initialized because it has no body.`);
@@ -2465,9 +2555,10 @@ export function evaluateComponent(
   };
   return evaluate(options, measured, (evaluation) => {
     const path = `${name} props`;
-    const readProps = readHostRecord(props, path);
+    const readProps = withoutEnvironment(readHostRecord(props, path));
     const readState = readHostRecord(state, `${name} state`);
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     if (component.isAbstract || component.body < 0) {
       fail("nx-ir-component", `Component '${name}' cannot be evaluated because it has no body.`);
@@ -2520,7 +2611,9 @@ export function dispatchComponentActions(
       // keeps origins the batch is read as new objects that no map holds.
       const fresh = evaluation.origins !== undefined || instanceOrigins.has(instance);
       const entries = readHostValues(batch, "the dispatched batch", (index) => `dispatch entry ${index}`, fresh);
-      return dispatchBatch(programOf(program), instance, entries, evaluation);
+      const linkedProgram = programOf(program);
+      beginEnvironment(linkedProgram, evaluation);
+      return dispatchBatch(linkedProgram, instance, entries, evaluation);
     },
   );
 }
@@ -2647,6 +2740,7 @@ export function normalizeComponentState(
   return evaluate(options, (input) => measureRecord(input, state), (evaluation) => {
     const readState = readHostRecord(state, `${name} state`);
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     const normalized = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, readState, propsFrame(component), `${name} state`, true, evaluation);
     chargeWrittenFields(normalized, declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation));
@@ -2686,6 +2780,7 @@ export function applyComponentStatePatch(
     const readState = readHostRecord(currentState, `${name} state`);
     const readPatch = readHostRecord(patch, `${name} state patch`);
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const { declaration, component } = componentDeclaration(linkedProgram, name);
     const patched = patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, readState, readPatch, evaluation);
     chargeWrittenFields(patched, declarationContext(linkedProgram, linkedProgram.entry, declaration, evaluation));
@@ -2783,6 +2878,10 @@ interface Evaluation {
   /** The entries of the call's report, once its value has been written for the host. */
   readonly entries: NxOriginEntry[];
   readonly callSites: RecordOrigin[] | undefined;
+  /** The environment the host gave the call. */
+  readonly environment: NxEnvironment;
+  /** The environment state of the call: its layers of overrides and its root values. */
+  readonly env: EnvironmentState;
 }
 
 /** The node that constructed a record: the module it belongs to and its index in that module's node table. */
@@ -2880,7 +2979,12 @@ function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) =
     recording: origins !== undefined,
     entries: [],
     callSites: origins?.includeCallSites === true ? [] : undefined,
+    environment: options.environment ?? rootEnvironment,
+    env: { layers: [], base: 0, roots: new Map() },
   };
+  if (!(evaluation.environment instanceof NxEnvironment)) {
+    fail("nx-ir-options", "The environment option must be an environment made with environment(values).");
+  }
   let inputSize: number | undefined;
   try {
     if (maxInputSize !== undefined) {
@@ -4074,6 +4178,12 @@ function evalNodeKind(index: number, context: EvalContext): NxCanonicalValue {
       return evalComponentDescriptor(context, index, entry);
     case nodeKinds.actionHandler:
       return evalActionHandler(context, entry);
+    case nodeKinds.envRead:
+      return evalEnvironmentRead(context, index, entry);
+    case nodeKinds.envProvide:
+      return evalEnvironmentProvide(context, index, entry);
+    case nodeKinds.envUpdate:
+      return evalEnvironmentBundle(context, index, entry);
     default:
       fail("nx-ir-expression", `Unknown NX IR node kind '${String(entry[0])}'.`, context, index);
   }
@@ -4269,6 +4379,7 @@ export function callFunction(
       fail("nx-ir-function-value", "callFunction expects a Function record: { $type: \"Function\", module, name }.");
     }
     const linkedProgram = programOf(program);
+    beginEnvironment(linkedProgram, evaluation);
     const callee = resolveFunctionRecord(linkedProgram, record, "callFunction");
     // `resolveFunctionRecord` answers a function, so its declaration has parameters.
     const params = callee.declaration.kind.tag === "function" ? callee.declaration.kind.params : [];
@@ -4348,6 +4459,603 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
   applyContentBinding(props, contentField, component.props, content, name, hasBodyAt(entry, next));
   const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false, context.evaluation);
   return originated({ $type: name, ...normalized, ...handlerObject(handlers) }, context, nodeIndex);
+}
+
+// ------------------------------------------------------------------------------------------------
+// Environment values
+// ------------------------------------------------------------------------------------------------
+
+/** The prefix of an environment declaration's name in an image: `env.colorMode`. */
+const environmentPrefix = "env.";
+/** The `$type` of a bundle, the value an `envUpdate` node makes. */
+const bundleTypeName = "env.Update";
+/** The field of a bundle that holds its entries. */
+const bundleEntriesField = "$entries";
+/** The reserved field of a component descriptor that carries the overrides around it. */
+const environmentField = "$env";
+
+/** One override a component descriptor's `$env` carries, outermost first. */
+export interface NxEnvironmentEntry {
+  /** The environment value: its module identity and name, `identity::name`. */
+  readonly value: string;
+  /** The field path the override sets; empty for the whole value. */
+  readonly path: readonly string[];
+  /** The value it sets. */
+  readonly to: NxHostValue;
+}
+
+/**
+ * The environment a call runs in: the root values a host gives, then the overrides of each
+ * component descriptor down to an instance. Immutable: {@link NxEnvironment.enter} answers a new
+ * one. Make one with {@link environment}.
+ */
+export class NxEnvironment {
+  /** The root values, by the names the host gave them. */
+  readonly roots: readonly (readonly [string, NxHostValue])[];
+  /** The overrides entered, outermost first. */
+  readonly entries: readonly NxEnvironmentEntry[];
+
+  /** @internal Use {@link environment}. */
+  constructor(roots: readonly (readonly [string, NxHostValue])[], entries: readonly NxEnvironmentEntry[]) {
+    this.roots = Object.freeze(roots.slice());
+    this.entries = Object.freeze(entries.slice());
+    Object.freeze(this);
+  }
+
+  /**
+   * This environment extended with the overrides a component descriptor's `$env` carries, inside
+   * the ones it holds: the environment to initialize, render or dispatch the descriptor's
+   * component in. A descriptor without `$env` answers this environment. A malformed `$env` is
+   * refused with `nx-ir-boundary-type`. The values are checked when a call is given the result.
+   */
+  enter(descriptor: NxHostValue): NxEnvironment {
+    if (!isPlainInput(descriptor)) {
+      return this;
+    }
+    const entries = parseEnvironmentEntries((descriptor as Readonly<Record<string, unknown>>)[environmentField]);
+    return entries.length === 0 ? this : new NxEnvironment(this.roots, [...this.entries, ...entries]);
+  }
+}
+
+/** The environment with no root values, which a call given none runs in. */
+const rootEnvironment = new NxEnvironment([], []);
+
+/**
+ * An environment of root values, named as the program's environment values are: `colorMode`
+ * when exactly one module of the program declares one of that name, and `identity::colorMode`
+ * always. Each value is checked against its declared type when a call is given the environment;
+ * an unknown name fails it with `nx-ir-environment-name`.
+ */
+export function environment(values: NxHostRecord = {}): NxEnvironment {
+  requirePlainRecord(values, "the root environment values");
+  return new NxEnvironment(
+    Object.entries(values).filter((entry): entry is [string, NxHostValue] => entry[1] !== undefined),
+    [],
+  );
+}
+
+function malformedEnvironment(message: string): never {
+  fail("nx-ir-boundary-type", `A component descriptor's '$env' is malformed: ${message}.`);
+}
+
+/** The entries of a `$env` value in host form. */
+function parseEnvironmentEntries(carried: unknown): NxEnvironmentEntry[] {
+  if (carried === undefined || carried === null) {
+    return [];
+  }
+  if (!Array.isArray(carried)) {
+    malformedEnvironment("it is not a list");
+  }
+  return carried.map((item: unknown): NxEnvironmentEntry => {
+    if (!isPlainInput(item)) {
+      malformedEnvironment("an entry is not a record");
+    }
+    const entry = item as Readonly<Record<string, unknown>>;
+    const value = entry.value;
+    if (typeof value !== "string") {
+      malformedEnvironment("an entry has no 'value' string");
+    }
+    const path = entry.path;
+    let fields: string[];
+    if (path === undefined || path === null) {
+      fields = [];
+    } else if (typeof path === "string") {
+      fields = [path];
+    } else if (Array.isArray(path)) {
+      fields = path.map((field: unknown) => {
+        if (typeof field !== "string") {
+          malformedEnvironment("a 'path' entry is not a string");
+        }
+        return field;
+      });
+    } else {
+      malformedEnvironment("an entry's 'path' is not a list");
+    }
+    if (!("to" in entry) || entry.to === undefined) {
+      malformedEnvironment("an entry has no 'to'");
+    }
+    return { value, path: fields, to: entry.to as NxHostValue };
+  });
+}
+
+/** Props without the reserved `$env` field, which is not a prop: a host may pass a descriptor's fields as they are. */
+function withoutEnvironment(props: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue> {
+  if (!Object.hasOwn(props, environmentField)) {
+    return props;
+  }
+  const { [environmentField]: _env, ...rest } = props;
+  return rest;
+}
+
+/** An environment declaration of a linked program. */
+interface EnvironmentDeclaration {
+  /** Its qualified name, `identity::name`, which is also its key. */
+  readonly key: string;
+  readonly linked: LinkedModule;
+  readonly declaration: PreparedDeclaration;
+  readonly default: number;
+  readonly ty: PreparedType;
+}
+
+/** Every environment declaration of a linked program, its entry module's provides and its component names. */
+interface EnvironmentIndex {
+  readonly qualified: ReadonlyMap<string, EnvironmentDeclaration>;
+  readonly simple: ReadonlyMap<string, readonly EnvironmentDeclaration[]>;
+  readonly componentNames: ReadonlySet<string>;
+  readonly provides:
+    | { readonly linked: LinkedModule; readonly declaration: PreparedDeclaration; readonly list: readonly PreparedProvide[] }
+    | undefined;
+}
+
+const environmentIndexes = new WeakMap<NxPreparedProgram, EnvironmentIndex>();
+
+function environmentKey(linked: LinkedModule, declaration: PreparedDeclaration): string {
+  return `${linked.module.identity}::${declaration.name.slice(environmentPrefix.length)}`;
+}
+
+/** The program's environment index, built on first use. */
+function environmentIndex(program: NxPreparedProgram): EnvironmentIndex {
+  const known = environmentIndexes.get(program);
+  if (known !== undefined) {
+    return known;
+  }
+  const qualified = new Map<string, EnvironmentDeclaration>();
+  const simple = new Map<string, EnvironmentDeclaration[]>();
+  const componentNames = new Set<string>();
+  const modules = new Set<LinkedModule>([program.entry, ...program.modulesByIdentity.values()]);
+  for (const linked of modules) {
+    for (const declaration of linked.module.declarations) {
+      if (declaration.kind.tag === "component") {
+        componentNames.add(declaration.name);
+      }
+      if (declaration.kind.tag !== "environment" || !declaration.name.startsWith(environmentPrefix)) {
+        continue;
+      }
+      const key = environmentKey(linked, declaration);
+      const found: EnvironmentDeclaration = { key, linked, declaration, default: declaration.kind.default, ty: declaration.kind.ty };
+      qualified.set(key, found);
+      const name = declaration.name.slice(environmentPrefix.length);
+      simple.set(name, [...(simple.get(name) ?? []), found]);
+    }
+  }
+  const providesDeclaration = program.entry.module.declarationsByName.get("$provides");
+  const provides =
+    providesDeclaration?.kind.tag === "provides"
+      ? { linked: program.entry, declaration: providesDeclaration, list: providesDeclaration.kind.provides }
+      : undefined;
+  const index: EnvironmentIndex = { qualified, simple, componentNames, provides };
+  environmentIndexes.set(program, index);
+  return index;
+}
+
+/** The declaration a host names a root value by: a qualified name, or a simple name exactly one environment value has. */
+function environmentByHostName(index: EnvironmentIndex, name: string): EnvironmentDeclaration {
+  const qualified = index.qualified.get(name);
+  if (qualified !== undefined) {
+    return qualified;
+  }
+  const candidates = index.simple.get(name) ?? [];
+  if (candidates.length === 1) {
+    return candidates[0]!;
+  }
+  if (candidates.length > 1) {
+    const modules = candidates.map((candidate) => candidate.key).sort();
+    fail(
+      "nx-ir-environment-name",
+      `Environment value '${name}' is declared more than once in the program (${modules.join(", ")}); name it as 'identity::${name}'.`,
+    );
+  }
+  fail("nx-ir-environment-name", `The program declares no environment value named '${name}'.`);
+}
+
+/** One layer of the environment stack: an override, or a cap while an entry-module provide is evaluated. */
+type EnvironmentLayer =
+  | { readonly set: true; readonly key: string; readonly path: readonly string[]; readonly value: NxCanonicalValue }
+  /** While the entry module's provide at `index` is evaluated for `key`, a read of `key` sees only the provides before it and the default. */
+  | { readonly set: false; readonly key: string; readonly index: number };
+
+/** The environment state of one call. */
+interface EnvironmentState {
+  readonly layers: EnvironmentLayer[];
+  /** How many of `layers` came from the host's environment, below any `envProvide`. */
+  base: number;
+  readonly roots: Map<string, NxCanonicalValue>;
+}
+
+/** One pending field override on the way to a base value. */
+interface PendingOverride {
+  readonly path: readonly string[];
+  readonly value: NxCanonicalValue;
+  /** An update record from a bundle, applied as a patch rather than set. */
+  readonly patch: boolean;
+}
+
+/** An evaluated override: the declaration it sets, the field path inside the value, and the value. */
+interface EvaluatedOverride {
+  readonly target: EnvironmentDeclaration;
+  readonly path: readonly string[];
+  readonly value: NxCanonicalValue;
+}
+
+/**
+ * Resolves and checks the environment a call was given, before anything is evaluated. A root
+ * value of an unknown name, or of the wrong type, fails the call.
+ */
+function beginEnvironment(program: NxPreparedProgram, evaluation: Evaluation): void {
+  const given = evaluation.environment;
+  if (given.roots.length === 0 && given.entries.length === 0) {
+    return;
+  }
+  const index = environmentIndex(program);
+  const state = evaluation.env;
+  for (const [name, value] of given.roots) {
+    const target = environmentByHostName(index, name);
+    state.roots.set(target.key, hostEnvironmentValue(program, evaluation, target, [], value, name));
+  }
+  for (const entry of given.entries) {
+    const target = index.qualified.get(entry.value);
+    if (target === undefined) {
+      fail("nx-ir-environment-name", `A '$env' entry names '${entry.value}', which the program does not declare.`);
+    }
+    const value = hostEnvironmentValue(program, evaluation, target, entry.path, entry.to, entry.value);
+    state.layers.push({ set: true, key: target.key, path: entry.path, value });
+  }
+  state.base = state.layers.length;
+}
+
+/** A value the host gave for `target` at `path`, read and checked against the type there. */
+function hostEnvironmentValue(
+  program: NxPreparedProgram,
+  evaluation: Evaluation,
+  target: EnvironmentDeclaration,
+  path: readonly string[],
+  value: NxHostValue,
+  name: string,
+): NxCanonicalValue {
+  const { context, ty } = environmentTypeAt(program, evaluation, target, path);
+  const what = `environment value '${name}'`;
+  return normalizeValue(context, ty, readHostValue(value, what), what);
+}
+
+/** The type of `target`'s value at `path`, with the context its references resolve in. */
+function environmentTypeAt(
+  program: NxPreparedProgram,
+  evaluation: Evaluation,
+  target: EnvironmentDeclaration,
+  path: readonly string[],
+): { context: EvalContext; ty: PreparedType } {
+  let context = declarationContext(program, target.linked, target.declaration, evaluation);
+  let ty = target.ty;
+  for (const field of path) {
+    let item = ty;
+    while (item.kind === "seq") {
+      item = item.item;
+    }
+    if (item.kind !== "nominal") {
+      fail("nx-ir-environment", `Environment path field '${field}' names no record field.`);
+    }
+    const { linked, declaration } = resolveReference(context.linked, item.slot, item.name);
+    if (declaration.kind.tag !== "record") {
+      fail("nx-ir-environment", `Environment path field '${field}' names no record field.`);
+    }
+    const found = declaration.kind.fields.find((candidate) => candidate.name === field);
+    if (found === undefined) {
+      fail("nx-ir-environment", `Record '${declaration.name}' has no field '${field}' for an environment override.`);
+    }
+    context = declarationContext(program, linked, declaration, evaluation);
+    ty = found.ty;
+  }
+  return { context, ty };
+}
+
+/** The environment declaration an `envRead` or override reference names. */
+function environmentTarget(context: EvalContext, nodeIndex: number, slot: number, name: string): EnvironmentDeclaration {
+  const { linked, declaration } = resolveReference(context.linked, slot, name);
+  const target =
+    declaration.kind.tag === "environment" ? environmentIndex(context.program).qualified.get(environmentKey(linked, declaration)) : undefined;
+  if (target === undefined) {
+    fail("nx-ir-reference", `'${name}' is not an environment value.`, context, nodeIndex);
+  }
+  return target;
+}
+
+function evalEnvironmentRead(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const image = context.linked.module.artifact;
+  return environmentValue(context, nodeIndex, environmentTarget(context, nodeIndex, entry[1]!, image.string(entry[2]!)));
+}
+
+/**
+ * The environment value `target` at a read: the overrides around it, nearest first, then the
+ * host's root value, then the entry module's provides, last first, then the default. A default
+ * and a provide are evaluated at each read that reaches them, in the environment of the read.
+ */
+function environmentValue(context: EvalContext, nodeIndex: number | undefined, target: EnvironmentDeclaration): NxCanonicalValue {
+  const state = context.evaluation.env;
+  const pending: PendingOverride[] = [];
+  let local = 0;
+  let base: NxCanonicalValue | undefined;
+  let cap: number | undefined;
+  for (let position = state.layers.length - 1; position >= 0; position -= 1) {
+    const layer = state.layers[position]!;
+    if (layer.key !== target.key) {
+      continue;
+    }
+    if (!layer.set) {
+      // A provide reading the value it sets: it sees what is beneath it.
+      cap = layer.index;
+      break;
+    }
+    if (layer.path.length === 0) {
+      if (position >= state.base) {
+        // Set by the call itself: nothing beneath it is read.
+        return applyPendingOverrides(context, nodeIndex, layer.value, pending);
+      }
+      base = layer.value;
+      break;
+    }
+    if (position >= state.base) {
+      local += 1;
+    }
+    pending.push({ path: layer.path, value: layer.value, patch: false });
+  }
+  if (base === undefined && cap === undefined) {
+    base = state.roots.get(target.key);
+  }
+  const found = base !== undefined ? base : providedOrDefault(context, nodeIndex, target, cap ?? Infinity);
+  // The pending overrides were collected innermost first; the call's own are the first `local`
+  // of them, and are applied last.
+  const own = pending.splice(0, Math.min(local, pending.length));
+  return applyPendingOverrides(context, nodeIndex, applyPendingOverrides(context, nodeIndex, found, pending), own);
+}
+
+/** `base` with `pending`, collected innermost first, applied outermost first. */
+function applyPendingOverrides(
+  context: EvalContext,
+  nodeIndex: number | undefined,
+  base: NxCanonicalValue,
+  pending: readonly PendingOverride[],
+): NxCanonicalValue {
+  let value = base;
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    const entry = pending[index]!;
+    value = setEnvironmentPath(context, nodeIndex, value, entry.path, 0, entry.value, entry.patch);
+  }
+  return value;
+}
+
+/** `value` with `to` set at `path` from `at`, or with `to` applied there as an update record when `patch`. */
+function setEnvironmentPath(
+  context: EvalContext,
+  nodeIndex: number | undefined,
+  value: NxCanonicalValue,
+  path: readonly string[],
+  at: number,
+  to: NxCanonicalValue,
+  patch: boolean,
+): NxCanonicalValue {
+  if (at === path.length) {
+    if (!patch) {
+      return to;
+    }
+    if (isObject(value) && isObject(to) && typeof value.$type === "string") {
+      return carryOrigin(applyRecordUpdate(value as NxRecordObject, to as NxRecordObject), value, context.evaluation);
+    }
+    fail("nx-ir-environment", "An environment update record applies only to a record value.", context, nodeIndex);
+  }
+  const field = path[at]!;
+  if (!isObject(value)) {
+    fail("nx-ir-environment", `Environment override of field '${field}' needs a record value.`, context, nodeIndex);
+  }
+  const current = Object.hasOwn(value, field) ? value[field] : undefined;
+  let next: NxCanonicalValue;
+  if (current !== undefined) {
+    next = setEnvironmentPath(context, nodeIndex, current, path, at + 1, to, patch);
+  } else if (at + 1 === path.length && !patch) {
+    next = to;
+  } else {
+    fail("nx-ir-environment", `Environment override of field '${field}' found the field empty.`, context, nodeIndex);
+  }
+  return carryOrigin({ ...value, [field]: next }, value, context.evaluation);
+}
+
+/**
+ * The value `target` gets from the entry module's provides before `below`, or else from its
+ * default, each evaluated in the environment of the read.
+ */
+function providedOrDefault(context: EvalContext, nodeIndex: number | undefined, target: EnvironmentDeclaration, below: number): NxCanonicalValue {
+  const evaluation = context.evaluation;
+  const index = environmentIndex(context.program);
+  const pending: PendingOverride[] = [];
+  const provides = index.provides;
+  if (provides !== undefined) {
+    const providesContext: EvalContext = {
+      ...declarationContext(context.program, provides.linked, provides.declaration, evaluation),
+      depth: context.depth,
+    };
+    for (let position = Math.min(below, provides.list.length) - 1; position >= 0; position -= 1) {
+      const provide = provides.list[position]!;
+      if (provide.target !== undefined) {
+        const { linked, declaration } = resolveReference(provides.linked, provide.target.slot, provide.target.name);
+        if (declaration.kind.tag !== "environment" || environmentKey(linked, declaration) !== target.key) {
+          continue;
+        }
+        const value = cappedEnvironment(evaluation, target.key, position, () => evalNode(provide.value, providesContext));
+        if (provide.path.length === 0) {
+          return applyPendingOverrides(context, nodeIndex, value, pending);
+        }
+        pending.push({ path: provide.path, value, patch: false });
+      } else {
+        const bundle = cappedEnvironment(evaluation, target.key, position, () => evalNode(provide.value, providesContext));
+        const entries = bundleEntries(providesContext, provide.value, bundle, index);
+        for (let entry = entries.length - 1; entry >= 0; entry -= 1) {
+          const { target: set, path, value } = entries[entry]!;
+          if (set.key !== target.key) {
+            continue;
+          }
+          const patch = isObject(value) && typeof value.$type === "string" && value.$type.endsWith(".Update");
+          if (path.length === 0 && !patch) {
+            return applyPendingOverrides(context, nodeIndex, value, pending);
+          }
+          pending.push({ path, value, patch });
+        }
+      }
+    }
+  }
+  const declared: EvalContext = {
+    ...declarationContext(context.program, target.linked, target.declaration, evaluation),
+    depth: context.depth,
+  };
+  const value = normalizeValue(declared, target.ty, evalNode(target.default, declared), `environment value '${target.key}'`);
+  return applyPendingOverrides(context, nodeIndex, value, pending);
+}
+
+/** Runs `work` with a read of `key` capped below the entry module's provide at `index`. */
+function cappedEnvironment(evaluation: Evaluation, key: string, index: number, work: () => NxCanonicalValue): NxCanonicalValue {
+  const layers = evaluation.env.layers;
+  const depth = layers.length;
+  layers.push({ set: false, key, index });
+  try {
+    return work();
+  } finally {
+    layers.length = depth;
+  }
+}
+
+/** The entries of a bundle value, in order. */
+function bundleEntries(context: EvalContext, nodeIndex: number, bundle: NxCanonicalValue, index: EnvironmentIndex): EvaluatedOverride[] {
+  const entries = isObject(bundle) && bundle.$type === bundleTypeName ? bundle[bundleEntriesField] : undefined;
+  if (!Array.isArray(entries)) {
+    fail("nx-ir-environment", `A bundle provide needs an '${bundleTypeName}' value, got ${describeValue(bundle)}.`, context, nodeIndex);
+  }
+  return entries.map((entry) => {
+    const name = isObject(entry) ? entry.value : undefined;
+    const path = isObject(entry) ? entry.path : undefined;
+    const to = isObject(entry) ? entry.to : undefined;
+    if (typeof name !== "string" || path === undefined || to === undefined) {
+      fail("nx-ir-environment", `An '${bundleTypeName}' entry is malformed.`, context, nodeIndex);
+    }
+    const target = index.qualified.get(name);
+    if (target === undefined) {
+      fail(
+        "nx-ir-environment-name",
+        `An '${bundleTypeName}' entry names '${name}', which the program does not declare.`,
+        context,
+        nodeIndex,
+      );
+    }
+    const fields = Array.isArray(path) ? path.filter((field): field is string => typeof field === "string") : [];
+    return { target, path: fields, value: to };
+  });
+}
+
+/** The overrides of an `envProvide` or `envUpdate` node, from cell `at`, evaluated in order outside it. */
+function evalEnvironmentOverrides(
+  context: EvalContext,
+  nodeIndex: number,
+  entry: Uint32Array,
+  at: number,
+): { overrides: EvaluatedOverride[]; next: number } {
+  const image = context.linked.module.artifact;
+  const count = entry[at]!;
+  let position = at + 1;
+  const overrides: EvaluatedOverride[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const target = environmentTarget(context, nodeIndex, entry[position]!, image.string(entry[position + 1]!));
+    const length = entry[position + 2]!;
+    const path: string[] = [];
+    for (let field = 0; field < length; field += 1) {
+      path.push(image.string(entry[position + 3 + field]!));
+    }
+    const value = evalNode(entry[position + 3 + length]!, context);
+    overrides.push({ target, path, value });
+    position += 4 + length;
+  }
+  return { overrides, next: position };
+}
+
+/**
+ * An `envProvide` node: the overrides evaluated outside, the body inside them, and the overrides
+ * added to every component descriptor the result reaches.
+ */
+function evalEnvironmentProvide(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const { overrides, next } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
+  const layers = context.evaluation.env.layers;
+  const depth = layers.length;
+  for (const { target, path, value } of overrides) {
+    layers.push({ set: true, key: target.key, path, value });
+  }
+  let result: NxCanonicalValue;
+  try {
+    result = evalNode(entry[next]!, context);
+  } finally {
+    layers.length = depth;
+  }
+  return stampEnvironment(context, nodeIndex, result, environmentEntryValues(overrides), environmentIndex(context.program));
+}
+
+/** An `envUpdate` node: the overrides, evaluated, as one bundle value. */
+function evalEnvironmentBundle(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const { overrides } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
+  return originated({ $type: bundleTypeName, [bundleEntriesField]: environmentEntryValues(overrides) }, context, nodeIndex);
+}
+
+/** The `$env` entries for evaluated overrides. */
+function environmentEntryValues(overrides: readonly EvaluatedOverride[]): NxCanonicalValue[] {
+  return overrides.map(({ target, path, value }) => ({ value: target.key, path: [...path], to: value }));
+}
+
+/**
+ * `value` with `entries` in front of the `$env` of every component descriptor it reaches, walking
+ * sequences and the fields of every other record. Each descriptor costs one operation.
+ */
+function stampEnvironment(
+  context: EvalContext,
+  nodeIndex: number,
+  value: NxCanonicalValue,
+  entries: readonly NxCanonicalValue[],
+  index: EnvironmentIndex,
+): NxCanonicalValue {
+  if (entries.length === 0) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stampEnvironment(context, nodeIndex, item, entries, index));
+  }
+  if (!isObject(value) || Object.getPrototypeOf(value) !== Object.prototype || isActionHandler(value)) {
+    return value;
+  }
+  const type = value.$type;
+  if (typeof type === "string" && index.componentNames.has(type)) {
+    charge(context, nodeIndex, 1);
+    const existing = value[environmentField];
+    const carried = Array.isArray(existing) ? [...entries, ...existing] : [...entries];
+    return carryOrigin({ ...value, [environmentField]: carried }, value, context.evaluation);
+  }
+  const output: Record<string, NxCanonicalValue> = {};
+  for (const [key, field] of Object.entries(value)) {
+    output[key] = stampEnvironment(context, nodeIndex, field, entries, index);
+  }
+  return carryOrigin(output, value, context.evaluation);
 }
 
 // ------------------------------------------------------------------------------------------------

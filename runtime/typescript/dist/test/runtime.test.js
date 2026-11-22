@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { NX_IR_NONE, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY, NX_PRELUDE_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, callFunction, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, occurrenceFlags, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
+import { NX_IR_NONE, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NX_PRELUDE_MODULE_IDENTITY, NX_PRELUDE_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, callFunction, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, environment, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, occurrenceFlags, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
 const tests = [];
 function test(name, run) {
     tests.push([name, run]);
@@ -2340,6 +2340,52 @@ test("conditional property spreads require their feature", () => {
     assertEqual(evaluateFunction(program, "root"), { $type: "box", value: "chosen" });
 });
 let failures = 0;
+// ------------------------------------------------------------------------------------------------
+// Environment values: the corpus's `environment` program, whose `Badge` shows `env.locale`.
+// ------------------------------------------------------------------------------------------------
+function environmentProgram() {
+    return corpusProgram("environment", "main.nx", ["design.nx"], true);
+}
+test("a component reads the environment its host gives it", () => {
+    const program = environmentProgram();
+    const given = environment({ locale: "de-DE" });
+    assertEqual(initializeComponent(program, "Badge", {}, { environment: given }).rendered, { $type: "span", text: "de-DE" });
+    assertEqual(evaluateComponent(program, "Badge", {}, {}, { environment: given }).rendered, { $type: "span", text: "de-DE" });
+    // Given none, a read finds the default.
+    assertEqual(initializeComponent(program, "Badge").rendered, { $type: "span", text: "en-US" });
+    // A qualified name names the value as a simple one does.
+    assertEqual(evaluateFunction(program, "mode", [], { environment: environment({ "design.nx::colorMode": "dark" }) }), "dark");
+});
+test("a host composes a child's environment from the descriptor's $env", () => {
+    const program = environmentProgram();
+    const page = environment({ locale: "de-DE" });
+    const output = fields(evaluateFunction(program, "markup", [], { environment: page }));
+    const badge = output.content[0];
+    const child = page.enter(badge);
+    assertEqual(child.entries.length, 1);
+    assertEqual(child.roots, page.roots);
+    // The descriptor's fields pass as props as they are: `$env` is not a prop.
+    const { $type: _type, ...props } = fields(badge);
+    assertEqual(initializeComponent(program, "Badge", props, { environment: child }).rendered, { $type: "span", text: "de-DE" });
+    // An override of `locale` around the child wins over the root value.
+    const overridden = page.enter({ $type: "Badge", $env: [{ value: "design.nx::locale", path: [], to: "fr-FR" }] });
+    assertEqual(initializeComponent(program, "Badge", {}, { environment: overridden }).rendered, { $type: "span", text: "fr-FR" });
+    // Entering a descriptor without overrides keeps the environment.
+    assertEqual(page.enter({ $type: "Badge" }) === page, true);
+});
+test("root values and overrides are named and checked at the boundary", () => {
+    const program = environmentProgram();
+    const run = (given) => evaluateFunction(program, "mode", [], { environment: given });
+    assertEqual(assertThrows(() => run(environment({ colourMode: "dark" })), "no environment value named 'colourMode'").diagnostics[0].code, "nx-ir-environment-name");
+    assertEqual(assertThrows(() => run(environment({ colorMode: "dim" })), "environment value 'colorMode'").diagnostics[0].code, "nx-ir-boundary-type");
+    const unknown = environment().enter({ $type: "Badge", $env: [{ value: "design.nx::colour", to: "x" }] });
+    assertEqual(assertThrows(() => run(unknown), "does not declare").diagnostics[0].code, "nx-ir-environment-name");
+    for (const $env of [5, [3], [{ to: 1 }], [{ value: "design.nx::locale" }], [{ value: "design.nx::locale", path: 2, to: "x" }]]) {
+        const error = assertThrows(() => environment().enter({ $type: "Badge", $env }), "'$env' is malformed");
+        assertEqual(error.diagnostics[0].code, "nx-ir-boundary-type");
+    }
+    assertEqual(assertThrows(() => evaluateFunction(program, "mode", [], { environment: {} }), "environment option").diagnostics[0].code, "nx-ir-options");
+});
 for (const [name, run] of tests) {
     try {
         run();

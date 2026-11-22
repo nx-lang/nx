@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import {
   NxIrRuntimeError,
   dispatchComponentActions,
+  environment,
   evaluateFunction,
   initializeComponent,
   linkNxIrProgram,
@@ -101,6 +102,20 @@ function checkCount(what, recorded, run) {
     throw new Error(`${what} under ${recorded - 1} operations, one less than recorded, fails otherwise than on the budget, or names an argument: ${error instanceof Error ? error.message : String(error)}`);
   }
   throw new Error(`${what} succeeds under ${recorded - 1} operations, one less than recorded`);
+}
+
+/**
+ * `options` with the root environment values a case is evaluated with, when it names any. Only a
+ * case names them.
+ */
+function withEnvironment(entrypoint, options) {
+  if (entrypoint.environment === undefined) {
+    return options;
+  }
+  if (entrypoint.case === undefined) {
+    throw new Error(`${entrypoint.module}::${entrypoint.function}: only a case names an \`environment\``);
+  }
+  return { ...options, environment: environment(entrypoint.environment) };
 }
 
 /**
@@ -214,7 +229,7 @@ for (const program of loadCorpus()) {
           throw new Error(`the corpus emits no artifact for ${entrypoint.module}`);
         }
         const linked = linkNxIrProgram(module, { resolve });
-        const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], options);
+        const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], withEnvironment(entrypoint, options));
         if (entrypoint.fails) {
           checkFails(program.diagnostics[key], run);
           console.log(`ok - ${label} fails as recorded`);
@@ -301,7 +316,7 @@ for (const program of loadCorpus()) {
       recordedFailures += 1;
       const label = `${program.name} ${key} under ${record.budget} operations`;
       try {
-        evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], { maxOperations: record.budget });
+        evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], withEnvironment(entrypoint, { maxOperations: record.budget }));
         failures += 1;
         console.log(`not ok - ${label}: succeeds`);
       } catch (error) {
@@ -365,7 +380,7 @@ for (const program of loadCorpus()) {
       const label = `${program.name} (${variant}) ${key} origins`;
       try {
         const linked = linkNxIrProgram(modules.get(entrypoint.module), { resolve });
-        const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], options);
+        const run = (options) => evaluateFunction(linked, entrypoint.function, entrypoint.arguments ?? [], withEnvironment(entrypoint, options));
         if (entrypoint.fails) {
           const origins = { entries: [{ path: "", module: "an earlier call", start: 0, end: 0 }] };
           try {
