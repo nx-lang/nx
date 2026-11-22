@@ -356,7 +356,7 @@ export interface DocumentSymbol {
  * What a source node is: a construct a reader recognizes rather than a grammar production.
  *
  * `binding` is a name a `for` binds; `matchArm` is an arm of an `is` expression or of a condition
- * list; `unparsed` is a region the parser could not read.
+ * list; `provide` is a `provide` block, its `env.` overrides as attributes; `unparsed` is a region the parser could not read.
  */
 export type SourceRole =
   | "import"
@@ -384,6 +384,7 @@ export type SourceRole =
   | "matchArm"
   | "loop"
   | "binding"
+  | "provide"
   | "comment"
   | "docComment"
   | "unparsed";

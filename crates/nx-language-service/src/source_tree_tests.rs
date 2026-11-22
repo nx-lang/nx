@@ -210,6 +210,7 @@ fn punctuation(role: SourceRole) -> &'static [&'static str] {
         SourceRole::Match => &["if", "is", "else", "=>", "{", "}", "(", ")", ","],
         SourceRole::MatchArm => &["=>", ",", "{", "}", "(", ")"],
         SourceRole::Loop => &["for", "in", ",", "{", "}", "(", ")"],
+        SourceRole::Provide => &["provide", "{", "}", "(", ")"],
         // `as` renames an imported name.
         SourceRole::Reference => &["as"],
         SourceRole::TypeReference
@@ -879,6 +880,31 @@ fn a_loop_holds_its_bindings_iterable_and_body() {
     assert_eq!(keyed(&tree, "a.value.i").role, SourceRole::Binding);
     assert_eq!(keyed(&tree, "a.value.in").name.as_deref(), Some("xs"));
     assert_eq!(keyed(&tree, "a.value[0]").name.as_deref(), Some("x"));
+}
+
+#[test]
+fn a_provide_block_holds_its_overrides_and_body() {
+    let tree = tree_for(
+        "environment locale: string = \"en-US\"\nlet a() = { provide env.locale=\"fr-FR\" { env.locale } }",
+    );
+    let provided = keyed(&tree, "a.body");
+    assert_eq!(provided.role, SourceRole::Provide);
+    let locale = keyed(&tree, "a.body.env.locale");
+    assert_eq!(locale.role, SourceRole::Attribute);
+    assert_eq!(locale.name.as_deref(), Some("env.locale"));
+    assert_eq!(keyed(&tree, "a.body[0]").role, SourceRole::Member);
+}
+
+/// Spec: an element's `env.` attributes are reported as its attributes.
+#[test]
+fn an_elements_env_attributes_are_its_attributes() {
+    let tree = tree_for(
+        "environment space: int = 4\nlet <Box gap:int /> = <div />\nlet a() = <Box env.space=8 gap=2 />",
+    );
+    let space = keyed(&tree, "a.body.env.space");
+    assert_eq!(space.role, SourceRole::Attribute);
+    assert_eq!(space.name.as_deref(), Some("env.space"));
+    assert_eq!(keyed(&tree, "a.body.gap").role, SourceRole::Attribute);
 }
 
 #[test]
