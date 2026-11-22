@@ -177,7 +177,8 @@
         "stops": [
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 0,
               "g": 0,
               "r": 1
@@ -186,7 +187,8 @@
           },
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 1,
               "g": 0,
               "r": 0
@@ -386,7 +388,8 @@
         "stops": [
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 0,
               "g": 0,
               "r": 1
@@ -395,7 +398,8 @@
           },
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 1,
               "g": 0,
               "r": 0
@@ -595,7 +599,8 @@
         "stops": [
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 0,
               "g": 0,
               "r": 1
@@ -604,7 +609,8 @@
           },
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 1,
               "g": 0,
               "r": 0
@@ -952,7 +958,8 @@
                 "stops": [
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 0,
                       "g": 0,
                       "r": 1
@@ -961,7 +968,8 @@
                   },
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 1,
                       "g": 0,
                       "r": 0
@@ -1243,7 +1251,8 @@
               "stops": [
                 {
                   "color": {
-                    "a": 1,
+                    "$type": "Color.srgb",
+                    "alpha": 1,
                     "b": 0,
                     "g": 0,
                     "r": 1
@@ -1252,7 +1261,8 @@
                 },
                 {
                   "color": {
-                    "a": 1,
+                    "$type": "Color.srgb",
+                    "alpha": 1,
                     "b": 1,
                     "g": 0,
                     "r": 0
@@ -1677,7 +1687,8 @@
                 "stops": [
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 0,
                       "g": 0,
                       "r": 1
@@ -1686,7 +1697,8 @@
                   },
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 1,
                       "g": 0,
                       "r": 0
@@ -1709,7 +1721,8 @@
                 "stops": [
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 0,
                       "g": 0,
                       "r": 1
@@ -1718,7 +1731,8 @@
                   },
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 1,
                       "g": 0,
                       "r": 0
@@ -2098,7 +2112,8 @@
             "stops": [
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 0,
                   "g": 0,
                   "r": 1
@@ -2107,7 +2122,8 @@
               },
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 1,
                   "g": 0,
                   "r": 0
@@ -2130,7 +2146,8 @@
             "stops": [
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 0,
                   "g": 0,
                   "r": 1
@@ -2139,7 +2156,8 @@
               },
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 1,
                   "g": 0,
                   "r": 0
