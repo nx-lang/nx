@@ -687,12 +687,7 @@ impl<'p> Machine<'p> {
     }
 
     /// The entries of a bundle value, in order.
-    fn bundle_entries(
-        &self,
-        cx: Cx,
-        node: u32,
-        bundle: &Value,
-    ) -> Result<Vec<EvaluatedOverride>> {
+    fn bundle_entries(&self, cx: Cx, node: u32, bundle: &Value) -> Result<Vec<EvaluatedOverride>> {
         let entries = match bundle {
             Value::Record(record) if record.type_name() == Some(BUNDLE_TYPE) => {
                 record.get(BUNDLE_ENTRIES).cloned()
@@ -980,5 +975,61 @@ impl crate::program::Program {
             .iter()
             .map(|(key, value)| (index.qualified(*key), value.clone()))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn descriptor(env: &str) -> NxValue {
+        NxValue::from_json_str(&format!(
+            r#"{{ "$type": "Card", "title": "t", "$env": {env} }}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn entering_a_descriptor_appends_its_entries_inside_the_ones_held() {
+        let outer = Environment::root([("mode", NxValue::String("dark".to_string()))])
+            .enter(&descriptor(r#"[{ "value": "main::mode", "to": "dim" }]"#))
+            .unwrap();
+        let inner = outer
+            .enter(&descriptor(
+                r#"[{ "value": "main::size", "path": ["width"], "to": 4 }]"#,
+            ))
+            .unwrap();
+        assert_eq!(inner.roots(), outer.roots());
+        let values: Vec<_> = inner
+            .entries()
+            .iter()
+            .map(|entry| (entry.value.as_str(), entry.path.clone()))
+            .collect();
+        assert_eq!(
+            values,
+            [
+                ("main::mode", Vec::new()),
+                ("main::size", vec!["width".to_string()])
+            ]
+        );
+        // A descriptor without `$env`, or with an empty one, keeps the environment.
+        let plain = NxValue::from_json_str(r#"{ "$type": "Card" }"#).unwrap();
+        assert_eq!(inner.enter(&plain).unwrap().entries().len(), 2);
+        assert_eq!(inner.enter(&descriptor("[]")).unwrap().entries().len(), 2);
+    }
+
+    #[test]
+    fn a_malformed_env_is_refused_as_a_boundary_type() {
+        for env in [
+            "5",
+            "[3]",
+            r#"[{ "to": 1 }]"#,
+            r#"[{ "value": "main::mode" }]"#,
+            r#"[{ "value": "main::mode", "path": 2, "to": 1 }]"#,
+            r#"[{ "value": "main::mode", "path": [2], "to": 1 }]"#,
+        ] {
+            let error = Environment::default().enter(&descriptor(env)).unwrap_err();
+            assert_eq!(error.code(), "nx-ir-boundary-type", "{env}: {error}");
+        }
     }
 }
