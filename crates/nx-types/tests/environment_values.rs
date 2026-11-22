@@ -47,7 +47,10 @@ fn a_declaration_without_a_default_is_rejected() {
 
 #[test]
 fn a_default_of_the_wrong_type_is_rejected() {
-    assert_code("environment scale: float64 = \"large\"", "value-type-mismatch");
+    assert_code(
+        "environment scale: float64 = \"large\"",
+        "value-type-mismatch",
+    );
 }
 
 #[test]
@@ -66,7 +69,9 @@ fn a_read_has_the_declared_type() {
 
 #[test]
 fn a_field_read_goes_through_the_record() {
-    assert_clean(&format!("{MODES}let accent(): string = {{ env.color.accent }}"));
+    assert_clean(&format!(
+        "{MODES}let accent(): string = {{ env.color.accent }}"
+    ));
 }
 
 #[test]
@@ -124,5 +129,53 @@ fn an_element_attribute_overrides_and_is_not_a_property() {
 #[test]
 fn a_top_level_provide_is_checked() {
     assert_clean(&format!("{MODES}provide env.locale = \"fr-FR\""));
-    assert_code(&format!("{MODES}provide env.locale = 3"), "value-type-mismatch");
+    assert_code(
+        &format!("{MODES}provide env.locale = 3"),
+        "value-type-mismatch",
+    );
+}
+
+#[test]
+fn a_bundle_checks_its_entries() {
+    assert_clean(&format!(
+        "{MODES}let theme: env.Update = <env.Update locale=\"fr-FR\" color.accent=\"red\" />\n\
+         provide theme"
+    ));
+    assert_code(
+        &format!("{MODES}let theme: env.Update = <env.Update locale=3 />"),
+        "value-type-mismatch",
+    );
+    assert_code(
+        &format!("{MODES}let theme: env.Update = <env.Update missing=3 />"),
+        "unknown-environment-value",
+    );
+}
+
+#[test]
+fn a_bundle_takes_an_update_record_for_a_record_value() {
+    assert_clean(&format!(
+        "{MODES}let theme: env.Update = <env.Update color=<SemanticColors.Update accent=\"red\" /> />\n\
+         provide theme"
+    ));
+}
+
+#[test]
+fn a_provide_of_something_else_is_rejected() {
+    assert_code(
+        &format!("{MODES}let n = 3\nprovide n"),
+        "value-type-mismatch",
+    );
+}
+
+#[test]
+fn an_environment_value_named_update_is_rejected() {
+    assert_code("environment Update: int = 1", "reserved-name");
+}
+
+#[test]
+fn a_duplicate_environment_value_is_rejected() {
+    assert_code(
+        "environment space: int = 1\nenvironment space: int = 2",
+        "duplicate-environment",
+    );
 }

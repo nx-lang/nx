@@ -1,10 +1,11 @@
 use crate::model::{
     expr_id_u32, CodegenActionHandler, CodegenComponent, CodegenComponentDescriptor,
     CodegenComponentEmit, CodegenComponentField, CodegenComponentTargetKind, CodegenDeclaration,
-    CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
-    CodegenExpressionKind, CodegenFunctionParam, CodegenMatchArm, CodegenModule,
-    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
-    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
+    CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenEnvOverride,
+    CodegenExpression, CodegenExpressionKind, CodegenFunctionParam, CodegenMatchArm, CodegenModule,
+    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenProvide,
+    CodegenRecordField, CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef,
+    CodegenUnionCase,
 };
 use crate::options::CodegenError;
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
@@ -431,12 +432,138 @@ fn build_module(
             .then_with(|| lhs.name.cmp(&rhs.name))
     });
 
+    let mut provides = Vec::new();
+    for provide in lowered_module.provides() {
+        let mut scope = LexicalScope::new();
+        let built = match provide {
+            nx_hir::ProvideDecl::Override(provided) => {
+                let target = environment_target(
+                    artifact,
+                    module,
+                    provided.binding.as_ref(),
+                    &provided.name,
+                    provided.span,
+                    diagnostics,
+                )?;
+                CodegenProvide {
+                    target: Some(target),
+                    path: provided
+                        .path
+                        .iter()
+                        .map(|field| field.as_str().to_string())
+                        .collect(),
+                    value: build_expression(
+                        artifact,
+                        module,
+                        prepared_cache,
+                        lowered_module.as_ref(),
+                        &module_artifact.type_env,
+                        provided.value,
+                        &mut scope,
+                        diagnostics,
+                    )?,
+                }
+            }
+            nx_hir::ProvideDecl::Bundle { value, .. } => CodegenProvide {
+                target: None,
+                path: Vec::new(),
+                value: build_expression(
+                    artifact,
+                    module,
+                    prepared_cache,
+                    lowered_module.as_ref(),
+                    &module_artifact.type_env,
+                    *value,
+                    &mut scope,
+                    diagnostics,
+                )?,
+            },
+        };
+        provides.push(built);
+    }
+
     Some(CodegenModule {
         id: module.id,
         provenance: provenance(&module.source),
         declarations,
         imports,
+        provides,
     })
+}
+
+/// The environment declaration an `env.` read or override bound to, or `None` with a diagnostic
+/// when analysis left it unbound or the binding reaches no declaration.
+fn environment_target(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    binding: Option<&Name>,
+    name: &Name,
+    span: TextSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenReference> {
+    let reference = binding.and_then(|binding| {
+        resolve_visible_reference(artifact, resolved_module.id, binding.as_str())
+    });
+    if reference.is_none() {
+        diagnostics.push(
+            Diagnostic::error("codegen-unresolved-name")
+                .with_message(format!(
+                    "Environment value 'env.{name}' reaches no declaration, so it cannot be \
+                     emitted"
+                ))
+                .with_label(Label::primary(
+                    resolved_module.prepared_module_identity(),
+                    span,
+                ))
+                .build(),
+        );
+    }
+    reference
+}
+
+/// Builds the overrides of a `provide` block, element or bundle.
+#[allow(clippy::too_many_arguments)]
+fn build_env_overrides(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    overrides: &[ast::EnvOverride],
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenEnvOverride>> {
+    let mut built = Vec::with_capacity(overrides.len());
+    for provided in overrides {
+        let target = environment_target(
+            artifact,
+            resolved_module,
+            provided.binding.as_ref(),
+            &provided.name,
+            provided.span,
+            diagnostics,
+        )?;
+        let value = build_expression(
+            artifact,
+            resolved_module,
+            prepared_cache,
+            lowered_module,
+            type_env,
+            provided.value,
+            scope,
+            diagnostics,
+        )?;
+        built.push(CodegenEnvOverride {
+            target,
+            path: provided
+                .path
+                .iter()
+                .map(|field| field.as_str().to_string())
+                .collect(),
+            value,
+        });
+    }
+    Some(built)
 }
 
 #[derive(Debug, Default)]
@@ -565,6 +692,31 @@ fn build_declaration(
                     .map(|(_, result)| result.clone())
                     .or_else(|| type_env.get_expr_type(function.body).cloned()),
                 declared_return_type,
+            }
+        }
+        Item::Value(value) if nx_hir::environment_value_name(value.name.as_str()).is_some() => {
+            let mut scope = LexicalScope::new();
+            let default = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                value.value,
+                &mut scope,
+                diagnostics,
+            )?;
+            let declared_ty = build_type_ref(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                value.ty.as_ref()?,
+                diagnostics,
+            )?;
+            CodegenDeclarationKind::Environment {
+                default,
+                ty: type_env.lookup(&value.name).cloned(),
+                declared_ty,
             }
         }
         Item::Value(value) => {
@@ -1394,6 +1546,56 @@ fn build_expression(
                 }
             }
         }
+        ast::Expr::EnvRead { name, binding, .. } => CodegenExpressionKind::EnvRead {
+            reference: environment_target(
+                artifact,
+                resolved_module,
+                binding.as_ref(),
+                name,
+                span,
+                diagnostics,
+            )?,
+        },
+        ast::Expr::Provide {
+            overrides, body, ..
+        } => {
+            let overrides = build_env_overrides(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                overrides,
+                scope,
+                diagnostics,
+            )?;
+            let body = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *body,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::Provide {
+                overrides,
+                body: Box::new(body),
+            }
+        }
+        ast::Expr::EnvUpdate { overrides, .. } => CodegenExpressionKind::EnvUpdate {
+            overrides: build_env_overrides(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                overrides,
+                scope,
+                diagnostics,
+            )?,
+        },
         ast::Expr::Ident(name) => {
             let in_scope = scope.contains(name.as_str());
             let reference = if in_scope {
@@ -3355,6 +3557,12 @@ fn build_type_ref_resolving_aliases(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenTypeRef> {
     match ty {
+        // A bundle is checked where it is built; at a runtime boundary it is any value.
+        ast::TypeRef::Name(name) if name.as_str() == nx_hir::ENVIRONMENT_UPDATE_TYPE => {
+            Some(CodegenTypeRef::Primitive {
+                name: "object".to_string(),
+            })
+        }
         ast::TypeRef::Name(name) => {
             if is_builtin_type_name(name.as_str()) {
                 return Some(CodegenTypeRef::Primitive {

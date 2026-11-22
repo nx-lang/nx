@@ -126,6 +126,10 @@ enum Op {
 const NODES: &[Op] = &[Op::Node];
 const OPT_NODES: &[Op] = &[Op::OptNode];
 const STRS: &[Op] = &[Op::Str];
+/// One override of a `provide` block or bundle: the environment value, the field path, the value.
+const OVERRIDE: &[Op] = &[Op::RefPair, Op::List(STRS), Op::Node];
+/// One top-level provide: the environment value, absent for a bundle, the field path, the value.
+const PROVIDE: &[Op] = &[Op::OptRef, Op::List(STRS), Op::Node];
 const REFS: &[Op] = &[Op::RefPair];
 const PROPERTY: &[Op] = &[Op::Str, Op::Node];
 const FIELD: &[Op] = &[Op::Str, Op::Type, Op::OptNode, Op::Int];
@@ -233,6 +237,9 @@ impl Table {
                 node::UNION_CASE => &[Op::Ref, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ELEMENT => &[Op::Int, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ACTION_HANDLER => &[Op::Ref, Op::Str, Op::Ref, Op::Int, Op::OptRef, Op::Node],
+                node::ENV_READ => &[Op::Ref],
+                node::ENV_PROVIDE => &[Op::List(OVERRIDE), Op::Node],
+                node::ENV_UPDATE => &[Op::List(OVERRIDE)],
                 _ => return None,
             },
             Table::Declarations => match kind {
@@ -262,6 +269,8 @@ impl Table {
                 ],
                 declaration::UNION => &[Op::Str, Op::List(UNION_CASE), Op::List(REFS), Op::OptRef],
                 declaration::TYPE_ALIAS => &[Op::Str],
+                declaration::ENVIRONMENT => &[Op::Str, Op::Node, Op::Type],
+                declaration::PROVIDES => &[Op::Str, Op::List(PROVIDE)],
                 _ => return None,
             },
         })

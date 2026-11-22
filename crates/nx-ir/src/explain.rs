@@ -186,6 +186,29 @@ impl<'a> Explainer<'a> {
         }
     }
 
+    /// `.a.b` for a field path, or nothing for an empty one.
+    fn path(&self, path: &[IrItem]) -> Result<String, ExplainError> {
+        let mut text = String::new();
+        for field in path {
+            text.push('.');
+            text.push_str(self.string(self.int(field, "path field")?)?);
+        }
+        Ok(text)
+    }
+
+    /// The overrides of an `envProvide` or `envUpdate` node, one `env.name.path=value` each.
+    fn overrides(&self, overrides: &[IrItem]) -> Result<Vec<String>, ExplainError> {
+        let mut lines = Vec::new();
+        for entry in overrides {
+            let entry = self.list(entry, "override")?;
+            let target = self.reference_item(self.operand(entry, 0, "override")?)?;
+            let path = self.path(self.list_operand(entry, 1, "override")?)?;
+            let value = self.node(self.int_operand(entry, 2, "override")?)?;
+            lines.extend(prefixed(format!("{target}{path}="), value));
+        }
+        Ok(lines)
+    }
+
     fn reference_item(&self, item: &IrItem) -> Result<String, ExplainError> {
         let entry = self.list(item, "reference")?;
         self.reference(
@@ -442,6 +465,33 @@ impl<'a> Explainer<'a> {
                 }
             }
             kinds::declaration::TYPE_ALIAS => lines.push(format!("alias {name}{span}")),
+            kinds::declaration::ENVIRONMENT => {
+                let ty = self.ty(self.int_operand(entry, 3, "environment")?)?;
+                let simple = name.strip_prefix("env.").unwrap_or(name);
+                lines.push(format!("environment {simple}: {ty}{span} ="));
+                lines.extend(indent(self.node(self.int_operand(
+                    entry,
+                    2,
+                    "environment",
+                )?)?));
+            }
+            kinds::declaration::PROVIDES => {
+                for provide in self.list_operand(entry, 2, "provides")? {
+                    let provide = self.list(provide, "provide")?;
+                    let target = self.list_operand(provide, 0, "provide")?;
+                    let value = self.node(self.int_operand(provide, 2, "provide")?)?;
+                    let head = if target.is_empty() {
+                        "provide ".to_string()
+                    } else {
+                        let path = self.path(self.list_operand(provide, 1, "provide")?)?;
+                        format!(
+                            "provide {}{path} = ",
+                            self.reference_item(self.operand(provide, 0, "provide")?)?
+                        )
+                    };
+                    lines.extend(prefixed(head, value));
+                }
+            }
             other => return Err(self.malformed(format!("unknown declaration kind {other}"))),
         }
         Ok(lines)
@@ -740,6 +790,36 @@ impl<'a> Explainer<'a> {
                     .ok_or_else(|| self.malformed(format!("type index {index} is out of range")))?;
                 let ty = self.list(ty, "type")?;
                 vec![self.interval(ty)?]
+            }
+            kinds::node::ENV_READ => vec![self.reference(
+                self.int_operand(entry, 1, "envRead")?,
+                self.int_operand(entry, 2, "envRead")?,
+            )?],
+            kinds::node::ENV_PROVIDE => {
+                let mut lines = self.overrides(self.list_operand(entry, 1, "envProvide")?)?;
+                if let Some(first) = lines.first_mut() {
+                    first.insert_str(0, "provide ");
+                }
+                let last = lines.len() - 1;
+                lines[last].push_str(" {");
+                lines.extend(indent(self.node(self.int_operand(
+                    entry,
+                    2,
+                    "envProvide",
+                )?)?));
+                lines.push("}".to_string());
+                lines
+            }
+            kinds::node::ENV_UPDATE => {
+                let overrides = self.overrides(self.list_operand(entry, 1, "envUpdate")?)?;
+                if overrides.is_empty() {
+                    vec!["<env.Update />".to_string()]
+                } else {
+                    let mut lines = vec!["<env.Update".to_string()];
+                    lines.extend(indent(overrides));
+                    lines.push("/>".to_string());
+                    lines
+                }
             }
             kinds::node::COALESCE => {
                 let lhs = self.node(self.int_operand(entry, 1, "coalesce")?)?;

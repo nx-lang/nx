@@ -4,19 +4,19 @@
 //! our typed High-level Intermediate Representation (HIR).
 
 use crate::ast::{
-    BinOp, CompareOp, EnvOverride, Expr, FunctionParam, Literal, MatchArm, NumericPattern, Occurrence,
-    OrderedFloat, PatternBound, PatternTerm, RecordLiteralProperty, Stmt, TypeRef, UnOp,
-    UnsupportedTerm,
+    BinOp, CompareOp, EnvOverride, Expr, FunctionParam, Literal, MatchArm, NumericPattern,
+    Occurrence, OrderedFloat, PatternBound, PatternTerm, RecordLiteralProperty, Stmt, TypeRef,
+    UnOp, UnsupportedTerm,
 };
 use crate::{
-    property_union_name, props_record_name, state_record_name, update_record_name, Component,
-    ComponentEmit, ComponentEmitKind, Doc, Element, environment_item_name, ProvideDecl,
-    ENVIRONMENT_ITEM_PREFIX, ExprId, Function, FunctionForm, Import,
-    ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
-    PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
-    SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField, UnionDef,
-    ValueDef, Visibility, VisualizerDecl, WhitespaceRun, PROPERTY_UNION_SUFFIX,
-    PROPS_RECORD_SUFFIX, STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
+    environment_item_name, property_union_name, props_record_name, state_record_name,
+    update_record_name, Component, ComponentEmit, ComponentEmitKind, Doc, Element, ExprId,
+    Function, FunctionForm, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name,
+    Param, Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, ProvideDecl, RecordDef,
+    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef,
+    UnionCaseField, UnionDef, ValueDef, Visibility, VisualizerDecl, WhitespaceRun,
+    ENVIRONMENT_ITEM_PREFIX, ENVIRONMENT_UPDATE_TYPE, PROPERTY_UNION_SUFFIX, PROPS_RECORD_SUFFIX,
+    STATE_RECORD_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -1946,6 +1946,9 @@ impl LoweringContext {
             SyntaxKind::ELEMENT | SyntaxKind::TEXT_CHILD_ELEMENT => {
                 let span = node.span();
                 let element = self.lower_element(node);
+                if element.tag.as_str() == ENVIRONMENT_UPDATE_TYPE {
+                    return self.environment_update_expr(element, span);
+                }
                 let (element, overrides) = self.take_env_overrides(element);
                 let expr = self.element_or_record_expr(element, span);
                 self.wrap_in_provide(expr, overrides, span)
@@ -2452,6 +2455,14 @@ impl LoweringContext {
         let plain = name_node
             .map(|n| n.text().to_string())
             .unwrap_or_else(|| "unknown".to_string());
+        if plain == "Update" {
+            self.add_diagnostic(
+                "reserved-name: an environment value can't be named 'Update', since `env.Update` \
+                 names the bundle type"
+                    .to_string(),
+                name_node.map(|n| n.span()).unwrap_or_else(|| node.span()),
+            );
+        }
         let ty = match node.child_by_field("type") {
             Some(type_node) => {
                 self.module
@@ -3453,6 +3464,48 @@ impl LoweringContext {
             binding: None,
             span: property.span,
         })
+    }
+
+    /// The bundle `<env.Update a=1 b.c=2 />` constructs: each attribute names an environment value
+    /// without `env.`, and a dotted one a field path in it. Content and conditional attributes are
+    /// rejected, since a bundle is a flat list of overrides.
+    fn environment_update_expr(&mut self, element: Element, span: TextSpan) -> ExprId {
+        if !element.content.is_empty() {
+            self.add_diagnostic(
+                "environment-path: `<env.Update>` takes no content; set each value as an attribute"
+                    .to_string(),
+                span,
+            );
+        }
+        let mut overrides = Vec::new();
+        for entry in &element.property_entries {
+            match entry {
+                PropertyEntry::Value(property) => {
+                    let key = property
+                        .key
+                        .as_str()
+                        .strip_prefix(ENVIRONMENT_ITEM_PREFIX)
+                        .unwrap_or(property.key.as_str());
+                    let mut parts = key.split('.').map(Name::new);
+                    let name = parts.next().unwrap_or_else(|| Name::new(""));
+                    overrides.push(EnvOverride {
+                        name,
+                        path: parts.collect(),
+                        value: property.value,
+                        binding: None,
+                        span: property.span,
+                    });
+                }
+                _ => self.add_diagnostic(
+                    "environment-path: an `<env.Update>` attribute can't be set conditionally"
+                        .to_string(),
+                    span,
+                ),
+            }
+        }
+        let expr = self.alloc_expr(Expr::EnvUpdate { overrides, span });
+        self.module.set_expr_span(expr, span);
+        expr
     }
 
     /// `expr` with `overrides` in effect, or `expr` itself when there are none.

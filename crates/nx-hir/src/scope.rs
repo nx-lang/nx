@@ -513,6 +513,11 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
                 self.check_expr(*body, scope);
             }
+            ast::Expr::EnvUpdate { overrides, .. } => {
+                for provided in overrides {
+                    self.check_expr(provided.value, scope);
+                }
+            }
             ast::Expr::Ident(name) if name.as_str() == "env" => {
                 self.report_reserved_env(self.module.raw_module().expr_span(expr_id), None);
             }

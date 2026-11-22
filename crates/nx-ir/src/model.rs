@@ -48,6 +48,10 @@ pub const NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1: &str = "function-re
 /// the module by name rather than skipping its checks.
 pub const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1: &str = "constraints-v1";
 
+/// Required by a module that declares an environment value, reads or provides one, or has
+/// top-level provides, so a runtime that predates environment values refuses the module by name.
+pub const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1: &str = "environment-v1";
+
 /// The kind numbers of schema 5. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
@@ -92,6 +96,14 @@ pub mod kinds {
         /// A numeric pattern in an `ifIs` arm's pattern list, `[29, type]`: matches a scrutinee
         /// in the constrained type's interval. Appears nowhere else.
         pub const INTERVAL: i64 = 29;
+        /// An environment read, `[30, ref]`: the value the environment gives the `environment`
+        /// declaration the reference names.
+        pub const ENV_READ: i64 = 30;
+        /// A `provide` block, `[31, overrides, body]`: each override is `[ref, path, value]`,
+        /// evaluated outside the block, and the body is evaluated inside them.
+        pub const ENV_PROVIDE: i64 = 31;
+        /// An `env.Update` bundle, `[32, overrides]`: the overrides, evaluated, as one value.
+        pub const ENV_UPDATE: i64 = 32;
 
         pub const NAMES: &[(i64, &str)] = &[
             (BOOL, "bool"),
@@ -123,6 +135,9 @@ pub mod kinds {
             (STANDARD_MATH, "standardMath"),
             (CHECK, "check"),
             (INTERVAL, "interval"),
+            (ENV_READ, "envRead"),
+            (ENV_PROVIDE, "envProvide"),
+            (ENV_UPDATE, "envUpdate"),
         ];
     }
 
@@ -233,6 +248,13 @@ pub mod kinds {
         pub const COMPONENT: i64 = 3;
         pub const UNION: i64 = 4;
         pub const TYPE_ALIAS: i64 = 5;
+        /// An environment value, `[6, name, default, type]`. The name is `env.` and the value's
+        /// name, so it never collides with a `let` value of the same name.
+        pub const ENVIRONMENT: i64 = 6;
+        /// The module's top-level provides, `[7, name, provides]`, at most one per module and
+        /// named `$provides`. Each provide is `[target, path, value]`: an optional reference to an
+        /// `environment` declaration, absent for a bundle, a list of field names, and a node.
+        pub const PROVIDES: i64 = 7;
 
         /// Bit 0 of a function declaration's result flags: the result type, declared or inferred,
         /// is a standalone `T?`, so an entry call returns an empty result to the host as `null`.
@@ -245,6 +267,8 @@ pub mod kinds {
             (COMPONENT, "component"),
             (UNION, "union"),
             (TYPE_ALIAS, "typeAlias"),
+            (ENVIRONMENT, "environment"),
+            (PROVIDES, "provides"),
         ];
     }
 

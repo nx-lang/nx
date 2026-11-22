@@ -1016,7 +1016,7 @@ pub fn apply_environment_bindings(module: &mut PreparedModule, bindings: &FxHash
         .filter(|(_, expr)| {
             matches!(
                 expr,
-                ast::Expr::EnvRead { .. } | ast::Expr::Provide { .. }
+                ast::Expr::EnvRead { .. } | ast::Expr::Provide { .. } | ast::Expr::EnvUpdate { .. }
             )
         })
         .map(|(id, _)| id)
@@ -1028,7 +1028,7 @@ pub fn apply_environment_bindings(module: &mut PreparedModule, bindings: &FxHash
                     *binding = Some(resolved.clone());
                 }
             }
-            ast::Expr::Provide { overrides, .. } => {
+            ast::Expr::Provide { overrides, .. } | ast::Expr::EnvUpdate { overrides, .. } => {
                 for provided in overrides {
                     if let Some(resolved) = bindings.get(&provided.value) {
                         provided.binding = Some(resolved.clone());
@@ -1545,6 +1545,11 @@ fn collect_handler_rewrites_in_expr(
                 collect_handler_rewrites_in_expr(module, provided.value, owner, rewrites);
             }
             collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
+        }
+        ast::Expr::EnvUpdate { overrides, .. } => {
+            for provided in overrides {
+                collect_handler_rewrites_in_expr(module, provided.value, owner, rewrites);
+            }
         }
         ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);

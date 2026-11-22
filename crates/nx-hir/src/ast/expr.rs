@@ -286,6 +286,17 @@ pub enum Expr {
         span: TextSpan,
     },
 
+    /// An `env.Update` bundle: overrides as one value, for a top-level `provide` to apply.
+    ///
+    /// <para>Each override's `name` is the attribute's first segment, without `env.`, and its
+    /// path the rest; the type checker binds each as it binds an `env.` read.</para>
+    ///
+    /// Example: `<env.Update space=8 color.accent=#e11d48 />`
+    EnvUpdate {
+        overrides: Vec<EnvOverride>,
+        span: TextSpan,
+    },
+
     /// Binary operation.
     ///
     /// Example: `a + b`, `x == y`
@@ -570,6 +581,7 @@ impl Expr {
             Expr::ResolvedUnionCase { span, .. } => *span,
             Expr::EnvRead { span, .. } => *span,
             Expr::Provide { span, .. } => *span,
+            Expr::EnvUpdate { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
             Expr::Range { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,

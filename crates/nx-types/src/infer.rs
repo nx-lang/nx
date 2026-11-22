@@ -796,6 +796,17 @@ impl<'a> InferenceContext<'a> {
                 self.infer_expr(body)
             }
 
+            // A bundle: each entry is checked as an override, a record value also taking its
+            // update record, and the bundle is an `env.Update`.
+            ast::Expr::EnvUpdate { overrides, .. } => {
+                let overrides = overrides.clone();
+                self.check_environment_duplicates(&overrides);
+                for provided in &overrides {
+                    self.check_environment_entry(provided, true);
+                }
+                Type::named(nx_hir::ENVIRONMENT_UPDATE_TYPE)
+            }
+
             // Identifiers look up in environment, then in the narrowings in force.
             ast::Expr::Ident(name) => {
                 self.record_loop_name_use(expr_id, name);
@@ -5566,6 +5577,10 @@ impl<'a> InferenceContext<'a> {
         scoped: bool,
     ) -> Type {
         match type_ref {
+            // The bundle type has no declaration: it is every environment value, optional.
+            ast::TypeRef::Name(name) if name.as_str() == nx_hir::ENVIRONMENT_UPDATE_TYPE => {
+                Type::named(name.clone())
+            }
             ast::TypeRef::Name(name) => {
                 let ordinal = self.next_type_name_ordinal(name);
                 let ty = self.type_from_type_name(declaring_module, name, seen, scoped);
@@ -7800,6 +7815,12 @@ impl<'a> InferenceContext<'a> {
     /// Checks one override: resolves the value it names, the field its path reaches, and its
     /// value against that field's type. The value is inferred in any case.
     fn check_environment_override(&mut self, provided: &nx_hir::ast::EnvOverride) {
+        self.check_environment_entry(provided, false);
+    }
+
+    /// Checks one override, or with `in_bundle` one `env.Update` entry, which may also give a
+    /// record-typed value or field that record's update record to patch it with.
+    fn check_environment_entry(&mut self, provided: &nx_hir::ast::EnvOverride, in_bundle: bool) {
         let actual = self.infer_expr(provided.value);
         let Some((binding, ty)) = self.resolve_environment_value(&provided.name, provided.span)
         else {
@@ -7811,6 +7832,13 @@ impl<'a> InferenceContext<'a> {
         else {
             return;
         };
+        if in_bundle {
+            if let (Type::Named(actual), Type::Named(expected)) = (&actual, &expected) {
+                if actual.name.as_str() == format!("{}.Update", expected.name) {
+                    return;
+                }
+            }
+        }
         let mut spelled = format!("env.{}", provided.name);
         for field in &provided.path {
             spelled = format!("{spelled}.{field}");
@@ -7867,6 +7895,14 @@ impl<'a> InferenceContext<'a> {
     /// Checks the overrides of one element or `provide` block: each on its own, and the same
     /// path written twice.
     fn check_environment_overrides(&mut self, overrides: &[nx_hir::ast::EnvOverride]) {
+        self.check_environment_duplicates(overrides);
+        for provided in overrides {
+            self.check_environment_override(provided);
+        }
+    }
+
+    /// Reports a path written twice in one list of overrides.
+    fn check_environment_duplicates(&mut self, overrides: &[nx_hir::ast::EnvOverride]) {
         let mut seen: Vec<(Name, Vec<Name>)> = Vec::new();
         for provided in overrides {
             let key = (provided.name.clone(), provided.path.clone());
@@ -7882,7 +7918,6 @@ impl<'a> InferenceContext<'a> {
                 );
             }
             seen.push(key);
-            self.check_environment_override(provided);
         }
     }
 

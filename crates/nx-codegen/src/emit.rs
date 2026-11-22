@@ -201,6 +201,13 @@ fn collect_source_codegen_diagnostics(
                 collect_record_field_source_codegen_diagnostics(module, &case.fields, diagnostics);
             }
         }
+        CodegenDeclarationKind::Environment { .. } => {
+            diagnostics.push(source_codegen_unsupported_diagnostic(
+                module,
+                declaration.span,
+                "environment values are not supported by executable source codegen yet",
+            ));
+        }
         CodegenDeclarationKind::TypeAlias { .. } | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
@@ -235,6 +242,15 @@ fn collect_expression_source_codegen_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &expression.kind {
+        CodegenExpressionKind::EnvRead { .. }
+        | CodegenExpressionKind::Provide { .. }
+        | CodegenExpressionKind::EnvUpdate { .. } => {
+            diagnostics.push(source_codegen_unsupported_diagnostic(
+                module,
+                expression.span,
+                "environment values are not supported by executable source codegen yet",
+            ));
+        }
         // A handler is an unevaluated body a host dispatches later; these targets have no
         // instance to dispatch against, so the binding is refused before anything is emitted.
         CodegenExpressionKind::ActionHandler(_) => {
@@ -849,6 +865,7 @@ impl SchemaDeclaration {
             },
             CodegenDeclarationKind::Function { .. }
             | CodegenDeclarationKind::Value { .. }
+            | CodegenDeclarationKind::Environment { .. }
             | CodegenDeclarationKind::TypeAlias { .. }
             | CodegenDeclarationKind::Unsupported(_) => return None,
         };
@@ -1415,6 +1432,7 @@ fn emit_declaration(
             }
         }
         // A signature or field names an alias as written, so TypeScript needs the alias itself.
+        CodegenDeclarationKind::Environment { .. } => {}
         CodegenDeclarationKind::TypeAlias { target: aliased } => {
             if target.is_typescript() {
                 out.push_str(&format!(
@@ -3600,6 +3618,12 @@ fn emit_expression(
             format!("(() => {{ const __nx$callee = {}; const __nx$args = {input}; return __nx$callee({arguments}); }})()",
                 emit_expression(current_module_id, callee, context))
         }
+        CodegenExpressionKind::EnvRead { .. }
+        | CodegenExpressionKind::Provide { .. }
+        | CodegenExpressionKind::EnvUpdate { .. } => {
+            "nxRuntimeError(\"environment values are not supported by executable source codegen yet\")"
+                .to_string()
+        }
         CodegenExpressionKind::IntervalPattern { .. } => {
             "nxRuntimeError(\"numeric patterns are not supported by executable source codegen yet\")"
                 .to_string()
@@ -4599,6 +4623,7 @@ fn collect_declaration_value_references(
         CodegenDeclarationKind::Unsupported(_) => {}
         CodegenDeclarationKind::Record { .. }
         | CodegenDeclarationKind::Union { .. }
+        | CodegenDeclarationKind::Environment { .. }
         | CodegenDeclarationKind::TypeAlias { .. } => {}
     }
 }
@@ -4652,6 +4677,7 @@ fn collect_declaration_type_references(
                 collect_expression_render_type_references(module.id, body, output);
             }
         }
+        CodegenDeclarationKind::Environment { .. } => {}
         CodegenDeclarationKind::TypeAlias { target } => {
             collect_type_ref_references(module, target, output);
         }
@@ -4910,6 +4936,9 @@ fn collect_expression_value_references(
         | CodegenExpressionKind::ConstraintCheck { operand: expr, .. } => {
             collect_expression_value_references(current_module_id, expr, output);
         }
+        CodegenExpressionKind::EnvRead { .. }
+        | CodegenExpressionKind::Provide { .. }
+        | CodegenExpressionKind::EnvUpdate { .. } => {}
         CodegenExpressionKind::IntervalPattern { .. } => {}
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_value_references(current_module_id, callee, output);
@@ -5198,6 +5227,7 @@ fn collect_declaration_runtime_helpers(
                 output.insert("NxEmpty");
             }
         }
+        CodegenDeclarationKind::Environment { .. } => {}
         CodegenDeclarationKind::TypeAlias { target } => {
             if type_ref_has_optional(target) {
                 output.insert("NxEmpty");
@@ -5342,6 +5372,11 @@ fn collect_expression_runtime_helpers(
             for content in &element.content {
                 collect_expression_runtime_helpers(content, output);
             }
+        }
+        CodegenExpressionKind::EnvRead { .. }
+        | CodegenExpressionKind::Provide { .. }
+        | CodegenExpressionKind::EnvUpdate { .. } => {
+            output.insert("nxRuntimeError");
         }
         CodegenExpressionKind::Unsupported(_) | CodegenExpressionKind::IntervalPattern { .. } => {
             output.insert("nxRuntimeError");

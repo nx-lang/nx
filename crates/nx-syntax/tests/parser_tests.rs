@@ -307,7 +307,11 @@ fn test_parse_environment_and_provide_forms() {
     "#;
     let result = parse_str(source, "environment.nx");
 
-    assert!(result.is_ok(), "Environment forms should parse: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "Environment forms should parse: {:?}",
+        result.errors
+    );
     let root = result.root().expect("Should have root node");
     assert_eq!(count_kind(&root, SyntaxKind::ENVIRONMENT_DEFINITION), 2);
     assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_DEFINITION), 3);
@@ -334,7 +338,11 @@ fn test_parse_environment_and_provide_remain_names_elsewhere() {
     "#;
     let result = parse_str(source, "environment-contextual.nx");
 
-    assert!(result.is_ok(), "provide and environment should stay names: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "provide and environment should stay names: {:?}",
+        result.errors
+    );
     let root = result.root().expect("Should have root node");
     assert!(!contains_kind(&root, SyntaxKind::ENVIRONMENT_DEFINITION));
     assert!(!contains_kind(&root, SyntaxKind::PROVIDE_DEFINITION));
