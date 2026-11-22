@@ -56,8 +56,15 @@ numbers as sRGB ones:
 
 ```nx
 import "@nx/color" as c
+let spaceName(value: c.Color): string = {
+  if value is {
+    c.Color.srgb => "sRGB"
+    c.Color.displayP3 => "Display P3"
+    c.Color.oklab, c.Color.oklch => "perceptual"
+  }
+}
 let red(value: c.Color): float64 = { c.toRgb(value).r }
-let root() = { red(c.oklch(0.7, 0.1, 200)) }
+let root() = { spaceName(c.oklch(0.7, 0.1, 200)) red(c.oklch(0.7, 0.1, 200)) }
 ```
 
 Constructors accept float64 calculations, validate before narrowing, and round to float32.
@@ -92,6 +99,25 @@ import "@nx/color" as c
 let vivid = { c.oklch(0.7, 0.3, 145) }
 let root() = { c.inGamut(vivid) c.toHex(c.toGamut(vivid)) }
 ```
+
+### What each function does with a wide color
+
+A function keeps a wide color wide unless its result is defined only in sRGB. Then it maps the
+color into sRGB first, as an sRGB screen would.
+
+| Function | Input | Result |
+| --- | --- | --- |
+| `toGamut(value, gamut)` | any | `Color.srgb` or `Color.displayP3`, mapped if outside |
+| `inGamut(value, gamut)` | any | whether the color fits, within 2e-6 per channel |
+| `toHex`, `toRgb`, `toHsl`, `toHsv`, `toHwb`, `toLinearRgb` | any | sRGB, mapped first |
+| `relativeLuminance`, `contrastRatio`, `bestTextColor` | any | measured on the sRGB-mapped color |
+| `toOklab`, `toOklch` | any | exact, never mapped |
+| `toCss` | any | the color's own space |
+| `withAlpha`, `fadeIn`, `fadeOut` | any | same space |
+| `lighten` … `grayscale` | any | same space, mapped into its gamut if RGB |
+| `invert` | sRGB, Display P3 | same space |
+| `invert` | Oklab, Oklch | Display P3 |
+| `mix`, `composite` | any | the wider input space |
 
 ## Parsing and output
 

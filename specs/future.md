@@ -2430,5 +2430,4 @@ and `toGamut`. Left for later:
 - Drawing on P3 surfaces in Skia and Canvas, instead of mapping into sRGB at preparation.
 - An OKLCH picker, so wide colors can be edited and not only shown.
 - Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
-
 - `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.

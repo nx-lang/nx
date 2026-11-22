@@ -154,6 +154,14 @@ function pointer(type: string, clientX: number, init: MouseEventInit = {}): Mous
 }
 
 describe("what the reading can edit", () => {
+  it("offers the picker for an sRGB color and only shows a color in a wider space", async () => {
+    const source = ['import "@nx/color" as c', "let plain = { c.srgb(1, 0, 0) }", "let p3 = { c.displayP3(1, 0, 0) }", "let lch = <c.Color.oklch l=0.7 c=0.1 h=200 />", ""].join("\n");
+    const { tree, text } = await treeOf([{ uri: "nx:///colors.nx", identity: "colors.nx", source }]);
+    const colors = [...editTargets(indexTree(tree, text)).values()].filter((target) => target.kind === "color");
+    assert.deepEqual(colors.map((target) => target.value), ["#ff0000ff"], "only the sRGB color is a picker target");
+    assert.ok(tree.nodes.some((node) => node.color?.startsWith("color(display-p3") === true), "the P3 color still has its swatch");
+  });
+
   it("finds each editable value and its editor from the tree", async () => {
     const { tree, text } = await fixture("editing");
     const targets = editTargets(indexTree(tree, text));

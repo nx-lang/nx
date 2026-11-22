@@ -1,4 +1,4 @@
-module @nx/color/color.nx fingerprint 1499878461758878924
+module @nx/color/color.nx fingerprint 347466089660937621
 requires update-records-v1 property-unions-v1 constraints-v1
 entrypoints functions [] components []
 

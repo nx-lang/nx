@@ -189,7 +189,8 @@ fn narrow(x: f64) -> f64 {
 }
 /// Wraps finite degrees into [0, 360), also after float32 rounding.
 fn hue(h: f64) -> f64 {
-    let h = h.rem_euclid(360.0);
+    // Adding zero turns the -0.0 that `rem_euclid` leaves for -360 into 0.0, as TypeScript gives.
+    let h = h.rem_euclid(360.0) + 0.0;
     if narrow(h) >= 360.0 {
         0.0
     } else {
@@ -597,6 +598,10 @@ pub fn parse(text: &str) -> Result<NxValue, Error> {
     };
     let mut body = tail.strip_suffix(')').ok_or_else(bad)?;
     let mut name = name;
+    // The predefined spaces are written only inside `color()`: `display-p3(…)` is not CSS.
+    if matches!(name, "srgb" | "srgb-linear" | "display-p3") {
+        return Err(bad());
+    }
     if name == "color" {
         body = body.trim_ascii();
         let split = body
@@ -768,7 +773,7 @@ pub fn parse(text: &str) -> Result<NxValue, Error> {
     finish(space, c).map_err(|_| bad())
 }
 fn wrapped_hue(h: f64) -> f64 {
-    let h = h.rem_euclid(360.0);
+    let h = h.rem_euclid(360.0) + 0.0;
     if h >= 360.0 || h == 0.0 {
         0.0
     } else {
@@ -1144,6 +1149,12 @@ mod tests {
     }
     fn s(text: &str) -> NxValue {
         NxValue::String(text.into())
+    }
+    #[test]
+    fn a_wrapped_hue_is_never_negative_zero() {
+        let args = [0.5, 0.1, -360.0, 1.0].map(NxValue::Float);
+        let color = read(&call("oklch", &args)).unwrap();
+        assert_eq!(color.c[2].to_bits(), 0.0_f64.to_bits());
     }
     #[test]
     fn names_and_arities_agree() {

@@ -32,8 +32,8 @@ colors. Edits SHALL change only a hex token, the literal text argument of parse 
 `Color.srgb`, literal numeric arguments of rgb/rgba/srgb, or literal numeric fields of directly
 authored `Color.srgb` records. They SHALL preserve unrelated source, comments, and unchanged
 channel precision, use normal undo, and reject stale source revisions. Opening or dismissing a
-picker SHALL not change source or quantize channels. A recognized color in another space SHALL open
-read-only, showing its CSS text. Unsupported or computed expressions SHALL remain read-only; the
+picker SHALL not change source or quantize channels. A recognized color in another space SHALL be shown
+read-only, with its swatch and its CSS text, and SHALL NOT be offered to the sRGB picker. Unsupported or computed expressions SHALL remain read-only; the
 picker SHALL NOT replace them with a constant.
 
 #### Scenario: Transparent literal is edited safely
@@ -49,5 +49,5 @@ picker SHALL NOT replace them with a constant.
 - **THEN** a computed expression SHALL remain read-only and a stale literal edit SHALL be rejected until rediscovery
 
 #### Scenario: A wide color is not rewritten as sRGB
-- **WHEN** an author opens the picker for `displayP3(1, 0, 0)`
-- **THEN** the picker SHALL be read-only and SHALL NOT offer an edit that would rewrite the color as hex
+- **WHEN** a document holds `displayP3(1, 0, 0)`
+- **THEN** its swatch SHALL be shown, and no picker edit SHALL be offered that would rewrite the color as hex

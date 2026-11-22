@@ -10,7 +10,7 @@ and otherwise unconstrained. `srgb` and `displayP3` channels SHALL be encoded wi
 curve, using the sRGB and Display P3 primaries respectively. Because the ranges are value
 constraints, an ordinary record construction SHALL be checked by the existing constant and runtime
 constraint rules. `validate` SHALL accept any case and fail with `color-invalid-channel`, naming the
-field, for a value that bypassed those rules, such as an SDK record. Library functions SHALL
+field, for a value that bypassed those rules, such as one read without a typed boundary. Library functions SHALL
 validate every Color input. Constructors SHALL validate before narrowing, SHALL round stored channels
 to IEEE float32 nearest/ties-to-even, and SHALL normalize signed zero. No library function SHALL
 expose a channel of a color without naming its space, through a case or a conversion.
@@ -24,8 +24,12 @@ expose a channel of a color without naming its space, through a case or a conver
 - **THEN** analysis SHALL report `2.0` as outside the constraint for `r`
 
 #### Scenario: Invalid SDK record
-- **WHEN** validate or a formatter receives an SDK-supplied `Color.oklch` with `c` = -1, NaN, or infinity
-- **THEN** it SHALL report color-invalid-channel for `c` without producing output
+- **WHEN** an SDK client passes a `Color.oklch` with `c` = -1 to a function whose parameter is typed
+  with Color
+- **THEN** the call SHALL fail at the boundary with `nx-ir-boundary-constraint` before the function
+  runs
+- **AND** when a value reaches the library without a typed boundary, as graphics preparation reads a
+  scene, a channel out of range, NaN or infinity SHALL fail with color-invalid-channel
 
 #### Scenario: A wide color keeps its space
 - **WHEN** a program evaluates `oklch(0.7, 0.3, 145)`

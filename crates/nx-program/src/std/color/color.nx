@@ -51,8 +51,6 @@ export type ParseResult =
 /// Rectangular interpolation space.
 export type InterpolationSpace = srgb | linearSrgb | oklab
 
-// The channel records are unchanged.
-
 /// Encoded sRGB channels in [0, 255]; alpha is in [0, 1].
 export type RgbChannels = {
   r: float64      /// Red in [0, 255].

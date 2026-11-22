@@ -3574,6 +3574,195 @@
         }
       ],
       "expected": 0.39185346312909936
+    },
+    {
+      "op": "parse",
+      "args": [
+        "display-p3(1 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "parse",
+      "args": [
+        "srgb(1 0 0)"
+      ],
+      "error": "color-invalid-text"
+    },
+    {
+      "op": "oklch",
+      "args": [
+        0.5,
+        0.1,
+        -360,
+        1
+      ],
+      "expected": [
+        0.5,
+        0.1,
+        0,
+        1
+      ],
+      "space": "oklch"
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "oklch(0 0.2 30)"
+        },
+        "srgb"
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "toGamut",
+      "args": [
+        {
+          "color": "oklch(1 0.2 30)"
+        },
+        "displayP3"
+      ],
+      "expected": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "oklch(0.6 0 0)"
+        },
+        {
+          "color": "oklab(0.6 0 0)"
+        },
+        0.5,
+        "oklab"
+      ],
+      "expected": [
+        0.6,
+        0,
+        0,
+        1
+      ],
+      "space": "oklch"
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "oklab(0.6 0 0)"
+        },
+        {
+          "color": "oklch(0.6 0 0)"
+        },
+        0.5,
+        "oklab"
+      ],
+      "expected": [
+        0.6,
+        0,
+        0,
+        1
+      ],
+      "space": "oklab"
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        {
+          "color": "oklch(0.7 0.1 200)"
+        },
+        0,
+        "oklab"
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "op": "mix",
+      "args": [
+        {
+          "color": "#f00"
+        },
+        {
+          "color": "oklch(0.7 0.1 200)"
+        },
+        1,
+        "oklab"
+      ],
+      "expected": [
+        0.7,
+        0.1,
+        200,
+        1
+      ],
+      "space": "oklch"
+    },
+    {
+      "op": "composite",
+      "args": [
+        {
+          "color": "color(display-p3 1 0 0)"
+        },
+        {
+          "color": "#fff"
+        }
+      ],
+      "expected": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "space": "displayP3"
+    },
+    {
+      "op": "lighten",
+      "args": [
+        {
+          "color": "oklab(0.5 0.1 0)"
+        },
+        0.1
+      ],
+      "expected": [
+        0.6,
+        0.1,
+        0,
+        1
+      ],
+      "space": "oklab"
+    },
+    {
+      "op": "grayscale",
+      "args": [
+        {
+          "color": "oklch(0.5 0.2 100)"
+        }
+      ],
+      "expected": [
+        0.5,
+        0,
+        100,
+        1
+      ],
+      "space": "oklch"
     }
   ]
 }

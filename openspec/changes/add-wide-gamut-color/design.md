@@ -157,7 +157,7 @@ change keeps. P3 surfaces are a follow-up
   text. Browsers support `color(display-p3 …)` and `oklch()`, and map them for the screen.
 - **Out-of-sRGB mark:** a swatch for a color outside sRGB gets a small mark, with a tooltip saying
   it shows differently on sRGB screens.
-- **Picker:** edits `Color.srgb` colors exactly as today. Wide colors open read-only, rather than
+- **Picker:** edits `Color.srgb` colors exactly as today. Wide colors are shown read-only, with no picker, rather than
   being rewritten to hex.
 
 ## Risks / Trade-offs
