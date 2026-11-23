@@ -154,6 +154,29 @@ Each type maps to one DTCG 2025.10 type, so export can map them directly:
 
 They are aliases, so `padding=12` stays valid and only tools see the difference.
 
+### One design across platforms
+
+The tokens are platform-neutral, as Material's, Fluent's and DTCG's are: they name a value, and each
+UI library maps it to its platform, whether HTML, drawn UI or a native toolkit. A value that needs
+to differ by platform is an ordinary override, not a separate mechanism: the platform's UI library
+documents it, and the host sets it as a root (`--env`) or the main module provides it. These are
+the values most likely to need one:
+- **Units.** `Spacing`, `Radius`, `BorderWidth` and `FontSize` are layout units: CSS pixels on the
+  web, dp on Android, points on Apple platforms, and device-independent pixels on Windows, each
+  about 1/96 inch at standard density. The renderer scales them to the screen; the tokens carry no
+  unit. Export writes `px`, and may write `rem` for font sizes.
+- **Font families.** The defaults are the generic names `sans-serif` and `monospace`, which every
+  renderer resolves to a system font. A platform library may provide the platform's own face
+  (Segoe UI, SF Pro, Roboto). A theme that names a specific font must make sure it is installed or
+  bundled where it runs; the tokens don't load fonts.
+- **Shadows.** `Shadow` follows CSS `box-shadow`: offset, blur, spread and color. Skia's and
+  Canvas's blur sigma is half the CSS blur, which the renderer converts. Toolkits without spread,
+  or with elevation instead of shadows (Android), approximate the shadow, so a shadow may look
+  slightly different there.
+
+Two more are left to later work: density (touch screens need larger targets; see Open Questions
+on a `Density` mode), and reduced motion, which is a host input that `env.motion` could match on.
+
 ## Risks / Trade-offs
 
 - **The core grows by accretion.** → The rule that a role moves into the core only when two
