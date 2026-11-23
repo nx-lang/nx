@@ -125,6 +125,30 @@ The roles are the intersection of the systems surveyed, at about shadcn/ui's siz
 
 `accent` rather than Material's `primary`, as the design doc settled, because `primary` reads as
 "most important" in more contexts than color.
+This is the platforms' name for the role: Apple's accent and tint color, Windows'
+`SystemAccentColor`, CSS's `accent-color` and Radix Themes' `accentColor` all mean the main action
+and selection color. Web component libraries more often say `primary` (Material, MUI, Bootstrap,
+shadcn/ui, Ant Design), and Fluent 2, Atlassian and Polaris say `brand`. The reference page has a
+short "what other systems call this" note, and a table mapping shadcn/ui's names, the set most
+developers and AI models know:
+
+| shadcn/ui | `@nx/design` |
+|---|---|
+| `background`, `foreground` | `background`, `text.normal` |
+| `card`, `popover` and their `-foreground` | `surface`, with `text.normal` |
+| `muted`, `muted-foreground` | `surfaceMuted`, `text.muted` |
+| `primary`, `primary-foreground` | `accent`, `onAccent` |
+| `destructive`, `destructive-foreground` | `danger`, `onDanger` |
+| `border` | `border` |
+| `ring` | `focus` |
+| `secondary`, `secondary-foreground` | none: a component token |
+| `accent`, `accent-foreground` (the quiet hover fill) | none: a component token |
+| `input` | none: inputs use `border` |
+| none | `warning`, `success` and their `on…` roles, `text.disabled` |
+
+`focus` is its own role with a fixed default (blue 500), not a reading of `accent`, so a theme can
+make the ring differ from the accent. The cost is that a theme that changes `accent` must set
+`focus` too, or the ring stays blue; `examples/brand.nx` does, and the reference page says so.
 
 ### Modes are environment values that defaults match on
 
@@ -193,6 +217,11 @@ on a `Density` mode), and reduced motion, which is a host input that `env.motion
 - **`text.muted` on `surfaceMuted` is 4.4:1 in light mode**, below 4.5:1. → Not a target pair: muted
   text is for `background` and `surface`. A library that puts placeholder text on `surfaceMuted`
   uses `text.normal` or its own token.
+- **`accent` means something else in shadcn/ui**, where it is the quiet hover fill, and people from
+  Material, Bootstrap or shadcn/ui look for `primary`. → The reference page's naming note and
+  mapping table; the `@nx/design` name follows the platforms and CSS.
+- **A theme that changes `accent` but not `focus` keeps a blue focus ring.** → The reference page
+  and the tutorial's brand theme set both.
 - **Fourteen color roles may still be too few for a full UI library** (no hover or pressed states).
   → State colors stay component tokens, derived with `@nx/color` operations such as `darken`. These
   work in OKLCH, so derived states keep their hue and stay in the wide gamut.

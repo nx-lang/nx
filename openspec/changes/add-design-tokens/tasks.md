@@ -12,7 +12,7 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 Add `sites/website/src/content/docs/reference/libraries/design.md`: every type and token with its default, the palette's step roles (50–100 backgrounds, 200–300 borders, 500–600 fills, 400–950 text by mode) and how its wide colors look on sRGB and P3 screens, the contrast targets and that `border` has none, which values may need per-platform overrides (units, font families, shadows), the extension rules, themes as bundles, and the stability contract.
+- [ ] 3.1 Add `sites/website/src/content/docs/reference/libraries/design.md`: every type and token with its default, the palette's step roles (50–100 backgrounds, 200–300 borders, 500–600 fills, 400–950 text by mode) and how its wide colors look on sRGB and P3 screens, the contrast targets and that `border` has none, which values may need per-platform overrides (units, font families, shadows), what other systems call `accent` and a table mapping shadcn/ui's color names to ours, that a theme changing `accent` must set `focus` too, the extension rules, themes as bundles, and the stability contract.
 - [ ] 3.2 Extend the style guide's token section with the naming table and the extension rules.
 - [ ] 3.3 Rewrite `tutorials/working-with-design-tokens.md` around `@nx/design`: read tokens, build a component with its own tokens, write a light and dark brand theme, and apply it app-wide and to one section.
 - [ ] 3.4 Check every new code block with the website's code-block check.
