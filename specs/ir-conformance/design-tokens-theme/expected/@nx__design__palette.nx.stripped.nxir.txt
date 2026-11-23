@@ -1,0 +1,179 @@
+module @nx/design/palette.nx fingerprint 12365593852589900184
+links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
+links @nx/color/operations.nx version "346e014081a62e17" fingerprint 7353843330997707954
+requires update-records-v1 property-unions-v1
+entrypoints functions [] components []
+
+record StandardPalette
+  gray50: @nx/color/color.nx:Color required
+  gray100: @nx/color/color.nx:Color required
+  gray200: @nx/color/color.nx:Color required
+  gray300: @nx/color/color.nx:Color required
+  gray400: @nx/color/color.nx:Color required
+  gray500: @nx/color/color.nx:Color required
+  gray600: @nx/color/color.nx:Color required
+  gray700: @nx/color/color.nx:Color required
+  gray800: @nx/color/color.nx:Color required
+  gray900: @nx/color/color.nx:Color required
+  gray950: @nx/color/color.nx:Color required
+  blue50: @nx/color/color.nx:Color required
+  blue100: @nx/color/color.nx:Color required
+  blue200: @nx/color/color.nx:Color required
+  blue300: @nx/color/color.nx:Color required
+  blue400: @nx/color/color.nx:Color required
+  blue500: @nx/color/color.nx:Color required
+  blue600: @nx/color/color.nx:Color required
+  blue700: @nx/color/color.nx:Color required
+  blue800: @nx/color/color.nx:Color required
+  blue900: @nx/color/color.nx:Color required
+  blue950: @nx/color/color.nx:Color required
+  red50: @nx/color/color.nx:Color required
+  red100: @nx/color/color.nx:Color required
+  red200: @nx/color/color.nx:Color required
+  red300: @nx/color/color.nx:Color required
+  red400: @nx/color/color.nx:Color required
+  red500: @nx/color/color.nx:Color required
+  red600: @nx/color/color.nx:Color required
+  red700: @nx/color/color.nx:Color required
+  red800: @nx/color/color.nx:Color required
+  red900: @nx/color/color.nx:Color required
+  red950: @nx/color/color.nx:Color required
+  amber50: @nx/color/color.nx:Color required
+  amber100: @nx/color/color.nx:Color required
+  amber200: @nx/color/color.nx:Color required
+  amber300: @nx/color/color.nx:Color required
+  amber400: @nx/color/color.nx:Color required
+  amber500: @nx/color/color.nx:Color required
+  amber600: @nx/color/color.nx:Color required
+  amber700: @nx/color/color.nx:Color required
+  amber800: @nx/color/color.nx:Color required
+  amber900: @nx/color/color.nx:Color required
+  amber950: @nx/color/color.nx:Color required
+  green50: @nx/color/color.nx:Color required
+  green100: @nx/color/color.nx:Color required
+  green200: @nx/color/color.nx:Color required
+  green300: @nx/color/color.nx:Color required
+  green400: @nx/color/color.nx:Color required
+  green500: @nx/color/color.nx:Color required
+  green600: @nx/color/color.nx:Color required
+  green700: @nx/color/color.nx:Color required
+  green800: @nx/color/color.nx:Color required
+  green900: @nx/color/color.nx:Color required
+  green950: @nx/color/color.nx:Color required
+
+value standardPalette: StandardPalette =
+  <StandardPalette gray50=@nx/color/operations.nx:oklch(0.985, 0.0, 0.0) gray100=@nx/color/operations.nx:oklch(0.967, 0.001, 286.375) gray200=@nx/color/operations.nx:oklch(0.92, 0.004, 286.32) gray300=@nx/color/operations.nx:oklch(0.871, 0.006, 286.286) gray400=@nx/color/operations.nx:oklch(0.705, 0.015, 286.067) gray500=@nx/color/operations.nx:oklch(0.552, 0.016, 285.938) gray600=@nx/color/operations.nx:oklch(0.442, 0.017, 285.786) gray700=@nx/color/operations.nx:oklch(0.37, 0.013, 285.805) gray800=@nx/color/operations.nx:oklch(0.274, 0.006, 286.033) gray900=@nx/color/operations.nx:oklch(0.21, 0.006, 285.885) gray950=@nx/color/operations.nx:oklch(0.141, 0.005, 285.823) blue50=@nx/color/operations.nx:oklch(0.97, 0.014, 254.604) blue100=@nx/color/operations.nx:oklch(0.932, 0.032, 255.585) blue200=@nx/color/operations.nx:oklch(0.882, 0.059, 254.128) blue300=@nx/color/operations.nx:oklch(0.809, 0.105, 251.813) blue400=@nx/color/operations.nx:oklch(0.707, 0.165, 254.624) blue500=@nx/color/operations.nx:oklch(0.623, 0.214, 259.815) blue600=@nx/color/operations.nx:oklch(0.546, 0.245, 262.881) blue700=@nx/color/operations.nx:oklch(0.488, 0.243, 264.376) blue800=@nx/color/operations.nx:oklch(0.424, 0.199, 265.638) blue900=@nx/color/operations.nx:oklch(0.379, 0.146, 265.522) blue950=@nx/color/operations.nx:oklch(0.282, 0.091, 267.935) red50=@nx/color/operations.nx:oklch(0.971, 0.013, 17.38) red100=@nx/color/operations.nx:oklch(0.936, 0.032, 17.717) red200=@nx/color/operations.nx:oklch(0.885, 0.062, 18.334) red300=@nx/color/operations.nx:oklch(0.808, 0.114, 19.571) red400=@nx/color/operations.nx:oklch(0.704, 0.191, 22.216) red500=@nx/color/operations.nx:oklch(0.637, 0.237, 25.331) red600=@nx/color/operations.nx:oklch(0.577, 0.245, 27.325) red700=@nx/color/operations.nx:oklch(0.505, 0.213, 27.518) red800=@nx/color/operations.nx:oklch(0.444, 0.177, 26.899) red900=@nx/color/operations.nx:oklch(0.396, 0.141, 25.723) red950=@nx/color/operations.nx:oklch(0.258, 0.092, 26.042) amber50=@nx/color/operations.nx:oklch(0.987, 0.022, 95.277) amber100=@nx/color/operations.nx:oklch(0.962, 0.059, 95.617) amber200=@nx/color/operations.nx:oklch(0.924, 0.12, 95.746) amber300=@nx/color/operations.nx:oklch(0.879, 0.169, 91.605) amber400=@nx/color/operations.nx:oklch(0.828, 0.189, 84.429) amber500=@nx/color/operations.nx:oklch(0.769, 0.188, 70.08) amber600=@nx/color/operations.nx:oklch(0.666, 0.179, 58.318) amber700=@nx/color/operations.nx:oklch(0.555, 0.163, 48.998) amber800=@nx/color/operations.nx:oklch(0.473, 0.137, 46.201) amber900=@nx/color/operations.nx:oklch(0.414, 0.112, 45.904) amber950=@nx/color/operations.nx:oklch(0.279, 0.077, 45.635) green50=@nx/color/operations.nx:oklch(0.982, 0.018, 155.826) green100=@nx/color/operations.nx:oklch(0.962, 0.044, 156.743) green200=@nx/color/operations.nx:oklch(0.925, 0.084, 155.995) green300=@nx/color/operations.nx:oklch(0.871, 0.15, 154.449) green400=@nx/color/operations.nx:oklch(0.792, 0.209, 151.711) green500=@nx/color/operations.nx:oklch(0.723, 0.219, 149.579) green600=@nx/color/operations.nx:oklch(0.627, 0.194, 149.214) green700=@nx/color/operations.nx:oklch(0.527, 0.154, 150.069) green800=@nx/color/operations.nx:oklch(0.448, 0.119, 151.328) green900=@nx/color/operations.nx:oklch(0.393, 0.095, 152.535) green950=@nx/color/operations.nx:oklch(0.266, 0.065, 152.934) />
+
+record StandardPalette.Update update of StandardPalette
+  gray50: @nx/color/color.nx:Color
+  gray100: @nx/color/color.nx:Color
+  gray200: @nx/color/color.nx:Color
+  gray300: @nx/color/color.nx:Color
+  gray400: @nx/color/color.nx:Color
+  gray500: @nx/color/color.nx:Color
+  gray600: @nx/color/color.nx:Color
+  gray700: @nx/color/color.nx:Color
+  gray800: @nx/color/color.nx:Color
+  gray900: @nx/color/color.nx:Color
+  gray950: @nx/color/color.nx:Color
+  blue50: @nx/color/color.nx:Color
+  blue100: @nx/color/color.nx:Color
+  blue200: @nx/color/color.nx:Color
+  blue300: @nx/color/color.nx:Color
+  blue400: @nx/color/color.nx:Color
+  blue500: @nx/color/color.nx:Color
+  blue600: @nx/color/color.nx:Color
+  blue700: @nx/color/color.nx:Color
+  blue800: @nx/color/color.nx:Color
+  blue900: @nx/color/color.nx:Color
+  blue950: @nx/color/color.nx:Color
+  red50: @nx/color/color.nx:Color
+  red100: @nx/color/color.nx:Color
+  red200: @nx/color/color.nx:Color
+  red300: @nx/color/color.nx:Color
+  red400: @nx/color/color.nx:Color
+  red500: @nx/color/color.nx:Color
+  red600: @nx/color/color.nx:Color
+  red700: @nx/color/color.nx:Color
+  red800: @nx/color/color.nx:Color
+  red900: @nx/color/color.nx:Color
+  red950: @nx/color/color.nx:Color
+  amber50: @nx/color/color.nx:Color
+  amber100: @nx/color/color.nx:Color
+  amber200: @nx/color/color.nx:Color
+  amber300: @nx/color/color.nx:Color
+  amber400: @nx/color/color.nx:Color
+  amber500: @nx/color/color.nx:Color
+  amber600: @nx/color/color.nx:Color
+  amber700: @nx/color/color.nx:Color
+  amber800: @nx/color/color.nx:Color
+  amber900: @nx/color/color.nx:Color
+  amber950: @nx/color/color.nx:Color
+  green50: @nx/color/color.nx:Color
+  green100: @nx/color/color.nx:Color
+  green200: @nx/color/color.nx:Color
+  green300: @nx/color/color.nx:Color
+  green400: @nx/color/color.nx:Color
+  green500: @nx/color/color.nx:Color
+  green600: @nx/color/color.nx:Color
+  green700: @nx/color/color.nx:Color
+  green800: @nx/color/color.nx:Color
+  green900: @nx/color/color.nx:Color
+  green950: @nx/color/color.nx:Color
+
+union StandardPalette.Property property of StandardPalette
+  case gray50 constant
+  case gray100 constant
+  case gray200 constant
+  case gray300 constant
+  case gray400 constant
+  case gray500 constant
+  case gray600 constant
+  case gray700 constant
+  case gray800 constant
+  case gray900 constant
+  case gray950 constant
+  case blue50 constant
+  case blue100 constant
+  case blue200 constant
+  case blue300 constant
+  case blue400 constant
+  case blue500 constant
+  case blue600 constant
+  case blue700 constant
+  case blue800 constant
+  case blue900 constant
+  case blue950 constant
+  case red50 constant
+  case red100 constant
+  case red200 constant
+  case red300 constant
+  case red400 constant
+  case red500 constant
+  case red600 constant
+  case red700 constant
+  case red800 constant
+  case red900 constant
+  case red950 constant
+  case amber50 constant
+  case amber100 constant
+  case amber200 constant
+  case amber300 constant
+  case amber400 constant
+  case amber500 constant
+  case amber600 constant
+  case amber700 constant
+  case amber800 constant
+  case amber900 constant
+  case amber950 constant
+  case green50 constant
+  case green100 constant
+  case green200 constant
+  case green300 constant
+  case green400 constant
+  case green500 constant
+  case green600 constant
+  case green700 constant
+  case green800 constant
+  case green900 constant
+  case green950 constant

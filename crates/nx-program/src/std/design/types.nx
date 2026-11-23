@@ -1,3 +1,5 @@
+// @nx/design, unstable: declarations may change incompatibly in any NX release.
+//
 // Token value types: the DTCG 2025.10 type list as NX type aliases. Each alias is transparent to
 // type checking, so `padding=12` stays valid; the names let tools tell spacing from radius.
 

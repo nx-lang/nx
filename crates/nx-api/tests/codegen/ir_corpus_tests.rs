@@ -137,6 +137,17 @@ fn updating() -> bool {
     std::env::var_os("NX_UPDATE_CORPUS").is_some()
 }
 
+/// The source of a standard library module, such as `@nx/design/tokens.nx`.
+fn standard_library_module_source(identity: &str) -> Option<&'static str> {
+    let library = nx_api::standard_library_for_module(identity)?;
+    let rest = &identity[library.root.len() + 1..];
+    library
+        .modules
+        .iter()
+        .find(|module| module.identity == rest)
+        .map(|module| module.source)
+}
+
 fn collect_sources(dir: &Path, prefix: &str, sources: &mut BTreeMap<String, String>) {
     let mut entries = fs::read_dir(dir)
         .expect("corpus program directory")
@@ -1048,7 +1059,14 @@ fn corpus_origins_are_the_byte_ranges_of_syntax_nodes() {
         let mut spans = BTreeSet::new();
         origin_spans(&report, &mut spans);
         for (module, start, end) in spans {
-            let source = &program.sources[&module];
+            // An origin may lie in a standard library the program imports, whose source the
+            // compiler carries rather than the program's directory.
+            let source = program
+                .sources
+                .get(&module)
+                .map(String::as_str)
+                .or_else(|| standard_library_module_source(&module))
+                .unwrap_or_else(|| panic!("{}: no source for {module}", program.name));
             let tree = parse_str(source, &module)
                 .tree
                 .expect("a corpus module parses");

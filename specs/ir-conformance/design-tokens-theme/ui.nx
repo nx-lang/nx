@@ -2,8 +2,7 @@
 // defaults read the core. A theme that sets only core roles restyles these too; a theme can still
 // set `env.button.…` to tune this library alone.
 
-import "../api/types.nx"
-import "../api/tokens.nx"
+import "@nx/design"
 
 /// The host's drawing primitives this sketch renders to.
 export external component <Box

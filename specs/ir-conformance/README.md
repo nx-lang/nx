@@ -38,8 +38,10 @@ are held to their recorded results, counts and input sizes as every program is.
 
 Overwriting a cell of an image links and runs its whole program again, so that sweep grows with
 the square of a program's size. A program with an image above 16,384 bytes is left out of it, and
-the test names the programs it leaves out, the two large ones: another program that grows past the
-limit fails the test until it is added to that list or made smaller. Every image of every program
+the test names the programs it leaves out: the two large ones, and the three that emit
+`@nx/color`'s operations image (`color-library`, `design-tokens` and `design-tokens-theme`).
+Another program that grows past the limit fails the test until it is added to that list or made
+smaller. Every image of every program
 is still cut at every four-byte boundary.
 
 Each program is a directory:

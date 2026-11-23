@@ -6,20 +6,20 @@ categories (`env.color`), role first then variant, t-shirt scales, `standardPale
 camelCase in NX and hyphens only in CSS. `add-environment-values` built the mechanism. This change
 decides the token set and how libraries build on it.
 
-The proposed API is written as NX source in this change, so it is checked by the compiler rather
-than described:
+The API was drafted as NX source in this change, so the compiler checked it rather than a
+description. It is now the library itself, in `crates/nx-program/src/std/design/`:
 
-- `api/types.nx`: the value types.
-- `api/palette.nx`: the reference palette.
-- `api/tokens.nx`: the semantic tokens and their defaults.
-- `examples/ui.nx`: a UI library's component tokens and an extra role.
-- `examples/brand.nx`: a theme that varies by mode.
-- `examples/app.nx`: a main module applying the theme, with one dark section.
+- `types.nx`: the value types.
+- `palette.nx`: the standard palette.
+- `tokens.nx`: the semantic tokens and their defaults.
 
-They compile, and evaluate in the TypeScript IR runtime. With the brand applied, the example button
-is green 700 (`oklch(0.527 0.154 150.069)`) in light mode and green 500
-(`oklch(0.723 0.219 149.579)`) inside `env.colorMode=dark`, with the brand's pill radius. At implementation the `api/` files become
-`crates/nx-program/src/std/design/` and the examples become a conformance corpus program.
+The examples became two conformance corpus programs. `specs/ir-conformance/design-tokens/` checks
+the default theme: the roles in each mode, the contrast targets, the scales, a text role following
+`env.font`, a component token following the core, and the palette's gamut. Its `ui.nx` is a UI
+library's component tokens and an extra role. `specs/ir-conformance/design-tokens-theme/` is a brand
+theme that varies by mode (`brand.nx`) applied by a main module with one dark section (`main.nx`).
+With the brand applied, the button is green 700 (`oklch(0.527 0.154 150.069)`) in light mode and
+green 500 (`oklch(0.723 0.219 149.579)`) inside `env.colorMode=dark`, with the brand's pill radius.
 
 ## Goals / Non-Goals
 
@@ -67,7 +67,7 @@ Each hue's steps follow the convention Radix Colors names, and the reference pag
 - 50 to 100: backgrounds and muted fills.
 - 200 to 300: borders and dividers.
 - 500 to 600: solid fills and accents.
-- 400 to 950: text, depending on the mode (700 to 950 on light backgrounds, 400 to 50 on dark).
+- 500 to 950 for text on light backgrounds, and 50 to 400 on dark.
 
 *Alternatives:* Tailwind v3's sRGB hex values, which every sRGB screen shows the same but which
 cannot use a P3 screen's range; Radix Colors, whose 12 steps per hue have named uses and a P3 set,
@@ -148,7 +148,7 @@ developers and AI models know:
 
 `focus` is its own role with a fixed default (blue 500), not a reading of `accent`, so a theme can
 make the ring differ from the accent. The cost is that a theme that changes `accent` must set
-`focus` too, or the ring stays blue; `examples/brand.nx` does, and the reference page says so.
+`focus` too, or the ring stays blue; the corpus brand theme does, and the reference page says so.
 
 ### Modes are environment values that defaults match on
 
@@ -162,9 +162,10 @@ main-module provide is evaluated where it is read, the theme follows `env.colorM
 `stable`, these are breaking: removing or renaming a role, scale step, field or type; changing a
 field's type or narrowing its constraint; changing a default's value in a way the reference page
 documents. These are not breaking: adding a role, step or field with a default; widening a
-constraint; changing a default's exact value where it is not documented. Because adding a field
-breaks code that constructs a whole `<SemanticColors …/>`, themes set roles through `.Update`
-records, and the reference page says so.
+constraint; changing a default's exact value where it is not documented. A role added later gets a
+field default, so code that constructs a whole `<SemanticColors …/>` keeps compiling. Themes still
+set roles through `.Update` records, so that they name only what they change and pick up a new
+role's default value rather than restating every role; the reference page says so.
 
 ### Value types match DTCG
 
@@ -194,9 +195,9 @@ the values most likely to need one:
   (Segoe UI, SF Pro, Roboto). A theme that names a specific font must make sure it is installed or
   bundled where it runs; the tokens don't load fonts.
 - **Shadows.** `Shadow` follows CSS `box-shadow`: offset, blur, spread and color. Skia's and
-  Canvas's blur sigma is half the CSS blur, which the renderer converts. Toolkits without spread,
-  or with elevation instead of shadows (Android), approximate the shadow, so a shadow may look
-  slightly different there.
+  Canvas's blur sigma is half the CSS blur, so a renderer for those converts it. (No NX renderer
+  draws shadows yet.) Toolkits without spread, or with elevation instead of shadows (Android),
+  approximate the shadow, so a shadow may look slightly different there.
 
 Two more are left to later work: density (touch screens need larger targets; see Open Questions
 on a `Density` mode), and reduced motion, which is a host input that `env.motion` could match on.
@@ -222,6 +223,12 @@ on a `Density` mode), and reduced motion, which is a host input that `env.motion
   mapping table; the `@nx/design` name follows the platforms and CSS.
 - **A theme that changes `accent` but not `focus` keeps a blue focus ring.** → The reference page
   and the tutorial's brand theme set both.
+- **Reading a token is expensive today.** One `env.color` read costs about 28,000 operations and
+  one `env.button.radius` read about 232,000 in the brand corpus program, because the runtime
+  evaluates a default at every read, evaluates a whole record default to read one field, and builds
+  every top-level value, such as `standardPalette`'s 55 colors, each time it is read. → Recorded in
+  `specs/future.md` with memoizing defaults and caching top-level values, which change the cost
+  model and are their own change.
 - **Fourteen color roles may still be too few for a full UI library** (no hover or pressed states).
   → State colors stay component tokens, derived with `@nx/color` operations such as `darken`. These
   work in OKLCH, so derived states keep their hue and stay in the wide gamut.
@@ -242,9 +249,9 @@ None. Nothing uses `@nx/design` yet. The old tutorial's hand-rolled `Theme` reco
 
 ## Follow-ups
 
-- **A palette generator.** `palette(hue)` building eleven steps from an OKLCH lightness curve and a
-  hue, mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard
-  steps.
+- **A palette generator.** `paletteFromHue(…)` building eleven steps from an OKLCH lightness curve
+  and a hue, mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the
+  standard steps.
 - **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's
   Leonardo does, so a theme that changes `background` keeps its text legible.
 - **Token export.** `add-token-export` writes DTCG `color` values with `colorSpace: "oklch"` and

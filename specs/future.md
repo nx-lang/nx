@@ -2406,6 +2406,27 @@ then pass a few hundred times in a row.
 - **Record `with`.** Updating a record value in place of a whole `*.Update` patch, deferred as
   separate work.
 
+## Design Tokens: What `add-design-tokens` Left For Later
+
+- **Reading a token is expensive.** In `specs/ir-conformance/design-tokens-theme`, one
+  `env.color.accent` read costs 28,440 operations and one `env.button.radius` read 231,969, even
+  though the brand sets the radius outright. Three things multiply: a default is evaluated at every
+  read (see "Memoizing defaults" above); reading one field of a record default evaluates the whole
+  record, so `env.button.radius` also evaluates `env.color` twice and all of `env.text`; and a
+  top-level value is rebuilt each time it is read, so each of the dozen `standardPalette.…` reads in
+  the `env.color` default builds all 55 colors. Caching top-level values once per program and
+  memoizing defaults per environment would remove most of it; both change operation counts and so
+  the cost model.
+- **A bundle applied to one section.** `provide brand { … }` and an `env.` attribute that takes a
+  bundle don't exist; a section changes single values only. A theme for one section, such as a
+  marketing banner in another brand, needs one of them.
+- **A palette generator.** `paletteFromHue(…)` building eleven steps from an OKLCH lightness curve,
+  mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard steps.
+- **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's
+  Leonardo does, so a theme that changes `background` keeps its text legible.
+- **Token export.** `add-token-export`: DTCG `color` values with `colorSpace: "oklch"`, and CSS
+  `oklch()` custom properties.
+
 ## Running NX IR Files From The CLI
 
 `retire-hir-interpreter` keeps `nxlang run <file.nx>` and leaves out running an `.nxir` file

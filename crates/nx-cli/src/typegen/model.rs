@@ -1436,7 +1436,17 @@ impl ImportedTypeCollector {
         let mut dependencies_by_visible_name =
             FxHashMap::<String, Arc<CachedImportedLibrary>>::default();
 
+        // A standard library's modules import each other by relative path. Those peers are part
+        // of the library being generated, whose graph already links their types, and there is no
+        // directory beside the module to resolve them in.
+        let in_standard_library = source_path
+            .to_str()
+            .and_then(nx_api::standard_library_for_module)
+            .is_some();
         for import in &module.imports {
+            if in_standard_library && import.library_path.trim_start().starts_with('.') {
+                continue;
+            }
             let dependency_root = match resolve_dependency_root(source_path, &import.library_path) {
                 Ok(path) => path,
                 Err(error) => {

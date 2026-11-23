@@ -1,0 +1,19 @@
+{
+  "counts": {
+    "main.nx::accent": 28440,
+    "main.nx::accent#rootDark": 31653,
+    "main.nx::background": 28440,
+    "main.nx::background#rootDark": 31653,
+    "main.nx::buttonFill": 231973,
+    "main.nx::buttonFill#rootDark": 194796,
+    "main.nx::buttonRadius": 231969,
+    "main.nx::buttonText": 231973,
+    "main.nx::buttonText#rootDark": 194796,
+    "main.nx::coreRadius": 6695,
+    "main.nx::darkAccent": 31654,
+    "main.nx::focus": 28440,
+    "main.nx::focus#rootDark": 31653,
+    "main.nx::root": 60150,
+    "main.nx::themedRadius": 6695
+  }
+}

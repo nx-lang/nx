@@ -1,0 +1,76 @@
+module main.nx fingerprint 14669449929067314949
+links @nx/math/math.nx version "7d750052efed5e6f" fingerprint 7963937948937048613
+links @nx/color/operations.nx version "346e014081a62e17" fingerprint 7353843330997707954
+links @nx/design/tokens.nx version "077849efaffbf9cc" fingerprint 3846144553481102763
+links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
+links ui.nx version "" fingerprint 5984742701993045455
+links @nx/design/palette.nx version "077849efaffbf9cc" fingerprint 12365593852589900184
+requires environment-v1
+entrypoints functions [check contrast colors scalesOrdered spaceOrdered radiusOrdered borderWidthOrdered fontSizeOrdered fontWeightOrdered shadowOrdered durationOrdered textFollowsFont componentFollowsCore paletteColors paletteInDisplayP3 graysInSrgb grays paletteSurvivesCss] components []
+
+record ContrastCheck
+  pair: string required
+  ratio: float64 required
+  target: float64 required
+  meets: boolean required
+
+function check(pair: string, ratio: float64, target: float64) =
+  <ContrastCheck pair=pair ratio=(@nx/math/math.nx:round((ratio mul 100.0)) div 100.0) target=target meets=(ratio ge target) />
+
+function contrast(): ContrastCheck* =
+  [check("onAccent on accent", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.onAccent, @nx/design/tokens.nx:env.color.accent), 4.5), check("onDanger on danger", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.onDanger, @nx/design/tokens.nx:env.color.danger), 4.5), check("onWarning on warning", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.onWarning, @nx/design/tokens.nx:env.color.warning), 4.5), check("onSuccess on success", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.onSuccess, @nx/design/tokens.nx:env.color.success), 4.5), check("text.normal on background", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.text.normal, @nx/design/tokens.nx:env.color.background), 4.5), check("text.normal on surface", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.text.normal, @nx/design/tokens.nx:env.color.surface), 4.5), check("text.muted on background", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.text.muted, @nx/design/tokens.nx:env.color.background), 4.5), check("text.muted on surface", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.text.muted, @nx/design/tokens.nx:env.color.surface), 4.5), check("focus on background", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.focus, @nx/design/tokens.nx:env.color.background), 3.0), check("focus on surface", @nx/color/operations.nx:contrastRatio(@nx/design/tokens.nx:env.color.focus, @nx/design/tokens.nx:env.color.surface), 3.0)]
+
+function colors() =
+  @nx/design/tokens.nx:env.color
+
+function scalesOrdered(): boolean* =
+  [spaceOrdered(), radiusOrdered(), borderWidthOrdered(), fontSizeOrdered(), fontWeightOrdered(), shadowOrdered(), durationOrdered()]
+
+function spaceOrdered(): boolean =
+  ((((((((@nx/design/tokens.nx:env.space.none le @nx/design/tokens.nx:env.space.xxs) and (@nx/design/tokens.nx:env.space.xxs le @nx/design/tokens.nx:env.space.xs)) and (@nx/design/tokens.nx:env.space.xs le @nx/design/tokens.nx:env.space.sm)) and (@nx/design/tokens.nx:env.space.sm le @nx/design/tokens.nx:env.space.md)) and (@nx/design/tokens.nx:env.space.md le @nx/design/tokens.nx:env.space.lg)) and (@nx/design/tokens.nx:env.space.lg le @nx/design/tokens.nx:env.space.xl)) and (@nx/design/tokens.nx:env.space.xl le @nx/design/tokens.nx:env.space.xxl)) and (@nx/design/tokens.nx:env.space.xxl le @nx/design/tokens.nx:env.space.xxxl))
+
+function radiusOrdered(): boolean =
+  (((((@nx/design/tokens.nx:env.radius.none le @nx/design/tokens.nx:env.radius.sm) and (@nx/design/tokens.nx:env.radius.sm le @nx/design/tokens.nx:env.radius.md)) and (@nx/design/tokens.nx:env.radius.md le @nx/design/tokens.nx:env.radius.lg)) and (@nx/design/tokens.nx:env.radius.lg le @nx/design/tokens.nx:env.radius.xl)) and (@nx/design/tokens.nx:env.radius.xl le @nx/design/tokens.nx:env.radius.full))
+
+function borderWidthOrdered(): boolean =
+  (@nx/design/tokens.nx:env.borderWidth.thin le @nx/design/tokens.nx:env.borderWidth.thick)
+
+function fontSizeOrdered(): boolean =
+  ((((((@nx/design/tokens.nx:env.font.size.xs le @nx/design/tokens.nx:env.font.size.sm) and (@nx/design/tokens.nx:env.font.size.sm le @nx/design/tokens.nx:env.font.size.md)) and (@nx/design/tokens.nx:env.font.size.md le @nx/design/tokens.nx:env.font.size.lg)) and (@nx/design/tokens.nx:env.font.size.lg le @nx/design/tokens.nx:env.font.size.xl)) and (@nx/design/tokens.nx:env.font.size.xl le @nx/design/tokens.nx:env.font.size.xxl)) and (@nx/design/tokens.nx:env.font.size.xxl le @nx/design/tokens.nx:env.font.size.xxxl))
+
+function fontWeightOrdered(): boolean =
+  (((@nx/design/tokens.nx:env.font.weight.regular le @nx/design/tokens.nx:env.font.weight.medium) and (@nx/design/tokens.nx:env.font.weight.medium le @nx/design/tokens.nx:env.font.weight.semibold)) and (@nx/design/tokens.nx:env.font.weight.semibold le @nx/design/tokens.nx:env.font.weight.bold))
+
+function shadowOrdered(): boolean =
+  ((((@nx/design/tokens.nx:env.shadow.sm.blur le @nx/design/tokens.nx:env.shadow.md.blur) and (@nx/design/tokens.nx:env.shadow.md.blur le @nx/design/tokens.nx:env.shadow.lg.blur)) and (@nx/design/tokens.nx:env.shadow.sm.offsetY le @nx/design/tokens.nx:env.shadow.md.offsetY)) and (@nx/design/tokens.nx:env.shadow.md.offsetY le @nx/design/tokens.nx:env.shadow.lg.offsetY))
+
+function durationOrdered(): boolean =
+  ((@nx/design/tokens.nx:env.motion.duration.fast le @nx/design/tokens.nx:env.motion.duration.normal) and (@nx/design/tokens.nx:env.motion.duration.normal le @nx/design/tokens.nx:env.motion.duration.slow))
+
+function textFollowsFont() =
+  provide @nx/design/tokens.nx:env.font.size.md=20.0 {
+    @nx/design/tokens.nx:env.text.body.size
+  }
+
+function componentFollowsCore() =
+  provide @nx/design/tokens.nx:env.color.accent=<@nx/color/color.nx:Color.srgb r=0.08235294371843338 g=0.501960813999176 b=0.239215686917305 alpha=1.0 /> {
+    ui.nx:env.button.fill
+  }
+
+function paletteColors(): @nx/color/color.nx:Color* =
+  [@nx/design/palette.nx:standardPalette.gray50, @nx/design/palette.nx:standardPalette.gray100, @nx/design/palette.nx:standardPalette.gray200, @nx/design/palette.nx:standardPalette.gray300, @nx/design/palette.nx:standardPalette.gray400, @nx/design/palette.nx:standardPalette.gray500, @nx/design/palette.nx:standardPalette.gray600, @nx/design/palette.nx:standardPalette.gray700, @nx/design/palette.nx:standardPalette.gray800, @nx/design/palette.nx:standardPalette.gray900, @nx/design/palette.nx:standardPalette.gray950, @nx/design/palette.nx:standardPalette.blue50, @nx/design/palette.nx:standardPalette.blue100, @nx/design/palette.nx:standardPalette.blue200, @nx/design/palette.nx:standardPalette.blue300, @nx/design/palette.nx:standardPalette.blue400, @nx/design/palette.nx:standardPalette.blue500, @nx/design/palette.nx:standardPalette.blue600, @nx/design/palette.nx:standardPalette.blue700, @nx/design/palette.nx:standardPalette.blue800, @nx/design/palette.nx:standardPalette.blue900, @nx/design/palette.nx:standardPalette.blue950, @nx/design/palette.nx:standardPalette.red50, @nx/design/palette.nx:standardPalette.red100, @nx/design/palette.nx:standardPalette.red200, @nx/design/palette.nx:standardPalette.red300, @nx/design/palette.nx:standardPalette.red400, @nx/design/palette.nx:standardPalette.red500, @nx/design/palette.nx:standardPalette.red600, @nx/design/palette.nx:standardPalette.red700, @nx/design/palette.nx:standardPalette.red800, @nx/design/palette.nx:standardPalette.red900, @nx/design/palette.nx:standardPalette.red950, @nx/design/palette.nx:standardPalette.amber50, @nx/design/palette.nx:standardPalette.amber100, @nx/design/palette.nx:standardPalette.amber200, @nx/design/palette.nx:standardPalette.amber300, @nx/design/palette.nx:standardPalette.amber400, @nx/design/palette.nx:standardPalette.amber500, @nx/design/palette.nx:standardPalette.amber600, @nx/design/palette.nx:standardPalette.amber700, @nx/design/palette.nx:standardPalette.amber800, @nx/design/palette.nx:standardPalette.amber900, @nx/design/palette.nx:standardPalette.amber950, @nx/design/palette.nx:standardPalette.green50, @nx/design/palette.nx:standardPalette.green100, @nx/design/palette.nx:standardPalette.green200, @nx/design/palette.nx:standardPalette.green300, @nx/design/palette.nx:standardPalette.green400, @nx/design/palette.nx:standardPalette.green500, @nx/design/palette.nx:standardPalette.green600, @nx/design/palette.nx:standardPalette.green700, @nx/design/palette.nx:standardPalette.green800, @nx/design/palette.nx:standardPalette.green900, @nx/design/palette.nx:standardPalette.green950]
+
+function paletteInDisplayP3() =
+  for color in paletteColors() yield
+    @nx/color/operations.nx:inGamut(color, @nx/color/color.nx:Gamut.displayP3)
+
+function graysInSrgb() =
+  for color in grays() yield
+    @nx/color/operations.nx:inGamut(color)
+
+function grays(): @nx/color/color.nx:Color* =
+  [@nx/design/palette.nx:standardPalette.gray50, @nx/design/palette.nx:standardPalette.gray100, @nx/design/palette.nx:standardPalette.gray200, @nx/design/palette.nx:standardPalette.gray300, @nx/design/palette.nx:standardPalette.gray400, @nx/design/palette.nx:standardPalette.gray500, @nx/design/palette.nx:standardPalette.gray600, @nx/design/palette.nx:standardPalette.gray700, @nx/design/palette.nx:standardPalette.gray800, @nx/design/palette.nx:standardPalette.gray900, @nx/design/palette.nx:standardPalette.gray950]
+
+function paletteSurvivesCss() =
+  for color in paletteColors() yield
+    (@nx/color/operations.nx:parse(@nx/color/operations.nx:toCss(color)) eq color)

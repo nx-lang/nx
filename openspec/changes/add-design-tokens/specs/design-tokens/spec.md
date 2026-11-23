@@ -110,11 +110,13 @@ token its default reads.
 
 #### Scenario: A theme tunes one library
 - **WHEN** the main module applies a bundle that sets `button=<ButtonTokens.Update radius=9999 />`
-- **THEN** `env.button.radius` SHALL be `9999` and `env.radius.md` SHALL keep its default
+- **THEN** `env.button.radius` SHALL be `9999`, and a core radius the bundle does not set, such as
+  `env.radius.sm`, SHALL keep its default
 
 ### Requirement: Themes are environment bundles
 A theme SHALL be an `env.Update` value that sets core roles through their `.Update` records, applied
-app-wide with `provide theme` in the main module or around a subtree. A theme that varies by mode
+app-wide with `provide theme` in the main module. A section of the program changes single values
+with `env.` attributes or a `provide env.x=… { … }` block. A theme that varies by mode
 SHALL do so by matching on `env.colorMode` in the bundle's fields, and SHALL follow an
 `env.colorMode` override where it is read.
 

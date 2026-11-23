@@ -1,0 +1,171 @@
+// The guarantees `@nx/design` makes of its default theme: the contrast targets in the color mode
+// in effect, scales that never shrink, text roles built from the font scales, and a palette that a
+// Display P3 screen shows as written.
+
+import "@nx/design"
+import "@nx/color" as c
+import "@nx/math" as math
+import "./ui.nx"
+
+/// One contrast target, and whether the color mode in effect meets it.
+type ContrastCheck = {
+  pair: string     /// The two roles, content first.
+  ratio: float64   /// The ratio, rounded to two decimals.
+  target: float64  /// The ratio the spec requires.
+  meets: boolean   /// Whether the ratio reaches the target.
+}
+
+let check(pair: string, ratio: float64, target: float64) = {
+  <ContrastCheck pair={pair} ratio={math.round(ratio * 100.0) / 100.0} target={target} meets={ratio >= target} />
+}
+
+/// Every contrast target of the default theme, measured in the color mode in effect.
+let contrast(): ContrastCheck* = {
+  check("onAccent on accent", c.contrastRatio(env.color.onAccent, env.color.accent), 4.5)
+  check("onDanger on danger", c.contrastRatio(env.color.onDanger, env.color.danger), 4.5)
+  check("onWarning on warning", c.contrastRatio(env.color.onWarning, env.color.warning), 4.5)
+  check("onSuccess on success", c.contrastRatio(env.color.onSuccess, env.color.success), 4.5)
+  check("text.normal on background", c.contrastRatio(env.color.text.normal, env.color.background), 4.5)
+  check("text.normal on surface", c.contrastRatio(env.color.text.normal, env.color.surface), 4.5)
+  check("text.muted on background", c.contrastRatio(env.color.text.muted, env.color.background), 4.5)
+  check("text.muted on surface", c.contrastRatio(env.color.text.muted, env.color.surface), 4.5)
+  check("focus on background", c.contrastRatio(env.color.focus, env.color.background), 3.0)
+  check("focus on surface", c.contrastRatio(env.color.focus, env.color.surface), 3.0)
+}
+
+/// The color roles in the color mode in effect.
+let colors() = { env.color }
+
+/// Whether each scale is nondecreasing from its smallest step to its largest.
+let scalesOrdered(): boolean* = {
+  spaceOrdered()
+  radiusOrdered()
+  borderWidthOrdered()
+  fontSizeOrdered()
+  fontWeightOrdered()
+  shadowOrdered()
+  durationOrdered()
+}
+
+let spaceOrdered(): boolean = {
+  env.space.none <= env.space.xxs && env.space.xxs <= env.space.xs && env.space.xs <= env.space.sm &&
+    env.space.sm <= env.space.md && env.space.md <= env.space.lg && env.space.lg <= env.space.xl &&
+    env.space.xl <= env.space.xxl && env.space.xxl <= env.space.xxxl
+}
+
+let radiusOrdered(): boolean = {
+  env.radius.none <= env.radius.sm && env.radius.sm <= env.radius.md && env.radius.md <= env.radius.lg &&
+    env.radius.lg <= env.radius.xl && env.radius.xl <= env.radius.full
+}
+
+let borderWidthOrdered(): boolean = { env.borderWidth.thin <= env.borderWidth.thick }
+
+let fontSizeOrdered(): boolean = {
+  env.font.size.xs <= env.font.size.sm && env.font.size.sm <= env.font.size.md &&
+    env.font.size.md <= env.font.size.lg && env.font.size.lg <= env.font.size.xl &&
+    env.font.size.xl <= env.font.size.xxl && env.font.size.xxl <= env.font.size.xxxl
+}
+
+let fontWeightOrdered(): boolean = {
+  env.font.weight.regular <= env.font.weight.medium && env.font.weight.medium <= env.font.weight.semibold &&
+    env.font.weight.semibold <= env.font.weight.bold
+}
+
+let shadowOrdered(): boolean = {
+  env.shadow.sm.blur <= env.shadow.md.blur && env.shadow.md.blur <= env.shadow.lg.blur &&
+    env.shadow.sm.offsetY <= env.shadow.md.offsetY && env.shadow.md.offsetY <= env.shadow.lg.offsetY
+}
+
+let durationOrdered(): boolean = {
+  env.motion.duration.fast <= env.motion.duration.normal && env.motion.duration.normal <= env.motion.duration.slow
+}
+
+/// A text role follows the font scale it is built from.
+let textFollowsFont() = { provide env.font.size.md=20 { env.text.body.size } }
+
+/// A component token follows the core role it reads.
+let componentFollowsCore() = { provide env.color.accent=#15803d { env.button.fill } }
+
+/// Every palette color.
+let paletteColors(): Color* = {
+  standardPalette.gray50
+  standardPalette.gray100
+  standardPalette.gray200
+  standardPalette.gray300
+  standardPalette.gray400
+  standardPalette.gray500
+  standardPalette.gray600
+  standardPalette.gray700
+  standardPalette.gray800
+  standardPalette.gray900
+  standardPalette.gray950
+  standardPalette.blue50
+  standardPalette.blue100
+  standardPalette.blue200
+  standardPalette.blue300
+  standardPalette.blue400
+  standardPalette.blue500
+  standardPalette.blue600
+  standardPalette.blue700
+  standardPalette.blue800
+  standardPalette.blue900
+  standardPalette.blue950
+  standardPalette.red50
+  standardPalette.red100
+  standardPalette.red200
+  standardPalette.red300
+  standardPalette.red400
+  standardPalette.red500
+  standardPalette.red600
+  standardPalette.red700
+  standardPalette.red800
+  standardPalette.red900
+  standardPalette.red950
+  standardPalette.amber50
+  standardPalette.amber100
+  standardPalette.amber200
+  standardPalette.amber300
+  standardPalette.amber400
+  standardPalette.amber500
+  standardPalette.amber600
+  standardPalette.amber700
+  standardPalette.amber800
+  standardPalette.amber900
+  standardPalette.amber950
+  standardPalette.green50
+  standardPalette.green100
+  standardPalette.green200
+  standardPalette.green300
+  standardPalette.green400
+  standardPalette.green500
+  standardPalette.green600
+  standardPalette.green700
+  standardPalette.green800
+  standardPalette.green900
+  standardPalette.green950
+}
+
+/// Whether each palette color is inside Display P3.
+let paletteInDisplayP3() = { for color in paletteColors() { c.inGamut(color, c.Gamut.displayP3) } }
+
+/// Whether each gray is inside sRGB.
+let graysInSrgb() = {
+  for color in grays() { c.inGamut(color) }
+}
+
+let grays(): Color* = {
+  standardPalette.gray50
+  standardPalette.gray100
+  standardPalette.gray200
+  standardPalette.gray300
+  standardPalette.gray400
+  standardPalette.gray500
+  standardPalette.gray600
+  standardPalette.gray700
+  standardPalette.gray800
+  standardPalette.gray900
+  standardPalette.gray950
+}
+
+/// Whether each palette color reads back from its CSS text as the same color.
+let paletteSurvivesCss() = { for color in paletteColors() { c.parse(c.toCss(color)) == color } }

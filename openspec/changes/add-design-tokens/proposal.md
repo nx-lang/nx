@@ -44,9 +44,8 @@ stable, and the convention by which UI libraries extend it.
   with `if env.colorMode is { … }`.
 - **A stability contract for the core.** `@nx/design` starts `unstable`, as every new standard
   library does. The design records what will count as breaking once it is `stable`: removing or
-  renaming a role, a scale step or a field, or changing a type. Adding a role is not breaking for
-  readers, and is breaking only for code that constructs a whole `SemanticColors`, which is why
-  themes use `.Update` records.
+  renaming a role, a scale step or a field, or changing a type. Adding a role with a field default is
+  not breaking. Themes use `.Update` records so that they name only what they change.
 - **Documentation.** A reference page for `@nx/design`, the token convention and naming rules in the
   style guide, and the "Working with Design Tokens" tutorial rewritten around the library.
 

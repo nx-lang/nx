@@ -1,0 +1,47 @@
+module main.nx fingerprint 1844963044537619448
+links @nx/design/tokens.nx version "077849efaffbf9cc" fingerprint 3846144553481102763
+links ui.nx version "" fingerprint 5984742701993045455
+links brand.nx version "" fingerprint 17702158742468193261
+requires environment-v1
+entrypoints functions [root buttonRadius coreRadius themedRadius accent background darkAccent buttonFill buttonText focus] components []
+
+function root() =
+  <ui.nx:Box fill=@nx/design/tokens.nx:env.color.background radius=0.0 paddingX=0.0 paddingY=0.0>
+    <ui.nx:Button text="Save" />
+    provide @nx/design/tokens.nx:env.colorMode=@nx/design/tokens.nx:ColorMode.dark {
+      <ui.nx:Box fill=@nx/design/tokens.nx:env.color.background radius=0.0 paddingX=0.0 paddingY=0.0>
+        <ui.nx:Button text="Save" />
+      </ui.nx:Box>
+    }
+  </ui.nx:Box>
+
+function buttonRadius() =
+  ui.nx:env.button.radius
+
+function coreRadius() =
+  @nx/design/tokens.nx:env.radius.sm
+
+function themedRadius() =
+  @nx/design/tokens.nx:env.radius.md
+
+function accent() =
+  @nx/design/tokens.nx:env.color.accent
+
+function background() =
+  @nx/design/tokens.nx:env.color.background
+
+function darkAccent() =
+  provide @nx/design/tokens.nx:env.colorMode=@nx/design/tokens.nx:ColorMode.dark {
+    @nx/design/tokens.nx:env.color.accent
+  }
+
+function buttonFill() =
+  ui.nx:env.button.fill
+
+function buttonText() =
+  ui.nx:env.button.text
+
+function focus() =
+  @nx/design/tokens.nx:env.color.focus
+
+provide brand.nx:theme

@@ -1,3 +1,5 @@
+// @nx/design, unstable: declarations may change incompatibly in any NX release.
+//
 // Reference tokens: a fixed palette that themes fill the semantic roles from. Nothing requires it;
 // a brand can fill the roles from its own colors.
 //

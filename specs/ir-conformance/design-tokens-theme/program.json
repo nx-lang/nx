@@ -1,0 +1,100 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "brand.nx",
+    "ui.nx",
+    "@nx/design/palette.nx",
+    "@nx/design/tokens.nx",
+    "@nx/design/types.nx",
+    "@nx/color/color.nx",
+    "@nx/color/operations.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "root"
+    },
+    {
+      "module": "main.nx",
+      "function": "buttonRadius"
+    },
+    {
+      "module": "main.nx",
+      "function": "coreRadius"
+    },
+    {
+      "module": "main.nx",
+      "function": "themedRadius"
+    },
+    {
+      "module": "main.nx",
+      "function": "background"
+    },
+    {
+      "module": "main.nx",
+      "function": "background",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "accent"
+    },
+    {
+      "module": "main.nx",
+      "function": "darkAccent"
+    },
+    {
+      "module": "main.nx",
+      "function": "accent",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "buttonFill"
+    },
+    {
+      "module": "main.nx",
+      "function": "buttonFill",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "buttonText"
+    },
+    {
+      "module": "main.nx",
+      "function": "buttonText",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "focus"
+    },
+    {
+      "module": "main.nx",
+      "function": "focus",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    }
+  ]
+}

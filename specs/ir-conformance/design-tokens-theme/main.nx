@@ -1,0 +1,32 @@
+// The main module: applies the brand app-wide, and shows one section in dark mode.
+
+import "./brand.nx" as brand
+import "@nx/design"
+import "./ui.nx"
+
+provide brand.theme
+
+let root() = {
+  <Box fill={env.color.background} radius=0 paddingX=0 paddingY=0>
+    <Button text="Save" />
+    <Box env.colorMode=dark fill={env.color.background} radius=0 paddingX=0 paddingY=0>
+      <Button text="Save" />
+    </Box>
+  </Box>
+}
+
+/// The theme tunes the button alone: its pill radius reaches no core radius, and a core radius the
+/// theme does not set keeps its default.
+let buttonRadius() = { env.button.radius }
+let coreRadius() = { env.radius.sm }
+let themedRadius() = { env.radius.md }
+
+/// The theme varies by mode.
+let accent() = { env.color.accent }
+let background() = { env.color.background }
+let darkAccent() = { provide env.colorMode=dark { env.color.accent } }
+
+/// The brand sets only core color roles, and they reach the UI library's button.
+let buttonFill() = { env.button.fill }
+let buttonText() = { env.button.text }
+let focus() = { env.color.focus }

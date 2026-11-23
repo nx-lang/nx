@@ -1,0 +1,74 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "ui.nx",
+    "@nx/design/palette.nx",
+    "@nx/design/tokens.nx",
+    "@nx/design/types.nx",
+    "@nx/color/color.nx",
+    "@nx/color/operations.nx",
+    "@nx/math/math.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "colors"
+    },
+    {
+      "module": "main.nx",
+      "function": "colors",
+      "case": "dark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "contrast"
+    },
+    {
+      "module": "main.nx",
+      "function": "contrast",
+      "case": "dark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "scalesOrdered"
+    },
+    {
+      "module": "main.nx",
+      "function": "scalesOrdered",
+      "case": "dark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "textFollowsFont"
+    },
+    {
+      "module": "main.nx",
+      "function": "componentFollowsCore"
+    },
+    {
+      "module": "main.nx",
+      "function": "paletteInDisplayP3"
+    },
+    {
+      "module": "main.nx",
+      "function": "graysInSrgb"
+    },
+    {
+      "module": "main.nx",
+      "function": "paletteSurvivesCss"
+    }
+  ]
+}
