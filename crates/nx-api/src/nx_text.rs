@@ -129,9 +129,12 @@ pub(crate) fn annotate_nx_text(
     libraries: &[&LoweredModule],
     source: &str,
 ) -> Result<NxValueText, String> {
-    let mut writer = Writer::default();
-    writer.value(value, 0)?;
     let declarations = Declarations::new(module, libraries, source);
+    let mut writer = Writer {
+        canonical_color: declarations.canonical_color,
+        ..Writer::default()
+    };
+    writer.value(value, 0)?;
     let utf16 = Utf16Offsets::new(&writer.output);
     let nodes = writer
         .nodes
@@ -184,6 +187,8 @@ struct Writer {
     open: Vec<usize>,
     /// The JSON pointer of the value being written.
     pointer: String,
+    /// Whether `Color` is `@nx/color`'s, so a byte-exact sRGB color can be written as a hex literal.
+    canonical_color: bool,
 }
 
 impl Writer {
@@ -346,9 +351,15 @@ impl Writer {
                 self.nodes[index].color_outside_srgb = nx_value::color::outside_srgb(color);
             }
         }
+        // A hex literal reads back as exactly this record, so it is the shorter spelling.
+        if let Some(hex) = self.hex_color(tag_name, fields) {
+            self.output.push_str(&hex);
+            self.end();
+            return Ok(());
+        }
         write!(self.output, "<{}", tag_name).unwrap();
 
-        if field_vec.iter().any(|(_, value)| is_complex_value(value)) {
+        if field_vec.iter().any(|(_, value)| self.is_complex(value)) {
             // One property per line. This is layout only — every field is still a property.
             let property_indent = indent + 2;
             for (key, value) in &field_vec {
@@ -368,6 +379,43 @@ impl Writer {
 
         self.end();
         Ok(())
+    }
+
+    /// Whether a value forces the one-property-per-line layout. A color written as a hex literal is
+    /// as short as a number, so it does not.
+    fn is_complex(&self, value: &Value) -> bool {
+        match value {
+            Value::Record { type_name, fields } => self.hex_color(type_name, fields).is_none(),
+            Value::ActionHandler => true,
+            Value::Array(elements) => !elements.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// The hex literal spelling of `@nx/color`'s `Color.srgb` record, when its channels are the
+    /// bytes a hex literal lowers to: `#rrggbb`, or `#rrggbbaa` when it is not opaque.
+    fn hex_color(&self, tag_name: &Name, fields: &FxHashMap<SmolStr, Value>) -> Option<String> {
+        if !self.canonical_color || tag_name.as_str() != "Color.srgb" {
+            return None;
+        }
+        if fields
+            .keys()
+            .any(|key| !matches!(key.as_str(), "r" | "g" | "b" | "alpha"))
+        {
+            return None;
+        }
+        let mut hex = String::from("#");
+        for key in ["r", "g", "b", "alpha"] {
+            let byte = match fields.get(key) {
+                Some(value) => hex_byte(value)?,
+                None if key == "alpha" => 255,
+                None => return None,
+            };
+            if key != "alpha" || byte != 255 {
+                write!(hex, "{:02x}", byte).unwrap();
+            }
+        }
+        Some(hex)
     }
 
     /// Emits one `key=value` property of the record `owner`.
@@ -1051,7 +1099,10 @@ pub(crate) fn annotate_canonical_nx_text(
 ) -> Result<NxValueText, FormatError> {
     let declarations = Declarations::new(module, libraries, source);
     let mut pointer = String::new();
-    let mut writer = Writer::default();
+    let mut writer = Writer {
+        canonical_color: declarations.canonical_color,
+        ..Writer::default()
+    };
     let written = if let Some(component) = &options.state {
         let state = declarations.states.get(component.as_str()).ok_or_else(|| {
             FormatError::invalid(
@@ -1228,13 +1279,18 @@ fn format_real_literal(rendered: String, finite: bool) -> String {
     }
 }
 
-/// Whether a value forces the one-property-per-line layout.
-fn is_complex_value(value: &Value) -> bool {
-    match value {
-        Value::Record { .. } | Value::ActionHandler => true,
-        Value::Array(elements) => !elements.is_empty(),
-        _ => false,
+/// The byte whose hex literal channel is exactly `value`, a float32 of `byte / 255`.
+fn hex_byte(value: &Value) -> Option<u8> {
+    let x = match value {
+        Value::Float32(value) => *value,
+        Value::Float(value) if (*value as f32) as f64 == *value => *value as f32,
+        _ => return None,
+    };
+    let byte = (x as f64 * 255.0).round();
+    if !(0.0..=255.0).contains(&byte) || (byte / 255.0) as f32 != x {
+        return None;
     }
+    Some(byte as u8)
 }
 
 fn escape_string(s: &str) -> String {
@@ -2449,5 +2505,79 @@ mod tests {
             .unwrap();
         let rendered = annotate_nx_text(&value, &decoy, &[color], source).unwrap();
         assert!(rendered.nodes[0].color.is_none());
+    }
+
+    #[test]
+    fn byte_exact_canonical_srgb_colors_are_written_as_hex_literals() {
+        let entry = nx_types::analyze_str("let x = 0", "main.nx")
+            .lowered_module
+            .unwrap();
+        let library = crate::standard_library("@nx/color").unwrap();
+        let color = library
+            .modules
+            .iter()
+            .find(|module| module.file_name == "@nx/color/color.nx")
+            .unwrap()
+            .lowered_module
+            .as_ref()
+            .unwrap();
+        let srgb = |channels: [f32; 4]| Value::Record {
+            type_name: Name::new("Color.srgb"),
+            fields: ["r", "g", "b", "alpha"]
+                .into_iter()
+                .zip(channels)
+                .map(|(name, value)| (SmolStr::new(name), Value::Float32(value)))
+                .collect(),
+        };
+        let byte = |n: u8| (n as f64 / 255.0) as f32;
+        let style = Value::Record {
+            type_name: Name::new("Style"),
+            fields: [
+                (
+                    SmolStr::new("fill"),
+                    srgb([byte(0xf4), byte(0xe9), byte(0xe7), 1.0]),
+                ),
+                (
+                    SmolStr::new("shade"),
+                    srgb([0.0, byte(0x80), 1.0, byte(0x40)]),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let rendered = annotate_nx_text(&style, &entry, &[color], "").unwrap();
+        assert_eq!(rendered.text, "<Style fill=#f4e9e7 shade=#0080ff40 />");
+        let fill = rendered
+            .nodes
+            .iter()
+            .find(|node| node.role == NxValueRole::Record && node.pointer == "/fill")
+            .expect("the hex literal is still the record's node");
+        assert_eq!(
+            &rendered.text[fill.start as usize..fill.end as usize],
+            "#f4e9e7"
+        );
+        assert!(fill.color.is_some());
+
+        // A channel between bytes has no hex spelling, so the record keeps every digit.
+        let between = srgb([0.5, 0.0, 0.0, 1.0]);
+        let rendered = annotate_nx_text(&between, &entry, &[color], "").unwrap();
+        assert!(
+            rendered.text.starts_with("<Color.srgb "),
+            "got: {}",
+            rendered.text
+        );
+
+        // An authored `Color` is not the one a hex literal lowers to.
+        let source = "type Color = | srgb { r:float32 g:float32 b:float32 alpha:float32 }";
+        let decoy = nx_types::analyze_str(source, "decoy.nx")
+            .lowered_module
+            .unwrap();
+        let opaque = srgb([1.0, 1.0, 1.0, 1.0]);
+        let rendered = annotate_nx_text(&opaque, &decoy, &[color], source).unwrap();
+        assert!(
+            rendered.text.starts_with("<Color.srgb "),
+            "got: {}",
+            rendered.text
+        );
     }
 }

@@ -723,11 +723,11 @@
     ]
   },
   "colors": {
-    "text": "<Color.displayP3 alpha=1.0 b=0.0 g=0.0 r=1.0 />\n<Color.srgb alpha=1.0 b=0.0 g=0.0 r=1.0 />",
+    "text": "<Color.displayP3 alpha=1.0 b=0.0 g=0.0 r=1.0 />\n#ff0000",
     "nodes": [
       {
         "start": 0,
-        "end": 90,
+        "end": 55,
         "role": "sequence",
         "type": "object*",
         "count": 2,
@@ -781,48 +781,12 @@
       },
       {
         "start": 48,
-        "end": 90,
+        "end": 55,
         "role": "record",
         "color": "rgb(255 0 0 / 1)",
         "parent": 0,
         "type": "Color.srgb",
         "pointer": "/1"
-      },
-      {
-        "start": 60,
-        "end": 69,
-        "role": "property",
-        "parent": 6,
-        "type": "float32 where in 0.0..=1.0",
-        "name": "alpha",
-        "pointer": "/1/alpha"
-      },
-      {
-        "start": 70,
-        "end": 75,
-        "role": "property",
-        "parent": 6,
-        "type": "float32 where in 0.0..=1.0",
-        "name": "b",
-        "pointer": "/1/b"
-      },
-      {
-        "start": 76,
-        "end": 81,
-        "role": "property",
-        "parent": 6,
-        "type": "float32 where in 0.0..=1.0",
-        "name": "g",
-        "pointer": "/1/g"
-      },
-      {
-        "start": 82,
-        "end": 87,
-        "role": "property",
-        "parent": 6,
-        "type": "float32 where in 0.0..=1.0",
-        "name": "r",
-        "pointer": "/1/r"
       }
     ]
   }
