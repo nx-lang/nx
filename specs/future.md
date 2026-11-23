@@ -2421,3 +2421,20 @@ Named records require element syntax (`<User name="Bob" />`). Implicit positiona
 constructors are intentionally unsupported; explicitly declared factories can provide that
 interface. Conditional property fragments execute through the IR runtimes. Broader rules for
 function call styles and first-class calling conventions remain a separate design topic.
+
+## Wide-Gamut Color
+
+`Color` is a union of color spaces (`srgb`, `displayP3`, `oklab`, `oklch`) with explicit `inGamut`
+and `toGamut`. Left for later:
+
+- Drawing on P3 surfaces in Skia and Canvas, instead of mapping into sRGB at preparation.
+- An OKLCH picker, so wide colors can be edited and not only shown.
+- Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
+- `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.
+- Percentage literals for color (Bret, 2026-11-22). NX will get `23%` literals as a general
+  language feature. Once they exist, color creation should accept them where CSS does. Channels,
+  lightness and alpha would take `50%` for 0.5, as in `c.rgb(100%, 50%, 0%)`,
+  `<c.Color.srgb r=100% … />` and `alpha=50%`. Visual and hovers could then show these 0 to 1
+  fields as percentages. The stored value stays 0 to 1, which is why `color.nx` writes the range
+  inline instead of naming it `Percentage`. Note that `Length.percent` in the drawn-UI proposal
+  stores 50 for 50%, so the literal's meaning has to be settled per target type.

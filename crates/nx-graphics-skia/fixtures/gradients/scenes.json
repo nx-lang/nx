@@ -22,7 +22,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "19c050fd28ebc1187b09e451eafaf5e2d25dfa1d64d462fd0334a99d545b106b",
+      "revision": "a238bc21e8f2c4c1fbc1ce12a3b2d393dcb85f34c1b32b6523c3d03075ec2b4e",
       "root": {
         "accessibility": null,
         "children": [],
@@ -177,7 +177,8 @@
         "stops": [
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 0,
               "g": 0,
               "r": 1
@@ -186,7 +187,8 @@
           },
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 1,
               "g": 0,
               "r": 0
@@ -231,7 +233,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "67121011e81eb47452043a5b2812ed5872112484c0b9bba96cb840bac5aa0d3e",
+      "revision": "3fbbfdb1bef5b070e21669358b918f2a9c40035c59cd2fc66ce7cd0f4f62b743",
       "root": {
         "accessibility": null,
         "children": [],
@@ -386,7 +388,8 @@
         "stops": [
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 0,
               "g": 0,
               "r": 1
@@ -395,7 +398,8 @@
           },
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 1,
               "g": 0,
               "r": 0
@@ -440,7 +444,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "a4253d47dba12ac9cf84081d0c8013a95afc1485ffcf1861e80692450da13ee8",
+      "revision": "933b7c788d5094b654ea3af2469698aa66b1340a090325302927b3f652bbbb7b",
       "root": {
         "accessibility": null,
         "children": [],
@@ -595,7 +599,8 @@
         "stops": [
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 0,
               "g": 0,
               "r": 1
@@ -604,7 +609,8 @@
           },
           {
             "color": {
-              "a": 1,
+              "$type": "Color.srgb",
+              "alpha": 1,
               "b": 1,
               "g": 0,
               "r": 0
@@ -649,7 +655,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "cb682394870a7b622f82c82f7f81fcea8f7fe538439d80e6289260cb44009873",
+      "revision": "4249decb17e8bd5763edce1563244b3edd35d807bcc21b0ba185cc3779f6a6c4",
       "root": {
         "accessibility": null,
         "children": [
@@ -952,7 +958,8 @@
                 "stops": [
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 0,
                       "g": 0,
                       "r": 1
@@ -961,7 +968,8 @@
                   },
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 1,
                       "g": 0,
                       "r": 0
@@ -1020,7 +1028,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "9d2e057f40117acf150f30aba380d248cdf83f50a0770c7146550a105a35d059",
+      "revision": "d34e962227da65d34e45c853c03ae5f3ce56304e0ea5f14e664ff90861eb7484",
       "root": {
         "accessibility": null,
         "children": [
@@ -1243,7 +1251,8 @@
               "stops": [
                 {
                   "color": {
-                    "a": 1,
+                    "$type": "Color.srgb",
+                    "alpha": 1,
                     "b": 0,
                     "g": 0,
                     "r": 1
@@ -1252,7 +1261,8 @@
                 },
                 {
                   "color": {
-                    "a": 1,
+                    "$type": "Color.srgb",
+                    "alpha": 1,
                     "b": 1,
                     "g": 0,
                     "r": 0
@@ -1304,7 +1314,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "9fed0f8c3b40c31c6bfb7d8ea6b51f8ab42888e44de0ab23084ef1f791e744ac",
+      "revision": "9b2a3742b81b19eae7f5fd00088480b5ae59c263c60a49870925557fd84ab00d",
       "root": {
         "accessibility": null,
         "children": [
@@ -1677,7 +1687,8 @@
                 "stops": [
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 0,
                       "g": 0,
                       "r": 1
@@ -1686,7 +1697,8 @@
                   },
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 1,
                       "g": 0,
                       "r": 0
@@ -1709,7 +1721,8 @@
                 "stops": [
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 0,
                       "g": 0,
                       "r": 1
@@ -1718,7 +1731,8 @@
                   },
                   {
                     "color": {
-                      "a": 1,
+                      "$type": "Color.srgb",
+                      "alpha": 1,
                       "b": 1,
                       "g": 0,
                       "r": 0
@@ -1770,7 +1784,7 @@
         "width": 100.0
       },
       "profile": "graphics-core-v4",
-      "revision": "82ec6dffcc5b7df4cd51b204353c7a7400684007840f3010516aaa7a3cf81732",
+      "revision": "aa7dc936cdedef4ca5849050d2a7f1441b59066e0a56c3017fa0ecb23d51b6fb",
       "root": {
         "accessibility": null,
         "children": [
@@ -2098,7 +2112,8 @@
             "stops": [
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 0,
                   "g": 0,
                   "r": 1
@@ -2107,7 +2122,8 @@
               },
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 1,
                   "g": 0,
                   "r": 0
@@ -2130,7 +2146,8 @@
             "stops": [
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 0,
                   "g": 0,
                   "r": 1
@@ -2139,7 +2156,8 @@
               },
               {
                 "color": {
-                  "a": 1,
+                  "$type": "Color.srgb",
+                  "alpha": 1,
                   "b": 1,
                   "g": 0,
                   "r": 0

@@ -1080,7 +1080,10 @@ impl<'a> InferenceContext<'a> {
                         ty.clone()
                     } else if self.report_unresolved_property_reference(&name, *span) {
                         Type::Error
-                    } else if let Some((entry, case)) = self.union_case_from_qualified_name(&name) {
+                    } else if let Some((entry, case)) = {
+                        self.resolve_union_case_alias(&name);
+                        self.union_case_from_qualified_name(&name)
+                    } {
                         let union_name = entry.def.name.clone();
                         let case_name = case.name.clone();
                         let is_fieldless = case.fields.is_empty();
@@ -2740,6 +2743,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         if let Some(name) = self.flattened_expr_name(pattern) {
+            self.resolve_union_case_alias(&name);
             if let Some((entry, case)) = self.union_case_from_qualified_name(&name) {
                 let ty = entry.case_type(case.name.clone());
                 self.env.set_expr_type(pattern, ty.clone());
@@ -4175,6 +4179,7 @@ impl<'a> InferenceContext<'a> {
             );
         }
 
+        self.resolve_union_case_alias(&element.tag);
         if let Some((entry, case)) = self.union_case_from_qualified_name(&element.tag) {
             let entry = entry.clone();
             let case = case.clone();
@@ -8656,9 +8661,46 @@ impl<'a> InferenceContext<'a> {
         let (union_name, case_name) = name.as_str().rsplit_once('.')?;
         let union_name = Name::new(union_name);
         let case_name = Name::new(case_name);
-        let entry = self.union_defs.get(&union_name)?;
+        let entry = match self.union_defs.get(&union_name) {
+            Some(entry) => entry,
+            None => self.union_entry_through_alias(&union_name)?,
+        };
         let case = entry.def.cases.iter().find(|case| case.name == case_name)?;
         Some((entry, case))
+    }
+
+    /// The union an alias names, as in `g.Color.srgb` where `g.Color` aliases a union.
+    ///
+    /// <para>Reads only aliases already resolved, so callers resolve the alias first with
+    /// [`Self::resolve_union_case_alias`].</para>
+    fn union_entry_through_alias(&self, alias: &Name) -> Option<&UnionEntry> {
+        let Some(Type::Union(union)) = self.resolved_type_aliases.get(alias) else {
+            return None;
+        };
+        let origin = union.origin()?;
+        self.foreign_union_defs.get(origin).or_else(|| {
+            self.union_defs
+                .values()
+                .find(|entry| entry.origin.as_ref() == Some(origin))
+        })
+    }
+
+    /// Resolves the alias a qualified case name starts with, so that
+    /// [`Self::union_case_from_qualified_name`] can reach the union it names.
+    fn resolve_union_case_alias(&mut self, name: &Name) {
+        let Some((prefix, _)) = name.as_str().rsplit_once('.') else {
+            return;
+        };
+        let prefix = Name::new(prefix);
+        if self.union_defs.contains_key(&prefix)
+            || !self.type_aliases.contains_key(&prefix)
+            || self.resolved_type_aliases.contains_key(&prefix)
+        {
+            return;
+        }
+        let before = self.diagnostics.len();
+        self.resolve_named_type(&prefix, &mut FxHashSet::default());
+        self.diagnostics.truncate(before);
     }
 
     /// Converts a type reference, reporting a problem with the reference itself at `span`.

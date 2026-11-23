@@ -128,6 +128,15 @@ export function renderValue(
       swatch.setAttribute("aria-hidden", "true");
       swatch.style.cssText = "display:inline-block;width:.8em;height:.8em;margin-right:.35em;border:1px solid currentColor;vertical-align:baseline";
       swatch.style.backgroundColor = node.color;
+      // A color an sRGB screen cannot show is marked: a corner notch, labeled for assistive tech.
+      if (node.colorOutsideSrgb === true) {
+        swatch.classList.add("outside-srgb");
+        swatch.style.backgroundImage = "linear-gradient(225deg, currentColor 0 28%, transparent 28%)";
+        swatch.title = "Outside sRGB: shows differently on sRGB screens";
+        swatch.removeAttribute("aria-hidden");
+        swatch.setAttribute("role", "img");
+        swatch.setAttribute("aria-label", "Outside sRGB");
+      }
       if (swatch.style.backgroundColor !== "") element.append(swatch);
     }
 

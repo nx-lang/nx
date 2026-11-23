@@ -89,7 +89,15 @@ counting polygon vertices and star outer tips respectively; generated geometry S
 - **AND** the library SHALL NOT retain the old public names or count helper properties as aliases
 
 ### Requirement: Graphics consumes the shared color contract
-@nx/graphics SHALL import and re-export the canonical @nx/color Color rather than declaring a separate string alias. Solid paint colors and drawing backgrounds SHALL accept shared float32 Color records, including values authored as hex literals. Standard-library linking SHALL include color transitively when required, without requiring an application-level import. Scene preparation SHALL validate finite normalized channels, including raw SDK records, before painting. Direct strings in Color fields SHALL fail type checking or scene validation rather than being silently reparsed. Native and browser renderers SHALL preserve numerical channel precision until backend conversion.
+@nx/graphics SHALL import and re-export the canonical @nx/color Color rather than declaring a
+separate string alias. Solid paint colors, gradient stops and drawing backgrounds SHALL accept a
+shared Color in any of its spaces, including values authored as hex literals. Standard-library
+linking SHALL include color transitively when required, without requiring an application-level
+import. Scene preparation SHALL validate each color's channels for its space, including raw SDK
+records, and SHALL then convert it with `toGamut(value, srgb)` before painting, so prepared paints
+hold sRGB float32 channels. Direct strings in Color fields SHALL fail type checking or scene
+validation rather than being silently reparsed. Native and browser renderers SHALL preserve
+numerical channel precision from the prepared color until backend conversion.
 
 #### Scenario: One shared color across application and drawing
 - **WHEN** a program supplies the same @nx/color Color to an application brand record and a graphics solid fill
@@ -100,8 +108,12 @@ counting polygon vertices and star outer tips respectively; generated geometry S
 - **THEN** linking SHALL include the required image or report its absence before painting
 
 #### Scenario: Invalid SDK color is rejected before painting
-- **WHEN** a later scene element contains a Color channel outside [0,1] or non-finite channels
+- **WHEN** a later scene element contains a `Color.srgb` channel outside [0,1], a negative `Color.oklch` chroma, or non-finite channels
 - **THEN** preparation SHALL fail before painting any element and identify the element/channel
+
+#### Scenario: A wide color is mapped at preparation
+- **WHEN** a Rectangle is filled with `displayP3(1, 0, 0)`
+- **THEN** its prepared paint SHALL hold the channels of `toGamut(displayP3(1, 0, 0), srgb)`
 
 ### Requirement: Changed graphics color semantics have a new profile
 Graphics SHALL identify the shared-color, gradient paint, and shared-geometry contract as graphics-core-v4 in documentation, preparation metadata, previews, and fixtures. Existing geometry, solid/none paint behavior, opacity, and unsupported-effect diagnostics SHALL remain applicable. Supported native and browser paths SHALL consume the shared color record consistently.

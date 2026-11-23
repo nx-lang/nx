@@ -90,10 +90,11 @@ impl Paint {
         }
     }
 }
+/// Reads a Color in any space and maps it into sRGB, the space prepared paints are drawn in.
 fn color(value: &Value, path: &str, property: &str) -> Result<[f32; 4]> {
     let value: nx_value::NxValue = serde_json::from_value(value.clone())
         .map_err(|_| error(path, format!("{property}: invalid Color record")))?;
-    nx_value::color::channels(&value)
+    nx_value::color::srgb_channels(&value)
         .map(|c| c.map(|x| x as f32))
         .map_err(|failure| {
             let mut d = error(path, format!("{property}: {}", failure.message));

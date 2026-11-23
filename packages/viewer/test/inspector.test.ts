@@ -365,6 +365,21 @@ describe("inspectors", () => {
     assert.match(element.selection ?? "", /^blue/);
   });
 
+  it("marks a reference's swatch when the color it names is outside sRGB", async () => {
+    const source = [
+      'import "@nx/color" as c',
+      "type Tag = { name:string tint?:c.Color }",
+      "let vivid = <c.Color.oklch l=0.7 c=0.3 h=145 />",
+      'let tag = <Tag name="t" tint={vivid} />',
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///wide.nx", identity: "wide.nx", source }], { visualizers: { modules: [] } }), true);
+    element.selection = "tag.value";
+    const square = drawn(element, "tag.value.tint").querySelector<HTMLElement>(":scope > .sheet-value > .swatch")!;
+    assert.ok(square.classList.contains("outside-srgb"), "the swatch is marked");
+    assert.equal(square.getAttribute("aria-label"), "Outside sRGB");
+  });
+
   it("finds a reference's swatch and Go to through what it resolves to, not its name", async () => {
     const source = [
       "type Tag = { name:string tint?:color }",

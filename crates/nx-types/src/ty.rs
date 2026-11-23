@@ -1082,8 +1082,10 @@ impl fmt::Display for Type {
                 named.args(),
                 &|ty: &Type| ty.to_string(),
             )),
-            Type::Union(union_ty) => write!(f, "{}", union_ty.name),
-            Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
+            Type::Union(union_ty) => f.write_str(public_type_name(&union_ty.name)),
+            Type::UnionCase(case_ty) => {
+                write!(f, "{}.{}", public_type_name(&case_ty.union), case_ty.case)
+            }
             Type::Parameter(param) => write!(f, "{}", param.name),
             Type::Variable(id) => write!(f, "T{}", id),
             Type::ContextualName(name) => write!(f, "{}", name),
@@ -1171,17 +1173,21 @@ fn collect_nominal_parts<'ty>(
 fn qualified_display(ty: &Type) -> String {
     match ty {
         Type::Union(union_ty) => match union_ty.origin() {
-            Some(origin) => format!("{}:{}", origin.module_identity(), union_ty.name),
-            None => union_ty.name.to_string(),
+            Some(origin) => format!(
+                "{}:{}",
+                origin.module_identity(),
+                public_type_name(&union_ty.name)
+            ),
+            None => public_type_name(&union_ty.name).to_string(),
         },
         Type::UnionCase(case_ty) => match case_ty.origin() {
             Some(origin) => format!(
                 "{}:{}.{}",
                 origin.module_identity(),
-                case_ty.union,
+                public_type_name(&case_ty.union),
                 case_ty.case
             ),
-            None => format!("{}.{}", case_ty.union, case_ty.case),
+            None => format!("{}.{}", public_type_name(&case_ty.union), case_ty.case),
         },
         Type::Named(named) => {
             let name = match named.origin() {

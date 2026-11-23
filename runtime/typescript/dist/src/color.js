@@ -1,4 +1,11 @@
-/** Closed renderer-independent standard-color-v1 operations. */
+/**
+ * Closed renderer-independent standard-color-v2 operations.
+ *
+ * A `Color` is a union of color spaces: `srgb` and `displayP3` hold encoded RGB, `oklab` and
+ * `oklch` hold perceptual coordinates that may lie outside every screen's gamut. Conversions go
+ * through unclamped linear-light sRGB, and only `toGamut` and the functions documented as mapping
+ * into sRGB ever bring a color inside a gamut. This mirrors `crates/nx-value/src/color.rs`.
+ */
 export const nxStandardColorNames = [
     "rgb",
     "rgba",
@@ -7,11 +14,14 @@ export const nxStandardColorNames = [
     "hsl",
     "hsv",
     "hwb",
+    "displayP3",
     "oklab",
     "oklch",
     "parse",
     "tryParse",
     "validate",
+    "inGamut",
+    "toGamut",
     "toHex",
     "toCss",
     "toRgb",
@@ -39,10 +49,21 @@ export const nxStandardColorNames = [
     "bestTextColor",
 ];
 export const nxStandardColorArities = [
-    3, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2,
-    2, 2, 2, 1, 1, 2, 4, 2, 1, 2, 3,
+    3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2,
+    2, 2, 2, 2, 2, 2, 1, 1, 2, 4, 2, 1, 2, 3,
 ];
-const colorModule = "@nx/color/color.nx";
+const colorKeys = {
+    srgb: ["r", "g", "b", "alpha"],
+    displayP3: ["r", "g", "b", "alpha"],
+    oklab: ["l", "a", "b", "alpha"],
+    oklch: ["l", "c", "h", "alpha"],
+};
+const colorRank = { srgb: 0, displayP3: 1, oklab: 2, oklch: 2 };
+const colorIsRgb = (space) => space === "srgb" || space === "displayP3";
+/** How far outside [0, 1] a converted channel may be and still count as inside a gamut. */
+const colorGamutTolerance = 2e-6;
+const colorJnd = 0.02;
+const colorMapEpsilon = 0.0001;
 function colorError(field, code = "color-invalid-channel") {
     throw Object.assign(new Error(`Invalid color: ${field}`), { code });
 }
@@ -59,27 +80,85 @@ function colorFinite(x) {
 function colorRecord(name, keys, values) {
     return Object.assign({ $type: name }, Object.fromEntries(keys.map((key, i) => [key, values[i]])));
 }
-function colorMake(c) {
-    return colorRecord("Color", ["r", "g", "b", "a"], c.map((x) => Math.fround(colorUnit(x)) || 0));
+const colorNarrow = (x) => Math.fround(x) || 0;
+/** Wraps finite degrees into [0, 360), also after float32 rounding. */
+function colorWrapHue(h) {
+    h = ((h % 360) + 360) % 360;
+    return colorNarrow(h) >= 360 ? 0 : h;
 }
-function colorChannels(c) {
-    if (c === null || typeof c !== "object")
+/** Checks channels for their space and writes them as a `Color` union-case record. */
+function colorMakeIn(space, c) {
+    const keys = colorKeys[space];
+    c.forEach((x, i) => {
+        if (space === "oklab" && (i === 1 || i === 2))
+            colorFinite(x);
+        else if (space === "oklch" && i === 1) {
+            if (colorFinite(x) < 0)
+                colorError(keys[i]);
+        }
+        else if (space === "oklch" && i === 2) {
+            if (!(colorFinite(x) >= 0 && x < 360))
+                colorError(keys[i]);
+        }
+        else
+            colorUnit(x, keys[i]);
+    });
+    return colorRecord(`Color.${space}`, keys, c.map((x, i) => colorNarrow(space === "oklch" && i === 2 ? colorWrapHue(x) : x)));
+}
+function colorMake(c) {
+    return colorMakeIn("srgb", c);
+}
+/** Writes a computed color: a perceptual color has its lightness clamped and its hue wrapped. */
+function colorFinish(space, c) {
+    c = c.map((x) => colorFinite(x));
+    if (space === "oklab")
+        c[0] = Math.max(0, Math.min(1, c[0]));
+    if (space === "oklch") {
+        c[0] = Math.max(0, Math.min(1, c[0]));
+        c[1] = Math.max(0, c[1]);
+        c[2] = colorWrapHue(c[2]);
+    }
+    c[3] = Math.max(0, Math.min(1, c[3]));
+    return colorMakeIn(space, c);
+}
+/** Reads a `Color` union-case record, checking every channel for its space. */
+function colorRead(v) {
+    if (v === null || typeof v !== "object")
         colorError("Color");
-    return ["r", "g", "b", "a"].map((k) => {
-        const x = colorUnit(c[k] === undefined && k === "a" ? 1 : c[k], k);
+    const type = String(v.$type ?? "");
+    const scope = type.lastIndexOf("::");
+    const name = scope < 0 ? type : type.slice(scope + 2);
+    const dot = name.lastIndexOf(".");
+    const union = dot < 0 ? "" : name.slice(0, dot);
+    const space = name.slice(dot + 1);
+    if (!(union === "Color" || union.endsWith(".Color")) || !(space in colorKeys))
+        colorError("Color");
+    const keys = colorKeys[space];
+    const c = keys.map((k) => {
+        const x = v[k] === undefined && k === "alpha" ? 1 : v[k];
+        if (typeof x !== "number")
+            colorError(k);
+        colorFinite(x);
         if (Math.fround(x) !== x)
             colorError(k);
         return x;
     });
+    colorMakeIn(space, c);
+    if (Object.keys(v).some((k) => k !== "$type" && !keys.includes(k)))
+        colorError("Color");
+    return { space, c };
 }
 function colorClamp(x) {
     return Math.max(0, Math.min(1, colorFinite(x)));
 }
+/** The sRGB transfer curve, extended to negative values by symmetry as CSS Color 4 does. */
 function colorDecode(x) {
-    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    const a = Math.abs(x), y = a <= 0.04045 ? a / 12.92 : ((a + 0.055) / 1.055) ** 2.4;
+    return x < 0 ? -y : y;
 }
 function colorEncode(x) {
-    return x <= 0.0031308 ? x * 12.92 : 1.055 * x ** (1 / 2.4) - 0.055;
+    const a = Math.abs(x), y = a <= 0.0031308 ? a * 12.92 : 1.055 * a ** (1 / 2.4) - 0.055;
+    return x < 0 ? -y : y;
 }
 function colorHue(x) {
     colorFinite(x);
@@ -116,36 +195,194 @@ function colorFromHsl(c) {
     const v = c[2] + c[1] * Math.min(c[2], 1 - c[2]), s = v === 0 ? 0 : 2 * (1 - c[2] / v);
     return [...colorHsv(c[0], s, v), c[3]];
 }
-function colorLab(c) {
-    const [r, g, b] = c.slice(0, 3).map(colorDecode), l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+const colorP3ToSrgb = [
+    [1.2249401762805596, -0.22494017628055998, 0],
+    [-0.04205695470968817, 1.0420569547096883, 0],
+    [-0.019637554590334432, -0.07863604555063192, 1.0982736001409663],
+];
+const colorSrgbToP3 = [
+    [0.8224619687143624, 0.17753803128563778, 0],
+    [0.03319419885096163, 0.9668058011490381, 0],
+    [0.01708263072112004, 0.07239744066396347, 0.9105199286149165],
+];
+function colorMul(m, v) {
+    return m.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+}
+function colorLinToLab(v) {
+    const [r, g, b] = v, l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
     return [
         0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
         1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
         0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-        c[3],
     ];
 }
-function colorFromLab(c) {
-    const [L, a, b, alpha] = c, l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+function colorLabToLin(v) {
+    const [L, a, b] = v, l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
     return [
         4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
         -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
         -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
-    ]
-        .map(colorEncode)
-        .concat(alpha);
+    ];
+}
+function colorLabToLch(v) {
+    return [v[0], Math.hypot(v[1], v[2]), colorWrapHue((Math.atan2(v[2], v[1]) * 180) / Math.PI)];
+}
+function colorLchToLab(v) {
+    const h = (v[2] * Math.PI) / 180;
+    return [v[0], v[1] * Math.cos(h), v[1] * Math.sin(h)];
+}
+function colorToLin(color) {
+    const v = color.c.slice(0, 3);
+    switch (color.space) {
+        case "srgb":
+            return v.map(colorDecode);
+        case "displayP3":
+            return colorMul(colorP3ToSrgb, v.map(colorDecode));
+        case "oklab":
+            return colorLabToLin(v);
+        default:
+            return colorLabToLin(colorLchToLab(v));
+    }
+}
+function colorFromLin(space, v) {
+    switch (space) {
+        case "srgb":
+            return v.map(colorEncode);
+        case "displayP3":
+            return colorMul(colorSrgbToP3, v).map(colorEncode);
+        case "oklab":
+            return colorLinToLab(v);
+        default:
+            return colorLabToLch(colorLinToLab(v));
+    }
+}
+/** The color's channels in `space`, unclamped, alpha kept. */
+function colorConvert(color, space) {
+    const v = color.c.slice(0, 3);
+    let out;
+    if (color.space === space)
+        out = v;
+    else if (color.space === "oklab" && space === "oklch")
+        out = colorLabToLch(v);
+    else if (color.space === "oklch" && space === "oklab")
+        out = colorLchToLab(v);
+    else if (colorIsRgb(color.space) && space === "oklch" && v[0] === v[1] && v[1] === v[2])
+        out = [colorLinToLab(colorToLin(color))[0], 0, 0];
+    else
+        out = colorFromLin(space, colorToLin(color));
+    return [...out, color.c[3]];
+}
+function colorRgbInGamut(v) {
+    return v.every((x) => x >= -colorGamutTolerance && x <= 1 + colorGamutTolerance);
+}
+function colorInGamut(color, gamut) {
+    return color.space === gamut || colorRgbInGamut(colorConvert(color, gamut).slice(0, 3));
+}
+/** The color in `gamut`'s encoded RGB, mapped with the CSS Color 4 algorithm when outside it. */
+function colorToGamut(color, gamut) {
+    const alpha = color.c[3];
+    if (color.space === gamut)
+        return color.c.slice();
+    const origin = colorConvert(color, "oklch").slice(0, 3);
+    if (origin[0] >= 1)
+        return [1, 1, 1, alpha];
+    if (origin[0] <= 0)
+        return [0, 0, 0, alpha];
+    const direct = colorConvert(color, gamut).slice(0, 3);
+    if (colorRgbInGamut(direct))
+        return [...direct.map((x) => Math.max(0, Math.min(1, x))), alpha];
+    const dest = (lch) => colorFromLin(gamut, colorLabToLin(colorLchToLab(lch)));
+    const clip = (v) => v.map((x) => Math.max(0, Math.min(1, x)));
+    const delta = (clipped, lch) => {
+        const a = colorLinToLab(colorToLin({ space: gamut, c: [...clipped, alpha] })), b = colorLchToLab(lch);
+        return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
+    };
+    const current = origin.slice();
+    let clipped = clip(dest(current));
+    if (delta(clipped, current) < colorJnd)
+        return [...clipped, alpha];
+    let min = 0, max = origin[1], minInGamut = true;
+    while (max - min > colorMapEpsilon) {
+        const chroma = (min + max) / 2;
+        current[1] = chroma;
+        const rgb = dest(current);
+        if (minInGamut && colorRgbInGamut(rgb)) {
+            min = chroma;
+            continue;
+        }
+        clipped = clip(rgb);
+        const e = delta(clipped, current);
+        if (e < colorJnd) {
+            if (colorJnd - e < colorMapEpsilon)
+                break;
+            minInGamut = false;
+            min = chroma;
+        }
+        else
+            max = chroma;
+    }
+    return [...clipped, alpha];
+}
+/** Writes linear-light sRGB as a color in `space`, mapping into the gamut of an RGB space. */
+function colorFromLinIn(space, lin, alpha) {
+    lin.forEach((x) => colorFinite(x));
+    if (colorIsRgb(space)) {
+        const direct = colorFromLin(space, lin);
+        return colorMakeIn(space, colorRgbInGamut(direct)
+            ? [...direct.map((x) => Math.max(0, Math.min(1, x))), alpha]
+            : colorToGamut({ space: "oklab", c: [...colorLinToLab(lin), alpha] }, space));
+    }
+    return colorFinish(space, [...colorFromLin(space, lin), alpha]);
+}
+/** Writes an Oklch color in `space`, mapping into the gamut of an RGB space. */
+function colorFromLchIn(space, lch) {
+    lch.forEach((x) => colorFinite(x));
+    const color = {
+        space: "oklch",
+        c: [Math.max(0, Math.min(1, lch[0])), Math.max(0, lch[1]), colorWrapHue(lch[2]), lch[3]],
+    };
+    return colorIsRgb(space)
+        ? colorMakeIn(space, colorToGamut(color, space))
+        : colorFinish(space, colorConvert(color, space));
+}
+function colorWider(a, b) {
+    return colorRank[b] > colorRank[a] ? b : a;
+}
+/** Standalone CSS text for the color, in its own space. */
+function colorCss(color) {
+    const [a, b, c, alpha] = color.c.map((x) => String(x === 0 ? 0 : x));
+    switch (color.space) {
+        case "srgb":
+            return `rgb(${color.c
+                .slice(0, 3)
+                .map((x) => String(x * 255 || 0))
+                .join(" ")} / ${alpha})`;
+        case "displayP3":
+            return `color(display-p3 ${a} ${b} ${c} / ${alpha})`;
+        default:
+            return `${color.space}(${a} ${b} ${c} / ${alpha})`;
+    }
+}
+function colorGamutArg(v) {
+    if (v === "srgb" || v === "displayP3")
+        return v;
+    colorError("gamut");
+}
+/** The color as an sRGB screen shows it, for the functions defined only in sRGB. */
+function colorShown(color) {
+    return colorToGamut(color, "srgb").map(colorNarrow);
 }
 function colorLuminance(c) {
     if (c[3] !== 1)
         colorError("alpha must be opaque");
-    return c
-        .slice(0, 3)
-        .map(colorDecode)
-        .reduce((s, x, i) => s + x * ([0.2126, 0.7152, 0.0722][i] ?? 0), 0);
+    return 0.2126 * colorDecode(c[0]) + 0.7152 * colorDecode(c[1]) + 0.0722 * colorDecode(c[2]);
 }
 function colorContrast(a, b) {
-    const x = colorLuminance(a), y = colorLuminance(b);
+    const x = colorLuminance(colorShown(a)), y = colorLuminance(colorShown(b));
     return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+function colorWrite(color) {
+    return colorMakeIn(color.space, color.c);
 }
 function colorParse(text) {
     if (typeof text !== "string")
@@ -185,7 +422,7 @@ function colorParseValue(text) {
         colorError(text, "color-invalid-text");
     if (name === "color") {
         body = trimColorWhitespace(body);
-        const p = /^(srgb|srgb-linear)[\t\n\f\r ]+/.exec(body);
+        const p = /^(srgb|srgb-linear|display-p3)[\t\n\f\r ]+/.exec(body);
         if (!p)
             colorError(text, "color-invalid-text");
         name = p[1];
@@ -237,18 +474,21 @@ function colorParseValue(text) {
     if (name === "oklch" && tokens[2].endsWith("%"))
         bad();
     const a = tokens[3] === undefined ? 1 : colorClamp(number(tokens[3]));
-    let c;
+    let c, space = "srgb";
     if (name === "rgb" || name === "rgba")
         c = tokens
             .slice(0, 3)
             .map((s) => colorClamp(number(s, 255) / 255))
             .concat(a);
-    else if (name === "srgb" || name === "srgb-linear")
+    else if (name === "srgb" || name === "srgb-linear" || name === "display-p3") {
+        if (name === "display-p3")
+            space = "displayP3";
         c = tokens
             .slice(0, 3)
             .map((s) => colorClamp(number(s)))
-            .map((x) => (name === "srgb" ? x : colorEncode(x)))
+            .map((x) => (name === "srgb-linear" ? colorEncode(x) : x))
             .concat(a);
+    }
     else if (name === "hsl" || name === "hsla")
         c = colorFromHsl([
             number(tokens[0], 1, true),
@@ -263,19 +503,20 @@ function colorParseValue(text) {
             : colorHsv(number(tokens[0], 1, true), 1, 1).map((x) => x * (1 - w - b) + w)).concat(a);
     }
     else {
-        const l = colorClamp(number(tokens[0])), x = number(tokens[1], 0.4), y = number(tokens[2], 0.4, name === "oklch");
-        c = colorFromLab(name === "oklab"
-            ? [l, x, y, a]
-            : [
-                l,
-                Math.max(0, x) *
-                    Math.cos((number(tokens[2], 1, true) * Math.PI) / 180),
-                Math.max(0, x) *
-                    Math.sin((number(tokens[2], 1, true) * Math.PI) / 180),
-                a,
-            ]);
+        const l = colorClamp(number(tokens[0])), x = number(tokens[1], 0.4);
+        if (name === "oklch") {
+            space = "oklch";
+            c = [l, Math.max(0, x), number(tokens[2], 1, true), a];
+        }
+        else {
+            space = "oklab";
+            c = [l, x, number(tokens[2], 0.4), a];
+        }
     }
-    return colorMake(c.map(colorClamp));
+    c.forEach(colorFinite);
+    if (space === "srgb" || space === "displayP3")
+        c = c.map(colorClamp);
+    return colorFinish(space, c);
 }
 export function nxStandardColor(op, args) {
     const name = nxStandardColorNames[op];
@@ -291,17 +532,7 @@ export function nxStandardColor(op, args) {
             return colorRecord("ParseResult.invalid", ["message"], [e.message]);
         }
     }
-    if ([
-        "rgb",
-        "rgba",
-        "srgb",
-        "linearRgb",
-        "hsl",
-        "hsv",
-        "hwb",
-        "oklab",
-        "oklch",
-    ].includes(name)) {
+    if (["rgb", "rgba", "srgb", "linearRgb", "hsl", "hsv", "hwb", "displayP3", "oklab", "oklch"].includes(name)) {
         let c = [args[0], args[1], args[2], args[3] ?? 1];
         c.forEach(colorFinite);
         colorUnit(c[3]);
@@ -333,31 +564,45 @@ export function nxStandardColor(op, args) {
                 ? [c[1] / sum, c[1] / sum, c[1] / sum]
                 : colorHsv(c[0], 1, 1).map((x) => x * (1 - sum) + c[1])).concat(c[3]);
         }
-        else if (name === "oklab" || name === "oklch") {
+        else if (name === "displayP3")
+            return colorMakeIn("displayP3", c);
+        else if (name === "oklab") {
             colorUnit(c[0]);
-            if (name === "oklch") {
-                if (c[1] < 0)
-                    colorError("chroma");
-                const h = (colorHue(c[2]) * Math.PI) / 180;
-                c = [c[0], c[1] * Math.cos(h), c[1] * Math.sin(h), c[3]];
-            }
-            c = colorFromLab(c).map(colorClamp);
+            return colorMakeIn("oklab", c);
+        }
+        else if (name === "oklch") {
+            colorUnit(c[0]);
+            if (c[1] < 0)
+                colorError("c");
+            c[2] = colorWrapHue(c[2]);
+            return colorMakeIn("oklch", c);
         }
         return colorMake(c);
     }
-    let c = colorChannels(args[0]);
+    const color = colorRead(args[0]);
     if (name === "validate")
-        return colorMake(c);
+        return colorWrite(color);
+    if (name === "inGamut")
+        return colorInGamut(color, colorGamutArg(args[1]));
+    if (name === "toGamut") {
+        const gamut = colorGamutArg(args[1]);
+        return colorMakeIn(gamut, colorToGamut(color, gamut));
+    }
     if (name === "toHex")
         return ("#" +
-            c
+            colorShown(color)
                 .map((x) => Math.floor(x * 255 + 0.5)
                 .toString(16)
                 .padStart(2, "0"))
                 .join(""));
     if (name === "toCss")
-        return `rgba(${c[0] * 255}, ${c[1] * 255}, ${c[2] * 255}, ${c[3]})`;
+        return colorCss(color);
+    if (name === "toOklab" || name === "toOklch") {
+        const space = name === "toOklab" ? "oklab" : "oklch";
+        return colorRecord(name.slice(2) + "Channels", colorKeys[space], colorConvert(color, space));
+    }
     if (name.startsWith("to")) {
+        const c = colorShown(color);
         let v, keys;
         switch (name) {
             case "toRgb":
@@ -379,110 +624,86 @@ export function nxStandardColor(op, args) {
                 break;
             }
             case "toHwb":
-                v = [
-                    colorHsl(c)[0],
-                    Math.min(...c.slice(0, 3)),
-                    1 - Math.max(...c.slice(0, 3)),
-                    c[3],
-                ];
+                v = [colorHsl(c)[0], Math.min(...c.slice(0, 3)), 1 - Math.max(...c.slice(0, 3)), c[3]];
                 keys = ["h", "w", "b", "alpha"];
                 break;
-            case "toLinearRgb":
+            default:
                 v = c.slice(0, 3).map(colorDecode).concat(c[3]);
                 keys = ["r", "g", "b", "alpha"];
-                break;
-            default:
-                v = colorLab(c);
-                keys = ["l", "a", "b", "alpha"];
-                if (name === "toOklch") {
-                    v = [
-                        v[0],
-                        Math.hypot(v[1], v[2]),
-                        colorHue((Math.atan2(v[2], v[1]) * 180) / Math.PI),
-                        v[3],
-                    ];
-                    if (c[0] === c[1] && c[1] === c[2]) {
-                        v[1] = 0;
-                        v[2] = 0;
-                    }
-                    keys = ["l", "c", "h", "alpha"];
-                }
         }
         return colorRecord(name.slice(2) + "Channels", keys, v);
     }
-    if (["withAlpha", "fadeIn", "fadeOut", "invert"].includes(name)) {
-        const a = colorUnit(args[1]);
+    if (["withAlpha", "fadeIn", "fadeOut"].includes(name)) {
+        const a = colorUnit(args[1]), c = color.c.slice();
         if (name === "withAlpha")
             c[3] = a;
         else if (name === "fadeIn")
             c[3] = Math.min(1, c[3] + a);
-        else if (name === "fadeOut")
-            c[3] = Math.max(0, c[3] - a);
         else
-            c = c
-                .slice(0, 3)
-                .map((x) => x * (1 - a) + (1 - x) * a)
-                .concat(c[3]);
-        return colorMake(c);
+            c[3] = Math.max(0, c[3] - a);
+        return colorMakeIn(color.space, c);
     }
-    if ([
-        "lighten",
-        "darken",
-        "saturate",
-        "desaturate",
-        "rotateHue",
-        "complement",
-        "grayscale",
-    ].includes(name)) {
-        c = colorHsl(c);
+    if (name === "invert") {
+        const a = colorUnit(args[1]);
+        const [space, c] = colorIsRgb(color.space)
+            ? [color.space, color.c]
+            : ["displayP3", colorToGamut(color, "displayP3")];
+        return colorMakeIn(space, c
+            .slice(0, 3)
+            .map((x) => Math.max(0, Math.min(1, x * (1 - a) + (1 - x) * a)))
+            .concat(c[3]));
+    }
+    if (["lighten", "darken", "saturate", "desaturate", "rotateHue", "complement", "grayscale"].includes(name)) {
+        const v = colorConvert(color, "oklch");
         if (name === "complement")
-            c[0] += 180;
+            v[2] += 180;
         else if (name === "grayscale")
-            c[1] = 0;
+            v[1] = 0;
         else if (name === "rotateHue")
-            c[0] += colorFinite(args[1]);
+            v[2] += colorFinite(args[1]);
         else {
-            const a = colorUnit(args[1]), i = name === "lighten" || name === "darken" ? 2 : 1;
-            c[i] = colorClamp(c[i] + (["darken", "desaturate"].includes(name) ? -a : a));
+            const a = colorUnit(args[1]);
+            if (name === "lighten")
+                v[0] = Math.max(0, Math.min(1, v[0] + a));
+            else if (name === "darken")
+                v[0] = Math.max(0, Math.min(1, v[0] - a));
+            else if (name === "saturate")
+                v[1] *= 1 + a;
+            else
+                v[1] *= 1 - a;
         }
-        return colorMake(colorFromHsl(c));
+        return colorFromLchIn(color.space, v);
     }
     if (name === "relativeLuminance")
-        return colorLuminance(c);
+        return colorLuminance(colorShown(color));
     if (name === "contrastRatio")
-        return colorContrast(c, colorChannels(args[1]));
+        return colorContrast(color, colorRead(args[1]));
     if (name === "bestTextColor") {
-        const a = colorChannels(args[1]), b = colorChannels(args[2]);
-        return colorMake(colorContrast(c, a) >= colorContrast(c, b) ? a : b);
+        const a = colorRead(args[1]), b = colorRead(args[2]);
+        return colorWrite(colorContrast(color, a) >= colorContrast(color, b) ? a : b);
     }
     if (name === "mix" || name === "composite") {
-        let b = colorChannels(args[1]), w = name === "mix" ? colorUnit(args[2]) : 0, space = name === "mix" ? args[3] : "linearSrgb";
-        if (name === "mix" && w === 0)
-            return colorMake(c);
-        if (name === "mix" && w === 1)
-            return colorMake(b);
+        const a = color, b = colorRead(args[1]), w = name === "mix" ? colorUnit(args[2]) : 0, space = name === "mix" ? args[3] : "linearSrgb";
         if (!["srgb", "linearSrgb", "oklab"].includes(space))
             colorError("space");
-        if (space === "oklab") {
-            c = colorLab(c);
-            b = colorLab(b);
-        }
-        else if (space === "linearSrgb") {
-            c = c.slice(0, 3).map(colorDecode).concat(c[3]);
-            b = b.slice(0, 3).map(colorDecode).concat(b[3]);
-        }
-        const wa = name === "mix" ? 1 - w : 1, wb = name === "mix" ? w : 1 - c[3], a = c[3] * wa + b[3] * wb;
-        if (a === 0)
-            return colorMake([0, 0, 0, 0]);
-        let out = c
-            .slice(0, 3)
-            .map((x, i) => (x * c[3] * wa + b[i] * b[3] * wb) / a)
-            .concat(a);
-        if (space === "oklab")
-            out = colorFromLab(out);
-        else if (space === "linearSrgb")
-            out = out.slice(0, 3).map(colorEncode).concat(a);
-        return colorMake(out.map(colorClamp));
+        if (name === "mix" && w === 0)
+            return colorWrite(a);
+        if (name === "mix" && w === 1)
+            return colorWrite(b);
+        const result = colorWider(a.space, b.space);
+        const coords = (x) => space === "oklab"
+            ? colorConvert(x, "oklab").slice(0, 3)
+            : space === "srgb"
+                ? colorToLin(x).map(colorEncode)
+                : colorToLin(x);
+        const pa = coords(a), pb = coords(b), wa = name === "mix" ? 1 - w : 1, wb = name === "mix" ? w : 1 - a.c[3], alpha = a.c[3] * wa + b.c[3] * wb;
+        if (alpha <= 0)
+            return colorMakeIn(result, [0, 0, 0, 0]);
+        const out = pa.map((x, i) => (x * a.c[3] * wa + pb[i] * b.c[3] * wb) / alpha);
+        if (space === "oklab" && !colorIsRgb(result))
+            return colorFinish(result, result === "oklch" ? colorConvert({ space: "oklab", c: [...out, alpha] }, "oklch") : [...out, alpha]);
+        const lin = space === "oklab" ? colorLabToLin(out) : space === "srgb" ? out.map(colorDecode) : out;
+        return colorFromLinIn(result, lin, alpha);
     }
     colorError("operation");
 }

@@ -31,6 +31,9 @@
     "source": "import \"@nx/visualizer\"\n\ntype Color = string\n\ntype Brand = { name:string primary:Color accent?:Color note?:string }\n\nvisualizer Color = <ValueVisualizer format=color />\n\nlet brand = <Brand name=\"Hive5\" primary=\"#b6695d\" accent=\"not a color\" note=\"#ffffff\" />\n",
     "visualizers": []
   },
+  "wideColors": {
+    "source": "import \"@nx/color\" as c\n\nlet p3 = { c.displayP3(1, 0, 0) }\nlet plain = { c.srgb(1, 0, 0) }\n"
+  },
   "icons": {
     "source": "import \"@nx/visualizer\"\n\ntype Choice = { value:string label:string }\ntype Note = { text:string }\ntype Tip = { text:string }\ntype Status =\n  | open\n  | closed { reason:string }\n\nvisualizer Choice = <ElementVisualizer title=label icon=\"circle-dot\" />\nvisualizer Tip = <ElementVisualizer icon=\"no-such-icon\" />\n\nlet items = {\n  <Choice value=\"a\" label=\"First\" />\n  <Note text=\"Plain\" />\n  <Tip text=\"Unknown icon\" />\n  <Status.closed reason=\"done\" />\n}\n\nlet held = <Note text=\"Inline\" />\n\nlet picks:Choice+ = {\n  <Choice value=\"b\" label=\"Second\" />\n}\n",
     "visualizers": []

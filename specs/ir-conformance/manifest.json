@@ -251,6 +251,7 @@
         "two-module"
       ],
       "typeAlias": [
+        "color-library",
         "conditional-properties",
         "constraints",
         "function-references",
@@ -635,7 +636,6 @@
       "record": [
         "agent-library",
         "agent-tool-context",
-        "color-library",
         "conditional-properties",
         "constraints",
         "conversions",
@@ -786,6 +786,7 @@
         "function-references"
       ],
       "constrained": [
+        "color-library",
         "conditional-properties",
         "constraints",
         "geometry-library"
