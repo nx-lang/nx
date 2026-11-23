@@ -3,7 +3,7 @@
 
 import "@nx/color" as colors
 
-/// An sRGB color with alpha, from @nx/color.
+/// A color in any of `@nx/color`'s spaces, with alpha.
 export type Color = colors.Color
 
 /// Gaps, padding and margins, in layout units.
