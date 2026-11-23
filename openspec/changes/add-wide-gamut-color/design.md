@@ -155,9 +155,11 @@ would mean different things depending on how its input was written. See Decided 
 
 ### Literals, transport and the runtime feature
 
-- Hex literals lower to a `Color.srgb` constant. Value printing writes every color as its case
-  record, as `<Color.srgb r=1.0 g=0.0 b=0.0 alpha=1.0 />`, with a swatch painted from its CSS text
-  and the outside-sRGB mark where it applies.
+- Hex literals lower to a `Color.srgb` constant. Value printing writes an sRGB color whose channels
+  are each exactly a byte as the hex literal that reads back as it, `#rrggbb`, or `#rrggbbaa` when
+  alpha is not 1. Any other color is written as its case record, as
+  `<Color.srgb r=0.1 g=0.0 b=0.0 alpha=1.0 />`, which is exact and names its space. Either way the
+  value gets a swatch painted from its CSS text, and the outside-sRGB mark where it applies.
 - Transport is the ordinary union-case record, `{"$type": "Color.srgb", "r": 1, "g": 0, "b": 0,
   "alpha": 1}`, through IR, JSON, MessagePack and the SDKs. No new value tag.
 - The operation set changes, so emitted programs require `standard-color-v2`. A runtime without it

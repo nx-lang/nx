@@ -23,3 +23,16 @@ The compiler SHALL discover the canonical color module through standard-library 
 #### Scenario: Literal-only runtime
 - **WHEN** a compiled literal-only program runs on supported IR without color external-function implementations but with its required library images
 - **THEN** it SHALL return the canonical `Color.srgb` record successfully
+
+## ADDED Requirements
+
+### Requirement: Printed values use hex for byte-exact sRGB colors
+NX value text SHALL write a canonical `Color.srgb` record whose fields are only `r`, `g`, `b` and
+`alpha`, each exactly float32(byte/255), as the hex literal that reads back as it: `#rrggbb`, or
+`#rrggbbaa` when alpha is not 1. Every other color SHALL be written as its case record. The written
+node SHALL keep the record's type, pointer and swatch, and a hex color SHALL NOT force its parent
+onto one property per line.
+
+#### Scenario: Hex in printed output
+- **WHEN** a value holding `#f4e9e7` and `c.lighten(#f4e9e7, 0.1)` is printed as NX text
+- **THEN** the first SHALL print as `#f4e9e7` and the second, whose channels fall between bytes, as a `<Color.srgb … />` record
