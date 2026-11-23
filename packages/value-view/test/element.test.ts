@@ -8,7 +8,7 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import githubDark from "shiki/themes/github-dark.mjs";
 import githubLight from "shiki/themes/github-light.mjs";
 
-import { card, greeting, nested, person, tasks, user } from "./fixtures.js";
+import { card, colors, greeting, nested, person, tasks, user } from "./fixtures.js";
 import type { NxValueActionDetail, NxValueElement, NxValueHighlighter, NxValueNavigateDetail } from "../src/index.js";
 
 const elementModule = await import("../src/index.js");
@@ -141,6 +141,16 @@ describe("the value reads as NX", () => {
     element.setFolded(record, true);
     await until(() => code(element).querySelector(".t") !== null, "the highlighter");
     assert.equal(element.isFolded(record), true, "folding survives the recoloring");
+  });
+
+  it("paints a color's swatch from its CSS and marks one outside sRGB", () => {
+    const element = show(colors);
+    const swatches = Array.from(element.shadowRoot!.querySelectorAll<HTMLElement>(".swatch"));
+    assert.equal(swatches.length, 2);
+    assert.ok(swatches[0]!.classList.contains("outside-srgb"));
+    assert.equal(swatches[0]!.getAttribute("aria-label"), "Outside sRGB");
+    assert.ok(!swatches[1]!.classList.contains("outside-srgb"));
+    assert.equal(swatches[1]!.getAttribute("aria-hidden"), "true");
   });
 
   it("shows the text exactly", () => {

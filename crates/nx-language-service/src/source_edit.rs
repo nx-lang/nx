@@ -886,8 +886,16 @@ fn set_constructor_color(
     let channels =
         nx_value::color::channels(&parsed).map_err(|_| SourceEditRefusal::InvalidValue)?;
     if node.role == SourceRole::Element && declaration.name == "Color" {
+        // The picker edits sRGB channels; a color in a wider space is shown, not rewritten.
+        if !node
+            .name
+            .as_deref()
+            .is_some_and(|name| name.ends_with(".srgb"))
+        {
+            return Err(SourceEditRefusal::NotEditable);
+        }
         let mut replacements = Vec::new();
-        for (i, name) in ["r", "g", "b", "a"].iter().enumerate() {
+        for (i, name) in ["r", "g", "b", "alpha"].iter().enumerate() {
             let attribute = tree.nodes.iter().position(|candidate| {
                 candidate.parent == Some(at as u32)
                     && candidate.role == SourceRole::Attribute
@@ -914,7 +922,7 @@ fn set_constructor_color(
                     source,
                     tree,
                     at,
-                    "a",
+                    "alpha",
                     &SourceEditValue::Number {
                         text: (channels[3] as f32).to_string(),
                     },

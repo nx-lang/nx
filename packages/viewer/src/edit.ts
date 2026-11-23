@@ -308,7 +308,10 @@ function targetOf(
   const hints = hintsOf(index, at, spelled);
   const property = propertyOf(index, at);
   const extra = { ...(hints === undefined ? {} : { hints }), ...(property === undefined ? {} : { property }) };
-  if ((node.role === "call" || node.role === "element") && node.color !== undefined) return { at, key, kind: "color", value: node.color, colorLiteral: true, ...extra };
+  // The picker edits sRGB colors, whose swatch text is hex. A wider color is shown, not rewritten.
+  if ((node.role === "call" || node.role === "element") && node.color !== undefined) {
+    return node.color.startsWith("#") ? { at, key, kind: "color", value: node.color, colorLiteral: true, ...extra } : undefined;
+  }
   if (node.role !== "literal" && node.role !== "case") {
     return undefined;
   }

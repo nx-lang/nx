@@ -721,5 +721,73 @@
         "pointer": ""
       }
     ]
+  },
+  "colors": {
+    "text": "<Color.displayP3 alpha=1.0 b=0.0 g=0.0 r=1.0 />\n#ff0000",
+    "nodes": [
+      {
+        "start": 0,
+        "end": 55,
+        "role": "sequence",
+        "type": "object*",
+        "count": 2,
+        "pointer": ""
+      },
+      {
+        "start": 0,
+        "end": 47,
+        "role": "record",
+        "color": "color(display-p3 1 0 0 / 1)",
+        "colorOutsideSrgb": true,
+        "parent": 0,
+        "type": "Color.displayP3",
+        "pointer": "/0"
+      },
+      {
+        "start": 17,
+        "end": 26,
+        "role": "property",
+        "parent": 1,
+        "type": "float32 where in 0.0..=1.0",
+        "name": "alpha",
+        "pointer": "/0/alpha"
+      },
+      {
+        "start": 27,
+        "end": 32,
+        "role": "property",
+        "parent": 1,
+        "type": "float32 where in 0.0..=1.0",
+        "name": "b",
+        "pointer": "/0/b"
+      },
+      {
+        "start": 33,
+        "end": 38,
+        "role": "property",
+        "parent": 1,
+        "type": "float32 where in 0.0..=1.0",
+        "name": "g",
+        "pointer": "/0/g"
+      },
+      {
+        "start": 39,
+        "end": 44,
+        "role": "property",
+        "parent": 1,
+        "type": "float32 where in 0.0..=1.0",
+        "name": "r",
+        "pointer": "/0/r"
+      },
+      {
+        "start": 48,
+        "end": 55,
+        "role": "record",
+        "color": "rgb(255 0 0 / 1)",
+        "parent": 0,
+        "type": "Color.srgb",
+        "pointer": "/1"
+      }
+    ]
   }
 }

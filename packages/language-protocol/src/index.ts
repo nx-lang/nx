@@ -430,6 +430,8 @@ export interface SourceNode {
   color?: string;
   /** Validation failure for a statically recognized color constructor. */
   colorError?: string;
+  /** Whether `color` is outside sRGB, so an sRGB screen shows it differently than written. */
+  colorOutsideSrgb?: boolean;
   /** The text type of a typed body, as `markdown` in `<Note:markdown>`. */
   textType?: string;
   /** The construct's type spelled in NX, wherever the type checker gave it one. */

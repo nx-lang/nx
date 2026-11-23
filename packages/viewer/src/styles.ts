@@ -355,6 +355,10 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
   vertical-align: -0.05em;
 }
+/* A color outside sRGB: a small corner notch, since an sRGB screen draws it mapped. */
+.source .swatch.outside-srgb {
+  background-image: linear-gradient(225deg, light-dark(#000, #fff) 0 28%, transparent 28%);
+}
 /* A color in an inspector reads in its parts, as a design tool shows one: its swatch, its six-digit
    hex, and its opacity in percent, whose sign drags to change it. Elsewhere it reads as written. */
 .source .color-opacity { display: none; }

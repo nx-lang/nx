@@ -320,6 +320,18 @@ export function renderSource(
   const formats = formattedNodes(index);
   const identifiers = new Set([...formats].flatMap(([at, format]) => (format === "id" ? [at] : [])));
 
+  // A color an sRGB screen cannot show gets a marked swatch, since this screen may draw it mapped.
+  const markOutsideSrgb = (square: HTMLElement, at: number): void => {
+    if (tree.nodes[at]?.colorOutsideSrgb !== true) {
+      return;
+    }
+    square.classList.add("outside-srgb");
+    square.title = "Outside sRGB: shows differently on sRGB screens";
+    square.removeAttribute("aria-hidden");
+    square.setAttribute("role", "img");
+    square.setAttribute("aria-label", "Outside sRGB");
+  };
+
   // A small square of the color a string names, before it, for a string its visualizer formats as a
   // color. Nothing when the string names no color: the square would show a color that is not there.
   const swatch = (at: number, start: number, end: number): HTMLElement | undefined => {
@@ -337,6 +349,7 @@ export function renderSource(
       return undefined;
     }
     square.setAttribute("aria-hidden", "true");
+    markOutsideSrgb(square, at);
     return square;
   };
 
@@ -852,8 +865,9 @@ export function renderSource(
     if (named !== undefined) {
       const square = document.createElement("span");
       square.className = "swatch";
-      square.style.backgroundColor = named;
+      square.style.backgroundColor = named.color;
       square.setAttribute("aria-hidden", "true");
+      markOutsideSrgb(square, named.at);
       if (square.style.backgroundColor !== "") {
         cell.insertBefore(square, opening);
       }
@@ -865,22 +879,22 @@ export function renderSource(
    * an element one of whose properties is a color literal or a string its visualizer formats as a
    * color. A reference to a local, which the tree leaves without a declaration, has none.
    */
-  const referencedColor = (reference: SourceNode): string | undefined => {
+  const referencedColor = (reference: SourceNode): { color: string; at: number } | undefined => {
     const declaration = topLevelLet(tree, reference);
     if (declaration < 0) {
       return undefined;
     }
     const held = childrenOf(declaration).find((child) => tree.nodes[child]!.role === "literal" || tree.nodes[child]!.role === "element");
-    const colorOf = (at: number): string | undefined => {
+    const colorOf = (at: number): { color: string; at: number } | undefined => {
       const node = tree.nodes[at]!;
       const raw = node.value ?? "";
       if (node.color !== undefined) {
-        return node.color;
+        return { color: node.color, at };
       }
       if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(raw)) {
-        return raw;
+        return { color: raw, at };
       }
-      return formats.get(at) === "color" && raw.startsWith('"') ? raw.slice(1, -1).trim() : undefined;
+      return formats.get(at) === "color" && raw.startsWith('"') ? { color: raw.slice(1, -1).trim(), at } : undefined;
     };
     if (held === undefined) {
       return undefined;
@@ -895,7 +909,8 @@ export function renderSource(
         return found;
       }
     }
-    return tree.nodes[held]!.color;
+    const whole = tree.nodes[held]!.color;
+    return whole === undefined ? undefined : { color: whole, at: held };
   };
 
   /**

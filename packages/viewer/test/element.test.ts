@@ -218,6 +218,17 @@ describe("the reading", () => {
     assert.equal(squares[0]!.getAttribute("aria-hidden"), "true");
   });
 
+  it("marks a swatch for a color outside sRGB, and paints it from the color's own CSS", async () => {
+    const element = show(await fixture("wideColors"));
+    const source = root(element).querySelector<HTMLElement>(".source")!;
+    const squares = Array.from(source.querySelectorAll<HTMLElement>(".swatch"));
+    assert.equal(squares.length, 2);
+    assert.ok(squares[0]!.classList.contains("outside-srgb"), "the Display P3 red is outside sRGB");
+    assert.match(squares[0]!.title, /sRGB/);
+    assert.equal(squares[0]!.getAttribute("aria-label"), "Outside sRGB", "the mark has words for assistive tech");
+    assert.ok(!squares[1]!.classList.contains("outside-srgb"), "the sRGB red is not");
+  });
+
   it("reads text shown to people and a color swatch through aliases another module declares", async () => {
     // As a host's catalog does: the aliases in one module, the color format in a host visualizer
     // module, and the document importing only the first.

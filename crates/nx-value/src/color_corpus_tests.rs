@@ -27,8 +27,16 @@ fn standard_color_reference_corpus() {
         }
         let actual = result.unwrap_or_else(|error| panic!("case {index}: {name}: {error:?}"));
         let expected = &case["expected"];
+        let space = case["space"].as_str().unwrap_or("srgb");
+        if expected.is_array() {
+            assert_eq!(
+                color::read(&actual).unwrap().space.case(),
+                space,
+                "case {index}: {name}"
+            );
+        }
         if case["exact"] == true {
-            let channels = color::channels(&actual).unwrap();
+            let channels = color::read(&actual).unwrap().c;
             for (channel, expected) in channels.iter().zip(expected.as_array().unwrap()) {
                 assert_eq!(
                     (*channel as f32).to_bits(),
@@ -39,7 +47,7 @@ fn standard_color_reference_corpus() {
             continue;
         }
         let actual = if expected.is_array() {
-            serde_json::json!(color::channels(&actual).unwrap())
+            serde_json::json!(color::read(&actual).unwrap().c)
         } else {
             serde_json::to_value(actual).unwrap()
         };

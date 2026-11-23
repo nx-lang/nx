@@ -3169,12 +3169,9 @@ fn build_union_case_for_member(
     let Some(base_name) = flattened_visible_name(lowered_module, base, scope) else {
         return UnionCaseLookup::Missing;
     };
-    let Some(reference) = resolve_visible_reference(artifact, module_id, &base_name) else {
+    let Some(reference) = resolve_visible_union(artifact, module_id, &base_name) else {
         return UnionCaseLookup::Missing;
     };
-    if reference.kind != nx_program::ResolvedItemKind::Union {
-        return UnionCaseLookup::Missing;
-    }
     build_union_case_from_reference(artifact, prepared_cache, reference, member, diagnostics)
 }
 
@@ -3247,13 +3244,37 @@ fn build_union_case_for_tag(
     let Some((union_name, case_name)) = tag.rsplit_once('.') else {
         return UnionCaseLookup::Missing;
     };
-    let Some(reference) = resolve_visible_reference(artifact, module_id, union_name) else {
+    let Some(reference) = resolve_visible_union(artifact, module_id, union_name) else {
         return UnionCaseLookup::Missing;
     };
-    if reference.kind != nx_program::ResolvedItemKind::Union {
-        return UnionCaseLookup::Missing;
-    }
     build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
+}
+
+/// The union a visible name reaches, directly or through type aliases, as `g.Color` in
+/// `g.Color.srgb` where `@nx/graphics` aliases `@nx/color`'s `Color`.
+fn resolve_visible_union(
+    artifact: &ProgramArtifact,
+    module_id: RuntimeModuleId,
+    visible_name: &str,
+) -> Option<CodegenReference> {
+    let mut reference = resolve_visible_reference(artifact, module_id, visible_name)?;
+    // An alias chain is finite in a checked program; the bound only guards a malformed one.
+    for _ in 0..32 {
+        match reference.kind {
+            nx_program::ResolvedItemKind::Union => return Some(reference),
+            nx_program::ResolvedItemKind::TypeAlias => {
+                let module = artifact.resolved_program.module(reference.module_id)?;
+                let ast::TypeRef::Name(target) =
+                    type_alias_target(artifact, module, reference.definition_id)?
+                else {
+                    return None;
+                };
+                reference = resolve_visible_reference(artifact, module.id, target.as_str())?;
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// Builds a union case from the declaring origin an analysis-resolved reference carries.

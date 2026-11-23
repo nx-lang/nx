@@ -1067,11 +1067,12 @@ import "@nx/color" as c
 
 let literal: g.Color = #5b6ef5
 let parsed: g.Color = { c.parse("red") }
-let record: g.Color = <c.Color r=1 g=0 b=0 />
+let record: g.Color = <c.Color.srgb r=1 g=0 b=0 />
+let wide: g.Color = <g.Color.oklch l=0.7 c=0.3 h=145 />
 type Brand = { accent: g.Color }
 let brand = <Brand accent=#5b6ef5 />
 let css(value: g.Color): string = { c.toHex(value) }
-let root() = { css(literal) css(parsed) css(record) c.toHex(brand.accent) }
+let root() = { css(literal) css(parsed) css(record) css(wide) c.toHex(brand.accent) }
 "##;
     let artifact =
         build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())

@@ -1603,7 +1603,7 @@ impl LoweringContext {
                     });
                 }
                 let mut properties = Vec::new();
-                for (index, name) in ["r", "g", "b", "a"].iter().enumerate() {
+                for (index, name) in ["r", "g", "b", "alpha"].iter().enumerate() {
                     let byte = if index * 2 < expanded.len() {
                         u8::from_str_radix(&expanded[index * 2..index * 2 + 2], 16).unwrap()
                     } else {
@@ -1614,19 +1614,34 @@ impl LoweringContext {
                         TypeTag::Float32,
                         node.span(),
                     );
-                    properties.push(RecordLiteralProperty {
-                        name: Name::new(name),
+                    properties.push(Property {
+                        key: Name::new(name),
                         value,
                         span: node.span(),
                     });
                 }
-                self.alloc_expr(Expr::RecordLiteral {
-                    record: Name::new(if self.defines_color_type {
-                        "Color"
+                // A hex literal is the sRGB case of the canonical Color union.
+                let element = self.module.alloc_element(Element {
+                    tag: Name::new(if self.defines_color_type {
+                        "Color.srgb"
                     } else {
-                        "$nxColor.Color"
+                        "$nxColor.Color.srgb"
                     }),
+                    property_entries: properties
+                        .iter()
+                        .cloned()
+                        .map(PropertyEntry::Value)
+                        .collect(),
                     properties,
+                    content: Vec::new(),
+                    whitespace_runs: Vec::new(),
+                    text_runs: Vec::new(),
+                    text_type: None,
+                    close_name: None,
+                    span: node.span(),
+                });
+                self.alloc_expr(Expr::Element {
+                    element,
                     span: node.span(),
                 })
             }
@@ -7812,15 +7827,15 @@ mod color_literal_tests {
                 let Some(Item::Value(binding)) = module.find_item(name) else {
                     panic!("{name}");
                 };
-                let Expr::RecordLiteral { record, .. } = module.expr(binding.value) else {
-                    panic!("color record");
+                let Expr::Element { element, .. } = module.expr(binding.value) else {
+                    panic!("color element");
                 };
                 assert_eq!(
-                    record.as_str(),
+                    module.element(*element).tag.as_str(),
                     if defines_color_type {
-                        "Color"
+                        "Color.srgb"
                     } else {
-                        "$nxColor.Color"
+                        "$nxColor.Color.srgb"
                     }
                 );
             }
@@ -7828,7 +7843,7 @@ mod color_literal_tests {
     }
 
     #[test]
-    fn color_literals_lower_to_float32_records_and_import_once() {
+    fn color_literals_lower_to_float32_srgb_elements_and_import_once() {
         let parsed = nx_syntax::parse_str("let a = #f008\nlet b = #FF000088", "colors.nx");
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
         let tree = parsed.tree.unwrap();
@@ -7849,16 +7864,15 @@ mod color_literal_tests {
             .collect();
         assert_eq!(values.len(), 2);
         for value in values {
-            let Expr::RecordLiteral {
-                record, properties, ..
-            } = module.expr(value)
-            else {
-                panic!("record")
+            let Expr::Element { element, .. } = module.expr(value) else {
+                panic!("color element")
             };
-            assert_eq!(record.as_str(), "$nxColor.Color");
-            assert_eq!(properties.len(), 4);
+            let element = module.element(*element);
+            assert_eq!(element.tag.as_str(), "$nxColor.Color.srgb");
+            let names: Vec<_> = element.properties.iter().map(|p| p.key.as_str()).collect();
+            assert_eq!(names, ["r", "g", "b", "alpha"]);
             assert!(
-                matches!(module.expr(properties[3].value), Expr::Literal(Literal::Float32(x)) if x.0 == (136.0_f64 / 255.0) as f32 as f64)
+                matches!(module.expr(element.properties[3].value), Expr::Literal(Literal::Float32(x)) if x.0 == (136.0_f64 / 255.0) as f32 as f64)
             );
         }
     }

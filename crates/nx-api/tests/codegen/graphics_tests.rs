@@ -261,7 +261,7 @@ fn graphics_aliased_records_defaults_and_payload_cases_evaluate_on_ir() {
     );
     assert_eq!(
         rect["fill"],
-        serde_json::json!({"$type":"Paint.color", "color":{"$type":"Color", "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}})
+        serde_json::json!({"$type":"Paint.color", "color":{"$type":"Color.srgb", "r": 1.0, "g": 0.0, "b": 0.0, "alpha": 1.0}})
     );
     assert_eq!(rect["stroke"]["$type"], "Stroke");
     assert_eq!(rect["stroke"]["paint"], "none");
@@ -306,20 +306,20 @@ let root() = <Box><Shape/><div/></Box>"#;
 }
 
 #[test]
-fn color_literal_ir_infers_canonical_import_free_records() {
+fn color_literal_ir_infers_canonical_import_free_srgb_records() {
     let source = "type Color = { decoy:string }\nlet root() = { #f008 #FF000088 #fff }";
     let actual = crate::ir_runtime_tests::program(source)
         .evaluate_function("root", &[], &RuntimeOptions::default())
         .unwrap();
     let value = serde_json::to_value(actual).unwrap();
     assert_eq!(value[0], value[1]);
-    assert_eq!(value[0]["$type"], "Color");
+    assert_eq!(value[0]["$type"], "Color.srgb");
     assert_eq!(
-        value[0]["a"].as_f64().unwrap(),
+        value[0]["alpha"].as_f64().unwrap(),
         (136.0_f64 / 255.0) as f32 as f64
     );
     assert_eq!(value[2]["r"], 1.0);
-    assert_eq!(value[2]["a"], 1.0);
+    assert_eq!(value[2]["alpha"], 1.0);
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn color_literals_bind_defaults_and_unbraced_properties() {
     let value = serde_json::to_value(actual).unwrap();
     assert_eq!(value[0]["accent"]["r"], 1.0);
     assert_eq!(
-        value[1]["accent"]["a"].as_f64().unwrap(),
+        value[1]["accent"]["alpha"].as_f64().unwrap(),
         (68.0_f64 / 255.0) as f32 as f64
     );
 }
@@ -352,7 +352,8 @@ let defaultAlpha() = { c.srgb(0.2,0.4,0.8) }
         .unwrap();
     let color = serde_json::to_value(value).unwrap();
     assert_eq!(color["r"], serde_json::json!(0.2f32 as f64));
-    assert_eq!(color["a"], serde_json::json!(0.5));
+    assert_eq!(color["$type"], "Color.srgb");
+    assert_eq!(color["alpha"], serde_json::json!(0.5));
     assert_eq!(
         program
             .evaluate_function("contrast", &[], &RuntimeOptions::default())
@@ -403,7 +404,7 @@ fn color_literal_links_without_color_operation_module() {
                 .metadata
                 .required_features
                 .iter()
-                .any(|f| f == "standard-color-v1"))
+                .any(|f| f == "standard-color-v2"))
         })
         .map(|image| {
             let module = PreparedModule::prepare(image.bytes).unwrap();
@@ -423,7 +424,7 @@ fn color_literal_links_without_color_operation_module() {
     )
     .unwrap();
     assert_eq!(
-        value["a"].as_f64().unwrap(),
+        value["alpha"].as_f64().unwrap(),
         (128.0_f64 / 255.0) as f32 as f64
     );
 }

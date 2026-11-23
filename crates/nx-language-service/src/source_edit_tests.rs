@@ -1420,7 +1420,7 @@ let handled = { c.tryParse("#xyz") }
 #[test]
 fn canonical_color_records_are_editable_and_decoys_are_not() {
     let source = r#"import "@nx/color" as c
-let accent = <c.Color r=0.125 g=0.5 b=1 />
+let accent = <c.Color.srgb r=0.125 g=0.5 b=1 />
 type Color = { r:float32 g:float32 b:float32 a:float32 = 1 }
 let decoy = <Color r=0 g=0 b=0 />
 "#;
@@ -1443,7 +1443,7 @@ let decoy = <Color r=0 g=0 b=0 />
         },
     );
     assert!(result.contains("r=1 g=0.5 b=1"));
-    assert!(result.contains("a="));
+    assert!(result.contains("alpha="));
 }
 
 #[test]
@@ -1481,7 +1481,7 @@ fn color_channel_edits_use_short_source_numbers_and_preserve_comments() {
         );
         assert!(after.contains(expected), "{after}");
     }
-    let source = "import \"@nx/color\" as c\nlet accent = <c.Color r=0 g=0 b=0/>\n";
+    let source = "import \"@nx/color\" as c\nlet accent = <c.Color.srgb r=0 g=0 b=0/>\n";
     let tree = snapshot_for(source)
         .source_tree(&DocumentUri::from(URI))
         .unwrap();
@@ -1499,7 +1499,7 @@ fn color_channel_edits_use_short_source_numbers_and_preserve_comments() {
         after.contains("r=0.35686275 g=0.43137255 b=0.9607843"),
         "{after}"
     );
-    assert_eq!(after, "import \"@nx/color\" as c\nlet accent = <c.Color r=0.35686275 g=0.43137255 b=0.9607843 a=0.5019608/>\n");
+    assert_eq!(after, "import \"@nx/color\" as c\nlet accent = <c.Color.srgb r=0.35686275 g=0.43137255 b=0.9607843 alpha=0.5019608/>\n");
 }
 
 #[test]
@@ -1595,7 +1595,7 @@ fn color_diagnostics_locate_the_invalid_channel_and_literal() {
             "300",
         ),
         (
-            "import \"@nx/color\" as c\nlet value = <c.Color r=2 g=0 b=0/>",
+            "import \"@nx/color\" as c\nlet value = <c.Color.srgb r=2 g=0 b=0/>",
             "color-invalid-channel",
             "2",
         ),
@@ -1637,14 +1637,14 @@ fn parsed_color_picker_preserves_unmodified_alpha_and_precision() {
         },
     );
     assert!(
-        after.contains("102.00000151991844, 204.00000303983688, 0.5"),
+        after.contains("102.00000151991844 204.00000303983688 / 0.5"),
         "{after}"
     );
 }
 
 #[test]
 fn graphics_color_reexports_keep_canonical_editing() {
-    let source = "import \"@nx/graphics\" as g\nlet accent = <g.Color r=0 g=0 b=0/>";
+    let source = "import \"@nx/graphics\" as g\nlet accent = <g.Color.srgb r=0 g=0 b=0/>";
     let tree = snapshot_for(source)
         .source_tree(&DocumentUri::from(URI))
         .unwrap();
@@ -1696,5 +1696,58 @@ fn parsed_byte_colors_keep_compact_hex_spelling() {
             after,
             format!("import \"@nx/color\" as c\nlet value = {{ c.parse(\"{expected}\") }}\n")
         );
+    }
+}
+
+#[test]
+fn wide_colors_get_css_swatches_with_an_outside_srgb_mark_and_are_read_only() {
+    let source = r#"import "@nx/color" as c
+let p3 = { c.displayP3(1, 0, 0) }
+let lch = { c.oklch(0.7, 0.1, 200) }
+let vivid = <c.Color.oklch l=0.7 c=0.3 h=145 />
+let parsed = { c.parse("color(display-p3 0.5 0.5 0.5)") }
+let plain = <c.Color.srgb r=1 g=0 b=0 />
+"#;
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    let swatches: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            node.color
+                .as_deref()
+                .map(|color| (color, node.color_outside_srgb, node.key.clone()))
+        })
+        .collect();
+    let colors: Vec<_> = swatches
+        .iter()
+        .map(|(color, outside, _)| (*color, *outside))
+        .collect();
+    assert_eq!(
+        colors,
+        [
+            ("color(display-p3 1 0 0 / 1)", true),
+            (
+                "oklch(0.699999988079071 0.10000000149011612 200 / 1)",
+                false
+            ),
+            ("oklch(0.699999988079071 0.30000001192092896 145 / 1)", true),
+            ("color(display-p3 0.5 0.5 0.5 / 1)", false),
+            ("#ff0000ff", false),
+        ],
+        "{swatches:?}"
+    );
+    for (_, _, key) in &swatches[..4] {
+        let answer = edit(
+            source,
+            key,
+            SourceEdit::SetValue {
+                value: SourceEditValue::Color {
+                    text: "#5b6ef5".into(),
+                },
+            },
+        );
+        assert!(answer.refused.is_some(), "{key}");
     }
 }

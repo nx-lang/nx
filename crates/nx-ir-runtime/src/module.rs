@@ -20,7 +20,7 @@ use std::sync::{Arc, OnceLock};
 
 const KNOWN_FEATURES: [&str; 13] = [
     nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
-    "standard-color-v1",
+    "standard-color-v2",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
     NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
     NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
