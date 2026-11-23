@@ -17,8 +17,8 @@ than described:
 - `examples/app.nx`: a main module applying the theme, with one dark section.
 
 They compile, and evaluate in the TypeScript IR runtime. With the brand applied, the example button
-is `#15803d` (green 700) in light mode and `#22c55e` (green 500) inside `env.colorMode=dark`, with
-the brand's pill radius. At implementation the `api/` files become
+is green 700 (`oklch(0.527 0.154 150.069)`) in light mode and green 500
+(`oklch(0.723 0.219 149.579)`) inside `env.colorMode=dark`, with the brand's pill radius. At implementation the `api/` files become
 `crates/nx-program/src/std/design/` and the examples become a conformance corpus program.
 
 ## Goals / Non-Goals
@@ -50,6 +50,46 @@ the brand's pill radius. At implementation the `api/` files become
 
 *Alternative:* standardize component tokens too, as Fluent does. Rejected: it couples the standard
 to one library's set of controls, and it is what makes Fluent's token list hard to retheme by hand.
+
+### The palette is Tailwind CSS v4's, in OKLCH
+
+`palette` holds five hues (zinc as `gray`, `blue`, `red`, `amber` and `green`) at eleven steps, 50
+to 950, with Tailwind CSS v4's values written as `c.oklch(…)`, the form Tailwind publishes. Tailwind
+is MIT licensed; the library header carries its notice.
+
+Many of the vivid steps are outside sRGB but inside Display P3. A Display P3 screen shows them as
+written. An sRGB screen, and today's Skia and Canvas renderers, show them mapped with `toGamut`,
+which keeps lightness and hue and reduces chroma, so they look as Tailwind v4's colors look on an
+sRGB screen. The grays are inside sRGB. Every palette color is inside Display P3, so a P3 screen
+never maps.
+
+Each hue's steps follow the convention Radix Colors names, and the reference page documents it:
+- 50 to 100: backgrounds and muted fills.
+- 200 to 300: borders and dividers.
+- 500 to 600: solid fills and accents.
+- 400 to 950: text, depending on the mode (700 to 950 on light backgrounds, 400 to 50 on dark).
+
+*Alternatives:* Tailwind v3's sRGB hex values, which every sRGB screen shows the same but which
+cannot use a P3 screen's range; Radix Colors, whose 12 steps per hue have named uses and a P3 set,
+but are licensed MIT too and need two scales per hue for light and dark; and generating a palette
+from a few OKLCH parameters, which is a follow-up (see Follow-ups). Tailwind v4 is the palette most
+developers and AI models already know by step name.
+
+### Default roles meet contrast targets
+
+The default theme's role pairs meet WCAG 2 contrast in both modes, measured with `contrastRatio`,
+which maps both colors into sRGB first so the result holds on any screen:
+- each `on…` role is at least 4.5:1 against its role;
+- `text.normal` and `text.muted` are at least 4.5:1 against `background` and `surface`;
+- `focus` is at least 3:1 against `background` and `surface`.
+
+Measured on the v4 values, the lowest are light `focus` on white (3.8:1), light `onDanger` on red
+600 (4.8:1) and light `text.muted` on white (4.8:1). `text.disabled` is exempt, as WCAG exempts
+inactive controls.
+
+`border` has no target. It is for dividers and control outlines that sit beside other cues, as in
+Tailwind and shadcn/ui, and a 3:1 border would be zinc 500 in light mode, which reads as heavy. A
+control whose outline alone identifies it uses a component token with a stronger color.
 
 ### Extension is composition: new environment values that read the core
 
@@ -121,9 +161,17 @@ They are aliases, so `padding=12` stays valid and only tools see the difference.
 - **A neutral default theme is still a look.** Programs that never theme will look alike. →
   Acceptable: the defaults exist so that an unthemed program is legible, and theming is one
   `provide`.
-- **`palette` values copied from Tailwind CSS v3 (MIT).** → See Open Questions.
+- **`palette` values copied from Tailwind CSS v4 (MIT).** → The library header carries the MIT
+  notice. If Tailwind changes its values, ours stay as they are; they are a snapshot, not a link.
+- **Vivid steps look different on sRGB and P3 screens.** → That is the intent of a wide palette, and
+  `toGamut` mapping keeps hue and lightness, so a design reads the same on both. The contrast targets
+  are measured after mapping into sRGB, so they hold on either.
+- **`text.muted` on `surfaceMuted` is 4.4:1 in light mode**, below 4.5:1. → Not a target pair: muted
+  text is for `background` and `surface`. A library that puts placeholder text on `surfaceMuted`
+  uses `text.normal` or its own token.
 - **Fourteen color roles may still be too few for a full UI library** (no hover or pressed states).
-  → State colors stay component tokens, derived with `@nx/color` operations such as `darken`.
+  → State colors stay component tokens, derived with `@nx/color` operations such as `darken`. These
+  work in OKLCH, so derived states keep their hue and stay in the wide gamut.
 
 ## Migration Plan
 
@@ -131,8 +179,6 @@ None. Nothing uses `@nx/design` yet. The old tutorial's hand-rolled `Theme` reco
 
 ## Open Questions
 
-- **Palette source.** The palette values are Tailwind CSS v3's, which is MIT licensed. Keep them
-  with an attribution line in the library header, or pick NX's own values?
 - **More modes.** Add `highContrast` to `ColorMode`, and a `Density = comfortable | compact` mode
   that `env.space` matches on? I'd leave both out until a library needs them.
 - **Graphics adopting the types.** Type `@nx/graphics` properties such as `Text.fontSize` and
@@ -140,3 +186,13 @@ None. Nothing uses `@nx/design` yet. The old tutorial's hand-rolled `Theme` reco
   `@nx/design`. I'd do it in `add-visual-value-suggestions`, where it is used.
 - **Hover and pressed states.** These stay component tokens for now. Should the core add
   `accentHover`, or a standard way to derive state colors?
+
+## Follow-ups
+
+- **A palette generator.** `palette(hue)` building eleven steps from an OKLCH lightness curve and a
+  hue, mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard
+  steps.
+- **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's
+  Leonardo does, so a theme that changes `background` keeps its text legible.
+- **Token export.** `add-token-export` writes DTCG `color` values with `colorSpace: "oklch"` and
+  CSS `oklch()`, so the wide values survive into other tools.

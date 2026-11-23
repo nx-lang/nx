@@ -25,14 +25,16 @@ stable, and the convention by which UI libraries extend it.
     `BorderWidth`, `FontSize`, `LineHeight`, `FontWeight`, `FontFamily`, `Opacity`, `Duration`,
     plus records `Easing`, `Shadow` and `TextStyle`, and `Color` re-exported from `@nx/color`.
   - **Reference tokens**: `palette`, five hues (gray, blue, red, amber, green) in eleven steps,
-    `palette.blue600`. Nothing requires it; it is what the default theme is built from.
+    `palette.blue600`, with Tailwind CSS v4's OKLCH values (MIT). The vivid steps use a Display P3
+    screen's range and map into sRGB elsewhere. Nothing requires it; it is what the default theme
+    is built from.
   - **Semantic tokens**: the core set, as environment values: `env.colorMode`, `env.color` (14
     roles: background, surface, surfaceMuted, text.normal / muted / disabled, border, focus, accent
     and onAccent, danger, warning and success with their `on…` roles), `env.space`, `env.radius`,
     `env.borderWidth`, `env.font` (families, sizes, weights), `env.text` (seven text roles:
     caption, body, label, title, heading, display, code), `env.shadow` and `env.motion`. Their
     defaults are a neutral light and dark theme, so a program that imports the library looks
-    reasonable with no setup.
+    reasonable with no setup, and meet WCAG contrast targets in both modes.
 - **Extension by composition, not inheritance.** A UI library adds its own component tokens as
   environment values whose defaults read the core (`environment button: ButtonTokens =
   <ButtonTokens fill={env.color.accent} … />`), and a role the core lacks in its own namespace,
