@@ -280,6 +280,29 @@ let root() = { provide env.colorMode=dark { env.color.accent } }
 Set roles through `.Update` records rather than constructing a whole `<SemanticColors … />`: a theme
 then names only what it changes, and picks up the default of a role the core adds later.
 
+`text` is a nested group, and `SemanticColors.Update`'s `text` field takes a whole `TextColors`. Set
+one text role with a path field instead, which keeps the others, beside the `color` field:
+
+```nx
+import "@nx/design"
+
+let brand: env.Update = <env.Update
+  color=<SemanticColors.Update accent={standardPalette.green700} focus={standardPalette.green600} />
+  color.text={
+    if env.colorMode is {
+      light => <TextColors.Update muted={standardPalette.gray600} />
+      dark => <TextColors.Update muted={standardPalette.gray300} />
+    }
+  }
+/>
+
+provide brand
+
+let root() = { env.color.text.muted }
+```
+
+A theme that sets the same role in both modes can write `color.text.muted={standardPalette.gray600}`.
+
 ## Per-platform values
 
 A value that needs to differ by platform is an ordinary override, set by the host as a root value
@@ -294,6 +317,17 @@ most likely to need one:
   instead of shadows, approximate the shadow.
 - **Units.** Layout units carry no unit of their own; export writes `px`, and may write `rem` for
   font sizes.
+
+## Generated code
+
+Programs that import `@nx/design` can be generated as JavaScript, which reads tokens as the IR
+runtimes do, with two gaps for now:
+
+- A main-module `provide bundle` is evaluated once, when the generated module loads. A theme that
+  matches on `env.colorMode` then keeps the root mode's values in a section that sets
+  `env.colorMode=dark`; the IR runtimes evaluate it where it is read.
+- Generated TypeScript doesn't type-check yet, because the library's `Color` names a type from
+  `@nx/color` that the generated file doesn't import.
 
 ## Stability
 

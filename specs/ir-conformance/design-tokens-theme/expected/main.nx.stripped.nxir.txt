@@ -1,9 +1,9 @@
-module main.nx fingerprint 1844963044537619448
-links @nx/design/tokens.nx version "077849efaffbf9cc" fingerprint 3846144553481102763
+module main.nx fingerprint 12610606781938929520
+links @nx/design/tokens.nx version "0c6bda86b7e010ba" fingerprint 3129711657228865219
 links ui.nx version "" fingerprint 5984742701993045455
-links brand.nx version "" fingerprint 17702158742468193261
+links brand.nx version "" fingerprint 12084356762303613976
 requires environment-v1
-entrypoints functions [root buttonRadius coreRadius themedRadius accent background darkAccent buttonFill buttonText focus] components []
+entrypoints functions [root buttonRadius coreRadius themedRadius accent background darkAccent buttonFill buttonText focus text] components []
 
 function root() =
   <ui.nx:Box fill=@nx/design/tokens.nx:env.color.background radius=0.0 paddingX=0.0 paddingY=0.0>
@@ -43,5 +43,8 @@ function buttonText() =
 
 function focus() =
   @nx/design/tokens.nx:env.color.focus
+
+function text() =
+  @nx/design/tokens.nx:env.color.text
 
 provide brand.nx:theme

@@ -30,3 +30,6 @@ let darkAccent() = { provide env.colorMode=dark { env.color.accent } }
 let buttonFill() = { env.button.fill }
 let buttonText() = { env.button.text }
 let focus() = { env.color.focus }
+
+/// The brand sets one text role per mode; the others keep the mode's defaults.
+let text() = { env.color.text }

@@ -95,6 +95,19 @@
       "environment": {
         "colorMode": "dark"
       }
+    },
+    {
+      "module": "main.nx",
+      "function": "text"
+    },
+    {
+      "module": "main.nx",
+      "function": "text",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
     }
   ]
 }

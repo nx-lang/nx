@@ -335,7 +335,26 @@ fn assert_json_values_eq(actual: &str, expected: &str) {
     if expected == Value::Null && actual == Value::Array(Vec::new()) {
         return;
     }
-    assert_eq!(actual, expected);
+    assert_eq!(numbers_as_floats(actual), numbers_as_floats(expected));
+}
+
+/// `value` with every number as a float, since generated JavaScript prints a whole `float32` such
+/// as `1.0` as `1`.
+fn numbers_as_floats(value: Value) -> Value {
+    match value {
+        Value::Number(number) => number
+            .as_f64()
+            .and_then(serde_json::Number::from_f64)
+            .map_or(Value::Number(number), Value::Number),
+        Value::Array(items) => Value::Array(items.into_iter().map(numbers_as_floats).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(name, value)| (name, numbers_as_floats(value)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 #[test]
@@ -550,8 +569,7 @@ fn generated_javascript_prints_primitives_as_the_interpreter_does() {
          let root() = { \"Reorder \" + item.title }",
         "let root() = { 1 + 1.5 }",
         "let root() = { 2 == 2.0 }",
-        // A join is a float64, so dividing it by an int divides as floats. Generated JavaScript
-        // has no match expressions yet; the conformance corpus covers a match arm.
+        // A join is a float64, so dividing it by an int divides as floats.
         "let pick(b:boolean, n:int, x:float64) = { if b { n } else { x } }\n\
          let root() = { pick(true, 3, 1.5) / 2 }",
         // Each float32 operation rounds to a float32, so a widened or compared result agrees.
@@ -3180,8 +3198,38 @@ fn generated_javascript_element_call_omits_an_optional_parameter() {
     }
 }
 
-/// Executable source codegen does not support match expressions, so a `{}` pattern is refused with
-/// a diagnostic rather than emitted; the IR runtime evaluates it.
+/// A match whose arms test only union cases, as `@nx/design`'s mode-dependent defaults do, is
+/// emitted, agrees with the interpreter, and type-checks as TypeScript.
+#[test]
+fn generated_code_supports_a_match_on_union_cases() {
+    let source = "type Mode = light | dark | dim\n\
+         let name(m:Mode) = { if m is { light => \"day\" dark, dim => \"night\" } }\n\
+         let fallback(m:Mode) = { if m is { light => 1 else => 2 } }\n\
+         let root() = { name(Mode.light) + name(Mode.dim) + fallback(Mode.dark) }";
+    assert_json_values_eq(
+        &execute_generated_javascript_root(source),
+        &interpreter_json_root(source),
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact_from_source(source));
+}
+
+/// A program that reads `@nx/design` tokens generates JavaScript that follows the mode. Its
+/// TypeScript does not type-check yet: a `Color` there is `@nx/color`'s, which the file does not
+/// import (`specs/future.md`, "Design Tokens").
+#[test]
+fn generated_javascript_reads_design_tokens_in_both_modes() {
+    let source = "import \"@nx/design\"\n\
+         let accent() = { env.color.accent }\n\
+         let root() = { <Pair light={accent()} dark={provide env.colorMode=dark { accent() }} gap={env.space.md} /> }\n\
+         type Pair = { light: Color dark: Color gap: Spacing }";
+    assert_json_values_eq(
+        &execute_generated_javascript_root(source),
+        &interpreter_json_root(source),
+    );
+}
+
+/// Executable source codegen supports only matches on union cases, so a `{}` pattern is refused
+/// with a diagnostic rather than emitted; the IR runtime evaluates it.
 #[test]
 fn generated_javascript_refuses_a_match_on_the_empty_pattern() {
     let error = emit_program(
@@ -3196,7 +3244,7 @@ fn generated_javascript_refuses_a_match_on_the_empty_pattern() {
     assert!(
         error.diagnostics.iter().any(|diagnostic| diagnostic
             .message()
-            .contains("match expressions are not supported by executable source codegen")),
+            .contains("not supported by executable source codegen")),
         "{:?}",
         error.diagnostics
     );

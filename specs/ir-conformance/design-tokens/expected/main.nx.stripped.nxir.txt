@@ -1,10 +1,10 @@
 module main.nx fingerprint 14669449929067314949
 links @nx/math/math.nx version "7d750052efed5e6f" fingerprint 7963937948937048613
 links @nx/color/operations.nx version "346e014081a62e17" fingerprint 7353843330997707954
-links @nx/design/tokens.nx version "077849efaffbf9cc" fingerprint 3846144553481102763
+links @nx/design/tokens.nx version "0c6bda86b7e010ba" fingerprint 3129711657228865219
 links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
 links ui.nx version "" fingerprint 5984742701993045455
-links @nx/design/palette.nx version "077849efaffbf9cc" fingerprint 12365593852589900184
+links @nx/design/palette.nx version "0c6bda86b7e010ba" fingerprint 12365593852589900184
 requires environment-v1
 entrypoints functions [check contrast colors scalesOrdered spaceOrdered radiusOrdered borderWidthOrdered fontSizeOrdered fontWeightOrdered shadowOrdered durationOrdered textFollowsFont componentFollowsCore paletteColors paletteInDisplayP3 graysInSrgb grays paletteSurvivesCss] components []
 

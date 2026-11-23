@@ -4,7 +4,8 @@
 import "@nx/design"
 import "./ui.nx"
 
-/// The brand: green accents, a lighter green in dark mode, and rounder corners.
+/// The brand: green accents, a lighter green in dark mode, stronger muted text, and rounder corners.
+/// `text` is a nested group, so it is set with a path field and keeps the roles it doesn't name.
 export let theme: env.Update = <env.Update
   color={
     if env.colorMode is {
@@ -14,6 +15,12 @@ export let theme: env.Update = <env.Update
         onAccent={standardPalette.gray950}
         focus={standardPalette.green400}
       />
+    }
+  }
+  color.text={
+    if env.colorMode is {
+      light => <TextColors.Update muted={standardPalette.gray600} />
+      dark => <TextColors.Update muted={standardPalette.gray300} />
     }
   }
   radius=<RadiusScale.Update md=8 lg=12 />

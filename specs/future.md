@@ -2424,6 +2424,15 @@ then pass a few hundred times in a row.
   mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard steps.
 - **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's
   Leonardo does, so a theme that changes `background` keeps its text legible.
+- **Generated code.** Generated JavaScript runs design programs, but a main-module `provide bundle`
+  is evaluated when the module loads (see "Generated values are evaluated at load" above), so a
+  theme that matches on `env.colorMode` keeps the root mode's values under a local
+  `env.colorMode=dark`. `design-tokens-theme`'s `darkAccent` is skipped in the generated-JavaScript
+  comparison for it. Generated TypeScript names a type the file doesn't import when a value's type
+  comes from a module it doesn't import, such as `@nx/color`'s `Color` through `@nx/design`'s
+  alias, or an inferred `b.X.p` returned through another module; it then doesn't type-check.
+  Importing such types where they are named would fix both. Matches on patterns other than union
+  cases are still refused.
 - **Token export.** `add-token-export`: DTCG `color` values with `colorSpace: "oklch"`, and CSS
   `oklch()` custom properties.
 

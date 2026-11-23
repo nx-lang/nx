@@ -1,4 +1,4 @@
-module @nx/design/types.nx fingerprint 5006119918868335741
+module @nx/design/types.nx fingerprint 14130614841922890477
 links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
 requires update-records-v1 property-unions-v1 constraints-v1
 entrypoints functions [] components []

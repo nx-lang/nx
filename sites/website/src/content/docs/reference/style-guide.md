@@ -261,7 +261,9 @@ A UI library extends the core by composition, not by subtyping:
 - Don't extend the core's record types to add roles.
 
 Write a theme as an `env.Update` bundle that sets roles through `.Update` records, so it names only
-what it changes. Set `focus` wherever you set `accent`.
+what it changes. Set a role of the nested `text` group with a path field, such as
+`color.text.muted=…`, since `SemanticColors.Update`'s `text` takes a whole `TextColors`. Set `focus`
+wherever you set `accent`.
 
 ```nx
 import "@nx/design"
@@ -278,6 +280,7 @@ export environment button: ButtonTokens = <ButtonTokens fill={env.color.accent} 
 /// The brand: green accents.
 export let brand: env.Update = <env.Update
   color=<SemanticColors.Update accent={standardPalette.green700} focus={standardPalette.green600} />
+  color.text.muted={standardPalette.gray600}
   button=<ButtonTokens.Update radius=9999 />
 />
 ```

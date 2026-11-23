@@ -45,11 +45,11 @@ export type Easing = {
 
 /// One drop shadow, as in CSS `box-shadow` without `inset`.
 export type Shadow = {
-  offsetX: float64 where finite = 0.0  /// Horizontal offset, in layout units.
-  offsetY: float64 where finite = 0.0  /// Vertical offset, in layout units.
-  blur: Spacing = 0.0                  /// Blur radius, in layout units.
-  spread: float64 where finite = 0.0   /// Growth (or, when negative, shrinkage) of the shape.
-  color: Color                         /// The shadow's color, usually translucent.
+  offsetX: float64 where finite = 0.0         /// Horizontal offset, in layout units.
+  offsetY: float64 where finite = 0.0         /// Vertical offset, in layout units.
+  blur: float64 where finite && >= 0.0 = 0.0  /// Blur radius, in layout units.
+  spread: float64 where finite = 0.0          /// Growth (or, when negative, shrinkage) of the shape.
+  color: Color                                /// The shadow's color, usually translucent.
 }
 
 /// A complete text style: what DTCG calls a typography token.

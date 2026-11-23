@@ -1,7 +1,7 @@
-module @nx/design/tokens.nx fingerprint 3846144553481102763
+module @nx/design/tokens.nx fingerprint 3129711657228865219
 links @nx/color/color.nx version "346e014081a62e17" fingerprint 16291222639973348538
-links @nx/design/palette.nx version "077849efaffbf9cc" fingerprint 12365593852589900184
-links @nx/design/types.nx version "077849efaffbf9cc" fingerprint 5006119918868335741
+links @nx/design/palette.nx version "0c6bda86b7e010ba" fingerprint 12365593852589900184
+links @nx/design/types.nx version "0c6bda86b7e010ba" fingerprint 14130614841922890477
 requires update-records-v1 property-unions-v1 environment-v1 constraints-v1
 entrypoints functions [] components []
 

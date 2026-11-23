@@ -1,19 +1,21 @@
 {
   "counts": {
-    "main.nx::accent": 28440,
-    "main.nx::accent#rootDark": 31653,
-    "main.nx::background": 28440,
-    "main.nx::background#rootDark": 31653,
-    "main.nx::buttonFill": 231973,
-    "main.nx::buttonFill#rootDark": 194796,
-    "main.nx::buttonRadius": 231969,
-    "main.nx::buttonText": 231973,
-    "main.nx::buttonText#rootDark": 194796,
-    "main.nx::coreRadius": 6695,
-    "main.nx::darkAccent": 31654,
-    "main.nx::focus": 28440,
-    "main.nx::focus#rootDark": 31653,
-    "main.nx::root": 60150,
-    "main.nx::themedRadius": 6695
+    "main.nx::accent": 38440,
+    "main.nx::accent#rootDark": 33319,
+    "main.nx::background": 38440,
+    "main.nx::background#rootDark": 33319,
+    "main.nx::buttonFill": 468657,
+    "main.nx::buttonFill#rootDark": 241444,
+    "main.nx::buttonRadius": 468653,
+    "main.nx::buttonText": 468657,
+    "main.nx::buttonText#rootDark": 241444,
+    "main.nx::coreRadius": 15029,
+    "main.nx::darkAccent": 33320,
+    "main.nx::focus": 38440,
+    "main.nx::focus#rootDark": 33319,
+    "main.nx::root": 71816,
+    "main.nx::text": 38451,
+    "main.nx::text#rootDark": 33330,
+    "main.nx::themedRadius": 15029
   }
 }

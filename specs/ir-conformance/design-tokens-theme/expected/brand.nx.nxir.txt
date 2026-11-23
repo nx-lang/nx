@@ -1,17 +1,22 @@
-module brand.nx fingerprint 17702158742468193261
-links @nx/design/tokens.nx version "077849efaffbf9cc" fingerprint 3846144553481102763
-links @nx/design/palette.nx version "077849efaffbf9cc" fingerprint 12365593852589900184
+module brand.nx fingerprint 12084356762303613976
+links @nx/design/tokens.nx version "0c6bda86b7e010ba" fingerprint 3129711657228865219
+links @nx/design/palette.nx version "0c6bda86b7e010ba" fingerprint 12365593852589900184
 links ui.nx version "" fingerprint 5984742701993045455
 requires environment-v1
 entrypoints functions [] components []
 
-value theme: object @8:1-21:3 =
+value theme: object @9:1-28:3 =
   <env.Update
     @nx/design/tokens.nx:env.color=if @nx/design/tokens.nx:env.colorMode is
       @nx/design/tokens.nx:ColorMode.light =>
         <@nx/design/tokens.nx:SemanticColors.Update accent=@nx/design/palette.nx:standardPalette.green700 focus=@nx/design/palette.nx:standardPalette.green600 />
       @nx/design/tokens.nx:ColorMode.dark =>
         <@nx/design/tokens.nx:SemanticColors.Update accent=@nx/design/palette.nx:standardPalette.green500 onAccent=@nx/design/palette.nx:standardPalette.gray950 focus=@nx/design/palette.nx:standardPalette.green400 />
+    @nx/design/tokens.nx:env.color.text=if @nx/design/tokens.nx:env.colorMode is
+      @nx/design/tokens.nx:ColorMode.light =>
+        <@nx/design/tokens.nx:TextColors.Update muted=@nx/design/palette.nx:standardPalette.gray600 />
+      @nx/design/tokens.nx:ColorMode.dark =>
+        <@nx/design/tokens.nx:TextColors.Update muted=@nx/design/palette.nx:standardPalette.gray300 />
     @nx/design/tokens.nx:env.radius=<@nx/design/tokens.nx:RadiusScale.Update md=8.0 lg=12.0 />
     ui.nx:env.button=<ui.nx:ButtonTokens.Update radius=9999.0 />
   />

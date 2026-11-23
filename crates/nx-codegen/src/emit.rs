@@ -272,14 +272,23 @@ fn collect_expression_source_codegen_diagnostics(
             arms,
             else_branch,
         } => {
-            if !arms.iter().all(|arm| {
-                matches!(&arm.body.kind,
-                CodegenExpressionKind::Element(element) if element.tag == "$bindings")
-            }) {
+            // A match whose arms all test union cases is emitted as case comparisons; other
+            // patterns (records, `{}`, intervals) are not supported yet.
+            let union_cases_only = arms.iter().all(|arm| {
+                arm.patterns
+                    .iter()
+                    .all(|pattern| matches!(&pattern.kind, CodegenExpressionKind::UnionCase { .. }))
+            });
+            if !union_cases_only
+                && !arms.iter().all(|arm| {
+                    matches!(&arm.body.kind,
+                    CodegenExpressionKind::Element(element) if element.tag == "$bindings")
+                })
+            {
                 diagnostics.push(source_codegen_unsupported_diagnostic(
                     module,
                     expression.span,
-                    "match expressions are not supported by executable source codegen yet",
+                    "match expressions on patterns other than union cases are not supported by executable source codegen yet",
                 ));
             }
             collect_expression_source_codegen_diagnostics(module, scrutinee, diagnostics);
@@ -3760,8 +3769,11 @@ fn emit_expression(
                 } else { String::new() };
                 code.push_str(&format!("if ({tests}) {{ {narrowing}return {}; }} ", emit_expression(current_module_id, &arm.body, context)));
             }
+            // Without `else`, no arm matching gives the empty value. The site's type comes from
+            // NX: `T?` for a partial match, and `T` for one that covers every case, where the
+            // fallthrough is unreachable, so TypeScript is told it is `never`.
             let otherwise = else_branch.as_ref().map(|branch| emit_expression(current_module_id, branch, context))
-                .unwrap_or_else(|| "[]".to_string());
+                .unwrap_or_else(|| if context.target.is_typescript() { "(nxEmpty as never)" } else { "nxEmpty" }.to_string());
             code.push_str(&format!("return {otherwise}; }})()"));
             code
         }
@@ -5691,6 +5703,9 @@ fn collect_expression_runtime_helpers(
             else_branch,
         } => {
             output.insert("nxPatternMatches");
+            if else_branch.is_none() {
+                output.insert("nxEmpty");
+            }
             collect_expression_runtime_helpers(scrutinee, output);
             for arm in arms {
                 for pattern in &arm.patterns {

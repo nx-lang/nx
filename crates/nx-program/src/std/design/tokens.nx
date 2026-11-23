@@ -1,7 +1,8 @@
 // @nx/design, unstable: declarations may change incompatibly in any NX release.
 //
-// Semantic tokens: the environment values every NX UI library reads. This set is the stable core;
-// a library adds its own component tokens as environment values whose defaults read these.
+// Semantic tokens: the environment values every NX UI library reads. This set is the core, meant to
+// stay stable once the library is; a library adds its own component tokens as environment values
+// whose defaults read these.
 
 import "./types.nx"
 import "./palette.nx"
