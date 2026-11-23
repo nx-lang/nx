@@ -2,9 +2,9 @@
 
 The design doc (https://claude.ai/artifact/VrkdfYN3jv2Y8KjZWtxshG) settled that tokens are a
 convention on environment values, not a language feature, and the naming rules: singular lowercase
-categories (`env.color`), role first then variant, t-shirt scales, `palette.blue600`, camelCase in
-NX and hyphens only in CSS. `add-environment-values` built the mechanism. This change decides the
-token set and how libraries build on it.
+categories (`env.color`), role first then variant, t-shirt scales, `standardPalette.blue600`,
+camelCase in NX and hyphens only in CSS. `add-environment-values` built the mechanism. This change
+decides the token set and how libraries build on it.
 
 The proposed API is written as NX source in this change, so it is checked by the compiler rather
 than described:
@@ -42,8 +42,8 @@ is green 700 (`oklch(0.527 0.154 150.069)`) in light mode and green 500
 
 ### Three tiers, with only the middle one standard
 
-- **Reference** (`palette`) is an ordinary exported `let`. It is in the library because the default
-  theme needs colors from somewhere, not because themes must use it.
+- **Reference** (`standardPalette`) is an ordinary exported `let`. It is in the library because the
+  default theme needs colors from somewhere, not because themes must use it.
 - **Semantic** (`env.color`, `env.space`, …) is the standard: these names are what every library
   reads and every theme sets.
 - **Component** tokens are each library's own.
@@ -53,9 +53,9 @@ to one library's set of controls, and it is what makes Fluent's token list hard 
 
 ### The palette is Tailwind CSS v4's, in OKLCH
 
-`palette` holds five hues (zinc as `gray`, `blue`, `red`, `amber` and `green`) at eleven steps, 50
-to 950, with Tailwind CSS v4's values written as `c.oklch(…)`, the form Tailwind publishes. Tailwind
-is MIT licensed; the library header carries its notice.
+`standardPalette` holds five hues (zinc as `gray`, `blue`, `red`, `amber` and `green`) at eleven
+steps, 50 to 950, with Tailwind CSS v4's values written as `c.oklch(…)`, the form Tailwind
+publishes. Tailwind is MIT licensed; the library header carries its notice.
 
 Many of the vivid steps are outside sRGB but inside Display P3. A Display P3 screen shows them as
 written. An sRGB screen, and today's Skia and Canvas renderers, show them mapped with `toGamut`,
@@ -184,8 +184,9 @@ on a `Density` mode), and reduced motion, which is a host input that `env.motion
 - **A neutral default theme is still a look.** Programs that never theme will look alike. →
   Acceptable: the defaults exist so that an unthemed program is legible, and theming is one
   `provide`.
-- **`palette` values copied from Tailwind CSS v4 (MIT).** → The library header carries the MIT
-  notice. If Tailwind changes its values, ours stay as they are; they are a snapshot, not a link.
+- **`standardPalette` values copied from Tailwind CSS v4 (MIT).** → The library header carries the
+  MIT notice. If Tailwind changes its values, ours stay as they are; they are a snapshot, not a
+  link.
 - **Vivid steps look different on sRGB and P3 screens.** → That is the intent of a wide palette, and
   `toGamut` mapping keeps hue and lightness, so a design reads the same on both. The contrast targets
   are measured after mapping into sRGB, so they hold on either.

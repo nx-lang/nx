@@ -9,8 +9,12 @@ import "./ui.nx"
 export let theme: env.Update = <env.Update
   color={
     if env.colorMode is {
-      light => <SemanticColors.Update accent={palette.green700} focus={palette.green600} />
-      dark => <SemanticColors.Update accent={palette.green500} onAccent={palette.gray950} focus={palette.green400} />
+      light => <SemanticColors.Update accent={standardPalette.green700} focus={standardPalette.green600} />
+      dark => <SemanticColors.Update
+        accent={standardPalette.green500}
+        onAccent={standardPalette.gray950}
+        focus={standardPalette.green400}
+      />
     }
   }
   radius=<RadiusScale.Update md=8 lg=12 />

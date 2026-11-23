@@ -49,34 +49,42 @@ export environment color: SemanticColors = {
     light => <SemanticColors
       background=#ffffff
       surface=#ffffff
-      surfaceMuted={palette.gray100}
-      text=<TextColors normal={palette.gray900} muted={palette.gray500} disabled={palette.gray400} />
-      border={palette.gray200}
-      focus={palette.blue500}
-      accent={palette.blue600}
+      surfaceMuted={standardPalette.gray100}
+      text=<TextColors
+        normal={standardPalette.gray900}
+        muted={standardPalette.gray500}
+        disabled={standardPalette.gray400}
+      />
+      border={standardPalette.gray200}
+      focus={standardPalette.blue500}
+      accent={standardPalette.blue600}
       onAccent=#ffffff
-      danger={palette.red600}
+      danger={standardPalette.red600}
       onDanger=#ffffff
-      warning={palette.amber500}
-      onWarning={palette.gray950}
-      success={palette.green700}
+      warning={standardPalette.amber500}
+      onWarning={standardPalette.gray950}
+      success={standardPalette.green700}
       onSuccess=#ffffff
     />
     dark => <SemanticColors
-      background={palette.gray950}
-      surface={palette.gray900}
-      surfaceMuted={palette.gray800}
-      text=<TextColors normal={palette.gray50} muted={palette.gray400} disabled={palette.gray600} />
-      border={palette.gray800}
-      focus={palette.blue400}
-      accent={palette.blue400}
-      onAccent={palette.gray950}
-      danger={palette.red500}
-      onDanger={palette.gray950}
-      warning={palette.amber400}
-      onWarning={palette.gray950}
-      success={palette.green500}
-      onSuccess={palette.gray950}
+      background={standardPalette.gray950}
+      surface={standardPalette.gray900}
+      surfaceMuted={standardPalette.gray800}
+      text=<TextColors
+        normal={standardPalette.gray50}
+        muted={standardPalette.gray400}
+        disabled={standardPalette.gray600}
+      />
+      border={standardPalette.gray800}
+      focus={standardPalette.blue400}
+      accent={standardPalette.blue400}
+      onAccent={standardPalette.gray950}
+      danger={standardPalette.red500}
+      onDanger={standardPalette.gray950}
+      warning={standardPalette.amber400}
+      onWarning={standardPalette.gray950}
+      success={standardPalette.green500}
+      onSuccess={standardPalette.gray950}
     />
   }
 }

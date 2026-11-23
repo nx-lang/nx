@@ -18,23 +18,23 @@ accepted where it is expected.
 - **THEN** analysis SHALL report the value as outside the type's constraint
 
 ### Requirement: The library provides a reference palette
-`@nx/design` SHALL export `palette: Palette`, a record of five hues, `gray`, `blue`, `red`, `amber`
-and `green`, each in the steps 50, 100, 200 and so on up to 900, then 950, named hue then step
-(`palette.blue600`). The values SHALL be Tailwind CSS v4's, written as `Color.oklch`, and the
-library's source header SHALL carry Tailwind's MIT license notice. Every palette color SHALL be
-inside the Display P3 gamut. No other declaration of the library SHALL require a program to use the
-palette.
+`@nx/design` SHALL export `standardPalette: StandardPalette`, a record of five hues, `gray`, `blue`,
+`red`, `amber` and `green`, each in the steps 50, 100, 200 and so on up to 900, then 950, named hue
+then step (`standardPalette.blue600`). The values SHALL be Tailwind CSS v4's, written as
+`Color.oklch`, and the library's source header SHALL carry Tailwind's MIT license notice. Every
+palette color SHALL be inside the Display P3 gamut. No other declaration of the library SHALL
+require a program to use the palette.
 
 #### Scenario: A palette step is read by name
-- **WHEN** a module evaluates `palette.blue600`
+- **WHEN** a module evaluates `standardPalette.blue600`
 - **THEN** the result SHALL be a `Color.oklch`
 
 #### Scenario: The palette fits a Display P3 screen
-- **WHEN** `inGamut(color, displayP3)` is evaluated for every color in `palette`
+- **WHEN** `inGamut(color, displayP3)` is evaluated for every color in `standardPalette`
 - **THEN** each result SHALL be `true`
 
 #### Scenario: A palette color survives CSS output
-- **WHEN** a module evaluates `toCss(palette.green500)`
+- **WHEN** a module evaluates `toCss(standardPalette.green500)`
 - **THEN** the result SHALL be an `oklch(…)` string that `parse` reads back as the same color
 
 ### Requirement: The semantic tokens are environment values with a usable default theme
@@ -120,9 +120,9 @@ SHALL do so by matching on `env.colorMode` in the bundle's fields, and SHALL fol
 
 #### Scenario: A theme varies by mode
 - **WHEN** the main module applies a bundle whose `color` field is
-  `if env.colorMode is { light => <SemanticColors.Update accent={palette.green700} /> dark => <SemanticColors.Update accent={palette.green500} /> }`
-- **THEN** `env.color.accent` SHALL be `palette.green700` at the root and `palette.green500` inside
-  an element with `env.colorMode=dark`
+  `if env.colorMode is { light => <SemanticColors.Update accent={standardPalette.green700} /> dark => <SemanticColors.Update accent={standardPalette.green500} /> }`
+- **THEN** `env.color.accent` SHALL be `standardPalette.green700` at the root and
+  `standardPalette.green500` inside an element with `env.colorMode=dark`
 - **AND** `env.color.background` SHALL keep each mode's default
 
 ### Requirement: The core changes compatibly once stable

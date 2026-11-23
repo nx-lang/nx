@@ -8,7 +8,7 @@ import "@nx/color" as c
 import "./types.nx"
 
 /// Five hues in eleven steps each, from 50 (lightest) to 950 (darkest).
-export type Palette = {
+export type StandardPalette = {
   gray50: Color
   gray100: Color
   gray200: Color
@@ -69,7 +69,7 @@ export type Palette = {
 /// The standard palette: Tailwind CSS v4's values for zinc (as gray), blue, red, amber and green,
 /// in OKLCH as Tailwind publishes them. The vivid steps are outside sRGB: a Display P3 screen shows
 /// them as written, and an sRGB screen or renderer shows them mapped with `toGamut`.
-export let palette: Palette = <Palette
+export let standardPalette: StandardPalette = <StandardPalette
   gray50={c.oklch(0.985, 0, 0)}
   gray100={c.oklch(0.967, 0.001, 286.375)}
   gray200={c.oklch(0.92, 0.004, 286.32)}
