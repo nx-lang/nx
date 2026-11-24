@@ -2373,12 +2373,9 @@ then pass a few hundred times in a row.
   be skipped.
 - **Restored instances have no recorded reads.** An instance restored from saved state has no read
   list until it renders once, so a root value change does not reach it before then.
-- **A bundle is evaluated at every read.** A main-module `provide bundle` is evaluated each time a
-  read reaches it, as a default is. Hoisting it, like memoizing defaults below, changes operation
-  counts and so the cost model.
-- **Generated values are evaluated at load.** A generated module evaluates its top-level values
-  when it loads, in the environment of that moment, where the IR runtimes evaluate them where they
-  are read.
+- **A bundle's values are computed at every read.** Each value a `provide env with brand` sets is
+  computed each time a read reaches it, as a default is. Hoisting it, like memoizing defaults
+  below, changes operation counts and so the cost model.
 - **Generated path overrides are not checked.** Generated code applies `env.size.width=…` without
   checking that the field exists in the value it patches, where the IR runtimes refuse a path that
   does not.
@@ -2403,8 +2400,12 @@ then pass a few hundred times in a row.
   to add if hosts want it.
 - **Memoizing defaults.** A body that reads `env.color` ten times evaluates its default ten times.
   Memoizing per environment would change operation counts, so the cost model would change with it.
-- **Record `with`.** Updating a record value in place of a whole `*.Update` patch, deferred as
-  separate work.
+- **An element form of `with`.** `<ada with age=37 />` or similar, if markup-heavy code wants it;
+  `{ ada with { age=37 } }` covers it today.
+- **`with` on union cases.** Patching a value of a union type whose cases are records, keeping the
+  case. Today the left side must be a record, an update record or a bundle.
+- **Conditional entries in a field list.** `{ ada with { if older { age=37 } } }`, to set a field
+  only sometimes, without writing the field's current value in an `else`.
 
 ## Design Tokens: What `add-design-tokens` Left For Later
 
@@ -2417,18 +2418,11 @@ then pass a few hundred times in a row.
   the `env.color` default builds all 55 colors. Caching top-level values once per program and
   memoizing defaults per environment would remove most of it; both change operation counts and so
   the cost model.
-- **A bundle applied to one section.** `provide brand { … }` and an `env.` attribute that takes a
-  bundle don't exist; a section changes single values only. A theme for one section, such as a
-  marketing banner in another brand, needs one of them.
 - **A palette generator.** `paletteFromHue(…)` building eleven steps from an OKLCH lightness curve,
   mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard steps.
 - **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's
   Leonardo does, so a theme that changes `background` keeps its text legible.
-- **Generated code.** Generated JavaScript runs design programs, but a main-module `provide bundle`
-  is evaluated when the module loads (see "Generated values are evaluated at load" above), so a
-  theme that matches on `env.colorMode` keeps the root mode's values under a local
-  `env.colorMode=dark`. `design-tokens-theme`'s `darkAccent` is skipped in the generated-JavaScript
-  comparison for it. Generated TypeScript names a type the file doesn't import when a value's type
+- **Generated TypeScript types.** Generated TypeScript names a type the file doesn't import when a value's type
   comes from a module it doesn't import, such as `@nx/color`'s `Color` through `@nx/design`'s
   alias, or an inferred `b.X.p` returned through another module; it then doesn't type-check.
   Importing such types where they are named would fix both. Matches on patterns other than union

@@ -387,6 +387,9 @@ field is never invented, so `apply(u, merge(a, b))` equals `apply(apply(u, a), b
 `apply(a, diff(a, b))` equals `b`. `apply` and `diff` take a record, so they work on a component's
 `T.State` value but not on a component element; `merge` and `changed` take any update record.
 
+`record with { name="Ada" }` is `apply` written in place, and `update with other` is `merge`; see
+[`with`](/reference/syntax/expressions#patching-a-value-with) for field lists and paths.
+
 ```nx
 external component <Button label:string emits { Tapped { } } />
 

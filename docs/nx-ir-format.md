@@ -40,6 +40,8 @@ Layouts use these operand types:
 - `ref?` — an optional reference.
 - `[x...]` — a list of the given operand type, possibly empty.
 - `flags` — an integer whose bits are named in the layout.
+- `formula?` — a `0`/`1` flag that only some elements of a list carry (see *Cells*).
+- `base?` — an operand at the end of an entry that may be left out (see *Cells*).
 
 Kind numbers are assigned here and are never reused. A reader that meets a kind number it does not
 know must refuse the image. A retired kind keeps its number, so no later kind takes it; the emitter
@@ -51,7 +53,7 @@ Every number in the image is a little-endian unsigned 32-bit integer, a *cell*, 
 offset from the start of the image. The value `0xFFFFFFFF`, spelled `none` below, is reserved for
 an absent optional operand and never appears as an index or a count.
 
-An entry is a run of cells: its kind, then its operands, written by six rules that are the whole
+An entry is a run of cells: its kind, then its operands, written by eight rules that are the whole
 encoding:
 
 | Operand | Cells |
@@ -62,6 +64,8 @@ encoding:
 | `ref?` | two; `none` in the module-slot cell when absent, and then the second cell is `none` too |
 | `[x...]` | a count, then each element by its own rule, recursively; an element that is itself a list of operands is written as those operands in order, with no count of its own |
 | a constant's value | `int` and `float` are two cells, low word first, of the `i64` or the `f64` bits; `bigint` is one `str` |
+| `[[…, formula?]...]` | as `[x...]` when no element has the flag; otherwise the count cell has bit 31 (`0x80000000`) set and every element is followed by one flag cell, `0` where the element has none |
+| a trailing `base?` | its cells when present, nothing when absent; a reader takes it as present when the entry has cells left after the operands before it |
 
 So the node `[18, ref, [[str, node]...], [node...]]` is the cells `18, slot, name, n, (name, node)
 × n, m, node × m`. There is no per-entry length cell: the table's offset array gives every entry's
@@ -159,8 +163,8 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 28 | check | `[28, node, type, str]` | A constraint check, written where a value is bound to a constrained site its type does not already satisfy: the operand, a `constrained` type entry, and the name of the site, such as a parameter or field. Yields the operand's value when the interval admits it, comparing at the base type, and otherwise fails with `nx-ir-constraint`, naming the site, the value and the interval. A sequence operand is checked item by item and the empty value passes, so one node serves an optional site and a `+` or `*` site whose item type is constrained. `NaN` fails. Requires `constraints-v1`. |
 | 29 | interval | `[29, type]` | A numeric pattern, `in 0.0..1.0` or `> 0 && <= 10`, in an `ifIs` arm's pattern list, and nowhere else: a `constrained` type entry whose base is the scrutinee's base type and whose interval is the pattern's. It matches when the scrutinee lies in the interval, and never matches `NaN` or the empty value. Requires `constraints-v1`. |
 | 30 | envRead | `[30, ref]` | `env.name`: the value the environment gives the `environment` declaration the reference names. A field read after it is an ordinary `member`. Requires `environment-v1`; see *Environment values*. |
-| 31 | envProvide | `[31, [override...], node]` | A `provide` block, or an element written with `env.` attributes: the overrides, each `[ref, [str...], node]` naming an `environment` declaration, a field path that may be empty and the value, evaluated in order outside the block, and the body, evaluated inside them. Requires `environment-v1`. |
-| 32 | envUpdate | `[32, [override...]]` | An `<env.Update>` bundle: the overrides, in the layout of `envProvide`, evaluated as one value for a top-level `provide`. Requires `environment-v1`. |
+| 31 | envProvide | `[31, [override...], node]` | A `provide` block, or an element written with `env.` attributes: the overrides, each `[ref?, [str...], node, formula?]` naming an `environment` declaration, a field path that may be empty and the value, evaluated in order outside the block, and the body, evaluated inside them. An override with no reference is a bundle: its value is an `env.Update`, applied entry by entry (`provide env with b { … }`). An override with the formula flag `1` is a formula: its value is captured where it is written and computed at each read that reaches it. Requires `environment-v1`; a bundle or formula override requires `environment-v2`. |
+| 32 | envUpdate | `[32, [override...], base?]` | An `<env.Update>` bundle, or the bundle a `with` field list makes: the overrides, in the layout of `envProvide`, and an optional base bundle node whose entries come first, so `b with { x=1 }` is `b`'s entries then `x`. Requires `environment-v1`; a base, a bundle override or a formula requires `environment-v2`. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding or an index expression, so neither has a node kind. A function
@@ -526,7 +530,10 @@ arm with the `{}` pattern, lists `occurrence-v1`; one that contains a `standardM
 `standard-math-v1`; a `standardColor` node lists `standard-color-v2`; one whose type table holds a
 `constrained` entry, or whose nodes hold a `check` or an `interval`, lists `constraints-v1`; one that
 declares an `environment` value, has a `provides` declaration, or contains an `envRead`,
-`envProvide` or `envUpdate` node lists `environment-v1`. Constructing a range needs no feature: that is an
+`envProvide` or `envUpdate` node lists `environment-v1`. One that also holds a formula override, a
+bundle override in an `envProvide`, or an `envUpdate` with a base lists `environment-v2` as well;
+a runtime refuses such a module that does not list it, rather than evaluating a formula where it is
+written. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
 needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
 never tests, steps through or falls back from one lists nothing. A runtime that does not know a
@@ -694,6 +701,22 @@ value sees only the sources after it, so a provide that reads the value it sets 
 bundle provide applies each of its entries as an override; an entry whose value is a `*.Update`
 record is applied as a patch of the fields it sets.
 
+**Formulas.** An override whose value reads an environment value is a *formula*, flagged as such
+in the image. Where it is written, a runtime captures it rather than evaluating it: the module, the
+declaration and the value's node, with the locals the node reads. Each read that reaches it
+evaluates the node there, in the environment of that read, with reads of the value it sets seeing
+only the sources after it, so `env.radius={env.radius + 1}` reads the outer radius, and
+`provide env.gap={env.space * 2} { provide env.space=1 { env.gap } }` gives `2`. A bundle's
+entries are formulas the same way, inline and named bundles alike, so a bundle passed as data means
+what it meant where it was built. A read of a value while its own default is being evaluated, which
+an override can cause through another value's default, is `nx-ir-environment-cycle`, naming the
+values on the way.
+
+**Bundles in a block.** An `envProvide` override with no reference is a bundle,
+`provide env with brand { … }`: its value is an `env.Update`, and each of its entries applies as an
+override of the block, in order. An `envUpdate` with a base is `b with { … }` on a bundle: the
+base's entries, then the overrides.
+
 **`$env`.** Evaluating an `envProvide` node evaluates its overrides outside the node, then its body
 inside them, then adds the overrides to every component descriptor its result reaches. The walk
 goes through sequences, records, and the fields and content of elements that are not component
@@ -701,13 +724,19 @@ descriptors, an external component's record among them, and stops at each descri
 component declared with a body, which receives the overrides in front of any
 it holds already. A descriptor carries them in the reserved field `$env`, a list outermost first of
 entries `{ "value": "<module identity>::<name>", "path": [...], "to": <value> }`, with `to` in
-canonical form. A descriptor without overrides has no `$env`, and an element that is not a component
+canonical form. A formula's entry has `"formula": { "module", "declaration", "node", "fingerprint",
+"locals" }` in place of `to`: the module identity, the declaration's name, the node index, the
+module's fingerprint as a string, and the captured locals as a record. A bundle applied by a block
+is one entry `{ "bundle": [...] }` holding its entries in order. A runtime checks only a formula's
+shape when it is entered, and refuses it with `nx-ir-boundary-type` at the read that evaluates it
+when its module is not in the program or its fingerprint is not that module's, so a formula saved
+by another build is never evaluated against different nodes. A descriptor without overrides has no `$env`, and an element that is not a component
 descriptor never gets one. A host renders a child component in the environment it gets by entering
 the child's descriptor (`Environment::enter` in Rust, `environment.enter(descriptor)` in
 TypeScript), and a component's props never include `$env`.
 
 **`env.Update`.** A bundle evaluates to `{ "$type": "env.Update", "$entries": [...] }`, each entry
-in the `$env` entry form. The qualified names make a bundle built in one module apply to the right
+in the `$env` entry form, formulas among them. The qualified names make a bundle built in one module apply to the right
 values in an entry module that doesn't import them by those names.
 
 **Root values.** A host names each root value by its simple name when exactly one environment value
@@ -715,8 +744,8 @@ in the program has it, and otherwise by its qualified name. An unknown or ambigu
 `nx-ir-environment-name`, and a value is checked against the declared type with the usual boundary
 diagnostics. A malformed `$env` on a descriptor is refused with `nx-ir-boundary-type`.
 
-**Cost.** An `envRead` costs one operation, and a default or entry-module provide evaluated for it
-is charged node by node each time it is evaluated. An `envProvide` costs one operation, and its
+**Cost.** An `envRead` costs one operation, and a default, entry-module provide or formula evaluated
+for it is charged node by node each time it is evaluated. Capturing a formula costs one operation. An `envProvide` costs one operation, and its
 override values and body are charged as any other children. Adding the overrides to one component
 descriptor costs one operation. The lookup itself costs nothing beyond the nodes it evaluates.
 

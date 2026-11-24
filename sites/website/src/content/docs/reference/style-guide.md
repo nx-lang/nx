@@ -202,6 +202,10 @@ Keep a short `provide` block on one line. When the body needs more, keep the ove
 aligned with `provide`. When the overrides themselves no longer fit, put each on its own line,
 indented by 2 spaces, with the `{` on the line after them, aligned with `provide`.
 
+Set a single value with `env.x=…`, in an attribute or a `provide` block. Use `provide env with …`
+for a bundle or a named group of values, and an inline field list, `provide env with { … }`, only
+when it patches several values that belong together.
+
 Put a main module's top-level provides after its imports and before its declarations, one per line
 and with no blank lines between them, bundles first so that the single values after them read as
 the exceptions to the bundle.

@@ -96,14 +96,57 @@ declaration, parameter or binding (`reserved-name`); a record field named `provi
 the call. An element with `env.` attributes means a `provide` with the same overrides around the
 element.
 
-The value of an override is evaluated where it is written, outside the override, so it can read
-the value it replaces:
+### Computed where it is read
+
+An override's value that reads the environment is computed where the value is read, not where the
+override is written. Inside it, a read of the value it overrides sees the sources outside the
+override, so it can build on the value it replaces:
 
 ```nx
 environment space: int = 4
 
 let doubled() = { provide env.space={env.space * 2} { env.space } }
 ```
+
+`doubled()` is `8`. Because the value is computed at the read, a value it reads that is overridden
+nearer the reader is the nearer one:
+
+```nx
+environment space: int = 4
+environment gap: int = 0
+
+let nested() = { provide env.gap={env.space * 2} { provide env.space=1 { env.gap } } }
+```
+
+`nested()` is `2`, not `8`: `gap` means "twice the space here", wherever it is read. Locals the
+value reads keep the values they had where the override was written. A value that reads no
+environment value, such as `env.locale="fr-FR"`, is the same wherever it is read.
+
+### Bundles in a block
+
+`provide env with` applies a bundle, an `env.Update` value, to the body:
+
+```nx
+environment space: int = 4
+environment gap: int = 0
+
+let dense: env.Update = <env.Update space=2 gap={env.space * 3} />
+
+let list() = { provide env with dense { env.gap } }
+let tighter() = { provide env with dense with { space=1 } { env.gap } }
+let inline() = { provide env with { space=3 } { env.space } }
+```
+
+- The bundle may be a name, a call, an element or a braced expression, and `with` steps after it
+  apply their entries after the bundle's. A field list right after `env with` is an inline bundle.
+- The bundle's entries are computed where a value is read, like any override, so `list()` is `6`:
+  `dense`'s `gap` reads the `space` the bundle sets. `tighter()` is `3`.
+- A value or field the bundle doesn't set falls through to the sources outside it, so a bundle
+  patches the place around it rather than resetting values to their defaults.
+- A block holds `env.` overrides or one `env with` chain, never both. To set a value beside a
+  bundle, write it as a step: `provide env with dense with { locale="fr-FR" } { … }`. A mixed block
+  is a syntax error that suggests that chain, in the order written.
+- `env with` is written only after `provide`; elsewhere it is `reserved-name`.
 
 ## App-wide values in the main module
 
@@ -123,7 +166,7 @@ previews, may contain them, and they take effect only when it is the entry modul
 ### Bundles
 
 An `env.Update` value is a bundle of overrides. A module can build one and the main module can apply
-it with `provide bundle`:
+it with `provide env with`:
 
 ```nx fragment
 // brand.nx
@@ -136,18 +179,22 @@ export let theme: env.Update = <env.Update space=12 color=<Palette.Update accent
 // app.nx
 import "./brand.nx" as brand
 
-provide brand.theme
+provide env with brand.theme
+provide env with brand.theme with { radius=0 }
 ```
 
 Each field of `<env.Update>` names an environment value as an `env.` read does, and a record value
 takes that record's `.Update` type, so a bundle can set some of its fields. A bundle remembers which
 declarations it means, so it applies to the right values in a main module that doesn't import them.
+`bundle with { … }` and `bundle with other` are bundles too, with the right side's entries after the
+left's, so a bundle can be built from another and passed around as a value.
 
 ## Which value a read sees
 
 A read finds the value from the first of these that sets it:
 
-1. the nearest override around the read: an `env.` attribute or a `provide` block, nearest first;
+1. the nearest override around the read: an `env.` attribute, a `provide` block or a bundle's
+   entry, nearest first;
 2. the host's root value;
 3. the main module's provides, a later one before an earlier one;
 4. the declaration's default.
@@ -177,8 +224,12 @@ let darkSurface() = { provide env.colorMode=dark { env.color.surface } }
 ```
 
 A default that can read its own value, through other defaults or the functions it calls, never
-finishes, so it is rejected with `environment-cycle`, naming the values on the way. A main-module
-provide that reads the value it sets is fine: it sees the sources after it.
+finishes, so it is rejected with `environment-cycle`, naming the values on the way. An override, a
+bundle entry or a main-module provide that reads the value it sets is fine: it sees the sources
+after it. One of `V` that reads a `W` whose default reads `V` is `environment-cycle` at the
+override: under it, a read of `W` would evaluate `W`'s default, then the override, then `W` again
+with nothing left to give it. An override placed by another body can still close such a path while
+the program runs, and the read then fails with the runtime error `nx-ir-environment-cycle`.
 
 ## Root values from the host
 
@@ -202,4 +253,7 @@ operating system's environment.
   documentation.
 - Hover on a function, value or component lists the environment values it reads, directly or through
   the functions and values it calls.
-- Hover on a top-level `provide` lists what it sets, following a bundle to its `<env.Update>`.
+- Hover on a top-level `provide`, or on a block's `env with`, lists what it sets, following a
+  bundle to its `<env.Update>` and through its `with` steps.
+- Completion in a bundle's field list, `provide env with { … }` or `theme with { … }`, offers the
+  environment values, and after `name.` the fields of the value.

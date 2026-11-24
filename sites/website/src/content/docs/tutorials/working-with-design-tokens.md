@@ -104,12 +104,12 @@ export let brand: env.Update = <env.Update
 
 ## 4) Apply it app-wide, with one dark section
 
-`provide` at the top of the main module applies the theme to the whole program. An `env.`
-attribute changes a single value for one element and everything inside it; a bundle can't be
-applied to one section yet:
+`provide env with brand` at the top of the main module applies the theme to the whole program. An
+`env.` attribute changes a single value for one element and everything inside it. To apply a theme
+to one section only, write `provide env with brand { … }` around it instead.
 
 ```nx fragment
-provide brand
+provide env with brand
 
 let root() = {
   <Box fill={env.color.background} radius=0 padding=0>

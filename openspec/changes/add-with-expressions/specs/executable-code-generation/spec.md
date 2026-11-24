@@ -11,11 +11,11 @@ descriptor's `$env` SHALL be what the generated program's `enter` reads, so a ho
 composes a child's environment as a host of the TypeScript runtime does. Its entries SHALL have the
 runtime's shape, except that a formula SHALL be a function of no arguments that closes over its
 captured locals and reads the environment through the generated helpers, and SHALL hold the
-runtime's `module` and `locals`, in place of its `node` and `fingerprint`; such an entry is
+runtime's `module` and `locals`, in place of its `declaration`, `node` and `fingerprint`; such an entry is
 meaningful only to the generated program that made it. Serializing a generated formula with
 `JSON.stringify` SHALL throw an error naming the environment value rather than drop the entry. The
 conformance comparison with the IR runtimes SHALL compare a formula entry by its `value`, `path`,
-`module` and `locals`, and by the values reads through it give, not by `node` or `fingerprint`.
+`module` and `locals`, and by the values reads through it give, not by `declaration`, `node` or `fingerprint`.
 Because a bundle's formulas are evaluated where a value is read, a top-level bundle evaluated when
 the generated module loads SHALL still follow the environment of each read for an entry whose own
 expression reads the environment; an entry that only names a top-level value gets that value as it

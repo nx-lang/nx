@@ -8,8 +8,10 @@ its default node, and exported as other declarations are. A read SHALL be an `en
 node, kind `31`, holding a list of overrides and a body; the list SHALL hold either attribute
 overrides or a single bundle override, never both. Each override SHALL hold a reference to the
 declaration, a list of field names that may be empty, a value node, and, only when the value is a
-formula, a fourth cell holding the formula flag; an override that is not a formula SHALL have no
-fourth cell, so its encoding is unchanged. A value is a formula when its static read set, following
+formula, the formula flag. When no override in the list is a formula, the list SHALL be encoded as
+before; when one is, its count cell SHALL have bit 31 set and every override SHALL be followed by
+one flag cell, `1` for a formula and `0` otherwise, so a module without formulas emits unchanged
+IR. An `envUpdate`'s `base` SHALL be its last operand, written only when present. A value is a formula when its static read set, following
 `env.` reads, the functions and values they call and the defaults of the values they read, is not
 empty. A bundle override SHALL hold no reference and an empty list, and its node SHALL be of type
 `env.Update`. An `env.Update` bundle SHALL be an `envUpdate` node, kind `32`, holding an optional
@@ -66,7 +68,7 @@ the declaration kind, the node kinds and the features SHALL NOT change the IR sc
 A runtime that evaluates an `envProvide` node SHALL evaluate the override values without the formula
 flag once, in order, in the environment outside the node, and SHALL capture each formula override;
 it SHALL then evaluate the body with the overrides in effect, and add the overrides to every
-component descriptor its result reaches. Capturing a formula SHALL record the module, the override's
+component descriptor its result reaches. Capturing a formula SHALL record the module, the declaration it is written in, the override's
 value node, the module's fingerprint, and the values of the locals the node reads, in canonical
 form. A bundle override's node SHALL be evaluated where it is written, to an `env.Update` value
 whose entries are held as `$env` entries are. The walk SHALL go through sequences, records, and the
@@ -78,7 +80,7 @@ content as through any other element, and it SHALL never get `$env`. A component
 carry its overrides in the reserved field `$env`, as a list of entries outermost first, each
 holding `value` (the qualified name of the environment value: its module identity and name) and
 `path` (a list of field names), and either `to` (the value in canonical form) or `formula`
-(`module`, `node`, `fingerprint` and `locals`), with `fingerprint` written in the lossless form the
+(`module`, `declaration`, `node`, `fingerprint` and `locals`), with `fingerprint` written in the lossless form the
 program fingerprints use. A bundle override SHALL be an entry holding only
 `bundle`: the bundle's own entries, in order. An `env.Update` value SHALL be
 `{ "$type": "env.Update", "$entries": [ … ] }` with entries of the same shape. A descriptor without

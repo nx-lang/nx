@@ -118,7 +118,7 @@ An override still sees the locals where it is written, with their values there, 
 **Descriptors and bundles carry formulas.** A component descriptor's `$env` must stay data a host can
 store and compare. An override that reads no environment value gives the same value at every read,
 so a runtime evaluates it once and carries the value as before (`env.colorMode=dark` is unchanged).
-Any other override is carried as a formula: the module, the value's node, the module's fingerprint
+Any other override is carried as a formula: the module, the declaration, the value's node, the module's fingerprint
 and the locals it captured, which are data. Whether a value reads the environment is decided from its
 static read set, so a value that reads one only on some branches is a formula.
 
@@ -182,7 +182,7 @@ is.
 - `envUpdate` gains an optional `base` node: the bundle's entries are the base's followed by its own.
 - Each `envProvide` and `envUpdate` override gains a formula flag, set from the static read set, and
   `envProvide` gains bundle overrides (no reference, empty path, an `env.Update` node).
-- `$env` and `$entries` entries hold `to` or `formula` (`module`, `node`, `fingerprint`, `locals`),
+- `$env` and `$entries` entries hold `to` or `formula` (`module`, `declaration`, `node`, `fingerprint`, `locals`),
   and a bundle in `$env` is an entry holding `bundle`.
 - A module that uses a formula, a bundle in a block or a `base` lists `environment-v2` beside
   `environment-v1`. A program that uses none of them still declares only `environment-v1` and emits
