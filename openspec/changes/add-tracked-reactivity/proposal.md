@@ -53,6 +53,10 @@ design can be judged as a whole rather than one phase at a time.
   override formula the body wrote captures it, and when a handler the body binds reads it.
   Otherwise the node takes the new props and keeps its render, rebound to the parent's new handlers
   as a kept child is today.
+- **A handler captures what it reads.** A handler made by a body captures only the slots its node
+  reads, not the whole frame, in both IR runtimes. Two handlers then compare equal when only a slot
+  they do not read changed, so a kept child's content keeps its render. Handler comparisons cost
+  less, which the corpus regeneration shows.
 - **The instance tree keeps derived results across renders, checked by revision.** Results that
   renders evaluated are held in the tree and offered to later renders of any node, so the render
   after a click reuses the palette. As in incremental engines such as Salsa, each root change and
@@ -62,7 +66,8 @@ design can be judged as a whole rather than one phase at a time.
   whether an override supplied it, and is valid at a use only where the same holds. A read that an
   override supplied, such as `env.colorMode=dark` on a section, is compared by value. A light and a
   dark section keep a variant each, and a variant lives while a node's record or another kept result
-  uses it.
+  uses it. An edge to a used result is checked as Salsa's deep verify checks it: the used result is
+  validated first, and evaluated again when it is not valid, before its revision is compared.
 - **Equal results stop a change from spreading.** A result evaluated again is compared once with
   its old value, by the identity a host would see in written output. When they are the same, it
   keeps its old revision, and nothing that used it is evaluated or rendered again. So when `locale`
@@ -102,6 +107,7 @@ design can be judged as a whole rather than one phase at a time.
   skip, push-based staleness, the change set, and node records of direct inputs. The requirements
   on what the tree composes through, props flowing down, handlers, emits, passes and the root-value
   change are modified to match.
+- `component-action-handlers`: a handler captures only the slots its body reads.
 - `environment-values`: a value is still computed where it is read, and a runtime may reuse an
   earlier result as `reactivity` defines.
 - `executable-code-generation`: generated code reuses derived results within one call.
@@ -110,13 +116,15 @@ design can be judged as a whole rather than one phase at a time.
 
 - `crates/nx-ir-runtime`: layer identities on the environment stack; a per-call record of tracked
   computations in `Machine`; reuse in `eval_reference`, `provided_or_default` and `source_value`;
-  state and prop read records on `ComponentInstance` (not stored); a render identity shared by an
-  instance whose dispatch kept its render; internal lifecycle entries for a dispatch that renders
-  only when asked and for normalizing props without rendering; an internal runtime option through
-  which the tree passes its kept results to a render's `Machine`; and, in `tree.rs`, the kept
-  results, the node records, the reverse indexes, the change set and their place in `atomically`.
+  handlers that capture only the slots their node reads; state and prop read records on
+  `ComponentInstance` (not stored); a render identity, props left out, shared by an instance whose
+  dispatch or prop skip kept its render; internal lifecycle entries for a dispatch that renders only
+  when asked and for normalizing props without rendering; an internal runtime option through which
+  the tree passes its kept results to a render's `Machine`; and, in `tree.rs`, the kept results, the
+  node records, the reverse indexes, the change set and their place in `atomically`.
   `dispatch_component_actions` is unchanged.
-- `runtime/typescript`: within-call reuse only, and `dist` rebuilt. Its dispatch is unchanged.
+- `runtime/typescript`: within-call reuse and the narrowed handler capture, and `dist` rebuilt. Its
+  dispatch is unchanged.
 - `crates/nx-codegen`: the generated environment helpers and the thunks of top-level values that
   read the environment.
 - Hosts of the tree (the DrawnUI fiddle's `nx-rust` language, the .NET binding where it wraps the

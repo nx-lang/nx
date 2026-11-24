@@ -7,16 +7,19 @@ found as a formula's captured locals are found. A content parameter SHALL count 
 handler props bound for emits SHALL NOT count as reads. When a visit hands a node a descriptor of
 its component under its parent that is not equal to the one it holds, and the node's environment
 record holds at its new place, the tree SHALL normalize the new descriptor's props, charged as
-initialization charges normalizing them, and SHALL compare the recorded props of the old and the
-new normalized props as two descriptors are compared when a kept child is rebound: a handler the
-body can see resolved through the instance each descriptor was read from and compared as `==`
-compares it, a handler bound for an emit bound in both or in neither, and the text of a token not
-counting. The comparison SHALL count against the visit's operation budget as the comparison for a
-rebinding does. When a recorded prop differs, the node SHALL be initialized again. Otherwise the
-node SHALL keep its render: it SHALL be rebound as a kept child is, when its parent's instance
-changed or a handler it holds is replaced; its instance SHALL take the new normalized props and the
-new handler props without rendering, and SHALL keep its generation and tokens; and the node SHALL
-take the new descriptor and environment and SHALL stay settled.
+initialization charges normalizing them, and SHALL compare the recorded props of the old and the new
+normalized props as two descriptors are compared when a kept child is rebound: a handler the body
+can see resolved through the instance each descriptor was read from and compared as `==` compares
+it, a handler bound for an emit bound in both or in neither, and the text of a token not counting.
+The comparison SHALL count against the visit's operation budget as the comparison for a rebinding
+does. When a recorded prop differs, the node SHALL be initialized again from the props normalized
+for the comparison, so that normalization is charged once. Otherwise the node SHALL keep its render:
+it SHALL be rebound as a kept child is, when its parent's instance changed or a handler it holds is
+replaced; its instance SHALL take the new normalized props and the new handler props without
+rendering, and SHALL keep its generation and tokens; and the node SHALL take the new descriptor and
+environment and SHALL stay settled. A node's props SHALL NOT be part of what makes its instance the
+same render for the tree's comparisons, so a prop skip that rebinds nothing leaves the nodes
+initialized through the node matching it.
 
 #### Scenario: A prop the body ignores does not render
 - **WHEN** a `Badge` node's body reads `label` and not `tooltip`, and a pass hands it a descriptor
@@ -48,24 +51,30 @@ take the new descriptor and environment and SHALL stay settled.
 
 ### Requirement: The tree keeps derived results across renders
 The tree SHALL keep the top-level values, defaults and entry-module provides its renders evaluated,
-when no read they recorded was supplied or capped by a layer the render pushed, and SHALL offer them
-to later renders of any node. Formulas, and the bundles of a render's own `envProvide` nodes, SHALL
-be reused within one call only. The tree SHALL pass its kept results to a render through an
-internal option, not a public API, and a result taken from the tree SHALL enter the call's own
-reuse as if evaluated at the call's start, with its reads' tokens taken at the use.
+when no read they recorded, at any depth, was supplied or capped by a layer the render pushed, and
+SHALL offer them to later renders of any node. Formulas, and the bundles of a render's own
+`envProvide` nodes, SHALL be reused within one call only. The tree SHALL pass its kept results to a
+render through an internal option, not a public API. Each variant SHALL hold, beside its direct
+inputs, the flattened set of the leaf environment reads it made at any depth, through its edges
+included, each with its supplier class. A render SHALL take a variant from the tree only when no
+layer the render pushed touches a value in that set, and the variant SHALL enter the call's own
+reuse as if evaluated at the call's start, with that set's reads and their tokens taken at the use.
+Validation SHALL use the direct inputs only.
 
 The tree SHALL keep one revision counter, and each root value that `set_environment` sets, changes
 or clears, and each kept result whose value changes when it is evaluated again, SHALL take the next
-revision. Each variant of a kept result SHALL hold the revision at which its value last changed,
-the revision at which it was last found valid, and its record of direct inputs. A variant SHALL be
-valid at a use when its inputs, checked in the order they were read, all hold there: each read
-classified at the use as it was recorded, a root read whose root value has not changed since the
-variant was last found valid, an edge whose variant is valid at the use and changed no later, and an
-override-supplied read whose value the environment lookup gives at the use is equal. The lookup
-SHALL evaluate any formula there and SHALL be charged as the skip check's reads and comparisons
-are. The check SHALL stop at the first input that does not hold, and the result SHALL then be
-evaluated again without checking the rest, so that the check never evaluates what a fresh
-evaluation would not. Classifying a read and comparing revisions SHALL cost no operations.
+revision. Each variant of a kept result SHALL hold the revision at which its value last changed, the
+revision at which it was last found valid, and its record of direct inputs. A variant SHALL be valid
+at a use when its inputs, checked in the order they were read, all hold there: each read classified
+at the use as it was recorded, a root read whose root value has not changed since the variant was
+last found valid, an edge whose variant, validated first at the use by this rule and evaluated again
+there with the cutoff below when it is not valid, has changed no later than the record was last
+found valid, and an override-supplied read whose value the environment lookup gives at the use is
+equal. The lookup SHALL evaluate any formula there and SHALL be charged as the skip check's reads
+and comparisons are. An evaluation of the used result that gives another variant than the edge names
+SHALL count as a change. The check SHALL stop at the first input that does not hold, and the result
+SHALL then be evaluated again without checking the rest, so that the check never evaluates what a
+fresh evaluation would not. Classifying a read and comparing revisions SHALL cost no operations.
 
 A result evaluated again SHALL be compared with the variant it replaces, charged as a comparison of
 values. When the two are the same value as a host would see it written, of the same number kind,
@@ -106,6 +115,19 @@ indexes and the change set with the nodes when it fails.
 - **THEN** `color`'s default SHALL be evaluated again for the second node, which SHALL read the dark
   colors
 
+#### Scenario: A render that overrides a value a kept result read below an edge evaluates it again
+- **WHEN** the tree keeps `button`'s default, which used `color`'s default, which read
+  `env.colorMode` from the root, and a node's body reads `env.button` inside its own
+  `provide env.colorMode=dark`
+- **THEN** the render SHALL evaluate `button`'s and `color`'s defaults again and read the dark
+  button
+
+#### Scenario: A used result is evaluated again before its edge is judged
+- **WHEN** a node's render used a kept `direction` result that read `env.locale`, and a host
+  changes `locale` so that `direction` evaluates again to `ltr`
+- **THEN** checking the node's edge SHALL evaluate `direction` again and find it unchanged
+- **AND** the node SHALL NOT render again
+
 #### Scenario: An input only a branch no longer taken read is not checked
 - **WHEN** a kept result reads `env.flag` and, only when it is `true`, `env.detail`, whose default
   fails once a root value it reads changes, and a host changes `flag` to `false` and that root value
@@ -123,11 +145,13 @@ read of it, and of those with an override-supplied read whose lookup read its ro
 each kept result, the nodes and kept results that used it. `set_environment` SHALL follow those
 indexes from the values whose root value changed to mark possibly stale exactly the nodes and kept
 results they reach, evaluating nothing, and SHALL check nothing else. Then, in order from the nodes
-nearest the root, it SHALL check each possibly stale node's record at its environment by the rule
-on kept derived results, evaluating again only the kept results that are not valid, and SHALL
-render the node again at the first direct input that changed. A dispatch SHALL decide whether to
-render from the dispatched node's own record. The indexes SHALL stay current as nodes render, are
-replaced, removed and dropped, and as kept results are replaced and dropped.
+nearest the root, it SHALL check each possibly stale node's record at its environment by the rule on
+kept derived results: each kept result the node used validated first, and evaluated again with the
+cutoff only when it is not valid, its edge holding when the result's revision of last change is no
+later than the node's. It SHALL render the node again at the first direct input that does not hold.
+A dispatch SHALL decide whether to render from the dispatched node's own record. The indexes SHALL
+stay current as nodes render, are replaced, removed and dropped, and as kept results are replaced
+and dropped.
 
 #### Scenario: Unrelated kept results are not checked
 - **WHEN** the tree holds kept results that read `colorMode` and others that read only `locale`, and

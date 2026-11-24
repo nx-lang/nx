@@ -63,7 +63,7 @@ result SHALL count the same number of operations, in the same order. The format'
     field an update record clears is;
   - two action handlers made by one node that captured as many slots compare their captured
     values slot by slot, in order, up to and including the first slot that differs. A handler
-    captures the slots of its frame as they stood when it was made, and a slot that was not bound
+    captures the slots its node reads, as they stood when it was made, and a slot that was not bound
     then compares only with another that was not;
   - two strings cost one more for every 64 UTF-16 code units of the shorter, rounded down.
 
@@ -218,7 +218,7 @@ last three carry no span.
 - **THEN** binding it SHALL cost one operation, `[1, null]` two, `[[null, null], 1]` three, and `[[], [], [1, 2, 3]]` five
 
 #### Scenario: Two handlers compare what they captured
-- **WHEN** two action handlers made by one node in a frame with two bound slots are compared
+- **WHEN** two action handlers made by one node that reads two slots, both bound, are compared
 - **THEN** the comparison SHALL cost three operations when they captured equal values: the pair of handlers and each pair of captured values
 - **AND** SHALL cost two when the values in their first slot differ, whether or not those in the second differ too
 

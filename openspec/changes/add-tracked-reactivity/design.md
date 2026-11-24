@@ -215,13 +215,17 @@ are the host layers of its calls. The place of a kept result is the place where 
 the tree keeps only results whose reads were all found beneath the render's own overrides
 (Decision 11).
 
-Reads made inside a kept result the evaluation used are not copied into the record: the edge stands
-for them. So when `locale` changes and `direction` evaluates again to `ltr`, a node that read only
+Reads made inside a kept result the evaluation used are not direct inputs: the edge stands for them
+in validation. So when `locale` changes and `direction` evaluates again to `ltr`, a node that read only
 `direction` sees an unchanged edge and does not render (the cutoff, Decision 11). With the leaf
 reads that `environment_reads_hold` checks by value today, the node would be a `locale` reader and
 render. Within one call, a reused result's reads are still added to the call's records with tokens
-(Decision 4), since that is how the call decides reuse. The tree builds its record from the direct
-inputs.
+(Decision 4), since that is how the call decides reuse. The tree validates with the direct inputs
+only. Beside them, each kept variant also holds the flattened set of the leaf environment reads it
+made at any depth, through its edges included, each with its supplier class (root or override). That
+set is used only when a variant is taken into a call (Decision 11): for the check that no layer the
+render pushed touches a value it read, and for the tokens it enters the call with. It is bounded by
+the program's environment declarations, and building it from the edges' sets is free.
 
 A read where a source was evaluated under the render's own overrides of other values keeps today's
 handling (`take_environment_reads`): it holds the value found beneath those overrides, or none,
@@ -285,9 +289,20 @@ A render records the props it read. A prop is read:
   `frame.get(slot)` for the formula's locals without evaluating their nodes, so with
   `<Row env.gap={env.space * scale}>`, a prop or state field `scale` is a read of the enclosing
   render;
-- when the body binds a handler that reads it. A handler captures the frame (`Handler.captured`)
-  and reads its props from the capture, so the prop slots of each handler node the body binds,
-  found as a formula's locals are (`slots_read`), are reads. Its state slots are not (Decision 9).
+- when the body binds a handler that reads it. A handler reads its props from what it captured, so
+  the prop slots of each handler node the body binds, found as a formula's locals are
+  (`slots_read`), are reads. Its state slots are not (Decision 9).
+
+A handler today captures the whole frame of the body (`Handler.captured`), so after any change of
+the frame every handler the body binds is unequal to the one before, whether or not it reads what
+changed (`specs/future.md`, "What a handler captures"). This change narrows the capture: when a
+runtime makes a handler, it captures only the slots its node reads, `slots_read` of the handler
+node, computed by the runtime from the image (no image format change), at no charge, and cacheable
+per node. Both IR runtimes do this. Equal handlers then compare equal when only a slot they do not
+read changed, which is what lets a kept child's content keep its render. It changes handler
+comparisons, which compare captures slot by slot, and so operation counts; the corpus regeneration
+covers it. Results do not change, since a slot a handler does not read cannot change what it
+does.
 
 A content parameter counts as one prop. Handler props bound for emits are not reads; they are
 compared as the existing descriptor comparison compares them.
@@ -308,11 +323,15 @@ recorded in a `Rebinding`; a handler bound for an emit must be bound in both or 
 of a token does not count. The comparison is metered as the existing rebinding comparison is
 (`Program::metered`), not unmetered as `same_descriptor` is.
 
-When a recorded prop differs, the node is initialized again, as today. Otherwise the node keeps its
-render. When the parent's instance changed, or the comparison mapped a handler to another, the kept
+When a recorded prop differs, the node is initialized again from the props already normalized for
+the comparison, through an internal entry, so normalization is charged once. Otherwise the node
+keeps its render. When the parent's instance changed, or the comparison mapped a handler to another, the kept
 output, the node's own handlers and the nodes initialized through it are rebound as a kept child is
 (`rebinding` and `rebind`), with the rebinding's cost. The instance takes the new normalized props
-and handler props without rendering, and keeps its generation and tokens. The node takes the new
+and handler props without rendering, and keeps its generation and tokens. Props are outside the
+render part that `ComponentInstance::is` compares (Decision 9): the identity is the render, its
+generation's handlers and tokens. So a prop skip without rebinding leaves the children's `through`
+and the pass's record matching, and a rebinding updates them as it does today. The node takes the new
 descriptor and environment and stays settled. An equal descriptor still takes today's free path.
 
 ### 11. The tree keeps derived results across renders, checked by revision
@@ -345,8 +364,13 @@ only when its inputs, checked in the order they were read, all hold there:
   the value, or recorded as override-supplied where none does, does not hold;
 - a root read holds when its root value has not changed since `verified`, and, when it has an edge,
   when the edge holds;
-- an edge holds when the variant it names is valid at the use, by this rule, and its `changed` is
-  no later than this variant's `verified`;
+- an edge is checked as Salsa's deep verify checks an input query: the variant it names is
+  validated first at the use, by this rule, and when it is not valid it is evaluated again there,
+  with the equality cutoff. The edge then holds when that variant's `changed` is no later than this
+  record's `verified`. An evaluation that gives another variant than the one the edge names, because
+  its reads are classified otherwise at the use, counts as changed. Evaluating the used result is
+  safe for the reason the order gives: the edge was read after inputs that all still hold, so a
+  fresh evaluation would evaluate it too;
 - an override-supplied read holds when the value the environment lookup gives at the use equals the
   recorded one. Getting the value evaluates any formula there, and a derived result the lookup needs
   is taken from the tree by this same rule. It cannot need the variant being validated, which would
@@ -358,8 +382,10 @@ without checking the rest. Each input checked was read by the last evaluation af
 still hold, so a fresh evaluation would reach that same read, and the check never evaluates a
 branch the fresh run would not take, nor raises an error it would not raise. The order also fixes
 the operation count. So with a result `K` that reads `flag` and, only when `flag` is true, a result
-`K3`, a change of `flag` to false evaluates `K` again without validating `K3`. A variant found
-valid takes the current revision as its `verified`. Comparing revisions costs no operations.
+`K3`, a change of `flag` to false evaluates `K` again without validating `K3`. And with a node that
+read only a kept `direction` result, a change of `locale` evaluates `direction` again while checking
+the node's edge; when it gives `ltr` again, its `changed` stays, the edge holds and the node does not
+render. A variant or node found valid takes the current revision as its `verified`. Comparing revisions costs no operations.
 
 **Equality cutoff.** A result evaluated again is compared with the variant it replaces, the one with
 the same reads classified alike and equal override-supplied values. It is the same value when a host
@@ -385,10 +411,13 @@ node's record uses it, however many passes render nothing in between.
 
 **Into a call.** The tree passes its kept results to each render's `Machine` through an internal
 runtime option, not a public API. At a use in the render, the runtime takes a result from the tree
-when no layer the render pushed touches a value the result read, which the tokens show for free. A
-result taken from the tree enters the call's own cache as if it had been evaluated at the call's
-start, its reads with the tokens they have over the call's host layers, taken at the use, and
-Decisions 1 to 4 apply from there. A result the render evaluates and the tree may keep is kept when
+when no layer the render pushed touches a value in the variant's flattened set of leaf reads, which
+the tokens show for free. Checking only the direct inputs would not do: `button`'s direct inputs are
+an edge to `color`, and a render inside its own `provide env.colorMode=dark` must not take the light
+`button`. A result taken from the tree enters the call's own cache as if it had been evaluated at
+the call's start, its flattened reads with the tokens they have over the call's host layers, taken at
+the use, and Decisions 1 to 4 apply from there, the replay of its reads into enclosing records
+included. A result the render evaluates and the tree may keep is kept when
 the render succeeds.
 
 **Cost.** A render's count now depends on what the tree holds, which a pass's count already does,
@@ -413,9 +442,10 @@ such as a read of `gap` under `<Row env.gap={env.space * 2}>` for `space`.
 `set_environment` gives each changed root value a new revision and follows the indexes to mark the
 nodes that could be affected as possibly stale, transitively. That walk visits only what the indexes
 name and evaluates nothing. Then, in depth order, the tree pulls: for each possibly stale node it
-checks the node's record at its environment by the rule of Decision 11, validating the kept results
-the node used and evaluating again only those that are not valid, with equality cutoff. It renders
-the node again, with the state it holds, at the first direct input that changed. A node whose inputs
+checks the node's record at its environment by the rule of Decision 11. For each edge in order, it
+validates the used kept result first, evaluating it again with the equality cutoff when it is not
+valid, and the edge holds when the result's `changed` is then no later than the node's `verified`.
+It renders the node again, with the state it holds, at the first direct input that does not hold. A node whose inputs
 all hold is left alone, takes the current revision as its `verified`, and stays settled.
 
 A visit's skip check validates the node's record at its new place by the same rule. A dispatch
@@ -457,7 +487,7 @@ unsettled exactly when it or a node under it rendered or was added since a pass 
 - **Recording props and state reads touches every render.** The records are small (bounded by the
   component's declared props and state fields) and replace work the dispatch and visit skip.
 - **Captured reads must be exact.** A handler or formula whose slots are recorded wrongly could keep
-  stale captures. The compiler's slot analysis (`slots_read`) is the source, and the tree's tests
+  stale captures, and with the narrowed capture a handler missing a slot would read it unbound. The compiler's slot analysis (`slots_read`) is the source, and the tree's tests
   run the handler programs with the skips on.
 - **One entry per derived result within a call.** A call that alternates between environments
   evaluates again at each switch. That is at most what it costs today.

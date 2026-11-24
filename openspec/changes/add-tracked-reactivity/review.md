@@ -16,7 +16,7 @@ are those of `design.md` itself.
 
 ## Findings
 
-### 🟡 Fixed - RF1 A kept result's validity never checks that a read it took from the root is still taken from the root at the new use, so a light palette can be reused in a dark section
+### ✅ Verified - RF1 A kept result's validity never checks that a read it took from the root is still taken from the root at the new use, so a light palette can be reused in a dark section
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** design.md:206-226 and specs/component-instance-tree/spec.md:27-31 classify a kept
@@ -37,8 +37,9 @@ are those of `design.md` itself.
   scenario: a result kept from an unoverridden node and then used under `env.colorMode=dark` is
   evaluated again.
 - **Fix:** Each read in a record is classified at the use by whether a layer there sets or caps the value (free, from the walk that gives tokens), and a read classified otherwise than recorded does not hold, at any depth, since an edge holds only when its variant is valid at the same use. Variants are told apart by those classes and the override-supplied values. design.md Decisions 8 and 11; reactivity model requirement; component-instance-tree "The tree keeps derived results across renders", with the scenario "A result kept where nothing overrides is not used under an override". Refinement: a use tries variants in the order kept, each by the in-order rule of RF3, rather than computing a key up front, so that selecting a variant never looks up a value a fresh run would not read.
+- **Verification:** Verified. Decision 11 "Validity at a use" and the kept-results requirement classify each read at the use, and a read classified otherwise than recorded does not hold. The new scenario "A result kept where nothing overrides is not used under an override" pins the light/dark case. Variants are tried in the order kept, each by the in-order rule, which is deterministic.
 
-### 🟡 Fixed - RF2 The node's record is flattened leaf reads in Decision 8 but direct inputs in Decisions 11–12, and the flattened record defeats the equality cutoff
+### ✅ Verified - RF2 The node's record is flattened leaf reads in Decision 8 but direct inputs in Decisions 11–12, and the flattened record defeats the equality cutoff
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** Decision 8 (design.md:158-164) and the requirement "The instance tree records the
@@ -62,8 +63,9 @@ are those of `design.md` itself.
   skip check validates the new record, and move the cutoff scenario under the kept-results
   requirement.
 - **Fix:** One record form for nodes and kept results: direct inputs in read order (root reads with the root's revision and an edge when a provide or default supplied the value, kept results used as edges, override-supplied reads with values; reads under the render's own overrides keep today's by-value handling), plus props, state fields and a per-node `verified` revision. `set_environment`, the visit skip check and the dispatch all check it by the kept-results rule, with revisions and equality cutoff. Rewrote Decision 8, replaced the reactivity requirement with "The instance tree's records hold direct inputs" (the cutoff scenario now sits there), and rewrote the MODIFIED root-value requirement.
+- **Verification:** Verified. Decision 8 and the reactivity requirement "The instance tree's records hold direct inputs" give nodes and kept results one record form (direct inputs in read order, edges in place of inner reads) plus a per-node `verified` revision, and task 5.1 replaces the leaf-read `environment_reads_hold` check in `visit`, `set_environment` and dispatch. The cutoff scenario now sits under that requirement. The rule for edges still needs a fix for the cutoff to work; that is RF17, a new finding.
 
-### 🟡 Fixed - RF3 Recursive validation has no defined order and no early stop, so it can evaluate an input the new run would not read, adding operations or raising an error a fresh evaluation would not
+### ✅ Verified - RF3 Recursive validation has no defined order and no early stop, so it can evaluate an input the new run would not read, adding operations or raising an error a fresh evaluation would not
 - **Severity:** High
 - **Confidence:** Medium
 - **Evidence:** design.md:209-213 and component-instance-tree/spec.md:29-31 say only that "the
@@ -80,8 +82,9 @@ are those of `design.md` itself.
   evaluated again without checking the rest. Add a scenario where an input that only a branch no
   longer taken read fails when evaluated, and the render still succeeds.
 - **Fix:** Inputs are checked in the order they were read, each validated before the next, stopping at the first that does not hold; the result is then evaluated again without checking the rest (Salsa's rule). design.md Decision 11 states why this never evaluates a branch or raises an error a fresh run would not, and that the order fixes the count. Scenario "An input only a branch no longer taken read is not checked".
+- **Verification:** Verified. Inputs are checked in read order with an early stop, followed by evaluation again (Decision 11, kept-results requirement, scenario "An input only a branch no longer taken read is not checked"). The wording of the edge rule introduced RF17.
 
-### 🟡 Fixed - RF4 Ignoring the caps pushed for an evaluation is unsound for a bundle provide, which is cached by index but evaluated under a cap of whichever value is being read
+### ✅ Verified - RF4 Ignoring the caps pushed for an evaluation is unsound for a bundle provide, which is cached by index but evaluated under a cap of whichever value is being read
 - **Severity:** High
 - **Confidence:** Medium
 - **Evidence:** design.md:88 caches "an entry-module provide's value, a bundle provide's bundle
@@ -104,8 +107,9 @@ are those of `design.md` itself.
   (before its cap is pushed) in both runtimes, and correct the "only more often" argument. Add a
   corpus case with a bundle provide that reads a value it sets, read for two different keys.
 - **Fix:** A bundle entry-module provide is keyed by (provide index, value being read), in design.md Decision 2, the reactivity within-call requirement and generated code. Decision 3 now defines where an evaluation begins (the stack when the result is asked for, before its own cap), takes tokens over the layers below that, explains that the caps above it are fixed by the result's identity and that caps below are ordinary layers, drops the "only more often" argument, and walks through `provide env with makeTheme(env.scale)` read for `gap` and `scale`. Added a reactivity scenario, an nx-ir-format corpus item and tasks 1.2/1.4/6.1.
+- **Verification:** Verified. A bundle provide is keyed by (index, value read) in Decision 2, the within-call requirement and generated code. Where an evaluation begins (before its own cap) is pinned, and caps below the start are ordinary numbered layers. I traced `makeTheme(env.scale)` through `provided_or_default`: the `scale` entry starts above `Cap{gap}`, records `scale` with token none and gives the default-built bundle, and the `gap` entry gives the bundle built from the provided `scale`. Each matches a fresh evaluation. The "only more often" argument is gone.
 
-### 🟡 Fixed - RF5 Reads made by capturing a frame are not reads a body makes at run time, so formulas, prop defaults and handlers can depend on a prop or state field the record misses
+### ✅ Verified - RF5 Reads made by capturing a frame are not reads a body makes at run time, so formulas, prop defaults and handlers can depend on a prop or state field the record misses
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** Props and state are frame slots (component.rs: the dispatch frame is built from
@@ -130,8 +134,9 @@ are those of `design.md` itself.
   the props a default read as reads of the defaulted prop. Add scenarios for a formula override
   that captures a prop or state field, and for a defaulted prop that reads another prop.
 - **Fix:** A read now includes slots `capture_formula` captures (a captured prop or state field is a read of the enclosing render) and the prop slots of each handler node the body binds (`slots_read`); props are compared after defaults resolve, so a defaulted prop that reads a changed prop counts. design.md Decisions 9 and 10; reactivity dispatch requirement; component-instance-tree prop requirement with scenarios for a formula-captured prop, a formula-captured state field and a defaulted prop. Refinement: a handler's *state* slots are not reads, because in the tree every handler runs against its creator with live state (Decision 9); counting them would make the `pressedAt` case render.
+- **Verification:** Verified. Reads now cover `slot` nodes evaluated, slots `capture_formula` captures, and handler prop slots (`slots_read`). Props are compared after defaults resolve. Scenarios cover a formula-captured prop, a formula-captured state field and a defaulted prop. Excluding handler state slots is sound in the tree, because `dispatch_chain` only sends token invocations to the creator, where `invoke_handler` binds every state slot live (component.rs:1277-1278, 685-699).
 
-### 🟡 Fixed - RF6 Keeping a render under a new descriptor keeps the parent's old handler allocations in its output, and the instance's old props, with no rebinding
+### ✅ Verified - RF6 Keeping a render under a new descriptor keeps the parent's old handler allocations in its output, and the instance's old props, with no rebinding
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:**
@@ -160,8 +165,9 @@ are those of `design.md` itself.
   exactly what the comparison is charged. Add a scenario: a `Stack` whose unread prop changes
   keeps its output, and a tap on its content's button still patches the parent.
 - **Fix:** The prop skip now normalizes the new props (an internal entry, charged as initialization charges normalization, which the instance needs anyway), compares the recorded props with `Across` semantics under `Program::metered` with a `Rebinding`, rebinds through `rebinding`/`rebind` when the parent's instance or a handler changed, and gives the instance the new props without rendering. design.md Decision 10; component-instance-tree prop requirement with the `Stack` scenario.
+- **Verification:** Verified. The prop skip normalizes the new props through an internal entry, compares the recorded props with `Across` semantics under `Program::metered`, rebinds via `rebinding`/`rebind`, and gives the instance the new props. Two issues the fix introduced are recorded as new findings: the `Stack` scenario cannot hold while handlers capture the whole frame (RF19), and a prop skip changes the part of the instance that `is` compares (RF20).
 
-### 🟡 Fixed - RF7 The dispatch skip has nothing to return: neither runtime's instance holds its rendered output, and the spec does not say what happens to generations, tokens, written-output charges or origins
+### ✅ Verified - RF7 The dispatch skip has nothing to return: neither runtime's instance holds its rendered output, and the spec does not say what happens to generations, tokens, written-output charges or origins
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:**
@@ -192,8 +198,9 @@ are those of `design.md` itself.
   typescript-ir-runtime, regenerate `results.json`, and pin the skip with a corpus lifecycle case,
   since the corpus does have lifecycles.
 - **Fix:** The dispatch skip is restricted to the instance tree, which holds rendered output. `dispatch_component_actions` and the TypeScript dispatch keep rendering every batch, so `rust-ir-runtime`, `typescript-ir-runtime` and the corpus's `results.json` are unchanged and need no delta. In the tree a skip keeps rendered output, tokens and generation, writes no output and reports no origins for it; it also requires the node's environment record to hold. The tree uses one internal Rust lifecycle call that applies the handlers and renders only when needed, so the budget still covers the whole dispatch (a refinement of "an entry that returns state and effects without rendering"). Instance records are in memory only; the stored form is unchanged. Updated proposal, design.md Decision 9, the reactivity requirement (with a bare-lifecycle scenario) and tasks 4.x/5.3.
+- **Verification:** Verified. The skip is restricted to the tree, which holds rendered output (`Node.rendered`). The bare APIs and the corpus are unchanged, so no runtime deltas are needed. Generation, tokens and handler allocations are kept, no output is written and no origins are reported, and an internal entry keeps one budget per dispatch (tasks 4.3, 4.5, 5.3). The stored form is unchanged, which answers the restore question.
 
-### 🟡 Fixed - RF8 A dispatch that keeps its render returns a new instance, and the tree uses instance identity to mean "this render"
+### ✅ Verified - RF8 A dispatch that keeps its render returns a new instance, and the tree uses instance identity to mean "this render"
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** `Node.through`, `visited`, `read_from_current`, `walked_anew`, `rebinding` and
@@ -209,8 +216,9 @@ are those of `design.md` itself.
   render id, and compare that wherever the tree means "the same output", or have a skipped dispatch
   update the children's `through`. Specify it in the component-instance-tree delta.
 - **Fix:** A dispatch that keeps its render keeps the instance's render identity: the instance's render part (handlers, generation, tokens) is shared, and `ComponentInstance::is` compares it, so `through`, `visited`, `creator` and the rest still match and nothing is rebound; only the state changes. design.md Decision 9, the reactivity dispatch requirement and task 4.2.
+- **Verification:** Verified. Task 4.2 splits the instance into a shared render part and makes `ComponentInstance::is` compare it, so after a kept dispatch `through`, `visited`, `read_from_current`, `walked_anew`, `rebinding` and `creator` still match. See RF20 for the same question after a prop skip.
 
-### 🟡 Fixed - RF9 "The state a handler captured is never read" is false for handlers run without live state, and the dispatch skip ignores a changed environment
+### ✅ Verified - RF9 "The state a handler captured is never read" is false for handlers run without live state, and the dispatch skip ignores a changed environment
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:**
@@ -231,8 +239,9 @@ are those of `design.md` itself.
   also require `environment_reads_hold`, or the kept-result validity, for the dispatch's
   environment. Add bare-API scenarios for both.
 - **Fix:** Resolved by RF7's restriction: the bare APIs keep rendering, so a bare-API handler run on its captures is never left stale. In the tree, every handler, emits included, runs against its creator with live state (design.md Decision 9). The tree's skip also requires the node's environment record to hold.
+- **Verification:** Verified. Both problems are gone. The bare APIs keep rendering, so a non-live handler there never sees captures a skip left stale. In the tree, every handler runs against its creator with live state, and the skip also requires the node's environment record to hold (Decision 9).
 
-### 🟡 Fixed - RF10 The equality cutoff keeps the old value under `==`, which equates values that are written differently and ignores origins
+### ✅ Verified - RF10 The equality cutoff keeps the old value under `==`, which equates values that are written differently and ignores origins
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** design.md:214-218 keeps the old value when the new one is equal "charged as a
@@ -247,8 +256,9 @@ are those of `design.md` itself.
   while leaving `changed` alone, provided dependents' outputs are then provably identical. State
   which, and add a scenario with `1` versus `1.0`.
 - **Fix:** The cutoff uses the identity a host would see in written output: same number kind, `-0.0` distinct from `0.0`, NaN never the same (no cutoff), and equal origins when the host collects them, charged as a comparison. design.md Decision 11, component-instance-tree kept-results requirement, and a reactivity scenario with `1` versus `1.0`.
+- **Verification:** Verified. The cutoff compares by written identity: number kind, `-0.0` versus `0.0`, NaN never equal, and origins when collected. It is charged as a comparison, and the `1` versus `1.0` scenario was added.
 
-### 🟡 Fixed - RF11 Dropping variants that no render used during a pass throws away the palette after almost every pass
+### ✅ Verified - RF11 Dropping variants that no render used during a pass throws away the palette after almost every pass
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** design.md:223-225 and component-instance-tree/spec.md:34-35 drop a variant "no
@@ -262,8 +272,9 @@ are those of `design.md` itself.
   Decision 12 already give this, as a reference count. Add a scenario of two dispatches separated
   by a pass that renders nothing.
 - **Fix:** A variant is dropped when no node record and no kept-result record references it (reference counts over the edges), checked when the tree operation ends, not when a pass did not render it. design.md Decision 11 "Lifetime"; scenario "A kept result survives passes that render nothing"; task 5.6.
+- **Verification:** Verified. Variant lifetime now follows the records that reference it, dropped at the end of the tree operation, with the scenario "A kept result survives passes that render nothing" and task 5.6.
 
-### 🟡 Fixed - RF12 "Override-supplied reads compare by value" and "taken from the tree into the call's cache" are underspecified for formulas, field paths, bundles and the render's own overrides
+### ✅ Verified - RF12 "Override-supplied reads compare by value" and "taken from the tree into the call's cache" are underspecified for formulas, field paths, bundles and the render's own overrides
 - **Severity:** Medium
 - **Confidence:** Medium
 - **Evidence:**
@@ -288,8 +299,9 @@ are those of `design.md` itself.
   an override-supplied value is obtained and charged, how tokens are assigned to a tree result
   entering a call, and the API through which the tree passes results to a call.
 - **Fix:** Specified in design.md Decision 11 and the kept-results requirement: an override-supplied read at a use is the value the environment lookup gives there, evaluating any formula and taking any needed result from the tree by the same rule (it cannot need the variant being validated), charged as the skip check charges; formulas and in-render bundles are reused within a call only; results with a read under a layer the render pushed are not kept; a tree result enters the call's cache as if evaluated at the call's start, with tokens over the host layers taken at the use; the tree passes its store through an internal runtime option, not a public API.
+- **Verification:** Verified for the parts listed. Formulas and in-render bundles are reused within a call only. Results with a read under a render-pushed layer are not kept. Override-supplied values come from the lookup, and the lookup cannot need the variant being validated. The tree passes results through an internal option. One gap the fix introduced is RF18: deciding whether a result can be taken into a render, and giving it tokens, needs its transitive reads, which the direct-input record does not hold.
 
-### 🟡 Fixed - RF13 All-or-nothing changes do not cover the new tree state
+### ✅ Verified - RF13 All-or-nothing changes do not cover the new tree state
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** `atomically` snapshots and restores `nodes`, `visited`, `inert`, `roots` and
@@ -302,8 +314,9 @@ are those of `design.md` itself.
   change set to `atomically`'s snapshot, and add a task and scenario: a `set_environment` whose
   second render fails leaves kept results and `take_changes` as they were.
 - **Fix:** `atomically` snapshots and restores the kept results, the revision counter, the reverse indexes and the change set with the nodes (design.md Decision 11, MODIFIED "A change to the tree is all or nothing", the kept-results requirement with scenario "A failed change leaves the kept results as they were", task 5.7).
+- **Verification:** Verified. `atomically` now snapshots the kept results, revision counter, reverse indexes and change set (Decision 11, MODIFIED "A change to the tree is all or nothing", task 5.7, and a scenario).
 
-### 🟡 Fixed - RF14 Main specs and the kept sentences of modified ones contradict the change, and no deltas update them
+### ✅ Verified - RF14 Main specs and the kept sentences of modified ones contradict the change, and no deltas update them
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:**
@@ -324,8 +337,9 @@ are those of `design.md` itself.
   flow down…", rust-ir-runtime and typescript-ir-runtime. Qualify the cost requirement's "alone"
   and reactivity:43 with "outside the instance tree".
 - **Fix:** Added MODIFIED deltas: environment-values "Every environment value is computed where it is read" (results unchanged; a runtime may reuse an earlier result as reactivity defines) and component-instance-tree "Props flow down and state stays with the node" (the prop-read skip). Edited the already-MODIFIED nx-ir-format cost requirement's first sentence (a function of the images, the input and, in the tree, its held state) and changed reactivity's "Results SHALL NOT be kept" to "except as the instance tree keeps them". No rust-ir-runtime or typescript-ir-runtime delta is needed after RF7. Beyond the list, also MODIFIED component-instance-tree "The Rust runtime exports an instance tree", "A pass drops the nodes…", "A handler runs against the instance whose body bound it", "An emitted action is carried…" and "A change to the tree is all or nothing", whose text or scenarios assumed every dispatch renders (for example the "event from output a dispatch replaced" scenario now has the body read the patched field). Task 7.3 now says the "handler captures the whole frame" premise stays.
+- **Verification:** Verified. There are MODIFIED deltas for environment-values (reuse allowed, same value) and for component-instance-tree "Props flow down" plus the other affected requirements. The nx-ir-format cost sentence now names the tree's held state, and reactivity's "SHALL NOT be kept" makes an exception for the tree. No runtime deltas are needed after RF7. Task 7.3 keeps the whole-frame capture premise.
 
-### 🟡 Fixed - RF15 The change set's semantics are ambiguous for replaced nodes, dropped subtrees and reused keys
+### ✅ Verified - RF15 The change set's semantics are ambiguous for replaced nodes, dropped subtrees and reused keys
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** design.md:248-256 and component-instance-tree/spec.md:77-84 cover added then
@@ -342,8 +356,9 @@ are those of `design.md` itself.
   identity = rendered, replaced = removed and added), and add scenarios for replacement and for a
   dropped subtree.
 - **Fix:** The change set is a diff by key since the last `take_changes`: a node replaced at its key is removed and added; every node dropped with a removed or replaced subtree is listed as removed; a key removed and visited again is removed and added; a node whose output changed in any way, rebinding of what its tokens name included, is rendered; a node that only took a new descriptor or state is not listed. design.md Decision 13, the change-set requirement with scenarios for replacement, a dropped subtree and a rebound node.
+- **Verification:** Verified. The change set is a diff by key, covering replacement as removed and added, every dropped node, a reused key, rebinding as rendered, and a descriptor or state change alone not listed. Scenarios and task 5.8 match.
 
-### 🟡 Fixed - RF16 Smaller gaps: within-call reuse changes depth-limit failures, the cost wording is ambiguous, and tests are missing
+### ✅ Verified - RF16 Smaller gaps: within-call reuse changes depth-limit failures, the cost wording is ambiguous, and tests are missing
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:**
@@ -363,6 +378,8 @@ are those of `design.md` itself.
 - **Recommendation:** State these rules in design.md and the deltas. Pin the depth case or accept
   it explicitly, choose all fields or patched fields for the dispatch comparison, and describe the
   instrumentation the generated-code test uses.
+- **Fix:** Documented in design.md (Decisions 4, 7, 9, 11, Goals and Risks) and the deltas: reuse can keep a call under a depth or operation limit a fresh evaluation reaches, alike in both runtimes (reactivity within-call requirement, proposal); the tree's state comparison is charged as `diff` charges a field, over the patched fields the render read; tokens are computed again, not copied, when a reused result's reads are added to an enclosing record; a shared kept result is paid for by the render that evaluates it first, so counts depend on host call order as held state does; the generated-code test uses a test-only evaluation counter in the generated helpers (executable-code-generation delta, tasks 3.2-3.3). Refinement: the comparison covers only patched fields the render read, since an unread field cannot cause a render.
+- **Verification:** Verified. Each point is stated: limits may be avoided alike in both runtimes, the comparison covers only patched fields the render read, tokens are recomputed on replay, a shared result is paid for by the first render that evaluates it, and generated code has a test-only evaluation counter (tasks 3.2-3.3). This finding's Fix line had been appended after the Summary; it has been moved here.
 
 ## Questions
 - Is the intent that the tree's kept results include anything evaluated under a render's own
@@ -388,5 +405,86 @@ are those of `design.md` itself.
   (RF5), skip the handler rebinding the tree relies on (RF6), and need rendered output that
   instances do not hold (RF7). Several main specs contradict the change and have no deltas (RF14).
   The design should be revised before implementation.
-- **Fix:** Documented in design.md (Decisions 4, 7, 9, 11, Goals and Risks) and the deltas: reuse can keep a call under a depth or operation limit a fresh evaluation reaches, alike in both runtimes (reactivity within-call requirement, proposal); the tree's state comparison is charged as `diff` charges a field, over the patched fields the render read; tokens are computed again, not copied, when a reused result's reads are added to an enclosing record; a shared kept result is paid for by the render that evaluates it first, so counts depend on host call order as held state does; the generated-code test uses a test-only evaluation counter in the generated helpers (executable-code-generation delta, tasks 3.2-3.3). Refinement: the comparison covers only patched fields the render read, since an unread field cannot cause a render.
+- Verification (2026-11-24): RF1-RF16 are verified. The revised fixes introduced four new
+  findings: RF17 (the edge rule defeats the equality cutoff), RF18 (taking a result into a render
+  needs its transitive reads), RF19 (a scenario contradicted by whole-frame capture) and RF20 (a
+  prop skip changes what `is` compares, and normalization may be charged twice).
+
+## New Findings Discovered During 2026-11-24 18:29 Verification
+
+### 🟡 Fixed - RF17 The edge rule treats an invalid used result as a changed input, so the equality cutoff never takes effect
+- **Severity:** High
+- **Confidence:** High
+- **Evidence:** design.md:348-349 and specs/component-instance-tree/spec.md:62-63 say an edge holds
+  only when "the variant it names is valid at the use … and its `changed` is no later than this
+  variant's `verified`", and that checking stops at the first input that does not hold, after
+  which the result is "evaluated again without checking the rest" (design.md:356;
+  spec.md:66-67). Take the `direction` example. `locale` changes, so `direction`'s variant is not
+  valid. The node's edge to it therefore does not hold, and the node renders, without `direction`
+  being evaluated again and compared. That contradicts "An equal result stops a change from
+  spreading" (reactivity/spec.md:122-126), "A node whose inputs come back equal is left alone"
+  (component-instance-tree/spec.md:138-141), and Decision 12's own "evaluating again only those
+  that are not valid, with equality cutoff" (design.md:416-418). Salsa's deep verify handles an
+  input query that is not valid by executing it again and then comparing its `changed` revision.
+  Doing so is safe here for the reason RF3's fix gives: the edge was read after inputs that all
+  hold.
+- **Recommendation:** Rewrite the edge rule: when the used variant is not valid at the use,
+  evaluate it again there (with the cutoff), and the edge holds when its `changed` is then still no
+  later than this record's `verified`. Use the same wording in Decision 11, the kept-results
+  requirement and Decision 12.
+- **Fix:** The edge rule is now Salsa's deep verify: the used variant is validated first at the use and, when not valid, evaluated again there with the equality cutoff; the edge holds when its `changed` is then no later than the user's `verified` (an evaluation that gives another variant counts as changed). Same wording in design.md Decisions 11 and 12, the kept-results and notification requirements of component-instance-tree, and the reactivity "direct inputs" requirement; added the scenario "A used result is evaluated again before its edge is judged", and the `direction` walk-through in Decision 11. Task 5.5.
+
+### 🟡 Fixed - RF18 Taking a kept result into a render needs its transitive reads, but the record holds only direct inputs
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Evidence:** design.md:386-391 takes a tree result into a render "when no layer the render
+  pushed touches a value the result read", and enters it into the call's cache "its reads with the
+  tokens they have over the call's host layers". Decision 4's reuse within the call and replay into
+  enclosing records also need every read with its token (design.md:155-159). But Decision 8 records
+  only direct inputs and says reads inside a kept result "are not copied … the edge stands for
+  them" (design.md:218-224). For `button` → edge to `color` → root read of `colorMode`, a render
+  inside `provide env.colorMode=dark` that checks only `button`'s direct inputs finds nothing
+  touched and takes the light `button`. Validity at a use classifies reads by the place's host
+  layers only, so it does not catch this either.
+- **Recommendation:** State that both checks walk edges transitively, which is bounded by the
+  program's declarations and free of operations. Alternatively, keep with each variant the
+  flattened set of values it read, used only for this check and for tokens. Add a scenario: a
+  render that overrides `colorMode` itself and reads `env.button` evaluates `button` and `color`
+  again.
+- **Fix:** Each variant keeps, beside its direct inputs, a flattened set of its leaf environment reads at any depth (through edges) with their supplier class. It is used only for the "no layer the render pushed touches its reads" check and for the tokens a taken result enters the call with (and so the replay into enclosing records); validation still uses direct inputs. design.md Decisions 8 and 11, the kept-results and reactivity requirements, the scenario "A render that overrides a value a kept result read below an edge evaluates it again", task 5.4.
+
+### 🟡 Fixed - RF19 The scenario "A kept render under a new parent instance is rebound" cannot hold while handlers capture the whole frame
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:** In specs/component-instance-tree/spec.md:43-48, `Page` renders
+  `<Stack note={note}><Button onTapped=<State.Update taps={taps + 1} /> /></Stack>` again with
+  another `note`, and `Stack`, which reads only its content, is expected to keep its render. The
+  content's `Button` handler captures `Page`'s whole frame (`Handler.captured`, value.rs:90; the
+  premise task 7.3 keeps), `note` included. The `Across` comparison of the content prop compares
+  handlers as `==` does, capture slot by slot (`handlers_equal`, value.rs:361-381), so the new
+  handler is unequal, the content prop differs, and `Stack` renders again. specs/future.md:1069-1074
+  records exactly this limitation.
+- **Recommendation:** Change the scenario to one where `Page`'s frame is unchanged apart from what
+  `Stack` does not see. For example, the parent is initialized again from equal props, or the
+  changed value is a prop of `Stack` that no handler's frame holds, such as one `Page` gets from
+  its own parent through a field of a record. Or narrow captures to `slots_read` in this change,
+  which future.md says touches the image format and both runtimes.
+- **Fix:** Handlers now capture only the slots their node reads (`slots_read` of the handler node, computed by the runtime from the image at no charge, cacheable per node), in both IR runtimes, with no image format change. New ADDED requirement in a component-action-handlers delta ("A handler captures only the slots its body reads", with scenarios); the nx-ir-format cost bullet ("A handler captures the slots its node reads") and its handler-comparison scenario are edited in the already-MODIFIED requirement. No main requirement says a handler captures the whole frame, so no other MODIFIED delta was needed. design.md Decision 10 notes that this changes handler comparisons and so operation counts, which the corpus regeneration covers (task 6.2). The `Stack` scenario is kept and now holds. Tasks 1.6, 2.2 and 7.3 (future.md's "What a handler captures" is now marked done, replacing the earlier "keep the whole-frame premise").
+
+### 🟡 Fixed - RF20 A prop skip changes the part of an instance that `is` compares, so the children's `through` stops matching again
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** Task 4.2 puts "handlers, generation, tokens, props and records" in the shared
+  render part that `ComponentInstance::is` compares (tasks.md:45-47). A prop skip gives the
+  instance new normalized props, and its own handlers too when rebinding replaced them, while it
+  keeps the output (design.md:314-316). With props in the compared part, `is` is false. The
+  children's `through` and the pass's `visited` record then name a different instance, and the
+  next visit of a child takes the metered rebinding path. That is RF8's problem again, for prop
+  skips. Separately, when a recorded prop differs, the props are normalized for the comparison and
+  then again by `initialize_component`, so normalization is charged twice, and nothing says
+  whether that is intended.
+- **Recommendation:** Keep props out of the part `is` compares, or have a prop skip without
+  rebinding update the children's `through`. State whether initialization after a failed prop
+  comparison reuses the normalized props, or charges normalization again.
+- **Fix:** Props, handler props, state and records are outside the render part that `ComponentInstance::is` compares; the identity is the render (its generation's handlers and tokens), so a prop skip that rebinds nothing keeps children's `through` and the pass's record matching (design.md Decision 10, prop requirement, task 4.2). A node whose recorded prop differs is initialized from the props already normalized for the comparison through an internal entry, so normalization is charged once (design.md Decision 10, prop requirement, task 4.4).
 

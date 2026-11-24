@@ -100,18 +100,21 @@ SHALL do so alike.
 
 ### Requirement: The instance tree's records hold direct inputs
 In the instance tree, a node's record of its last render and a kept result's record SHALL have one
-form: the direct inputs of the evaluation, in the order it first read them. A read of an
-environment value that no layer of the place sets SHALL be a root read, holding the revision of the
-value's root value and, when a provide or the default supplied it, an edge to that kept result. A
-kept result the evaluation used otherwise SHALL be an edge to it. A read that a layer of the place
-sets, wholly or at a field path, SHALL be an override-supplied read, holding the value found. Reads
-made inside a kept result SHALL NOT be copied into the records that use it: the edge stands for them.
-A read where a source was evaluated under the render's own overrides of other values SHALL hold the
-value found beneath those overrides, or none, and SHALL compare by value. A node's record SHALL also
-hold the props and state fields its render read, and the node SHALL hold the revision at which its
-record was last found valid. `set_environment`, the skip check of a visit and a dispatch SHALL check
-a node's record by the rule on kept derived results, so that the tree decides alike whether a
-derived result was evaluated or reused.
+form: the direct inputs of the evaluation, in the order it first read them. A read of an environment
+value that no layer of the place sets SHALL be a root read, holding the revision of the value's root
+value and, when a provide or the default supplied it, an edge to that kept result. A kept result the
+evaluation used otherwise SHALL be an edge to it. A read that a layer of the place sets, wholly or
+at a field path, SHALL be an override-supplied read, holding the value found. Reads made inside a
+kept result SHALL NOT be direct inputs of the records that use it: the edge stands for them, and
+checking an edge SHALL validate the used result first, evaluating it again with the equality cutoff
+when it is not valid, the edge holding when that result has not changed since the record was last
+found valid. A kept result SHALL also hold the flattened set of its leaf reads with their supplier
+class, used only to take it into a call. A read where a source was evaluated under the render's own
+overrides of other values SHALL hold the value found beneath those overrides, or none, and SHALL
+compare by value. A node's record SHALL also hold the props and state fields its render read, and
+the node SHALL hold the revision at which its record was last found valid. `set_environment`, the
+skip check of a visit and a dispatch SHALL check a node's record by the rule on kept derived
+results, so that the tree decides alike whether a derived result was evaluated or reused.
 
 #### Scenario: A reader through a reused default renders again
 - **WHEN** a `Footer` node's render reads `env.color.accent` twice, the second read reuses
