@@ -12,8 +12,14 @@ composes a child's environment as a host of the TypeScript runtime does. Its ent
 runtime's shape, except that a formula SHALL be a function of no arguments that closes over its
 captured locals and reads the environment through the generated helpers, in place of the runtime's
 `module`, `node`, `fingerprint` and `locals`; such an entry is meaningful only to the generated
-program that made it. Because a bundle's formulas are evaluated where a value is read, a top-level
-bundle evaluated when the generated module loads SHALL still follow the environment of each read.
+program that made it, and it SHALL also hold the runtime's `module` and `locals`. Serializing a
+generated formula with `JSON.stringify` SHALL throw an error naming the environment value rather than
+drop the entry. The conformance comparison with the IR runtimes SHALL compare a formula entry by its
+`value`, `path`, `module` and `locals`, and by the values reads through it give, not by `node` or
+`fingerprint`. Because a bundle's formulas are evaluated where a value is read, a top-level bundle
+evaluated when the generated module loads SHALL still follow the environment of each read for an
+entry whose own expression reads the environment; an entry that only names a top-level value gets
+that value as it was at load, as other generated top-level values do.
 
 #### Scenario: A generated function reads a provided value
 - **WHEN** NX source declares `environment locale: string = "en-US"` and
@@ -36,3 +42,4 @@ bundle evaluated when the generated module loads SHALL still follow the environm
 - **WHEN** generated JavaScript renders `<Card env.gap={env.space * 2} />`
 - **THEN** the `Card` descriptor's `$env` entry for `gap` SHALL hold a function in `formula`
 - **AND** entering the descriptor and reading `env.gap` under `env.space=1` SHALL give `2`
+- **AND** `JSON.stringify` of the descriptor SHALL throw an error naming `gap`

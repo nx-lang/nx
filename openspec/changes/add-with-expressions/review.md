@@ -10,7 +10,7 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
 ## Findings
 
-### 🟡 Fixed - RF1 Precedence 125 is already taken by `??`, which is right-associative
+### ✅ Verified - RF1 Precedence 125 is already taken by `??`, which is right-associative
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** crates/nx-syntax/grammar.js:687 (`[prec.right, 125, '??']`); design.md:131-134;
@@ -24,8 +24,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   braced expression, so the spec should also say whether `x with y ?? z` is rejected or parses as
   `(x with y) ?? z`.
 - **Fix:** `with` is now left-associative at precedence 127, above `??` (125) and `*` (120), below unary (130). The with-expressions precedence requirement is retitled and has a `??` scenario; design decision 2 lists the readings; task 1.1 names the levels.
+- **Verification:** `with` is at 127, between `??` (125) and prefix unary (130), so it no longer shares a level with a rule of the other associativity. The requirement (specs/with-expressions/spec.md:65-69), design decision 2 and task 1.1 agree on both mixed readings. The `saved ?? fallback with { name="Bo" }` scenario checks `a ?? (b with c)`.
 
-### 🟡 Fixed - RF2 Formulas bring back reads that have no source left, and the cycle rules don't cover them
+### ✅ Verified - RF2 Formulas bring back reads that have no source left, and the cycle rules don't cover them
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** specs/environment-values/spec.md:244-246 ("a read of that same value SHALL see the sources
@@ -45,8 +46,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   source's own expression. Modify "A default that depends on itself is rejected" so that it covers override
   formulas and bundles, as task 2.3 already assumes, and add a conformance scenario for the case.
 - **Fix:** Added the rule "while a source of `V` is evaluated, a read of `V` at any depth sees only the sources after it" (environment-values ADDED requirement, nx-ir-format lookups). The static `environment-cycle` check now covers an override, bundle entry or main-module provide of `V` that reads `W` whose default reads `V`, and a runtime `nx-ir-environment-cycle` covers what placement reveals. Scenarios for both; design "Cycles" paragraph; tasks 2.4, 4.1, 6.1, 6.2.
+- **Verification:** environment-values now has a MODIFIED copy of "A default that depends on itself is rejected" (spec.md:281-310). It adds the static check for an override, bundle entry or main-module provide of `V` that reads `W` whose default reads `V`, plus the runtime `nx-ir-environment-cycle`, and both have scenarios. "At any depth" settles the dynamic reading in environment-values (spec.md:320-322) and in nx-ir-format's lookup (spec.md:125-128). I checked the other shapes: two overrides that read each other, and a provide of `V` reading `W` reading `V`. Under the at-any-depth rule both terminate, so this is the only shape that can loop. Tasks 2.4, 3.1, 4.1, 6.1 and 6.2 cover it.
 
-### 🟡 Fixed - RF3 A bundle held in a local, prop or loop item is still evaluated where it was built
+### ✅ Verified - RF3 A bundle held in a local, prop or loop item is still evaluated where it was built
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** docs/nx-ir-format.md:709 (a bundle evaluates to `{ "$type": "env.Update", "$entries": […] }`,
@@ -65,8 +67,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   - or state the limit: a bundle passed as a value is fixed where it is built, and only a bundle expression
     written in the `provide` (names of top-level values, calls, elements) is evaluated at the read.
 - **Fix:** `env.Update` values now hold their entries as `to` or `formula`, like `$env`, so a bundle passed through a prop, local or `for` item computes each entry where a value is read. New scenario with a bundle passed as a prop; design "Descriptors and bundles carry formulas"; nx-ir-format `$entries` shape.
+- **Verification:** `env.Update` values now hold their entries as `to` or `formula` (environment-values spec.md:263-267; nx-ir-format spec.md:69-81). The prop scenario (spec.md:274-279) pins the case from the finding, and design decision 3 drops the "named bundles only" claim. See RF17 for what this means for generated code, where those entries become closures.
 
-### 🟡 Fixed - RF4 The NX IR encoding of the new forms is missing from the format spec
+### ✅ Verified - RF4 The NX IR encoding of the new forms is missing from the format spec
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** openspec/specs/nx-ir-format/spec.md:1881-1897 ("NX IR encodes environment values behind a
@@ -87,8 +90,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   bundle in a block, `envUpdate` with `base`, a formula override's flag, and a v1-only program unchanged.
   Settle whether "reads the environment" means the static read set, including calls and top-level values.
 - **Fix:** nx-ir-format's environment requirement now encodes the formula flag (from the static read set), bundle overrides in `envProvide`, `envUpdate`'s optional `base`, and `environment-v2` (with v1-only scenarios). Design decision 7 lists the IR additions; task 3.1.
+- **Verification:** The environment requirement is now MODIFIED in nx-ir-format (spec.md:3-61). It covers the formula flag and how it is derived, the bundle override layout, `envUpdate`'s `base`, and when `environment-v2` is listed alongside v1, with a scenario for each. The `base`-only ambiguity is gone: `base` alone requires v2. One loose end remains, about how the flag is encoded; it is RF18.
 
-### 🟡 Fixed - RF5 Generated code can't produce the `$env` formulas that the runtimes produce
+### ✅ Verified - RF5 Generated code can't produce the `$env` formulas that the runtimes produce
 - **Severity:** High
 - **Confidence:** Medium
 - **Evidence:** openspec/specs/executable-code-generation/spec.md:883-891 (generated `$env` SHALL be what the
@@ -103,8 +107,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   there. Decide whether a value whose type merely contains an `env.Update`, such as a record of light and
   dark bundles, is also emitted as a function.
 - **Fix:** New executable-code-generation delta: a formula is a closure of no arguments over its locals; scenarios for a main theme following a local mode and a generated formula. Design decision 8; task 4.3 and 6.4 (removes the `darkAccent` divergence).
+- **Verification:** There is now an executable-code-generation delta. It states that a formula is a closure of no arguments and that such an entry is meaningful only to the generated program that made it, which settles the conflict with "same `$env`". It also has scenarios for a generated formula and for the #75 `darkAccent` case, and task 6.4 removes the divergence. A residual issue: the delta says a top-level bundle loaded at module load "SHALL still follow the environment of each read". That holds only for entries whose own expression reads the environment. An entry that only names a top-level value, such as `accent={myAccent}` where `myAccent` matches on `env.colorMode`, still gets that value as it was at load, which is the existing "Generated values are evaluated at load" limit. Saying so in a sentence is enough. The new issues are in RF17.
 
-### 🟡 Fixed - RF6 The runtime specs and the host `enter` API aren't updated
+### ✅ Verified - RF6 The runtime specs and the host `enter` API aren't updated
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** openspec/specs/rust-ir-runtime/spec.md:863-871 and
@@ -117,8 +122,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   `enter` and the environment reach the program needed to evaluate formulas, and validate formula and
   bundle entries.
 - **Fix:** New rust-ir-runtime and typescript-ir-runtime deltas: accept `environment-v2`, evaluate formulas with the prepared program of the reading evaluation, so `enter(descriptor)` needs no program, and refuse a bad formula with `nx-ir-boundary-type`. Tasks 4.1, 4.2.
+- **Verification:** There are now rust-ir-runtime and typescript-ir-runtime deltas. Both accept `environment-v2` and evaluate formulas with the prepared program of the evaluation that reads them, so `enter` keeps its signature. Both refuse an unevaluable formula with `nx-ir-boundary-type`. When that refusal happens is inconsistent across the deltas; that is RF19.
 
-### 🟡 Fixed - RF7 Read tracking in the instance tree doesn't cover formulas and bundles
+### ✅ Verified - RF7 Read tracking in the instance tree doesn't cover formulas and bundles
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** openspec/specs/component-instance-tree/spec.md:486-488 ("including those read while
@@ -131,8 +137,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   carried in `$env` or in `envProvide`. Add a scenario: a reader through an override formula renders again
   when a value the formula reads changes at the root.
 - **Fix:** New component-instance-tree delta: reads made while evaluating a formula or bundle entry are recorded for the reading node, with the scenario "A reader through an override formula renders again". Task 4.1.
+- **Verification:** There is a component-instance-tree MODIFIED requirement with the full original text and scenarios, extended to formulas and bundle entries. It adds the scenario "A reader through an override formula renders again" (`space` 4→6, `Cell` reads 12), which checks the index path.
 
-### 🟡 Fixed - RF8 What evaluating a bundle for one value means is underspecified, and so is its cost
+### ✅ Verified - RF8 What evaluating a bundle for one value means is underspecified, and so is its cost
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** specs/nx-ir-format/spec.md:53-57 ("a bundle SHALL contribute the overrides it holds for the
@@ -149,8 +156,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
 - **Recommendation:** State the evaluation unit and its cost in the lookup and cost requirements. Add a
   corpus scenario in which a bundle sets two values and one entry reads the other.
 - **Fix:** The lookup requirement now says a bundle contributes only its entries for the value being read, last first, and no other entry is evaluated; the cost requirement states the charges for formulas, capture and bundle entries. Scenario where one bundle entry reads another value the bundle sets.
+- **Verification:** The lookup requirement (nx-ir-format spec.md:122-123) and environment-values (spec.md:319-323) now say a read evaluates only the bundle's entries for the value being read, and that reads of other values see every source, including sibling entries. The cost list covers `envUpdate`, `base`, capture and bundle entries. The `dense` scenario (`space=2 gap={env.space * 3}`, read 6) pins it. The corpus requirement lists that case.
 
-### 🟡 Fixed - RF9 `env with marketing` outside a `provide` would parse, and the existing error isn't a syntax error
+### ✅ Verified - RF9 `env with marketing` outside a `provide` would parse, and the existing error isn't a syntax error
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** specs/environment-values/spec.md:167-169 (it expects "a syntax error at `env`");
@@ -164,8 +172,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   still, a dedicated message: "`env with` is allowed only after `provide`"), or add a grammar task and test
   that excludes it.
 - **Fix:** `env with` outside `provide` is `reserved-name` with a message that it is written only after `provide`; the old main-module `provide brand.theme` is a syntax error that suggests `provide env with brand.theme`. Scenarios in environment-values; tasks 1.2, 2.3, 6.2.
+- **Verification:** The spec now asks for `reserved-name` at `env` with a message saying `env with` is written only after `provide` (environment-values spec.md:152-153 and 184-187). That matches what the current bare-`env` path in scope.rs reports, with a dedicated message. Task 2.3 covers it.
 
-### 🟡 Fixed - RF10 The bundle after `provide env with` is "any expression", but the grammar can't take one there
+### ✅ Verified - RF10 The bundle after `provide env with` is "any expression", but the grammar can't take one there
 - **Severity:** Medium
 - **Confidence:** Medium
 - **Evidence:** specs/environment-values/spec.md:137 and 173; crates/nx-syntax/grammar.js:269-291
@@ -179,8 +188,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   overrides; an inline element; a `with` chain followed by the body; and an empty field list before the
   body.
 - **Fix:** The operand after `provide env with` is now the same operand set as `with`'s right side (name, member access, call, element, braced expression), optionally followed by more `with` steps, then overrides and the body. Design decision 2; task 1.2 lists the grammar tests.
+- **Verification:** The block form restricts the bundle to `with`'s operand set plus optional `with` steps (spec.md:146-149), and task 1.2 lists the grammar tests I suggested. The top-level form still says "an expression of type `env.Update`" (spec.md:191-192). There is no body after it, so it can be parsed, but using the same operand wording would keep the two forms alike. This is optional.
 
-### 🟡 Fixed - RF11 Editor, highlighting and migration specs and tasks are missing
+### ✅ Verified - RF11 Editor, highlighting and migration specs and tasks are missing
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:**
@@ -203,8 +213,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
   Add tasks for the TextMate grammar and its tests, and for migrating the listed tests and comments.
 - **Fix:** Added editor-language-service (bundle hover on `provide env with`, `with` completion and hover) and editor-syntax-highlighting (`with` after an operand, `provide env`) deltas; the editor requirement moved out of with-expressions. tasks.md has a TextMate task (1.4), a migration task listing every `provide bundle` use (6.3), and the #75 conditionals are gone now that #75 merged.
+- **Verification:** There are now editor-language-service and editor-syntax-highlighting deltas. The hover scenario uses `provide env with brand.theme`, and `with` is scoped as a keyword, a name and text. The `with` editor requirement moved, and tasks 1.4, 5.1 and 6.3 list the TextMate grammar and its test and every migration site I named. Two more mentions of the divergence go stale once task 6.4 removes it; they are RF20.
 
-### 🟡 Fixed - RF12 The with-target rules don't settle optional left sides or derived records
+### ✅ Verified - RF12 The with-target rules don't settle optional left sides or derived records
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/with-expressions/spec.md:7-9, 82-86 and 100-101; openspec/specs/update-records/spec.md:47-49
@@ -216,8 +227,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   record rule. Also say that an optional or sequence left side is `with-target`, with a hint to use
   `?.`/`??` or `if`. Add a scenario for the optional case.
 - **Fix:** `with-target` now also names optional and sequence left sides, with an unwrap hint and a scenario. Update types (`env.Update` included) are checked before records, so a derived update record is never treated as a record.
+- **Verification:** Update types are now checked before records (with-expressions spec.md:92-93; task 2.2). Optional and sequence left sides are `with-target` with an unwrap hint, and the `<Book />.author with { … }` scenario expects `User?`. `<Book />.author` parses as a member access on an element.
 
-### 🟡 Fixed - RF13 "A `T.Update` built from its entries" doesn't fit paths or overlapping entries
+### ✅ Verified - RF13 "A `T.Update` built from its entries" doesn't fit paths or overlapping entries
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/with-expressions/spec.md:8-9 compared with 40-44 and 57-60
@@ -229,8 +241,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   defer to the path requirement for anything else. For example: "the value SHALL be what applying its
   entries in order gives".
 - **Fix:** The first requirement now says the entries apply in order, each on the result of the one before; paths are allowed only on records and bundles (`with-path` on other update records); field lists hold plain entries only.
+- **Verification:** The requirement now says the entries apply in order, and that a field list without paths means `apply(left, <T.Update …/>)` (spec.md:8-11). That is consistent with the path requirement and with design decision 7.
 
-### 🟡 Fixed - RF14 The scenario for captured locals doesn't test a formula
+### ✅ Verified - RF14 The scenario for captured locals doesn't test a formula
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/environment-values/spec.md:268-271 (`<Row env.accent={item.color} />` reads no
@@ -239,8 +252,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   `env.gap={env.space * item.scale}` with an inner `env.space` override. The scenario then pins capture
   semantics at the language level, as nx-ir-format's descriptor scenario does at the IR level.
 - **Fix:** The captured-locals scenario is now `env.gap={env.space * item.scale}` with an inner `env.space` override, and pins that the local is captured and the environment read where read (Cells read 2 and 6).
+- **Verification:** The scenario now uses `env.gap={env.space * item.scale}` with an inner `env.space=2`. It expects 2 and 6, which is correct under the new rule and would be 4 and 12 under the old one, so it does test capture together with read-time evaluation.
 
-### 🟡 Fixed - RF15 One design line is far past the wrap width the other files use
+### ✅ Verified - RF15 One design line is far past the wrap width the other files use
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** design.md:164 is 149 characters, in the Risks "Cost" bullet. The rest of the change wraps at
@@ -249,6 +263,87 @@ all of its original scenarios included, and the REMOVED header matches the main 
   specs/with-expressions/spec.md:78 and 120), mostly because of long code spans. AGENTS.md's 120-character
   target is written for NX source, not for these Markdown files, so those lines are optional to fix.
 - **Fix:** Rewrapped prose at 100 characters in proposal, design and all spec deltas. The remaining lines over 100 are single long code spans in scenarios, left whole.
+- **Verification:** The 149-character line is gone. The remaining lines are at most 103 characters.
+
+## New Findings Discovered During 2026-11-24 05:05 Verification
+
+### 🟡 Fixed - RF16 The encoding of a formula's fingerprint in `$env` isn't stated
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** specs/nx-ir-format/spec.md:78-79 (`formula` holds `module`, `node`, `fingerprint`, `locals`);
+  openspec/specs/nx-ir-format/spec.md:49-52 (fingerprints are 64-bit and must survive a JavaScript
+  `number`); docs/nx-ir-format.md:346 and 374.
+- **Details:** `$env` is canonical JSON that hosts store and compare. A 64-bit fingerprint written as a
+  JSON number loses precision in the TypeScript runtime, so the two runtimes could disagree on whether a
+  stored formula is stale.
+- **Recommendation:** Specify the JSON form of `fingerprint` in `$env` and `$entries`, for example a decimal
+  string as the existing lossless-fingerprint requirement allows, and extend task 3.2 to document it.
+- **Fix:** `fingerprint` in `$env` and `$entries` is written in the lossless form program fingerprints use (nx-ir-format `$env` requirement, design decision 3, task 3.1).
+
+### 🟡 Fixed - RF17 Generated formulas are closures, but nothing says how they are compared or serialized
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:** specs/executable-code-generation/spec.md:11-16 (a formula is a function in `formula`,
+  "meaningful only to the generated program that made it"); specs/environment-values/spec.md:263-267
+  (bundles hold formula entries, so any `env.Update` value can carry one); tasks.md 6.4 (generated
+  JavaScript must agree with the IR runtimes on the new programs).
+- **Details:**
+  - The corpus comparison (`crates/nx-api/tests/codegen/ir_corpus_tests.rs`) compares generated output
+    with the IR runtime's canonical output. A descriptor or bundle holding a formula can't be equal under
+    that comparison: one side holds a closure, the other `{ module, node, fingerprint, locals }`.
+  - A generated program's output that holds a formula and is passed through `JSON.stringify`, for example
+    stored or sent to another process, silently loses the entry. The IR runtimes, by contrast, keep it as
+    data. A silent drop changes results without any diagnostic.
+- **Recommendation:**
+  - Say how the conformance comparison treats formula entries. For example, compare them by the value
+    they give at a fixed read, or normalize them to a marker. Add that to task 6.4.
+  - Say what serializing a generated formula does. Either refuse with a diagnostic, or give the closure a
+    `toJSON` that throws, so it is never dropped quietly.
+- **Fix:** Generated formulas also hold the runtime's `module` and `locals`; `JSON.stringify` of one throws naming the value (new scenario line); the conformance comparison matches formula entries by `value`, `path`, `module`, `locals` and the values reads give, not `node` or `fingerprint` (executable-code-generation delta, design decision 8, tasks 4.3 and 6.4). The RF5 note is added too: an entry that only names a top-level value keeps its load-time value in generated code.
+
+### 🟡 Fixed - RF18 The v1 IR can't be "what was emitted before" if every override gains a flag cell
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** specs/nx-ir-format/spec.md:8-11 (each override holds a reference, a path, a value node and
+  a flag); specs/nx-ir-format/spec.md:57-61 (a v1-only module's IR "SHALL be what was emitted before
+  this change"); docs/nx-ir-format.md:162 (`[ref, [str...], node]`).
+- **Details:** If the flag is a fourth cell present on every override, a v1-only program's `envProvide`
+  changes shape, which contradicts the scenario.
+- **Recommendation:** State the encoding so that an unset flag is absent, for example an optional fourth
+  cell present only on a formula, or the formula form as a separate shape. Then the scenario holds, and a
+  v1 reader rejects only v2 modules.
+- **Fix:** The formula flag is an optional fourth override cell present only on a formula, so a non-formula override's encoding is unchanged (nx-ir-format requirement, task 3.1).
+
+### 🟡 Fixed - RF19 When a stale formula is refused differs between the deltas
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:**
+  - specs/nx-ir-format/spec.md:111-114: refused when the host *enters* the stored descriptor;
+  - specs/typescript-ir-runtime/spec.md:26-29: refused when the body *reads* that value;
+  - specs/rust-ir-runtime/spec.md:9-14 and design.md:185-186: `enter` needs no program, so it can't check a
+    fingerprint;
+  - tasks.md 4.1: "validate them in `enter`".
+- **Details:** These four places name three different moments (entering, reading, validating in `enter`).
+  `enter` holds no program, so it can check only the shape, not the fingerprint. The result also differs
+  between the moments: a stale formula for a value the body never reads either fails or doesn't.
+- **Recommendation:** Pick one point and say it in every place:
+  - `enter` checks the shape only, and the start of an evaluation that is given the environment checks
+    every formula's module and fingerprint against its program;
+  - or the check happens lazily at the read.
+
+  Align the nx-ir-format scenario, both runtime deltas and task 4.1 with that choice.
+- **Fix:** One point everywhere: `enter` checks only the shape of `$env`; a formula with a wrong module, fingerprint or node is refused with `nx-ir-boundary-type` at the read that evaluates it. nx-ir-format requirement and its scenario (entering succeeds, the read fails), both runtime deltas, design decision 3 and task 4.1 now say this.
+
+### 🟡 Fixed - RF20 Two notes about the `darkAccent` divergence aren't in the migration tasks
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** specs/ir-conformance/README.md:147 and crates/nx-api/tests/codegen/ir_corpus_tests.rs:1283-1286
+  (the doc comment on `KNOWN_GENERATED_DIVERGENCES`).
+- **Details:** Task 6.4 removes the `darkAccent` divergence, and task 7.3 removes its note in
+  `specs/future.md`, but these two places also describe it and would go stale.
+- **Recommendation:** Add both to task 6.4. If the list becomes empty, remove the constant or leave an
+  empty list with its comment updated.
+- **Fix:** Task 6.4 now updates the `KNOWN_GENERATED_DIVERGENCES` doc comment (or removes the constant if empty) and `specs/ir-conformance/README.md`.
 
 ## Questions
 
@@ -257,6 +352,8 @@ all of its original scenarios included, and the REMOVED header matches the main 
    reconciliation across a rebuild, still compare and evaluate them? Should a stored formula carry an
    image hash, or be refused after a rebuild?
    - Answer: a formula carries the module's fingerprint and is refused with `nx-ir-boundary-type` when it doesn't match; a host that keeps descriptors across a rebuild renders again (nx-ir-format `$env` requirement, scenario "formula from another build"; design decision 3).
+   - Verification: accepted. RF16 (the fingerprint's JSON form) and RF19 (when the refusal happens) follow
+     from it.
 2. Should field lists accept the conditional entries that property lists allow
    (`x with { if c { a=1 } }`)? The spec says "attribute form" without saying whether that includes them.
    - Answer: no. Field lists hold plain entries only; conditional entries and spreads can come later (with-expressions first requirement; recorded as an open question in task 7.3).
@@ -273,25 +370,34 @@ all of its original scenarios included, and the REMOVED header matches the main 
    field of a record type" (openspec/specs/environment-values/spec.md:76-78). Should that requirement be
    tightened to "required", so the two rules match on paper?
    - Answer: leave the main spec as is; design decision 5 now says the rule matches `environment-path` rather than claiming it already says "required".
+   - Verification: this is not quite settled. `environment_path_type` (crates/nx-types/src/infer.rs:7777-7817)
+     steps through any record field, and the optional mark is kept apart from the field's type
+     (`optional: bool`, crates/nx-types/src/ty.rs:332). So `env.` paths appear to allow an optional step,
+     while `with` paths reject one (confidence: medium, from reading the code, not from a test). If so,
+     design decision 5's "It matches" is inaccurate: either say the `with` rule is stricter, or tighten
+     `environment-path` in the same change.
+   - Follow-up: design decision 5 now says `with` paths are stricter than `env.` paths, which this change leaves as they are (an `env.` override through an optional field applies only when the field has a value; a `with` patch always gives one). The top-level `provide env with` wording now uses the block form's operand (RF10 note).
 7. For an override that reads the environment only on some branches (`env.x={ if c { env.y } else { 1 } }`),
    is it a formula? A static read set would say yes. Confirm that this is intended.
    - Answer: yes, intended. The flag comes from the static read set, so a value that reads the environment on any branch is a formula (design decision 3).
 
 ## Summary
 
-The proposal is coherent in intent, and the three artifacts agree with each other on the user-facing
-syntax. It validates under strict mode, and its MODIFIED and REMOVED blocks are well formed. The weaknesses
-are in the new evaluation rule and the layers below it:
+`openspec validate add-with-expressions --strict` passes after the fixes. Each new delta is a MODIFIED
+block with the full main requirement and all of its scenarios, plus ADDED requirements, and every
+requirement has SHALL on its first line.
 
-- `with` collides with `??` at precedence 125 (RF1).
-- The "computed where read" rule creates reads with no remaining source, which the cycle rules don't cover
-  (RF2).
-- The rule doesn't hold for a bundle passed as a value (RF3).
-- Five capabilities need deltas that the change doesn't have:
-  - the IR encoding of bundles in blocks, `base`, the formula flag and `environment-v2` (RF4);
-  - generated-code `$env` (RF5);
-  - the runtime and `enter` APIs (RF6);
-  - instance-tree read tracking (RF7);
-  - editor and highlighting (RF11).
+All 15 original findings are ✅ Verified:
 
-Count: 6 High, 5 Medium, 4 Low, plus 7 questions.
+- The precedence is fixed.
+- The cycle rule and its runtime error are specified.
+- Bundles keep formulas wherever they travel.
+- The IR encoding, runtime, generated-code, instance-tree and editor deltas exist.
+
+Questions 2, 3, 4, 5 and 7 are answered in the artifacts. Question 1 is answered, but its answer raises
+RF16 and RF19. Question 6's answer still rests on an "It matches" claim that the code doesn't appear to
+support.
+
+New findings: 2 Medium (RF17 generated formula closures can't be compared or serialized; RF19 the
+stale-formula refusal point differs between deltas) and 3 Low (RF16 fingerprint JSON form; RF18 v1 IR
+shape versus the new flag; RF20 two leftover `darkAccent` notes).

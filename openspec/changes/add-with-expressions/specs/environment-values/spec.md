@@ -48,8 +48,9 @@ begins a block, a declaration, parameter or binding named `provide` SHALL be rej
 
 ### Requirement: Only the main module provides values app-wide
 A module SHALL be able to contain, at its top level, `provide env.name = value`,
-`provide env.name.field = value`, and `provide env with bundle`, where `bundle` is an expression of
-type `env.Update`. The main module of a program SHALL be its entry module, which the host chooses:
+`provide env.name.field = value`, and `provide env with bundle`, where `bundle` is the same operand
+as in a `provide` block (a name, member access, call, element or braced expression), optionally
+followed by more `with` steps, of type `env.Update`. The main module of a program SHALL be its entry module, which the host chooses:
 `chatLink.nx` for a chat link, the only module of a one-module program, and `app.nx` by convention
 for an app. A program SHALL apply the top-level provides of its main module alone, in the order
 written, and a module that another module of the program imports SHALL NOT contain a top-level

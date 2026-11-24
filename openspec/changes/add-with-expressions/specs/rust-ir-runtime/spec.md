@@ -10,8 +10,9 @@ An environment SHALL hold formulas as captured data, and the runtime SHALL evalu
 prepared program of the evaluation that reads them, so `enter` needs no program. Every evaluation,
 the component lifecycle included, SHALL take an environment through its options, and an evaluation
 given none SHALL run with no root values. Root values SHALL be named and checked as the
-environment-values capability defines, and a malformed `$env`, or a formula the program can't
-evaluate, SHALL be refused with `nx-ir-boundary-type`.
+environment-values capability defines, and a malformed `$env` SHALL be refused with `nx-ir-boundary-type` by
+`enter`, and a formula the program can't evaluate SHALL be refused with `nx-ir-boundary-type` at
+the read that evaluates it.
 
 #### Scenario: A function reads a root value
 - **WHEN** a host evaluates `let mode() = { env.colorMode }` with the root value `colorMode` equal to

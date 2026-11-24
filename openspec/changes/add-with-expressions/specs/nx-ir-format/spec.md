@@ -6,8 +6,9 @@ its default node, and exported as other declarations are. A read SHALL be an `en
 `30`, holding a reference to the declaration, with any field read after it encoded as ordinary
 `member` nodes. A `provide` block, and an element with `env.` attributes, SHALL be an `envProvide`
 node, kind `31`, holding a list of overrides and a body. Each override SHALL hold a reference to the
-declaration, a list of field names that may be empty, a value node, and a flag that is set when the
-value is a formula: when its static read set, following `env.` reads, the functions and values they
+declaration, a list of field names that may be empty, a value node, and, only when the
+value is a formula, a fourth cell holding the formula flag; an override that is not a formula SHALL
+have no fourth cell, so its encoding is unchanged. A value is a formula when its static read set, following `env.` reads, the functions and values they
 call and the defaults of the values they read, is not empty. A bundle override SHALL hold no
 reference and an empty list, and its node SHALL be of type `env.Update`. An `env.Update` bundle
 SHALL be an `envUpdate` node, kind `32`, holding an optional `base` node of type `env.Update` and a
@@ -76,12 +77,15 @@ content as through any other element, and it SHALL never get `$env`. A component
 carry its overrides in the reserved field `$env`, as a list of entries outermost first, each
 holding `value` (the qualified name of the environment value: its module identity and name) and
 `path` (a list of field names), and either `to` (the value in canonical form) or `formula`
-(`module`, `node`, `fingerprint` and `locals`). A bundle override SHALL be an entry holding only
+(`module`, `node`, `fingerprint` and `locals`), with `fingerprint` written in the lossless form the
+program fingerprints use. A bundle override SHALL be an entry holding only
 `bundle`: the bundle's own entries, in order. An `env.Update` value SHALL be
 `{ "$type": "env.Update", "$entries": [ … ] }` with entries of the same shape. A descriptor without
 overrides SHALL have no `$env` field, and an element that is not a component descriptor SHALL never
 get one. A formula whose module is not in the program, whose fingerprint differs from the module's,
-or whose node is not a formula-flagged override value SHALL be refused with `nx-ir-boundary-type`.
+or whose node is not a formula-flagged override value SHALL be refused with `nx-ir-boundary-type`
+when it is evaluated, at a read that uses it; entering a descriptor SHALL check only the shape of
+its `$env`, so a stale formula for a value the body never reads is not refused.
 
 #### Scenario: An override reaches a descriptor through a host element
 - **WHEN** a body evaluates to `<div env.colorMode=dark><Card /></div>`, where `Card` is an authored
@@ -111,7 +115,8 @@ or whose node is not a formula-flagged override value SHALL be refused with `nx-
 #### Scenario: A formula from another build is refused
 - **WHEN** a host stores a descriptor whose `$env` holds a formula, the module is rebuilt with a new
   fingerprint, and the host enters the stored descriptor
-- **THEN** the entry SHALL be refused with `nx-ir-boundary-type`
+- **THEN** entering SHALL succeed
+- **AND** a read in the body that uses the formula SHALL fail with `nx-ir-boundary-type`
 
 ### Requirement: Environment lookups follow precedence and evaluate defaults at the read
 A runtime SHALL find the value of an environment value at a read from, in order: the overrides of

@@ -15,14 +15,14 @@
 
 ## 3. NX IR
 
-- [ ] 3.1 Add the formula flag on `envProvide` and `envUpdate` overrides, bundle overrides in `envProvide`, the optional `base` of `envUpdate`, `formula` and `bundle` entries in `$env` and `$entries`, the fingerprint check, `nx-ir-environment-cycle`, and the `environment-v2` feature to `crates/nx-ir` (model, emitter, reader validation, `explain`). Programs that use none of these keep declaring only `environment-v1`.
+- [ ] 3.1 Add the formula flag on `envProvide` and `envUpdate` overrides, bundle overrides in `envProvide`, the optional `base` of `envUpdate`, `formula` and `bundle` entries in `$env` and `$entries`, the fingerprint check, `nx-ir-environment-cycle`, and the `environment-v2` feature to `crates/nx-ir` (model, emitter, reader validation, `explain`). Write the flag as an optional fourth override cell, present only on a formula, so programs that use none of these keep declaring only `environment-v1` and emit unchanged IR. Write `fingerprint` in `$env` in the lossless program-fingerprint form.
 - [ ] 3.2 Document the additions and their cost in `docs/nx-ir-format.md`. Check that a program written with `with` emits the same images as its `apply`/`merge` form.
 
 ## 4. Runtimes
 
-- [ ] 4.1 Rust IR runtime: accept `environment-v2`; capture formulas in `envProvide` and `envUpdate` and evaluate them at the read with the prepared program, with the "sources after it" rule at any depth and the runtime cycle error; evaluate only a bundle's entries for the value read; carry formulas and bundles in `$env` and validate them in `enter`; record the reads they make for the instance tree, so `set_environment` reaches readers through them.
+- [ ] 4.1 Rust IR runtime: accept `environment-v2`; capture formulas in `envProvide` and `envUpdate` and evaluate them at the read with the prepared program, with the "sources after it" rule at any depth and the runtime cycle error; evaluate only a bundle's entries for the value read; carry formulas and bundles in `$env`, check only their shape in `enter`, and refuse a stale fingerprint at the read that evaluates the formula; record the reads they make for the instance tree, so `set_environment` reaches readers through them.
 - [ ] 4.2 TypeScript runtime: the same, matching the Rust runtime's results and operation counts on the corpus.
-- [ ] 4.3 Generated code: emit record `with` through the existing `apply`/`merge` helpers, bundle `with`, bundles in blocks, and formulas as functions of no arguments that close over their locals, in the generated environment helpers and `enter`.
+- [ ] 4.3 Generated code: emit record `with` through the existing `apply`/`merge` helpers, bundle `with`, bundles in blocks, and formulas as functions of no arguments that close over their locals and also hold `module` and `locals`, in the generated environment helpers and `enter`; make `JSON.stringify` of a generated formula throw.
 
 ## 5. Editor
 
@@ -33,7 +33,7 @@
 - [ ] 6.1 Add conformance programs: `with-expressions` (field lists, paths, chains, `with` beside `??`, update records, the `apply` equivalence) and `environment-formulas` (a bundle in a block, inline, named and passed as a prop; patching the app theme; a mode set inside the section; a single override after a bundle; an override following a value overridden nearer the reader; captured locals in a formula; one bundle entry reading another value it sets; descriptors with formulas; the runtime cycle error; operation counts). Move the `environment` and `design-tokens-theme` programs to `provide env with`, and check whether any recorded result changes under the new rule.
 - [ ] 6.2 Unit tests for each diagnostic: `with-target`, `with-path`, `environment-cycle` on an override, `reserved-name` (for `with` and for `env with` outside `provide`), the syntax error for `provide bundle`, and a stale formula fingerprint.
 - [ ] 6.3 Migrate the tests that use `provide bundle`: `crates/nx-language-service/src/environment_tests.rs`, `crates/nx-syntax/tests/parser_tests.rs`, `crates/nx-types/tests/environment_values.rs`, and the TextMate test; and the comments in `runtime/typescript/src/index.ts`.
-- [ ] 6.4 Check generated JavaScript agrees on the new programs, including a theme that varies by mode in a section, and remove `design-tokens-theme`'s `darkAccent` from `KNOWN_GENERATED_DIVERGENCES`.
+- [ ] 6.4 Check generated JavaScript agrees on the new programs, including a theme that varies by mode in a section, compare formula entries by `value`, `path`, `module`, `locals` and the values reads give, and remove `design-tokens-theme`'s `darkAccent` from `KNOWN_GENERATED_DIVERGENCES`, updating its doc comment (or removing the constant if empty) and `specs/ir-conformance/README.md`.
 
 ## 7. Docs
 

@@ -121,8 +121,10 @@ prop, a local or a `for` item, and applied anywhere, still computes each entry w
 the banner. Inline and named bundles behave the same, and no bundle needs to be named. A read of a
 value evaluates only the entries for that value of the bundles on its way.
 
-A formula is valid only with the build of the module that made it: its fingerprint must match, or it
-is refused with `nx-ir-boundary-type`, as a stale handler token is refused. A host that keeps
+A formula is valid only with the build of the module that made it: its fingerprint, written in the
+lossless form program fingerprints use, must match. `enter` has no program, so it checks only the
+shape of `$env`; a stale formula is refused with `nx-ir-boundary-type` at the read that evaluates
+it, as a stale handler token is refused when it is used. A host that keeps
 descriptors across a rebuild renders again.
 
 **Cycles.** While a source of `V` is evaluated, a read of `V` at any depth sees only the sources
@@ -152,8 +154,10 @@ the bundle patches the place around it rather than resetting to defaults. This i
 
 `r with { a.b=1 }` means `r with { a=(r.a with { b=1 }) }`, with `r` evaluated once. Each step but
 the last must name a required field of a record type; an optional field, a union, or anything else
-is `with-path`, since there may be nothing to patch. Setting the whole field works instead. It
-matches the record-field rule for `env.` paths (`environment-path`).
+is `with-path`, since there may be nothing to patch. Setting the whole field works instead. This is
+stricter than `env.` paths (`environment-path`), which this change leaves as they are: an `env.`
+override through an optional field applies only when the field has a value, while a `with` patch
+always gives a value.
 
 ### 6. `with` on update records and bundles
 
@@ -188,7 +192,11 @@ runtimes accept `environment-v2`. The instance tree records the reads a formula 
 makes, so `set_environment` reaches a node that reads through one.
 
 Generated code carries a formula as a function of no arguments that closes over its locals and reads
-the environment through the generated helpers; `$env` entries otherwise have the runtime's shape.
+the environment through the generated helpers, beside the runtime's `module` and `locals`; `$env`
+entries otherwise have the runtime's shape. Serializing a generated formula throws rather than
+dropping it, and the conformance comparison matches formula entries by `module`, `locals` and the
+values reads through them give. An entry that only names a top-level value still has that value's
+load-time result in generated code, as other top-level values do.
 Since a bundle's entries are formulas, a top-level bundle evaluated when a generated module loads
 still computes its entries at each read, which fixes the `darkAccent` divergence from #75 without
 treating `env.Update` values specially.

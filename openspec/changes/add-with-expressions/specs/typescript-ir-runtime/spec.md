@@ -11,7 +11,8 @@ evaluate them with the prepared program of the evaluation that reads them, so `e
 program. Every evaluation, the component lifecycle included, SHALL take an environment through its
 options, and an evaluation given none SHALL run with no root values. Root values SHALL be named and
 checked as the environment-values capability defines, in their JavaScript form, and a malformed
-`$env`, or a formula the program can't evaluate, SHALL be refused with `nx-ir-boundary-type`.
+`$env` SHALL be refused with `nx-ir-boundary-type` by `enter`, and a formula the program can't
+evaluate SHALL be refused with `nx-ir-boundary-type` at the read that evaluates it.
 
 #### Scenario: A component reads the environment its host gives it
 - **WHEN** a host initializes `Badge`, whose body reads `env.colorMode`, with
