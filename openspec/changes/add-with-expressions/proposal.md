@@ -24,22 +24,25 @@ these changes on top", so this change adds one word for both: `with`.
   applied after the first's, so `brand with { radius.md=4 }` derives a theme from a theme.
 - **Bundles for one section.** `provide env with brand { … }` applies a bundle to its body. It mixes
   with single overrides, in the order written: `provide env with marketing env.colorMode=dark { … }`.
-  - The bundle is named: a top-level value such as `brand` or `themes.marketing`. Its overrides are
-    evaluated where a value is read, as a main-module provide's are, so a theme that varies by mode
-    follows an `env.colorMode` set inside the section.
-  - It patches what is already there: values the bundle doesn't set keep what the place around it
-    has.
+  The bundle can be named or written inline. It patches what is already there: values it doesn't set
+  keep what the place around it has.
+- **One evaluation rule.** Every environment value is computed where it is read: defaults,
+  main-module provides, `env.` attributes, `provide` overrides and bundles alike. Inside one, a read
+  of the same value sees the sources further out. Until now local overrides were computed where
+  written; they now follow a value overridden nearer the reader, so a theme that varies by mode
+  follows an `env.colorMode` set inside the section. Descriptors carry an override that reads the
+  environment as a formula (its code and captured locals); plain values stay as they are.
 - **App-wide form.** The main module's `provide brand.theme` becomes `provide env with brand.theme`,
   so a bundle is applied with one syntax everywhere. The old form is removed (no compatibility is
   needed yet).
 - **Reserved word.** `with` can't name a declaration, parameter or binding (`reserved-name`); a
   record field named `with`, read as `x.with`, keeps working.
-- **Diagnostics:** `with-target` (the left side is not a record, update record or bundle),
-  `with-path` (a path step that is not a required record field), and `section-bundle-name` (a
-  section bundle that is not a named top-level value). A wrong-typed field gets the usual mismatch.
+- **Diagnostics:** `with-target` (the left side is not a record, update record or bundle) and
+  `with-path` (a path step that is not a required record field). A wrong-typed field gets the usual
+  mismatch.
 - **NX IR:** record `with` lowers to the existing `apply` intrinsic, so it needs nothing new. Bundle
-  `with` and section bundles add a base operand to `envUpdate` and a bundle-reference entry to
-  `envProvide` and to a descriptor's `$env`, behind a new required feature, `environment-v2`.
+  `with` adds a base operand to `envUpdate`; `envProvide` gains bundle overrides and formulas, and
+  `$env` entries gain `formula` and `bundle`, behind a new required feature, `environment-v2`.
 - **Runtimes and generated code:** the Rust and TypeScript IR runtimes and generated JavaScript and
   TypeScript evaluate the new forms. Generated code keeps its "values evaluated at load" limit (see
   design).
@@ -56,8 +59,8 @@ these changes on top", so this change adds one word for both: `with`.
 ### Modified Capabilities
 
 - `environment-values`: `provide env with bundle` in `provide` blocks and at the top of the main
-  module (replacing `provide bundle`), named section bundles evaluated where read, the precedence of
-  their overrides, and bundle references in descriptors.
+  module (replacing `provide bundle`), and one rule for every source: computed where it is read.
+- `nx-ir-format`: formulas and bundles in `envProvide` and `$env`, their lookup and their cost.
 
 ## Impact
 
@@ -65,7 +68,7 @@ these changes on top", so this change adds one word for both: `with`.
   `crates/nx-types` (typing and diagnostics), `crates/nx-ir` (`envUpdate` base, bundle references,
   `environment-v2`), `crates/nx-ir-runtime`, `runtime/typescript`, `crates/nx-codegen`,
   `crates/nx-language-service`.
-- Conformance corpus: new programs for record `with` and section bundles; `environment` programs
+- Conformance corpus: new programs for record `with`, bundles in blocks and formulas; `environment` programs
   move to `provide env with`.
 - Docs: `reference/syntax/expressions.md` (new `with` section), `reference/syntax/environment.md`,
   `reference/syntax/functions.md` (point from `apply` to `with`), the design-tokens tutorial and

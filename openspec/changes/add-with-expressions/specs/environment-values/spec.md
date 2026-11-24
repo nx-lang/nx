@@ -3,15 +3,13 @@
 ### Requirement: A `provide` block overrides values for an expression
 The language SHALL accept `provide overrides { body }` wherever an expression or markup content
 is, where `overrides` is one or more overrides, each either in the attribute form (`env.name=value`
-or `env.name.field=value`) or a section bundle, `env with bundle`. Its value and type SHALL be its
-body's. Attribute-form overrides SHALL be checked as an element's `env.` attributes are, and a
-block without an override SHALL be a syntax error. `bundle` SHALL be a name or member access that
-refers to a top-level value of type `env.Update`; any other expression SHALL be rejected with
-`section-bundle-name`, whose message suggests naming the bundle as a top-level value or writing
-single overrides. `env with` SHALL be allowed only as an override of a `provide`. Since `provide` at
-the start of an expression always begins a block, a declaration, parameter or binding named
-`provide` SHALL be rejected with `reserved-name`; a record field named `provide`, read as
-`x.provide`, SHALL keep working.
+or `env.name.field=value`) or a bundle, `env with bundle`, where `bundle` is any expression of type
+`env.Update`. Its value and type SHALL be its body's. Attribute-form overrides SHALL be checked as
+an element's `env.` attributes are, and a block without an override SHALL be a syntax error.
+`env with` SHALL be allowed only as an override of a `provide`. Since `provide` at the start of an
+expression always begins a block, a declaration, parameter or binding named `provide` SHALL be
+rejected with `reserved-name`; a record field named `provide`, read as `x.provide`, SHALL keep
+working.
 
 #### Scenario: A provide in an expression
 - **WHEN** a module declares `environment locale: string = "en-US"` and
@@ -31,9 +29,9 @@ the start of an expression always begins a block, a declaration, parameter or bi
 - **THEN** `Banner` SHALL read `space` `8` and `radius` `12`
 - **AND** `Body` SHALL read `space` `8` and `radius` `2`
 
-#### Scenario: An inline section bundle is rejected
-- **WHEN** a body contains `provide env with <env.Update radius=12 /> { <Banner /> }`
-- **THEN** the module SHALL fail with `section-bundle-name`
+#### Scenario: An inline bundle means the same as a named one
+- **WHEN** a body renders `{ provide env with <env.Update radius=12 /> { <Banner /> } }`
+- **THEN** `Banner` SHALL read `radius` `12`, as it does with the bundle named `marketing` above
 
 #### Scenario: `env with` outside a provide is rejected
 - **WHEN** a module contains `let saved = { env with marketing }`
@@ -75,9 +73,9 @@ SHALL be a syntax error.
 ### Requirement: Values take precedence from the default up to the nearest override
 A read SHALL find the value of an environment value at its place from the first source that sets it,
 in this order: the nearest local override around the place (an `env.` attribute, an attribute-form
-override of a `provide` block, or a section bundle, nearest first); then the host's root value; then
+override of a `provide` block, or a bundle in one, nearest first); then the host's root value; then
 the main module's provides, a later one before an earlier one; then the declaration's default. A
-source that sets only a field path, and a section bundle that doesn't set the value at all, SHALL
+source that sets only a field path, and a bundle that doesn't set the value at all, SHALL
 take its base from the sources after it. The overrides of one block SHALL apply in the order
 written, each on the result of the one before.
 
@@ -105,16 +103,19 @@ written, each on the result of the one before.
   `env.radius`
 - **THEN** `Banner` SHALL read `"pink"` and `8`
 
-### Requirement: Defaults and main-module provides are evaluated where they are read
-These SHALL be evaluated each time a read uses them, in the environment of that read: a
-declaration's default, the value of a main-module provide, and each override of a section bundle, so
-that an override of a value one of them reads changes what it gives. Inside the evaluation of a main-module provide or a section
-bundle's override of a value, a read of that same value SHALL see the sources after it. The value of
-an `env.` attribute or of a `provide` block's attribute-form override SHALL be evaluated once, where
-it is written, in the environment outside the overrides of that element or block. The element's
-other attributes and content, and the block's body, SHALL be evaluated inside them. A component
-descriptor's `$env` SHALL carry a section bundle as a reference to the top-level value that names
-it, which a runtime evaluates at a read.
+## ADDED Requirements
+
+### Requirement: Every environment value is computed where it is read
+An environment value SHALL be computed at each read, in the environment of that read, from every
+source that sets it: the declaration's default, the main module's provides, and every local
+override, whether an `env.` attribute, an attribute-form override of a `provide` block, or a bundle,
+written inline or named. Each override's value SHALL therefore act as a formula: a change, nearer
+the reader, of a value it reads SHALL change what it gives. Inside the evaluation of any source of a
+value, a read of that same value SHALL see the sources after it, so an override can read the value
+it replaces. An override's value SHALL see the names in scope where it is written, with the values
+they had there. The element's other attributes and content, and a `provide` block's body, SHALL be
+evaluated inside the overrides. A runtime MAY compute once, where it is written, an override whose
+value reads no environment value, since it gives the same value at every read.
 
 #### Scenario: An override cascades through a default
 - **WHEN** `color`'s default is `if env.colorMode is { light => lightColors dark => darkColors }`
@@ -125,6 +126,18 @@ it, which a runtime evaluates at a read.
 - **WHEN** `env.space` is `4` at a place, and a body there renders `<Stack env.space={env.space * 2} />`,
   whose body reads `env.space`
 - **THEN** `Stack` SHALL read `8`
+
+#### Scenario: An override follows a value overridden nearer the reader
+- **WHEN** `env.space` is `4` at a place, and a body there renders
+  `<Section env.gap={env.space * 2}><Inner env.space=1 /></Section>`, where `Inner`'s body reads
+  `env.gap`
+- **THEN** `Inner` SHALL read `2`
+- **AND** a read of `env.gap` in `Section`'s own body SHALL be `8`
+
+#### Scenario: An override sees the locals where it is written
+- **WHEN** a body renders `for item in items { <Row env.accent={item.color} /> }`, and each `Row`'s
+  body reads `env.accent`
+- **THEN** each `Row` SHALL read its own `item`'s `color`
 
 #### Scenario: A main-module provide reads the host's value
 - **WHEN** the main module provides `env.color = if env.colorMode is { light => a dark => b }` and
@@ -138,8 +151,12 @@ it, which a runtime evaluates at a read.
   `env.color`
 - **THEN** `Banner` SHALL read `b`
 
-#### Scenario: A descriptor carries a section bundle by reference
-- **WHEN** a body renders `{ provide env with marketing { <Banner /> } }` and the result is
-  rendered output
-- **THEN** the `Banner` descriptor's `$env` SHALL hold a reference to `marketing`'s declaration and
-  no evaluated `color` value
+## REMOVED Requirements
+
+### Requirement: Defaults and main-module provides are evaluated where they are read
+**Reason**: Replaced by "Every environment value is computed where it is read", which applies the
+same rule to local overrides and bundles, instead of evaluating local overrides where they are
+written.
+**Migration**: None needed for defaults and main-module provides. A local override that reads a
+value overridden again nearer the reader now follows that nearer override; to keep the outer value,
+read it into a local outside the override first.

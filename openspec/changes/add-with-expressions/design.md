@@ -21,6 +21,7 @@
 - One word, `with`, for "this value with these changes on top", on records, update records and
   bundles.
 - A bundle applied to one section, with the same meaning as the app-wide one.
+- One evaluation rule for every source of an environment value.
 - No new IR node for record `with`.
 
 **Non-Goals:**
@@ -68,32 +69,56 @@ Each field value is typed by the field it sets, so a bare union case works:
 `settings with { mode=dark }`. A present empty value clears an optional field: `user with {
 email={} }`, as in an update record.
 
-### 3. A section bundle is named, and evaluated where a value is read
+### 3. Every environment value is computed where it is read
 
-Single local overrides are evaluated where they are written. A section bundle can't follow that
-rule: a theme that varies by mode would be fixed to the mode at the section's edge, so `provide env
-with marketing env.colorMode=dark { … }` would apply marketing's light colors in a dark section. So
-a section bundle is evaluated where a value is read, as a main-module provide is, with the same
-rule for its own value: inside the evaluation of an override of `V`, a read of `V` sees the sources
-after it.
+Bret asked for one rule that can be explained without exceptions (thread, 2026-11-24). Until now
+there were two: defaults and main-module provides were evaluated where a value is read, local
+overrides where they are written. A bundle applied to a section exposed the cost of that split: a
+theme that varies by mode would be fixed to the mode at the section's edge, so `provide env with
+marketing env.colorMode=dark { … }` would apply marketing's light colors in a dark section, unless
+bundles got a third rule of their own.
 
-A component descriptor's `$env` holds plain data, which a host can store and compare. A bundle that
-is evaluated later can't be a value there, but a reference to a top-level declaration can: top-level
-values have no captured locals. So a section bundle must be a named top-level value
-(`section-bundle-name` otherwise), and `$env` carries a bundle reference, by declaration, which the
-runtime evaluates at a read. An inline bundle has no advantage over single overrides in a block,
-which the error message suggests.
+The rule now is: **an environment value is always computed where it is read.** Every default,
+provide, `env.` attribute and bundle is a formula that runs at the read, and inside it a read of the
+same value sees the sources further out. The two old rules only give different answers when an
+override reads a value that is overridden again nearer the reader:
 
-The main module's `provide env with X` keeps taking any `env.Update` expression, since it is already
-evaluated where read and has no locals.
+```nx
+<Section env.gap={env.space * 2}>   // space is 4 here
+  <Inner env.space=1> …env.gap… </Inner>
+</Section>
+```
 
-### 4. Where a section bundle sits in the lookup
+Computed where written, `gap` inside `Inner` is 8; computed where read, it is 2, so "the gap is twice
+the space" holds wherever it is read. That is what themes need, and what platforms with dynamic
+theme values do: SwiftUI's dynamic colors and UIKit's trait-resolved `UIColor` resolve at the point
+of use. CSS custom properties resolve where declared, and the familiar complaint about them is that
+`--accent: var(--mode-color)` doesn't follow a mode set further down.
 
-A section bundle is a local override: it counts among "the nearest override around the read". Its
-entries apply in the order written with the block's other overrides, each on the result of the one
-before. A value or field the bundle doesn't set falls through to the sources after it, so the bundle
-patches the place around it rather than resetting to defaults. This is how nested `ThemeProvider`s in
-MUI and `FluentProvider`s in Fluent UI behave, and how CSS custom properties cascade.
+An override still sees the locals where it is written, with their values there, as any closure does:
+`for item in items { <Row env.accent={item.color} /> }` gives each row its own color.
+
+**Descriptors carry formulas.** A component descriptor's `$env` must stay data a host can store and
+compare. An override that reads no environment value gives the same value at every read, so a runtime
+evaluates it once and carries the value as before (`env.colorMode=dark` is unchanged). Any other
+override, and any bundle, is carried as a formula: the value's node plus the locals it captured,
+which are data. Inline and named bundles therefore behave the same, and no bundle needs to be named.
+
+Alternatives considered:
+
+- **Top-level things where read, inline things where written.** It matches how functions read where
+  they are called, but `provide env with marketing` and the same bundle written inline would behave
+  differently, so replacing a name with its definition would change the meaning.
+- **Always where written.** Defaults could no longer follow overrides, which the whole token design
+  relies on.
+
+### 4. Where a bundle in a block sits in the lookup
+
+A bundle in a `provide` block is a local override: it counts among "the nearest override around the
+read". Its entries apply in the order written with the block's other overrides, each on the result
+of the one before. A value or field the bundle doesn't set falls through to the sources after it, so
+the bundle patches the place around it rather than resetting to defaults. This is how nested
+`ThemeProvider`s in MUI and `FluentProvider`s in Fluent UI behave.
 
 ### 5. Paths go through required record fields
 
@@ -118,10 +143,12 @@ rule already holds for `env.` paths (`environment-path`).
   equivalent `apply` program produces.
 - Bundle `with` adds an optional `base` operand to `envUpdate`: the bundle's entries are the base's
   followed by its own.
-- A section bundle adds a bundle-reference entry to `envProvide`, and to `$env` as
-  `{ "$bundle": "<module>::<name>" }`. A runtime evaluates it at a read.
-- These are behind a new required feature, `environment-v2`. A program that uses neither still
-  declares only `environment-v1`.
+- `envProvide` gains bundle overrides, and an override that reads the environment is captured as a
+  formula (its node and captured locals) instead of being evaluated. `$env` entries gain `formula`
+  beside `to`, and `bundle` entries. A formula is charged node by node at each read, as a default is.
+- These are behind a new required feature, `environment-v2`. A program whose overrides read no
+  environment value, and that uses no bundle in a block, still declares only `environment-v1` and
+  emits the same IR.
 
 ### 8. Generated code
 
@@ -133,14 +160,16 @@ load.
 
 ## Risks / Trade-offs
 
-- **Cost.** A section bundle is evaluated at every read inside the section, as the main-module one
-  is. Theme reads are already expensive (`specs/future.md`, "Reading a token is expensive"); this
+- **Cost.** An override that reads the environment, and every bundle in a block, is evaluated at
+  every read, as defaults and the main-module bundle are. Theme reads are already expensive (`specs/future.md`, "Reading a token is expensive"); this
   adds no new kind of cost, and `add-derived-value-caching` is meant to remove it.
 - **`with` becomes reserved.** Code that names something `with` must rename it. The repository is
   searched and updated as part of this change.
-- **Two evaluation rules for local overrides.** A single override is evaluated where written, a
-  bundle where read. The rule follows what each is for, and the reference page states it beside the
-  example that needs it.
+- **A behavior change for existing overrides.** An override that reads a value overridden again
+  nearer the reader now follows that nearer override. The corpus and docs are checked for any case
+  that relied on the old rule; reading the outer value into a local first keeps it.
+- **Descriptors are less readable when they carry formulas.** Only overrides that read the
+  environment become formulas; plain values stay as they were.
 - **#75 ordering.** Whichever of #75 and this change merges second updates the other's uses of
   `provide brand.theme`.
 
