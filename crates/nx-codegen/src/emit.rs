@@ -81,6 +81,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxStringSchema",
     "nxUnionSchema",
     "nxValuesEqual",
+    "nxValueThunk",
     "nxWithEnvironment",
 ];
 
@@ -952,6 +953,9 @@ fn emit_module(
     out.push('\n');
     let mut runtime_helpers = collect_module_runtime_helpers(module, target);
     runtime_helpers.extend(module_environment_runtime_helpers(program, module, false));
+    if module_has_value_thunks(module, context) {
+        runtime_helpers.push("nxValueThunk");
+    }
     runtime_helpers.sort_unstable();
     runtime_helpers.dedup();
     if !runtime_helpers.is_empty() {
@@ -1181,6 +1185,13 @@ fn emit_js_program_module_source(
     let mut runtime_helpers = collect_js_program_module_runtime_helpers(program);
     if let Some(first) = program.modules.first() {
         runtime_helpers.extend(module_environment_runtime_helpers(program, first, true));
+    }
+    if program
+        .modules
+        .iter()
+        .any(|module| module_has_value_thunks(module, context))
+    {
+        runtime_helpers.push("nxValueThunk");
     }
     runtime_helpers.sort_unstable();
     runtime_helpers.dedup();
@@ -1494,7 +1505,8 @@ fn emit_declaration(
         } => {
             let value = emit_declared_result(module.id, value, declared_ty.as_ref(), context);
             // A value that reads the environment is computed at each read, in the environment of
-            // that read, so it is a function of no arguments and its references call it.
+            // that read, so it is a function of no arguments and its references call it. The
+            // helpers reuse its result within a call while what it read is unchanged.
             let lazy = context.reads_environment_value(&declaration.reference);
             if target.is_typescript() {
                 let ty = ty
@@ -1503,7 +1515,7 @@ fn emit_declaration(
                     .unwrap_or_else(|| "unknown".to_string());
                 if lazy {
                     out.push_str(&format!(
-                        "{}const {} = (): {} => ({});\n",
+                        "{}const {} = nxValueThunk((): {} => ({}));\n",
                         export_prefix, name, ty, value
                     ));
                 } else {
@@ -1514,7 +1526,7 @@ fn emit_declaration(
                 }
             } else if lazy {
                 out.push_str(&format!(
-                    "{}const {} = () => ({});\n",
+                    "{}const {} = nxValueThunk(() => ({}));\n",
                     export_prefix, name, value
                 ));
             } else {
@@ -5368,6 +5380,15 @@ fn collect_expression_value_references(
         }
         | CodegenExpressionKind::Unsupported(_) => {}
     }
+}
+
+/// Whether a module declares a top-level value that reads the environment, which is generated as a
+/// thunk the helpers reuse within a call.
+fn module_has_value_thunks(module: &CodegenModule, context: &EmitContext) -> bool {
+    module.declarations.iter().any(|declaration| {
+        matches!(declaration.kind, CodegenDeclarationKind::Value { .. })
+            && context.reads_environment_value(&declaration.reference)
+    })
 }
 
 fn collect_module_runtime_helpers(

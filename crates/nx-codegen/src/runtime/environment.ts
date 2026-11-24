@@ -1,6 +1,13 @@
 // Environment values: the lookup generated code shares, with the same order and results as the
 // IR runtimes. Evaluation is synchronous, so one module-level state is safe: `nxWithEnvironment`
 // sets it for a call, and a provide adds layers to it around its body.
+//
+// Within one state, derived results are reused by the rule the IR runtimes follow: each layer has
+// an identity, and a top-level value thunk, a default, an entry-module provide (a bundle for each
+// value read) and a formula a layer holds keep their last result with the token of every value
+// their evaluation read, reused while every token matches. A call made outside `nxWithEnvironment`
+// runs in the module's own state, whose roots never change and whose layers are numbered for its
+// whole life, so what it keeps stays valid from one such call to the next.
 
 export type NxEnvironmentDeclaration<T> = {
   readonly key: string;
@@ -37,7 +44,8 @@ type NxEnvironmentSource = { readonly value: any } | { readonly formula: () => a
 /** Where a read continues while a source of the value is evaluated: the sources after it. */
 type NxEnvironmentBelow = { readonly layer: number } | { readonly provide: number } | { readonly exhausted: true };
 
-type NxEnvironmentLayer =
+type NxEnvironmentLayer = NxEnvironmentLayerContent & { id?: number };
+type NxEnvironmentLayerContent =
   | {
       readonly set: true;
       readonly key: string;
@@ -48,7 +56,19 @@ type NxEnvironmentLayer =
     }
   | { readonly set: false; readonly key: string; readonly below: NxEnvironmentBelow };
 
-type NxEnvironmentState = { readonly layers: NxEnvironmentLayer[]; base: number; readonly roots: Map<string, any> };
+/** The last result of a derived result, with the token of each value its evaluation read. */
+type NxKeptResult = { readonly value: any; readonly reads: Map<string, number | undefined> };
+type NxEnvironmentState = {
+  readonly layers: NxEnvironmentLayer[];
+  base: number;
+  readonly roots: Map<string, any>;
+  nextId: number;
+  /** Kept results by name: `p<index>` for a targeted provide, `b<index>:<key>` for a bundle read for a value. */
+  readonly derived: Map<string, NxKeptResult>;
+  /** Kept results by object: a default's declaration, a value thunk, and the layer that holds a formula. */
+  readonly byLayer: WeakMap<object, NxKeptResult>;
+  readonly evaluating: { readonly start: number; readonly reads: Map<string, number | undefined> }[];
+};
 
 type NxPendingOverride = { readonly path: readonly string[]; readonly value: any; readonly patch: boolean };
 
@@ -63,7 +83,104 @@ type NxEvaluatedEntry =
 const nxEnvironmentDeclarations = new Map<string, NxEnvironmentDeclaration<any>>();
 const nxEnvironmentComponents = new Set<string>();
 let nxEnvironmentProvides: readonly (readonly [NxEnvironmentDeclaration<any> | null, readonly string[], () => any])[] = [];
-let nxEnvironmentState: NxEnvironmentState = { layers: [], base: 0, roots: new Map() };
+let nxEnvironmentState: NxEnvironmentState = nxNewEnvironmentState();
+
+/** A state with no layers, roots or kept results. A result kept for an object, such as the layer that holds a formula, is held weakly, so it goes with the object. */
+function nxNewEnvironmentState(): NxEnvironmentState {
+  return { layers: [], base: 0, roots: new Map(), nextId: 0, derived: new Map(), byLayer: new WeakMap(), evaluating: [] };
+}
+
+/** The test-only count of evaluations of defaults, provides, formulas and top-level value thunks; `undefined` while off. */
+let nxEvaluations: number | undefined;
+
+/** Turns the test-only evaluation counter on, at zero. Only tests call it. */
+export function nxCountEvaluations(): void {
+  nxEvaluations = 0;
+}
+
+/** The evaluations counted since `nxCountEvaluations`, or `undefined` while the counter is off. */
+export function nxEvaluationCount(): number | undefined {
+  return nxEvaluations;
+}
+
+function nxCountEvaluation(): void {
+  if (nxEvaluations !== undefined) {
+    nxEvaluations += 1;
+  }
+}
+
+/** Pushes `layer` with the next identity of the state. */
+function nxPushLayer(state: NxEnvironmentState, layer: NxEnvironmentLayer): void {
+  layer.id = state.nextId;
+  state.nextId += 1;
+  state.layers.push(layer);
+}
+
+/** The identity of the topmost layer below `start` that sets or caps `key`, or `undefined`. */
+function nxEnvironmentToken(state: NxEnvironmentState, key: string, start: number): number | undefined {
+  for (let position = Math.min(start, state.layers.length) - 1; position >= 0; position -= 1) {
+    const layer = state.layers[position]!;
+    if (layer.key === key) {
+      return layer.id;
+    }
+  }
+  return undefined;
+}
+
+function nxNoteEnvironmentRead(state: NxEnvironmentState, key: string): void {
+  for (const recording of state.evaluating) {
+    if (!recording.reads.has(key)) {
+      recording.reads.set(key, nxEnvironmentToken(state, key, recording.start));
+    }
+  }
+}
+
+/**
+ * The kept result of `key` when every value it read has the same token here, or else `work`
+ * evaluated, kept and returned. A reused result's reads count as reads of every derived result
+ * being evaluated around it, with tokens over the layers below where each began.
+ */
+function nxDerived(state: NxEnvironmentState, key: string | object, work: () => any): any {
+  const last = typeof key === "string" ? state.derived.get(key) : state.byLayer.get(key);
+  const start = state.layers.length;
+  if (last !== undefined) {
+    let holds = true;
+    for (const [read, token] of last.reads) {
+      if (nxEnvironmentToken(state, read, start) !== token) {
+        holds = false;
+        break;
+      }
+    }
+    if (holds) {
+      for (const read of last.reads.keys()) {
+        nxNoteEnvironmentRead(state, read);
+      }
+      return last.value;
+    }
+  }
+  const recording = { start, reads: new Map<string, number | undefined>() };
+  state.evaluating.push(recording);
+  let value: any;
+  try {
+    nxCountEvaluation();
+    value = work();
+  } finally {
+    state.evaluating.pop();
+  }
+  const kept: NxKeptResult = { value, reads: recording.reads };
+  if (typeof key === "string") {
+    state.derived.set(key, kept);
+  } else {
+    state.byLayer.set(key, kept);
+  }
+  return value;
+}
+
+/** A top-level value that reads the environment: computed where it is read, and reused within a call while what it read is unchanged. */
+export function nxValueThunk<T>(evaluate: () => T): () => T {
+  const thunk = (): T => nxDerived(nxEnvironmentState, thunk, evaluate);
+  return thunk;
+}
 
 function nxEnvironmentError(code: string, message: string): NxRuntimeError {
   return new NxRuntimeError([{ code, message }]);
@@ -258,7 +375,7 @@ function nxFormulaEntry(key: string, path: readonly string[], formula: NxFormula
 }
 
 /** The layers one host `$env` entry gives: one, or one for each entry of a bundle. */
-function nxHostEnvironmentLayers(entry: NxEnvironmentEntry, bundle: boolean, layers: NxEnvironmentLayer[]): void {
+function nxHostEnvironmentLayers(entry: NxEnvironmentEntry, bundle: boolean, layers: NxEnvironmentLayerContent[]): void {
   if ("bundle" in entry) {
     for (const inner of entry.bundle) {
       nxHostEnvironmentLayers(inner, true, layers);
@@ -294,7 +411,7 @@ function nxHostEnvironmentLayers(entry: NxEnvironmentEntry, bundle: boolean, lay
  * types first.
  */
 export function nxWithEnvironment<T>(environment: NxEnvironment | undefined, run: () => T): T {
-  const state: NxEnvironmentState = { layers: [], base: 0, roots: new Map() };
+  const state: NxEnvironmentState = nxNewEnvironmentState();
   if (environment !== undefined) {
     if (!(environment instanceof NxEnvironment)) {
       throw nxEnvironmentError("nx-ir-options", "The environment option must be an environment made with nxEnvironment(values).");
@@ -303,8 +420,12 @@ export function nxWithEnvironment<T>(environment: NxEnvironment | undefined, run
       const declaration = nxEnvironmentByHostName(name);
       state.roots.set(declaration.key, nxNormalizeValue(value as NxValue, declaration.schema, `environment value '${name}'`));
     }
+    const layers: NxEnvironmentLayerContent[] = [];
     for (const entry of environment.entries) {
-      nxHostEnvironmentLayers(entry, false, state.layers);
+      nxHostEnvironmentLayers(entry, false, layers);
+    }
+    for (const layer of layers) {
+      nxPushLayer(state, layer);
     }
     state.base = state.layers.length;
   }
@@ -349,12 +470,26 @@ function nxEnvironmentCycle(state: NxEnvironmentState, key: string): never {
   );
 }
 
-/** What a source gives: its value, or a formula evaluated with reads of `key` capped at `below`. */
-function nxSourceValue(state: NxEnvironmentState, key: string, below: NxEnvironmentBelow, source: NxEnvironmentSource): any {
+/**
+ * What a source gives: its value, or a formula evaluated with reads of `key` capped at `below`. A
+ * formula `layer` holds is reused while what it read is unchanged; one of an entry-module bundle is
+ * evaluated at each read.
+ */
+function nxSourceValue(
+  state: NxEnvironmentState,
+  key: string,
+  below: NxEnvironmentBelow,
+  source: NxEnvironmentSource,
+  layer?: NxEnvironmentLayer,
+): any {
   if ("value" in source) {
     return source.value;
   }
-  return nxCappedEnvironment(state, key, below, source.formula);
+  if (layer === undefined) {
+    nxCountEvaluation();
+    return nxCappedEnvironment(state, key, below, source.formula);
+  }
+  return nxDerived(state, layer, () => nxCappedEnvironment(state, key, below, source.formula));
 }
 
 /**
@@ -364,6 +499,7 @@ function nxSourceValue(state: NxEnvironmentState, key: string, below: NxEnvironm
  */
 export function nxEnvRead<T>(declaration: NxEnvironmentDeclaration<T>): T {
   const state = nxEnvironmentState;
+  nxNoteEnvironmentRead(state, declaration.key);
   const own: NxPendingOverride[] = [];
   const beneath: NxPendingOverride[] = [];
   let found = false;
@@ -389,7 +525,7 @@ export function nxEnvRead<T>(declaration: NxEnvironmentDeclaration<T>): T {
       nxEnvironmentCycle(state, declaration.key);
     }
     const isOwn = position >= state.base;
-    const value = nxSourceValue(state, declaration.key, { layer: position }, layer.source);
+    const value = nxSourceValue(state, declaration.key, { layer: position }, layer.source, layer);
     const patch = layer.bundle && nxIsUpdateRecord(value);
     if (layer.path.length === 0 && !patch) {
       if (isOwn) {
@@ -451,7 +587,7 @@ function nxSetEnvironmentPath(value: any, path: readonly string[], at: number, t
 /** Runs `work` with a read of `key` seeing only the sources `below` gives. */
 function nxCappedEnvironment(state: NxEnvironmentState, key: string, below: NxEnvironmentBelow, work: () => any): any {
   const depth = state.layers.length;
-  state.layers.push({ set: false, key, below });
+  nxPushLayer(state, { set: false, key, below });
   try {
     return work();
   } finally {
@@ -506,14 +642,15 @@ function nxProvidedOrDefault(state: NxEnvironmentState, declaration: NxEnvironme
       if (target.key !== declaration.key) {
         continue;
       }
-      const value = nxCappedEnvironment(state, declaration.key, cap, evaluate);
+      const value = nxDerived(state, `p${position}`, () => nxCappedEnvironment(state, declaration.key, cap, evaluate));
       if (path.length === 0) {
         return nxApplyEnvironmentOverrides(value, pending);
       }
       pending.push({ path, value, patch: false });
       continue;
     }
-    const entries = nxBundleEntries(nxBundleItems(nxCappedEnvironment(state, declaration.key, cap, evaluate)));
+    const bundle = nxDerived(state, `b${position}:${declaration.key}`, () => nxCappedEnvironment(state, declaration.key, cap, evaluate));
+    const entries = nxBundleEntries(nxBundleItems(bundle));
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index]!;
       if (entry.key !== declaration.key) {
@@ -527,7 +664,7 @@ function nxProvidedOrDefault(state: NxEnvironmentState, declaration: NxEnvironme
       pending.push({ path: entry.path, value, patch });
     }
   }
-  const value = nxCappedEnvironment(state, declaration.key, { exhausted: true }, declaration.defaultValue);
+  const value = nxDerived(state, declaration, () => nxCappedEnvironment(state, declaration.key, { exhausted: true }, declaration.defaultValue));
   return nxApplyEnvironmentOverrides(value, pending);
 }
 
@@ -569,10 +706,10 @@ export function nxProvide<T>(overrides: readonly NxEnvOverride[], body: () => T)
   const depth = state.layers.length;
   for (const item of evaluated) {
     if ("set" in item) {
-      state.layers.push({ set: true, key: item.set.key, path: item.set.path, source: item.set.source, bundle: false });
+      nxPushLayer(state, { set: true, key: item.set.key, path: item.set.path, source: item.set.source, bundle: false });
     } else {
       for (const { key, path, source } of item.bundle) {
-        state.layers.push({ set: true, key, path, source, bundle: true });
+        nxPushLayer(state, { set: true, key, path, source, bundle: true });
       }
     }
   }

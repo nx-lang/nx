@@ -3978,8 +3978,121 @@ let direct(): int = { tv + doubled + plain + insets.top }
 "#,
     );
     let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
-    assert!(module.contains("const tv = (): number => ("), "{}", module);
+    assert!(
+        module.contains("const tv = nxValueThunk((): number => ("),
+        "{}",
+        module
+    );
     assert!(module.contains("const plain: number = 7;"), "{}", module);
     assert!(module.contains("tv() + doubled()"), "{}", module);
     assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+// ------------------------------------------------------------------------------------------------
+// Derived results reused within one call in generated code
+// ------------------------------------------------------------------------------------------------
+
+/// Runs `script_body` over generated JavaScript with the program as `m` and the generated helpers
+/// as `rt`, whose test-only evaluation counter it can read.
+fn execute_generated_javascript_with_helpers(
+    artifact: &ProgramArtifact,
+    script_body: &str,
+) -> String {
+    let output = emit_program(artifact, &CodegenOptions::javascript()).expect("js output");
+    let dir = TempDir::new().expect("temp dir");
+    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
+    for file in output.files {
+        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
+    }
+    let url = |file: &str| format!("file://{}", dir.path().join(file).display());
+    let script = format!(
+        "Promise.all([import({:?}), import({:?})]).then(([m, rt]) => {{ {} }});",
+        url("index.js"),
+        url("nx-runtime.js"),
+        script_body
+    );
+    let output = node_command()
+        .arg("--input-type=module")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .expect("node execution");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+const REUSE_SOURCE: &str = r#"
+type Mode = light | dark
+type Colors = { accent:string surface:string }
+environment colorMode: Mode = light
+environment color: Colors = {
+  if env.colorMode == Mode.dark { <Colors accent="navy" surface="black" /> }
+  else { <Colors accent="blue" surface="white" /> }
+}
+environment space: int = 4
+let tv: int = { env.space * 3 }
+let both(): string+ = { env.color.accent env.color.surface }
+let darkAccent(): string = { provide env.colorMode=dark { env.color.accent } }
+let darkBoth(): string+ = { env.color.accent darkAccent() }
+let inner(): int = { provide env.space=1 { tv } }
+let pair(): int+ = { tv inner() }
+let thrice(): int+ = { tv tv tv }
+"#;
+
+/// What the IR runtime gives for `function` of [`REUSE_SOURCE`], as JSON.
+fn ir_reuse_result(function: &str) -> Value {
+    let program = crate::ir_runtime_tests::program(REUSE_SOURCE);
+    let value = program
+        .evaluate_function(function, &[], &nx_ir_runtime::RuntimeOptions::default())
+        .unwrap_or_else(|error| panic!("{function}: {error}"));
+    serde_json::from_str(&value.to_json_string().expect("json")).expect("json value")
+}
+
+#[test]
+fn generated_code_evaluates_a_default_once_in_one_environment() {
+    let artifact = artifact_from_source(REUSE_SOURCE);
+    let output = execute_generated_javascript_with_helpers(
+        &artifact,
+        r#"const counted = (name) => {
+             rt.nxCountEvaluations();
+             const value = m.nxWithEnvironment(undefined, () => m[name]());
+             return { value, evaluations: rt.nxEvaluationCount() };
+           };
+           const before = rt.nxEvaluationCount();
+           console.log(JSON.stringify({
+             before: before === undefined ? "off" : before,
+             both: counted("both"),
+             darkBoth: counted("darkBoth"),
+             pair: counted("pair"),
+             thrice: counted("thrice"),
+             again: counted("thrice"),
+           }));"#,
+    );
+    let actual: Value = serde_json::from_str(&output).expect("json output");
+    // The counter is off until a test turns it on.
+    assert_eq!(actual["before"], "off");
+    // `color`'s default and `colorMode`'s, which it reads, each once.
+    assert_eq!(actual["both"]["evaluations"], 2);
+    assert_eq!(actual["both"]["value"], ir_reuse_result("both"));
+    // A new override of `colorMode` evaluates `color`'s default again; `colorMode` is then the
+    // override's, so its default is not evaluated a second time.
+    assert_eq!(actual["darkBoth"]["evaluations"], 3);
+    assert_eq!(actual["darkBoth"]["value"], ir_reuse_result("darkBoth"));
+    assert_eq!(
+        actual["darkBoth"]["value"],
+        serde_json::json!(["blue", "navy"])
+    );
+    // A value thunk follows a new override of what it reads.
+    assert_eq!(actual["pair"]["value"], serde_json::json!([12, 3]));
+    assert_eq!(actual["pair"]["value"], ir_reuse_result("pair"));
+    assert_eq!(actual["pair"]["evaluations"], 3);
+    // `tv` and `space`'s default once, however often `tv` is read; and again in the next call,
+    // since a result is not kept from one call to the next.
+    assert_eq!(actual["thrice"]["evaluations"], 2);
+    assert_eq!(actual["again"]["evaluations"], 2);
+    assert_eq!(actual["thrice"]["value"], ir_reuse_result("thrice"));
 }
