@@ -281,8 +281,13 @@ module.exports = grammar({
           $.qualified_name,
           $.element,
           $.values_braced_expression,
-          alias($.bundle_call_expression, $.call_expression),
         )),
+        // `provide m() with { … }`: a name followed by `with` parses as `provide_bundle`, a call
+        // does not, so its steps are kept here for the suggestion.
+        seq(
+          field('legacy_bundle', alias($.bundle_call_expression, $.call_expression)),
+          repeat(seq('with', field('legacy_step', $._bundle_operand))),
+        ),
       ),
     ),
 

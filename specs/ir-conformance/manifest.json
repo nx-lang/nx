@@ -585,6 +585,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "function-values",
         "handlers",

@@ -32,3 +32,7 @@ component <Section look: env.Update = {theme} /> = {
 
 /// A bundle the host passes as a prop.
 component <Branded look: env.Update /> = { provide env with look { <span accent={env.accent} /> } }
+
+/// The section-mode and prop cases as plain entrypoints, which generated JavaScript also runs.
+let sectioned() = { provide env with theme { provide env.colorMode=dark { env.accent } } }
+let shown() = { <Branded look={theme} /> }

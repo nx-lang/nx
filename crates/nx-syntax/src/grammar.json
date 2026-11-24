@@ -944,8 +944,17 @@
                   {
                     "type": "SYMBOL",
                     "name": "values_braced_expression"
-                  },
-                  {
+                  }
+                ]
+              }
+            },
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "legacy_bundle",
+                  "content": {
                     "type": "ALIAS",
                     "content": {
                       "type": "SYMBOL",
@@ -954,8 +963,28 @@
                     "named": true,
                     "value": "call_expression"
                   }
-                ]
-              }
+                },
+                {
+                  "type": "REPEAT",
+                  "content": {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": "with"
+                      },
+                      {
+                        "type": "FIELD",
+                        "name": "legacy_step",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "_bundle_operand"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
             }
           ]
         }

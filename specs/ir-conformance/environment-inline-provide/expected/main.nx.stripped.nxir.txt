@@ -1,6 +1,6 @@
-module main.nx fingerprint 9831234649067749080
+module main.nx fingerprint 15305385633046883285
 requires environment-v1 environment-v2
-entrypoints functions [radius gap space] components [Section Branded]
+entrypoints functions [radius gap space sectioned shown] components [Section Branded]
 
 union ColorMode
   case light constant
@@ -67,6 +67,16 @@ component Branded
     provide env with look {
       <span accent=env.accent />
     }
+
+function sectioned() =
+  provide env with theme {
+    provide env.colorMode=ColorMode.dark {
+      env.accent
+    }
+  }
+
+function shown() =
+  <Branded look=theme />
 
 provide <env.Update
   env.space:=(10 idiv env.zero)

@@ -110,15 +110,13 @@ fn validate_provide_forms(node: &SyntaxNode, file_name: &str, diagnostics: &mut 
     match node.kind() {
         SyntaxKind::PROVIDE_DEFINITION => {
             if let Some(legacy) = node.child_by_field("legacy_bundle") {
-                // `provide m() with { … }` leaves its `with` steps in an error node after the
-                // definition; keep them in the suggestion.
-                let steps = [legacy.next_sibling(), node.next_sibling()]
-                    .into_iter()
-                    .flatten()
-                    .find(|next| next.is_error() && next.text().trim_start().starts_with("with"))
-                    .map(|next| format!(" {}", next.text().trim()))
-                    .unwrap_or_default();
-                let suggestion = format!("provide env with {}{steps}", legacy.text());
+                // The bundle and any `with` steps after it, as written.
+                let written = node
+                    .text()
+                    .strip_prefix("provide")
+                    .unwrap_or(legacy.text())
+                    .trim();
+                let suggestion = format!("provide env with {written}");
                 diagnostics.push(
                     Diagnostic::error("syntax-error")
                         .with_message(format!(

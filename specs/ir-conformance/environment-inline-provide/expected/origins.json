@@ -14,5 +14,10 @@
   },
   "main.nx::gap": [],
   "main.nx::radius": [],
+  "main.nx::sectioned": [],
+  "main.nx::shown": [
+    {"path": "", "module": "main.nx", "start": 1552, "end": 1576},
+    {"path": "/look", "module": "main.nx", "start": 797, "end": 875}
+  ],
   "main.nx::space": []
 }

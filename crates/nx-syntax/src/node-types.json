@@ -1882,6 +1882,32 @@
           }
         ]
       },
+      "legacy_step": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "element",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "values_braced_expression",
+            "named": true
+          },
+          {
+            "type": "with_field_list",
+            "named": true
+          }
+        ]
+      },
       "target": {
         "multiple": false,
         "required": false,

@@ -15,6 +15,14 @@
     {
       "module": "main.nx",
       "function": "space"
+    },
+    {
+      "module": "main.nx",
+      "function": "sectioned"
+    },
+    {
+      "module": "main.nx",
+      "function": "shown"
     }
   ],
   "lifecycles": [

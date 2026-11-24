@@ -10,6 +10,8 @@
     },
     "main.nx::gap": 13,
     "main.nx::radius": 6,
+    "main.nx::sectioned": 16,
+    "main.nx::shown": 18,
     "main.nx::space": 11
   }
 }

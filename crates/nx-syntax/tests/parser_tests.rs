@@ -404,10 +404,10 @@ fn test_provide_bundle_with_steps_but_no_env_suggests_env_with() {
             "let a = { provide marketing with { radius=4 } { env.radius } }\n",
             "provide env with marketing with { radius=4 }",
         ),
-        ("provide m()\n", "provide env with m()"),
+        ("provide m()\nlet root() = { 1 }\n", "provide env with m()`"),
         (
-            "provide m() with { radius=1 }\n",
-            "provide env with m() with { radius=1 }",
+            "provide m() with { radius=1 }\nlet root() = { 1 }\n",
+            "provide env with m() with { radius=1 }`",
         ),
     ] {
         let result = parse_str(source, "steps.nx");
@@ -418,6 +418,7 @@ fn test_provide_bundle_with_steps_but_no_env_suggests_env_with() {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(message.contains(suggestion), "{source}: {message}");
+        assert!(!message.contains("Syntax error"), "{source}: {message}");
     }
 }
 

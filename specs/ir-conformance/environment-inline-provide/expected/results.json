@@ -21,5 +21,25 @@
   },
   "main.nx::gap": 10,
   "main.nx::radius": 5,
+  "main.nx::sectioned": "navy",
+  "main.nx::shown": {
+    "$type": "Branded",
+    "look": {
+      "$entries": [
+        {
+          "formula": {
+            "declaration": "theme",
+            "fingerprint": "15305385633046883285",
+            "locals": {},
+            "module": "main.nx",
+            "node": 16
+          },
+          "path": [],
+          "value": "main.nx::accent"
+        }
+      ],
+      "$type": "env.Update"
+    }
+  },
   "main.nx::space": 5
 }
