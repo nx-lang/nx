@@ -20,18 +20,21 @@
 //! rendered since the host last walked them ([`InstanceTree::is_settled`]), so a host that
 //! follows changes walks only where something changed.</para>
 
-use crate::component::{handler_property, ComponentInit, ComponentInstance, Rebinding};
+use crate::component::{
+    handler_property, ComponentInit, ComponentInstance, InitProps, NormalizedProps, Rebinding,
+};
 use crate::environment::{Environment, ENV_FIELD};
 use crate::error::{fail, fail_limit, Limit, Result};
 use crate::eval::{Meter, RuntimeOptions, Stack};
+use crate::kept::{Input, Session, Store, User};
 use crate::module::{ComponentDecl, DeclarationKind};
 use crate::program::Program;
 use crate::value::{
-    handlers_equal, too_deep, Handler, ACTION_HANDLER_TYPE, HANDLER_INVOCATION_TYPE,
-    MAX_VALUE_DEPTH,
+    get_field, handlers_equal, too_deep, Handler, Value, ACTION_HANDLER_TYPE,
+    HANDLER_INVOCATION_TYPE, MAX_VALUE_DEPTH,
 };
 use nx_value::NxValue;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 /// An action that left the tree: no component above the one that produced it bound a handler
@@ -43,6 +46,30 @@ pub struct HostEffect {
     /// The component that node is an instance of.
     pub component: String,
     pub action: NxValue,
+}
+
+/// What changed among the tree's nodes since the host last asked: a diff by key between the
+/// tree then and the tree now, each list in key order.
+///
+/// <para>A key with no node then and a node now is added, and one with a node then and none now
+/// is removed, every node dropped with a node removed or replaced listed under its own key. A key
+/// whose node was replaced in between, by a visit with another component or under another parent,
+/// or removed and then visited again, is both. A key that holds the same node then and now is
+/// rendered when the node's output changed in any way since, by a render or by a rebinding that
+/// changed what its tokens name; a node that only took a new descriptor or new state is not
+/// listed.</para>
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TreeChanges {
+    pub rendered: Vec<String>,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+impl TreeChanges {
+    /// Whether nothing changed.
+    pub fn is_empty(&self) -> bool {
+        self.rendered.is_empty() && self.added.is_empty() && self.removed.is_empty()
+    }
 }
 
 /// One use of an authored component, at one place in the output.
@@ -74,6 +101,31 @@ struct Node {
     /// Dropping a node can leave this set on the nodes above it until a pass ends, which costs a
     /// host a walk it did not need and nothing else.
     unsettled: bool,
+    /// The node's identity: one no other node of the tree has had, kept while the node renders
+    /// again, so the change set tells a node replaced at its key from one that rendered.
+    id: u64,
+    /// The direct inputs of the node's last render, in the order it read them.
+    record: Arc<[Input]>,
+    /// The revision at which the record was last found valid in the node's environment.
+    verified: u64,
+}
+
+impl Node {
+    /// Whether the record can never be found valid: it holds a read beneath the render's own
+    /// overrides that failed there.
+    fn always_stale(&self) -> bool {
+        self.record
+            .iter()
+            .any(|input| matches!(input, Input::Beneath { value: None, .. }))
+    }
+}
+
+/// What [`InstanceTree::keep_node`] made of a visit of a node whose record holds.
+enum Kept {
+    /// The node kept its render, and this is its output.
+    Rendered(Arc<NxValue>),
+    /// A prop its render read differs: it is initialized again from these props.
+    Normalized(NormalizedProps),
 }
 
 /// A node a rebinding changes: the instance it holds, the one replacing it, and the instance of
@@ -113,8 +165,15 @@ pub struct InstanceTree {
     inert: Vec<String>,
     /// The root values every node's environment starts from.
     roots: Environment,
-    /// The nodes whose last render read each environment value, by qualified name.
-    readers: HashMap<Arc<str>, BTreeSet<Arc<str>>>,
+    /// The derived results renders evaluated, kept across renders, with the revision counter and
+    /// the indexes of what read each root value and what used each kept result.
+    store: Store,
+    /// The identity the next node created gets.
+    next_id: u64,
+    /// The identity of the node at each key when the host last took the change set.
+    taken: HashMap<Arc<str>, u64>,
+    /// The keys whose node's output changed since the host last took the change set.
+    rendered_since: HashSet<Arc<str>>,
 }
 
 impl InstanceTree {
@@ -126,7 +185,10 @@ impl InstanceTree {
             visited: HashMap::new(),
             inert: Vec::new(),
             roots: Environment::default(),
-            readers: HashMap::new(),
+            store: Store::default(),
+            next_id: 0,
+            taken: HashMap::new(),
+            rendered_since: HashSet::new(),
         }
     }
 
@@ -146,43 +208,100 @@ impl InstanceTree {
         }
     }
 
-    /// Records in the index that the node at `key` read what `instance`'s render read.
-    fn index(&mut self, key: &Arc<str>, instance: &ComponentInstance) {
-        for (name, _) in instance.reads().iter() {
-            self.readers
-                .entry(Arc::clone(name))
-                .or_default()
-                .insert(Arc::clone(key));
-        }
+    /// A new node's identity.
+    fn new_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        id
     }
 
-    /// Takes the node at `key` out of the index for what `instance`'s render read.
-    fn unindex(&mut self, key: &str, instance: &ComponentInstance) {
-        for (name, _) in instance.reads().iter() {
-            if let Some(readers) = self.readers.get_mut(name) {
-                readers.remove(key);
-                if readers.is_empty() {
-                    self.readers.remove(name);
-                }
-            }
-        }
-    }
-
-    /// Puts `node` at `key`, keeping the index current.
+    /// Puts `node` at `key`, keeping the indexes current.
     fn put(&mut self, key: Arc<str>, node: Node) {
+        let user = User::Node(Arc::clone(&key));
         if let Some(old) = self.nodes.get(&key) {
-            let old = old.instance.clone();
-            self.unindex(&key, &old);
+            let record = Arc::clone(&old.record);
+            self.store.unlink(&user, &record);
         }
-        self.index(&key, &node.instance.clone());
+        self.store.link(&user, &node.record);
         self.nodes.insert(key, node);
     }
 
-    /// Takes the node at `key` out, keeping the index current.
+    /// Takes the node at `key` out, keeping the indexes current.
     fn take(&mut self, key: &str) -> Option<Node> {
-        let node = self.nodes.remove(key)?;
-        self.unindex(key, &node.instance);
+        let (key, node) = self.nodes.remove_entry(key)?;
+        self.store.unlink(&User::Node(key), &node.record);
         Some(node)
+    }
+
+    /// A session over the tree's kept results for one place of one operation.
+    fn session(&self) -> Session {
+        Session::new(self.store.clone())
+    }
+
+    /// Takes on what `session` found and kept.
+    fn commit(&mut self, session: Session) {
+        self.store = session.into_store();
+    }
+
+    /// Whether `node`'s record of its last render holds in `environment`, checked by the rule on
+    /// kept results with `session`. A record found valid at the current revision in the
+    /// environment the node holds needs no check.
+    fn record_holds(
+        &self,
+        node: &Node,
+        environment: &Environment,
+        options: &RuntimeOptions,
+        session: &Session,
+    ) -> Result<bool> {
+        if node.always_stale() {
+            return Ok(false);
+        }
+        if node.environment == *environment && node.verified == self.store.revision {
+            return Ok(true);
+        }
+        self.program.record_holds(
+            &node.record,
+            node.verified,
+            &self.options_for(environment, options),
+            session,
+        )
+    }
+
+    /// The change set: what changed among the nodes since the host last took it, which this
+    /// clears.
+    ///
+    /// <para>A host that derives something from the nodes, such as native controls or an index,
+    /// updates exactly the nodes listed and needs no walk. [`is_settled`](Self::is_settled)
+    /// remains for hosts that walk, and the two agree: a node is unsettled exactly when it or a
+    /// node under it rendered or was added since a pass last walked it.</para>
+    pub fn take_changes(&mut self) -> TreeChanges {
+        let now: HashMap<Arc<str>, u64> = self
+            .nodes
+            .iter()
+            .map(|(key, node)| (Arc::clone(key), node.id))
+            .collect();
+        let mut changes = TreeChanges::default();
+        for (key, id) in &now {
+            match self.taken.get(key) {
+                Some(before) if before == id => {
+                    if self.rendered_since.contains(key) {
+                        changes.rendered.push(key.to_string());
+                    }
+                }
+                _ => changes.added.push(key.to_string()),
+            }
+        }
+        for (key, id) in &self.taken {
+            if now.get(key) != Some(id) {
+                changes.removed.push(key.to_string());
+            }
+        }
+        changes.rendered.sort();
+        changes.added.sort();
+        changes.removed.sort();
+        self.taken = now;
+        self.rendered_since.clear();
+        changes
     }
 
     /// The value of the environment value `name` at the node at `key`: what its body reads for
@@ -229,54 +348,77 @@ impl InstanceTree {
             }
         }
         self.roots = roots;
-        let mut candidates: Vec<Arc<str>> = changed
+        let keys: BTreeSet<_> = changed
             .iter()
-            .filter_map(|name| self.readers.get(name))
-            .flatten()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
+            .filter_map(|name| self.program.environment_key(name))
             .collect();
+        if keys.is_empty() {
+            return Ok(());
+        }
+        // Push: the root values take a new revision, and what the indexes reach from them is
+        // possibly stale. Nothing is evaluated.
+        let previous = self.store.revision;
+        let stale = self.store.change_roots(&keys);
+        let revision = self.store.revision;
+        for (key, node) in &mut self.nodes {
+            if node.verified == previous && !stale.contains(key) {
+                node.verified = revision;
+            }
+        }
+        // Pull: from the nodes nearest the root, each possibly stale node's record is checked
+        // at its place, and the node renders again at the first input that does not hold.
+        let mut candidates: Vec<Arc<str>> = stale.into_iter().collect();
         candidates.sort_by_key(|key| self.depth(key));
         for key in candidates {
-            let Some(node) = self.nodes.get(&key) else {
+            let Some(node) = self.nodes.get(&key).cloned() else {
                 continue;
             };
+            let session = self.session();
             let node_options = self.options_for(&node.environment, options);
-            if self
-                .program
-                .environment_reads_hold(node.instance.reads(), &node_options)?
+            if !node.always_stale()
+                && self.program.record_holds(
+                    &node.record,
+                    node.verified,
+                    &node_options,
+                    &session,
+                )?
             {
+                self.commit(session);
+                if let Some(node) = self.nodes.get_mut(&key) {
+                    node.verified = revision;
+                }
                 continue;
             }
             let NxValue::Record { properties, .. } = &*node.descriptor else {
                 continue;
             };
-            let result = self.program.initialize_component(
+            let (result, record) = self.program.initialize_tracked(
                 &node.component,
-                properties,
+                InitProps::Host(properties),
                 &ComponentInit {
                     parent: node.through.as_ref(),
                     state: Some(&node.state),
                 },
                 &node_options,
+                &session,
             )?;
+            self.commit(session);
             let renewed = Node {
-                component: Arc::clone(&node.component),
-                parent: node.parent.clone(),
-                descriptor: Arc::clone(&node.descriptor),
-                through: node.through.clone(),
                 instance: result.instance,
                 state: Arc::new(result.state),
                 rendered: Arc::new(result.rendered),
-                environment: node.environment.clone(),
                 unwalked: true,
                 unsettled: true,
+                record: Arc::from(record),
+                verified: self.store.revision,
+                ..node
             };
             let parent = renewed.parent.clone();
+            self.rendered_since.insert(Arc::clone(&key));
             self.put(key, renewed);
             self.unsettle(parent);
         }
+        self.store.sweep();
         Ok(())
     }
 
@@ -370,6 +512,7 @@ impl InstanceTree {
         for key in unwalked {
             self.unsettle(Some(key));
         }
+        self.store.sweep();
     }
 
     /// Whether `node` was initialized through the instance its parent holds now, so that a visit
@@ -429,7 +572,9 @@ impl InstanceTree {
     pub fn remove(&mut self, key: &str) -> bool {
         self.drop_under(key);
         self.visited.remove(key);
-        self.take(key).is_some()
+        let removed = self.take(key).is_some();
+        self.store.sweep();
+        removed
     }
 
     /// The handler properties the pass found bound outside any component, each as
@@ -546,73 +691,15 @@ impl InstanceTree {
             Some((parent, _)) => self.node(parent)?.1.environment.enter(descriptor)?,
             None => Environment::default().enter(descriptor)?,
         };
-        let node_options = self.options_for(&environment, options);
-
-        let existing = self.nodes.get(&key).filter(|node| {
-            *node.component == **component
-                && node.parent.as_deref() == above.as_ref().map(|(parent, _)| &**parent)
-        });
-        if let Some(node) = existing {
-            let through_same = match (&node.through, &above) {
-                (Some(before), Some((_, now))) => before.is(now),
-                (None, None) => true,
-                _ => false,
-            };
-            let reads_hold = self
-                .program
-                .environment_reads_hold(node.instance.reads(), &node_options)?;
-            if reads_hold && through_same && same_descriptor(&node.descriptor, descriptor, &stack)?
-            {
-                let rendered = Arc::clone(&node.rendered);
-                let instance = node.instance.clone();
-                // Only the overrides may differ: the node takes them, so a later change is judged
-                // against its new place.
-                if node.environment != environment
-                    || !same(&node.descriptor, descriptor, 0, &stack)?
-                {
-                    let kept = copy(descriptor, 0, &stack)?;
-                    if let Some(node) = self.nodes.get_mut(&key) {
-                        node.descriptor = Arc::new(kept);
-                        node.environment = environment;
-                    }
-                }
-                self.visited.insert(key, instance);
-                self.inert.append(&mut inert);
-                return Ok(rendered);
-            }
-            if let (Some(before), Some((_, now))) = (&node.through, &above) {
-                if !through_same && reads_hold {
-                    let bound = bound_properties(&self.program, component);
-                    let changes = self.program.metered(component, options, |meter, stack| {
-                        let mut rebinding = Rebinding::default();
-                        let across = Across {
-                            before,
-                            now,
-                            meter,
-                            stack,
-                        };
-                        if !across.descriptors(
-                            &node.descriptor,
-                            descriptor,
-                            &bound,
-                            &mut rebinding,
-                        )? {
-                            return Ok(None);
-                        }
-                        self.rebinding(&key, now, rebinding, meter, stack).map(Some)
-                    })?;
-                    if let Some(changes) = changes {
-                        let kept = copy(descriptor, 0, &stack)?;
-                        if let Some(node) = self.nodes.get_mut(&key) {
-                            node.environment = environment.clone();
-                        }
-                        let rendered = self.rebind(&key, kept, changes);
-                        self.inert.append(&mut inert);
-                        return rendered;
-                    }
-                }
-            }
-        }
+        let existing = self
+            .nodes
+            .get(&key)
+            .filter(|node| {
+                *node.component == **component
+                    && node.parent.as_deref() == above.as_ref().map(|(parent, _)| &**parent)
+            })
+            .cloned();
+        let session = self.session();
         let stripped;
         let fields = if inert.is_empty() {
             properties
@@ -620,21 +707,115 @@ impl InstanceTree {
             stripped = fields_without_inert(properties, 0, &stack)?;
             &stripped
         };
-        let result = self.program.initialize_component(
+        let mut normalized: Option<NormalizedProps> = None;
+        if let Some(node) = &existing {
+            let through_same = match (&node.through, &above) {
+                (Some(before), Some((_, now))) => before.is(now),
+                (None, None) => true,
+                _ => false,
+            };
+            let holds = self.record_holds(node, &environment, options, &session)?;
+            if holds {
+                self.commit(session);
+                let revision = self.store.revision;
+                if let Some(node) = self.nodes.get_mut(&key) {
+                    node.verified = revision;
+                }
+                let kept = self.keep_node(
+                    &key,
+                    node,
+                    descriptor,
+                    fields,
+                    above.as_ref().map(|(_, now)| now),
+                    through_same,
+                    &environment,
+                    options,
+                    &stack,
+                )?;
+                match kept {
+                    Kept::Rendered(rendered) => {
+                        self.inert.append(&mut inert);
+                        self.store.sweep();
+                        return Ok(rendered);
+                    }
+                    Kept::Normalized(props) => normalized = Some(props),
+                }
+                return self.initialize_node(
+                    key,
+                    existing.as_ref(),
+                    component,
+                    descriptor,
+                    fields,
+                    normalized.as_ref(),
+                    above,
+                    environment,
+                    &mut inert,
+                    options,
+                    &stack,
+                );
+            }
+        }
+        self.commit(session);
+        self.initialize_node(
+            key,
+            existing.as_ref(),
             component,
+            descriptor,
             fields,
+            normalized.as_ref(),
+            above,
+            environment,
+            &mut inert,
+            options,
+            &stack,
+        )
+    }
+
+    /// Initializes the node at `key` from `descriptor`, whose fields less the inert handlers are
+    /// `fields`, or from the props already `normalized` from them, with the state `existing`
+    /// holds when it is the node of the same component under the same parent; otherwise the node
+    /// is new and what stood at the key goes with what was under it.
+    #[allow(clippy::too_many_arguments)]
+    fn initialize_node(
+        &mut self,
+        key: Arc<str>,
+        existing: Option<&Node>,
+        component: &str,
+        descriptor: &NxValue,
+        fields: &BTreeMap<String, NxValue>,
+        normalized: Option<&NormalizedProps>,
+        above: Option<(Arc<str>, ComponentInstance)>,
+        environment: Environment,
+        inert: &mut Vec<String>,
+        options: &RuntimeOptions,
+        stack: &Stack,
+    ) -> Result<Arc<NxValue>> {
+        let session = self.session();
+        let props = match normalized {
+            Some(normalized) => InitProps::Normalized(normalized),
+            None => InitProps::Host(fields),
+        };
+        let (result, record) = self.program.initialize_tracked(
+            component,
+            props,
             &ComponentInit {
                 parent: above.as_ref().map(|(_, instance)| instance),
                 state: existing.map(|node| &*node.state),
             },
-            &node_options,
+            &self.options_for(&environment, options),
+            &session,
         )?;
-        let kept = existing.is_some();
+        let descriptor = Arc::new(copy(descriptor, 0, stack)?);
+        self.commit(session);
+        let id = match existing {
+            Some(node) => node.id,
+            None => self.new_id(),
+        };
         let (parent, through) = above.unzip();
         let node = Node {
-            component: Arc::from(component.as_str()),
+            component: Arc::from(component),
             parent: parent.clone(),
-            descriptor: Arc::new(copy(descriptor, 0, &stack)?),
+            descriptor,
             through,
             instance: result.instance,
             state: Arc::new(result.state),
@@ -642,20 +823,134 @@ impl InstanceTree {
             environment,
             unwalked: true,
             unsettled: true,
+            id,
+            record: Arc::from(record),
+            verified: self.store.revision,
         };
         let rendered = Arc::clone(&node.rendered);
-        if !kept {
+        if existing.is_none() {
             // Whatever stood here was another component or under another parent: the nodes
             // under it belong to output this place no longer has.
+            self.take(&key);
             self.drop_under(&key);
         }
         // The pass reached the node only now that the visit succeeded: a visit that is refused
         // leaves the record of the pass, like the nodes, as it was.
         self.visited.insert(Arc::clone(&key), node.instance.clone());
+        self.rendered_since.insert(Arc::clone(&key));
         self.put(key, node);
         self.unsettle(parent);
-        self.inert.append(&mut inert);
+        self.inert.append(inert);
+        self.store.sweep();
         Ok(rendered)
+    }
+
+    /// Keeps the render of `node`, at `key`, whose record holds at its new place `environment`,
+    /// when `descriptor` from the parent's instance `now` gives it nothing its render read
+    /// anew: with the same descriptor through the same instance it is left alone; with one equal
+    /// to it through another it is rebound; and with one whose recorded props, normalized, equal
+    /// the ones it holds it takes the new props and is rebound when it needs to be. Otherwise it
+    /// says the node is to be initialized again, from the props normalized for the comparison
+    /// when there are some.
+    #[allow(clippy::too_many_arguments)]
+    fn keep_node(
+        &mut self,
+        key: &Arc<str>,
+        node: &Node,
+        descriptor: &NxValue,
+        fields: &BTreeMap<String, NxValue>,
+        now: Option<&ComponentInstance>,
+        through_same: bool,
+        environment: &Environment,
+        options: &RuntimeOptions,
+        stack: &Stack,
+    ) -> Result<Kept> {
+        let equal = same_descriptor(&node.descriptor, descriptor, stack)?;
+        if through_same && equal {
+            let rendered = Arc::clone(&node.rendered);
+            let instance = node.instance.clone();
+            // Only the overrides may differ: the node takes them, so a later change is judged
+            // against its new place.
+            if node.environment != *environment || !same(&node.descriptor, descriptor, 0, stack)? {
+                let kept = copy(descriptor, 0, stack)?;
+                if let Some(node) = self.nodes.get_mut(key) {
+                    node.descriptor = Arc::new(kept);
+                    node.environment = environment.clone();
+                }
+            }
+            self.visited.insert(Arc::clone(key), instance);
+            return Ok(Kept::Rendered(rendered));
+        }
+        let component = &*node.component;
+        let bound = bound_properties(&self.program, component);
+        if let (Some(before), Some(now), false) = (&node.through, now, through_same) {
+            // Read from another instance of the parent, tokens of equal handlers can read
+            // otherwise: the descriptors are compared handler by handler.
+            let changes = self.program.metered(component, options, |meter, stack| {
+                let mut rebinding = Rebinding::default();
+                let across = Across {
+                    before,
+                    now,
+                    meter,
+                    stack,
+                };
+                if !across.descriptors(&node.descriptor, descriptor, &bound, &mut rebinding)? {
+                    return Ok(None);
+                }
+                self.rebinding(key, now, rebinding, meter, stack).map(Some)
+            })?;
+            if let Some(changes) = changes {
+                let kept = copy(descriptor, 0, stack)?;
+                if let Some(node) = self.nodes.get_mut(key) {
+                    node.environment = environment.clone();
+                }
+                return self.rebind(key, kept, changes).map(Kept::Rendered);
+            }
+        }
+        // Another descriptor: the node keeps its render when no prop it read differs.
+        let normalized = self.program.normalize_component_props(
+            component,
+            fields,
+            now,
+            &self.options_for(environment, options),
+        )?;
+        let changes = self.program.metered(component, options, |meter, stack| {
+            let mut rebinding = Rebinding::default();
+            let props = Props {
+                meter,
+                stack,
+                rebinding: &mut rebinding,
+            };
+            if !props.read_ones_equal(&node.instance, &normalized, &bound)? {
+                return Ok(None);
+            }
+            match now {
+                Some(now) => self.rebinding(key, now, rebinding, meter, stack).map(Some),
+                None => Ok(Some(Vec::new())),
+            }
+        })?;
+        let Some(mut changes) = changes else {
+            return Ok(Kept::Normalized(normalized));
+        };
+        let kept = copy(descriptor, 0, stack)?;
+        match changes.first_mut() {
+            Some(first) => {
+                first.after = first
+                    .after
+                    .with_props(normalized.props, normalized.handler_props);
+            }
+            None => {
+                if let Some(node) = self.nodes.get_mut(key) {
+                    node.instance = node
+                        .instance
+                        .with_props(normalized.props, normalized.handler_props);
+                }
+            }
+        }
+        if let Some(node) = self.nodes.get_mut(key) {
+            node.environment = environment.clone();
+        }
+        self.rebind(key, kept, changes).map(Kept::Rendered)
     }
 
     /// What keeping the node at `key` changes. Its new descriptor equals the one it holds but was
@@ -746,6 +1041,10 @@ impl InstanceTree {
         changes: Vec<Change>,
     ) -> Result<Arc<NxValue>> {
         for change in changes {
+            if !change.before.is(&change.after) {
+                // The output's tokens name other handlers now.
+                self.rendered_since.insert(Arc::clone(&change.key));
+            }
             if self
                 .visited
                 .get(&change.key)
@@ -777,7 +1076,9 @@ impl InstanceTree {
 
     /// Runs `work` as one change to the tree: when it fails, the nodes, what they hold and the
     /// record of what the pass visited are put back as they were before it, so what the host
-    /// made of the tree before it still names the instances its events dispatch against.
+    /// made of the tree before it still names the instances its events dispatch against. So are
+    /// the kept results, the revision counter, the indexes of readers and users, and the change
+    /// set.
     pub fn atomically<T, E>(
         &mut self,
         work: impl FnOnce(&mut Self) -> std::result::Result<T, E>,
@@ -786,14 +1087,20 @@ impl InstanceTree {
         let visited = self.visited.clone();
         let inert = self.inert.clone();
         let roots = self.roots.clone();
-        let readers = self.readers.clone();
+        let store = self.store.clone();
+        let next_id = self.next_id;
+        let taken = self.taken.clone();
+        let rendered_since = self.rendered_since.clone();
         let result = work(self);
         if result.is_err() {
             self.nodes = nodes;
             self.visited = visited;
             self.inert = inert;
             self.roots = roots;
-            self.readers = readers;
+            self.store = store;
+            self.next_id = next_id;
+            self.taken = taken;
+            self.rendered_since = rendered_since;
         }
         result
     }
@@ -860,21 +1167,39 @@ impl InstanceTree {
             pending = rest;
             let batch: Vec<NxValue> = batch.into_iter().map(invocation).collect();
             let (_, node) = self.node(&deepest)?;
+            let node = node.clone();
+            let session = self.session();
+            let holds = self.record_holds(&node, &node.environment, options, &session)?;
             let node_options = self.options_for(&node.environment, options);
-            let result =
-                self.program
-                    .dispatch_component_actions(&node.instance, &batch, &node_options)?;
-            let node = Node {
-                component: Arc::clone(&node.component),
-                parent: node.parent.clone(),
-                descriptor: Arc::clone(&node.descriptor),
-                through: node.through.clone(),
-                instance: result.instance,
-                state: Arc::new(result.state),
-                rendered: Arc::new(result.rendered),
-                environment: node.environment.clone(),
-                unwalked: true,
-                unsettled: true,
+            let (result, record) = self.program.dispatch_tracked(
+                &node.instance,
+                &batch,
+                !holds,
+                &node_options,
+                &session,
+            )?;
+            self.commit(session);
+            let revision = self.store.revision;
+            let rendered = result.rendered.is_some();
+            let node = match result.rendered {
+                Some(output) => Node {
+                    instance: result.instance,
+                    state: Arc::new(result.state),
+                    rendered: Arc::new(output),
+                    unwalked: true,
+                    unsettled: true,
+                    record: Arc::from(record),
+                    verified: revision,
+                    ..node
+                },
+                // Nothing the render read changed: the node keeps its output, its tokens and
+                // whether it is walked and settled, and takes the new state.
+                None => Node {
+                    instance: result.instance,
+                    state: Arc::new(result.state),
+                    verified: revision,
+                    ..node
+                },
             };
             for action in result.effects {
                 match self.route(&node, &action)? {
@@ -887,9 +1212,15 @@ impl InstanceTree {
                 }
             }
             let parent = node.parent.clone();
+            if rendered {
+                self.rendered_since.insert(Arc::clone(&deepest));
+            }
             self.put(deepest, node);
-            self.unsettle(parent);
+            if rendered {
+                self.unsettle(parent);
+            }
         }
+        self.store.sweep();
         Ok(effects)
     }
 
@@ -1177,6 +1508,115 @@ impl Across<'_, '_, '_> {
             return Ok(false);
         }
         Ok(rebinding.pair(old, new))
+    }
+}
+
+/// Compares the props a node's render read with the ones a new descriptor gives it, normalized,
+/// as [`Across`] compares two descriptors: a handler compared as `==` compares it and paired with
+/// the one replacing it, a handler bound for an emit bound in both or in neither and answering the
+/// same emit, and a number of the same kind with the same sign of zero.
+struct Props<'a, 'm, 'p> {
+    meter: &'a Meter<'m, 'p>,
+    stack: &'a Stack,
+    rebinding: &'a mut Rebinding,
+}
+
+impl Props<'_, '_, '_> {
+    /// Whether every prop the render behind `held` read, and every handler bound for an emit
+    /// named in `bound`, is the same in `new`. A render whose reads are unknown read every prop.
+    fn read_ones_equal(
+        mut self,
+        held: &ComponentInstance,
+        new: &NormalizedProps,
+        bound: &[String],
+    ) -> Result<bool> {
+        let names: Vec<Arc<str>> = match held.render_reads() {
+            Some(reads) => reads.props.clone(),
+            None => held
+                .props()
+                .iter()
+                .chain(new.props.iter())
+                .map(|(name, _)| Arc::clone(name))
+                .collect(),
+        };
+        let empty = Value::empty();
+        for name in &names {
+            let old = get_field(held.props(), name).unwrap_or(&empty);
+            let now = get_field(&new.props, name).unwrap_or(&empty);
+            if !self.values(old, now, 0)? {
+                return Ok(false);
+            }
+        }
+        for property in bound {
+            let find = |handlers: &[(Arc<str>, Arc<Handler>)]| {
+                handlers
+                    .iter()
+                    .find(|(name, _)| **name == **property)
+                    .map(|(_, handler)| Arc::clone(handler))
+            };
+            match (find(held.handler_props()), find(&new.handler_props)) {
+                (None, None) => {}
+                (Some(old), Some(now)) => {
+                    if old.component != now.component
+                        || old.emit != now.emit
+                        || old.action_name != now.action_name
+                        || !self.rebinding.pair(&old, &now)
+                    {
+                        return Ok(false);
+                    }
+                }
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
+    }
+
+    fn values(&mut self, old: &Value, new: &Value, depth: u32) -> Result<bool> {
+        if matches!(new, Value::Seq(_) | Value::Record(_)) {
+            if depth > MAX_VALUE_DEPTH {
+                return too_deep();
+            }
+            if !self.stack.within() {
+                return self.stack.value_too_deep();
+            }
+        }
+        let deeper = depth.saturating_add(1);
+        Ok(match (old, new) {
+            (Value::Handler(old), Value::Handler(new)) => {
+                (Arc::ptr_eq(old, new) || handlers_equal(old, new, self.meter, self.stack)?)
+                    && self.rebinding.pair(old, new)
+            }
+            (Value::Seq(old), Value::Seq(new)) => {
+                if old.len() != new.len() {
+                    return Ok(false);
+                }
+                for (old, new) in old.iter().zip(new.iter()) {
+                    if !self.values(old, new, deeper)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            (Value::Record(old), Value::Record(new)) => {
+                if old.type_name != new.type_name || old.fields.len() != new.fields.len() {
+                    return Ok(false);
+                }
+                for ((old_name, old), (new_name, new)) in old.fields.iter().zip(new.fields.iter()) {
+                    if old_name != new_name || !self.values(old, new, deeper)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            // The same number, sign of zero included: a body can tell `-0.0` from `0.0`.
+            (Value::Float(old), Value::Float(new)) => old.to_bits() == new.to_bits(),
+            (Value::Int(old), Value::Int(new)) => old == new,
+            (Value::Bool(old), Value::Bool(new)) => old == new,
+            (Value::Str(old), Value::Str(new)) => old == new,
+            (Value::Case(old), Value::Case(new)) => old.union == new.union && old.case == new.case,
+            (Value::Function(old), Value::Function(new)) => old == new,
+            _ => false,
+        })
     }
 }
 

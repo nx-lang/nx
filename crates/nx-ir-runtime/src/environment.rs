@@ -13,9 +13,9 @@ use crate::eval::{Cx, Machine, Quoted};
 use crate::module::{DeclarationKind, Override, Type};
 use crate::normalize::Path;
 use crate::program::ProgramData;
-use crate::reuse::Derived;
+use crate::reuse::{Derived, ReadInfo, Track, TrackKind};
 use crate::update;
-use crate::value::{from_host, set_field, values_equal, Record, Value};
+use crate::value::{from_host, set_field, Record, Value};
 use nx_value::NxValue;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -384,16 +384,13 @@ pub(crate) struct EnvState {
     /// How many of `layers` came from the host's environment, below any `envProvide`.
     pub base: usize,
     pub roots: HashMap<EnvKey, Value>,
-    /// The reads the evaluation made, those made for a default, a provide or a formula included,
-    /// with the value each found beneath the overrides the evaluation pushed itself, when the
-    /// caller records them. A read that evaluated a default, a provide or a formula while
-    /// overrides the evaluation pushed were in effect has no value here: what it found depends
-    /// on those overrides, so its value beneath them is read again once the evaluation is done.
-    pub reads: Option<Vec<(EnvKey, Option<Value>)>>,
     /// The last result of each derived result the call evaluated, with what it read.
     pub(crate) derived: HashMap<crate::reuse::Derived, crate::reuse::Kept>,
     /// The derived results being evaluated, outermost first, with what each has read so far.
     pub(crate) evaluating: Vec<crate::reuse::Recording>,
+    /// In a call the instance tree makes, what the render, each derived evaluation and each read
+    /// under way has read, outermost first.
+    pub(crate) tracks: Vec<crate::reuse::Track>,
 }
 
 impl<'p> Machine<'p> {
@@ -491,79 +488,6 @@ impl<'p> Machine<'p> {
         Ok(())
     }
 
-    /// Starts recording the reads this evaluation makes at its own level.
-    pub(crate) fn record_environment_reads(&self) {
-        self.env.borrow_mut().reads = Some(Vec::new());
-    }
-
-    /// The reads recorded since [`Self::record_environment_reads`], by qualified name.
-    ///
-    /// <para>A read recorded without a value is read again here, in a machine of its own over
-    /// the same environment with none of this evaluation's overrides, which is the read the skip
-    /// check makes. It is not charged to this evaluation, as the check's reads are not. A read
-    /// that fails there, such as a default that is valid only under the body's own override, is
-    /// kept as `None`, which the skip check counts as changed, so tracking never fails a
-    /// render.</para>
-    pub(crate) fn take_environment_reads(&self) -> Vec<(Arc<str>, Option<Value>)> {
-        let reads = self.env.borrow_mut().reads.take().unwrap_or_default();
-        let index = self.environment_index();
-        let mut seen: Vec<(Arc<str>, Option<Value>)> = Vec::new();
-        let mut beneath: Option<Option<Machine<'_>>> = None;
-        for (key, value) in reads {
-            let name = index.qualified(key);
-            if seen.iter().any(|(known, _)| *known == name) {
-                continue;
-            }
-            let value = match value {
-                Some(value) => Some(value),
-                None => {
-                    let machine = beneath.get_or_insert_with(|| {
-                        let machine = Machine::new(self.program, self.options);
-                        machine.begin_environment().ok().map(|()| machine)
-                    });
-                    let cx = Cx {
-                        module: key.0,
-                        declaration: key.1,
-                        depth: 0,
-                    };
-                    machine
-                        .as_ref()
-                        .and_then(|machine| machine.environment_value(cx, None, key).ok())
-                }
-            };
-            seen.push((name, value));
-        }
-        seen
-    }
-
-    /// Whether every recorded read gives the same value in this machine's environment, read at
-    /// its base. Each read re-evaluated is paid for as a read is. A read recorded as `None`, or
-    /// one that fails now, counts as changed, so the render runs again and reports any error.
-    pub(crate) fn environment_reads_hold(
-        &self,
-        reads: &[(Arc<str>, Option<Value>)],
-    ) -> Result<bool> {
-        let index = self.environment_index();
-        let meter = self.meter(crate::component::entry_cx(0), None);
-        for (name, recorded) in reads {
-            let (Some(key), Some(recorded)) = (index.by_qualified(name), recorded) else {
-                return Ok(false);
-            };
-            let cx = Cx {
-                module: key.0,
-                declaration: key.1,
-                depth: 0,
-            };
-            let Ok(current) = self.environment_value(cx, None, key) else {
-                return Ok(false);
-            };
-            if !values_equal(&current, recorded, &meter, &self.stack)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
     /// A value the host gave for `key` at `path`, converted and checked against the type there.
     fn host_environment_value(
         &self,
@@ -658,31 +582,51 @@ impl<'p> Machine<'p> {
     /// to it are applied to the base, outermost first. A formula, a provide and the default are
     /// evaluated at the read, each with a cap that makes a read of `key` inside it see only the
     /// sources after it; a read of `key` while its default is evaluated is a cycle.</para>
+    ///
+    /// <para>In a call that tracks what it reads, the read is tracked: what it found, how, and
+    /// what it evaluated on its way.</para>
     pub(crate) fn environment_value(
         &self,
         cx: Cx,
         node: Option<u32>,
         key: EnvKey,
     ) -> Result<Value> {
-        let (record, pushed, base_len, top) = {
+        if self.session.is_none() {
+            return self.read_environment(cx, node, key, &mut ReadInfo::default());
+        }
+        let depth = {
+            let mut state = self.env.borrow_mut();
+            state.tracks.push(Track::new(TrackKind::Read));
+            state.tracks.len()
+        };
+        let mut info = ReadInfo::default();
+        let result = self.read_environment(cx, node, key, &mut info);
+        let mut state = self.env.borrow_mut();
+        match &result {
+            Ok(_) => {
+                state.tracks.truncate(depth);
+                state.end_read(key, info);
+            }
+            Err(_) => state.tracks.truncate(depth.saturating_sub(1)),
+        }
+        result
+    }
+
+    fn read_environment(
+        &self,
+        cx: Cx,
+        node: Option<u32>,
+        key: EnvKey,
+        info: &mut ReadInfo,
+    ) -> Result<Value> {
+        let (base_len, top) = {
             let mut state = self.env.borrow_mut();
             state.note_read(key);
-            (
-                state.reads.is_some(),
-                state
-                    .layers
-                    .get(state.base..)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|layer| matches!(layer, Layer::Set { .. })),
-                state.base,
-                state.layers.len(),
-            )
+            (state.base, state.layers.len())
         };
         // The overrides the evaluation pushed itself, and the ones beneath them, innermost first.
         let mut own: Vec<Pending> = Vec::new();
         let mut beneath: Vec<Pending> = Vec::new();
-        let mut evaluated = false;
         let mut capped = false;
         let mut provides_below: Option<usize> = None;
         let mut found: Option<Value> = None;
@@ -701,8 +645,10 @@ impl<'p> Machine<'p> {
                     bundle,
                 }) if set == key => {
                     let is_own = position >= base_len;
-                    if !is_own && matches!(source, Source::Formula(_)) {
-                        evaluated = true;
+                    if is_own {
+                        info.low = Some(info.low.map_or(position, |low| low.min(position)));
+                    } else {
+                        info.host = true;
                     }
                     let value =
                         self.source_value(cx, node, key, Below::Layer(position), id, &source)?;
@@ -710,6 +656,7 @@ impl<'p> Machine<'p> {
                     if path.is_empty() && !patch {
                         if is_own {
                             // Set by the evaluation itself: nothing beneath it is read.
+                            info.own_whole = Some(position);
                             return self.apply_pending(cx, node, value, own);
                         }
                         found = Some(value);
@@ -727,6 +674,8 @@ impl<'p> Machine<'p> {
                     below,
                 }) if capped_key == key => {
                     capped = true;
+                    info.capped = true;
+                    info.low = Some(info.low.map_or(position, |low| low.min(position)));
                     match below {
                         Below::Layer(at) => position = at,
                         Below::Provide(index) => {
@@ -745,24 +694,12 @@ impl<'p> Machine<'p> {
         let base = match found {
             Some(base) => base,
             None => {
-                evaluated = true;
                 self.provided_or_default(cx, node, key, provides_below.unwrap_or(usize::MAX))?
             }
         };
         let value = self.apply_pending(cx, node, base, beneath)?;
-        if !capped {
-            let mut state = self.env.borrow_mut();
-            // A derived result being evaluated keeps the read, so a use that reuses it adds
-            // the read to the call's record as evaluating it would.
-            state.note_tree_read(key, &value, evaluated);
-            if record {
-                // A source evaluated under the evaluation's own overrides of other values found
-                // what those overrides made it; beneath them it may differ.
-                let found = (!(evaluated && pushed)).then(|| value.clone());
-                if let Some(reads) = state.reads.as_mut() {
-                    reads.push((key, found));
-                }
-            }
+        if self.session.is_some() && !capped {
+            info.beneath = Some(value.clone());
         }
         self.apply_pending(cx, node, value, own)
     }
@@ -891,7 +828,11 @@ impl<'p> Machine<'p> {
     ) -> Result<Formula> {
         self.charge(cx, Some(node), 1)?;
         let mut locals: Vec<(Arc<str>, Value)> = Vec::new();
+        let rendering = self.is_render_frame(frame);
         for (slot, name) in self.slots_read(cx.module, value) {
+            if rendering {
+                self.note_render_slot(slot, false);
+            }
             let Some(Some(bound)) = frame.get(slot as usize) else {
                 continue;
             };
@@ -1103,9 +1044,7 @@ impl<'p> Machine<'p> {
                             continue;
                         }
                         let value = self.derived(Derived::Provide(index), || {
-                            self.capped(key, Below::Provide(index), || {
-                                self.eval(provides_cx, &mut Vec::new(), provide.value)
-                            })
+                            self.evaluate_derived(Derived::Provide(index), cx.depth)
                         })?;
                         let path: Arc<[Arc<str>]> = provide.path.iter().cloned().collect();
                         if path.is_empty() {
@@ -1119,9 +1058,7 @@ impl<'p> Machine<'p> {
                     }
                     None => {
                         let bundle = self.derived(Derived::Bundle(index, key), || {
-                            self.capped(key, Below::Provide(index), || {
-                                self.eval(provides_cx, &mut Vec::new(), provide.value)
-                            })
+                            self.evaluate_derived(Derived::Bundle(index, key), cx.depth)
                         })?;
                         let entries = self.bundle_entries(provides_cx, provide.value, &bundle)?;
                         for (set, path, source) in entries.into_iter().rev() {
@@ -1146,25 +1083,105 @@ impl<'p> Machine<'p> {
                 }
             }
         }
-        let (default, ty) = self.environment_declaration(key)?;
-        let declared = Cx {
-            module: key.0,
-            declaration: key.1,
-            depth: cx.depth,
-        };
         let value = self.derived(Derived::Default(key), || {
-            let value = self.capped(key, Below::Exhausted, || {
-                self.eval(declared, &mut Vec::new(), default)
-            })?;
-            let name = self.environment_index().qualified(key);
-            self.normalize(
-                declared,
-                ty,
-                value,
-                &Path::Root(&Quoted("environment value '", &name, "'")),
-            )
+            self.evaluate_derived(Derived::Default(key), cx.depth)
         })?;
         self.apply_pending(cx, node, value, pending)
+    }
+
+    /// Evaluates derived result `derived` afresh, at call depth `depth`: a top-level value or a
+    /// default checked against its type, an entry-module provide's value under the cap of the
+    /// value it provides, or a bundle provide's bundle under the cap of the value being read. A
+    /// formula is evaluated where its layer is read, never through here.
+    pub(crate) fn evaluate_derived(&self, derived: Derived, depth: u32) -> Result<Value> {
+        match derived {
+            Derived::Value(module, index) => {
+                let declaration = self
+                    .program
+                    .linked(module)
+                    .and_then(|linked| linked.module.declaration(index));
+                let Some((name, DeclarationKind::Value { value, ty })) =
+                    declaration.map(|declaration| (&declaration.name, &declaration.kind))
+                else {
+                    return Err(NxIrRuntimeError::new(
+                        "nx-ir-reference",
+                        "A kept value names a declaration that is not a value.",
+                    ));
+                };
+                let declared = Cx {
+                    module,
+                    declaration: index,
+                    depth,
+                };
+                let result = self.eval(declared, &mut Vec::new(), *value)?;
+                match ty {
+                    None => Ok(result),
+                    Some(ty) => self.normalize(
+                        declared,
+                        ty,
+                        result,
+                        &Path::Root(&Quoted("value '", name, "'")),
+                    ),
+                }
+            }
+            Derived::Default(key) => {
+                let (default, ty) = self.environment_declaration(key)?;
+                let declared = Cx {
+                    module: key.0,
+                    declaration: key.1,
+                    depth,
+                };
+                let value = self.capped(key, Below::Exhausted, || {
+                    self.eval(declared, &mut Vec::new(), default)
+                })?;
+                let name = self.environment_index().qualified(key);
+                self.normalize(
+                    declared,
+                    ty,
+                    value,
+                    &Path::Root(&Quoted("environment value '", &name, "'")),
+                )
+            }
+            Derived::Provide(index) | Derived::Bundle(index, _) => {
+                let Some((declaration, provide)) = self
+                    .entry_provides()
+                    .and_then(|(declaration, provides)| Some((declaration, provides.get(index)?)))
+                else {
+                    return Err(NxIrRuntimeError::new(
+                        "nx-ir-reference",
+                        "A kept provide names no provide of the entry module.",
+                    ));
+                };
+                let provides_cx = Cx {
+                    module: 0,
+                    declaration,
+                    depth,
+                };
+                let key = match (derived, &provide.target) {
+                    (Derived::Bundle(_, key), _) => key,
+                    (_, Some(target)) => {
+                        let (module, found, _) =
+                            self.program.resolve(0, target).map_err(|message| {
+                                self.error(Some(provides_cx), None, "nx-ir-reference", message)
+                            })?;
+                        (module, found)
+                    }
+                    (_, None) => {
+                        return Err(NxIrRuntimeError::new(
+                            "nx-ir-reference",
+                            "A kept provide names a bundle provide without the value read.",
+                        ))
+                    }
+                };
+                self.capped(key, Below::Provide(index), || {
+                    self.eval(provides_cx, &mut Vec::new(), provide.value)
+                })
+            }
+            Derived::Formula(_) => Err(NxIrRuntimeError::new(
+                "nx-ir-reference",
+                "A formula is evaluated where its layer is read.",
+            )),
+        }
     }
 
     /// The entry module's provides declaration, if it has one.
@@ -1545,18 +1562,27 @@ impl crate::program::Program {
         machine.report(&value, None, &meter)
     }
 
-    /// Whether every read gives the value it gave in `options`' environment.
-    pub(crate) fn environment_reads_hold(
+    /// Whether a node's record of its last render, found valid at revision `verified`, holds in
+    /// `options`' environment, the node's place, with the tree's kept results in `session`. The
+    /// check runs under its own budget and reports no usage.
+    pub(crate) fn record_holds(
         &self,
-        reads: &[(Arc<str>, Option<Value>)],
+        record: &[crate::kept::Input],
+        verified: u64,
         options: &crate::RuntimeOptions,
+        session: &crate::kept::Session,
     ) -> Result<bool> {
-        if reads.is_empty() {
+        if record.is_empty() {
             return Ok(true);
         }
-        let machine = Machine::new(&self.data, options);
+        let machine = Machine::with_session(&self.data, options, session);
         machine.begin_environment()?;
-        machine.environment_reads_hold(reads)
+        machine.record_holds(record, verified)
+    }
+
+    /// The qualified name's key of an environment value the program declares.
+    pub(crate) fn environment_key(&self, name: &str) -> Option<EnvKey> {
+        self.data.environment_index().by_qualified(name)
     }
 
     /// The root values of `environment`, checked, by qualified name.

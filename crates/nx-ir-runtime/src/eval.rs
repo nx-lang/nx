@@ -270,6 +270,25 @@ pub(crate) struct Machine<'p> {
     /// The slots each handler node reads, in ascending order, by module and node: found from
     /// the image once, at no charge.
     handler_slots: RefCell<HandlerSlots>,
+    /// The instance tree's kept results and what has been found of them at the call's place, in
+    /// a call the tree makes: the call then tracks what it reads.
+    pub(crate) session: Option<&'p crate::kept::Session>,
+    /// The address of the frame of the body being rendered, while one is; zero otherwise.
+    render_frame: Cell<usize>,
+    /// The render's record of its prop and state slots, while a body is being rendered.
+    render_slots: RefCell<RenderSlots>,
+}
+
+/// Which of a rendered body's prop and state slots the render read.
+#[derive(Debug, Default)]
+struct RenderSlots {
+    props: usize,
+    read: Vec<bool>,
+}
+
+/// The address that tells a frame from every other frame alive at the same time.
+fn frame_address(frame: &Frame) -> usize {
+    std::ptr::from_ref(frame) as usize
 }
 
 impl<'p> Machine<'p> {
@@ -284,7 +303,113 @@ impl<'p> Machine<'p> {
             collected: RefCell::new(options.origins.as_ref().map(|_| Collected::default())),
             env: RefCell::new(crate::environment::EnvState::default()),
             handler_slots: RefCell::new(std::collections::HashMap::new()),
+            session: None,
+            render_frame: Cell::new(0),
+            render_slots: RefCell::new(RenderSlots::default()),
         }
+    }
+
+    /// A machine for a call the instance tree makes, with the tree's kept results in `session`.
+    pub(crate) fn with_session(
+        program: &'p ProgramData,
+        options: &'p RuntimeOptions,
+        session: &'p crate::kept::Session,
+    ) -> Self {
+        Self {
+            session: Some(session),
+            ..Self::new(program, options)
+        }
+    }
+
+    /// A machine at this one's place, with nothing of its own under way, that spends what this
+    /// one has left of its budget and its stack: for checking a kept result in the middle of an
+    /// evaluation. What it spends is this machine's once [`absorb`](Self::absorb)ed.
+    pub(crate) fn fork(&self) -> Result<Machine<'p>> {
+        let fork = Self {
+            session: self.session,
+            stack: self.stack,
+            ..Self::new(self.program, self.options)
+        };
+        fork.begin_environment()?;
+        fork.remaining.set(self.remaining.get());
+        fork.nesting.set(self.nesting.get());
+        Ok(fork)
+    }
+
+    /// Takes on what `fork` spent.
+    pub(crate) fn absorb(&self, fork: &Machine<'p>) {
+        self.remaining.set(fork.remaining.get());
+    }
+
+    /// Starts recording what the render of a body over `frame`, whose first `props` slots are
+    /// the props and the `state` after them the state, reads of them, and, in a call that
+    /// tracks, the render's own track.
+    pub(crate) fn begin_render(&self, frame: &Frame, props: usize, state: usize) {
+        self.render_frame.set(frame_address(frame));
+        *self.render_slots.borrow_mut() = RenderSlots {
+            props,
+            read: vec![false; props.saturating_add(state)],
+        };
+        if self.session.is_some() {
+            self.env
+                .borrow_mut()
+                .tracks
+                .push(crate::reuse::Track::new(crate::reuse::TrackKind::Render));
+        }
+    }
+
+    /// Whether `frame` is the frame of the body being rendered.
+    #[inline]
+    pub(crate) fn is_render_frame(&self, frame: &Frame) -> bool {
+        self.render_frame.get() == frame_address(frame)
+    }
+
+    /// Notes that the render read slot `slot` of its frame; for a handler the body bound, only a
+    /// prop slot is a read.
+    pub(crate) fn note_render_slot(&self, slot: u32, props_only: bool) {
+        let mut slots = self.render_slots.borrow_mut();
+        let slot = slot as usize;
+        if props_only && slot >= slots.props {
+            return;
+        }
+        if let Some(read) = slots.read.get_mut(slot) {
+            *read = true;
+        }
+    }
+
+    /// Ends the render [`begin_render`](Self::begin_render) started: the slots it read, and its
+    /// track's direct inputs in a call that tracks, each read beneath the render's own overrides
+    /// with the value found there, read again in a machine of its own over the same place. That
+    /// read is not charged, as the check's reads are not; one that fails is kept as `None`,
+    /// which counts as changed, so tracking never fails a render.
+    pub(crate) fn end_render(&self) -> (Vec<bool>, Option<Vec<crate::kept::Input>>) {
+        self.render_frame.set(0);
+        let slots = std::mem::take(&mut *self.render_slots.borrow_mut());
+        if self.session.is_none() {
+            return (slots.read, None);
+        }
+        let track = self.env.borrow_mut().tracks.pop();
+        let mut inputs = track
+            .map(crate::reuse::Track::into_inputs)
+            .unwrap_or_default();
+        let mut beneath: Option<Option<Machine<'_>>> = None;
+        for input in &mut inputs {
+            if let crate::kept::Input::Beneath { key, value } = input {
+                let machine = beneath.get_or_insert_with(|| {
+                    let machine = Machine::new(self.program, self.options);
+                    machine.begin_environment().ok().map(|()| machine)
+                });
+                let cx = Cx {
+                    module: key.0,
+                    declaration: key.1,
+                    depth: 0,
+                };
+                *value = machine
+                    .as_ref()
+                    .and_then(|machine| machine.environment_value(cx, None, *key).ok());
+            }
+        }
+        (slots.read, Some(inputs))
     }
 
     /// Whether the call keeps track of where records were constructed: only when the host gave a
@@ -583,10 +708,15 @@ impl<'p> Machine<'p> {
             Node::Bool(value) => Ok(Value::Bool(*value)),
             Node::String(text) => Ok(Value::Str(Arc::clone(text))),
             Node::Number(value) => Ok(value.clone()),
-            Node::Slot { slot, name } => match frame.get(*slot as usize) {
-                Some(Some(value)) => Ok(value.clone()),
-                _ => self.unbound(cx, index, name),
-            },
+            Node::Slot { slot, name } => {
+                if self.is_render_frame(frame) {
+                    self.note_render_slot(*slot, false);
+                }
+                match frame.get(*slot as usize) {
+                    Some(Some(value)) => Ok(value.clone()),
+                    _ => self.unbound(cx, index, name),
+                }
+            }
             Node::Reference(reference) => self.eval_reference(cx, index, reference),
             Node::Binary { op, lhs, rhs } => self.eval_binary(cx, frame, index, *op, *lhs, *rhs),
             Node::Unary { op, operand } => self.eval_unary(cx, frame, index, *op, *operand),
@@ -993,25 +1123,10 @@ impl<'p> Machine<'p> {
                 module: self.program.identity(module),
                 name: Arc::clone(&declaration.name),
             }))),
-            DeclarationKind::Value { value, ty } => {
-                let declared = Cx {
-                    module,
-                    declaration: index,
-                    depth: cx.depth,
-                };
+            DeclarationKind::Value { .. } => {
                 // The value reads no local, so it is reused while what it read is unchanged.
-                self.derived(crate::reuse::Derived::Value(module, index), || {
-                    let result = self.eval(declared, &mut Vec::new(), *value)?;
-                    match ty {
-                        None => Ok(result),
-                        Some(ty) => self.normalize(
-                            declared,
-                            ty,
-                            result,
-                            &Path::Root(&Quoted("value '", &declaration.name, "'")),
-                        ),
-                    }
-                })
+                let derived = crate::reuse::Derived::Value(module, index);
+                self.derived(derived, || self.evaluate_derived(derived, cx.depth))
             }
             _ => self.fail(
                 cx,
@@ -1734,6 +1849,11 @@ impl<'p> Machine<'p> {
         handler: &HandlerNode,
     ) -> Result<Value> {
         let slots = self.handler_slots(cx.module, node);
+        if self.is_render_frame(frame) {
+            for slot in slots.iter() {
+                self.note_render_slot(*slot, true);
+            }
+        }
         let mut captured: Frame = Vec::new();
         for slot in slots.iter() {
             let slot = *slot as usize;

@@ -33,6 +33,7 @@ mod error;
 mod eval;
 mod helpers;
 mod input;
+mod kept;
 mod module;
 mod normalize;
 mod origins;
@@ -61,7 +62,7 @@ pub use nx_ir::{NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION};
 pub use origins::{OriginEntry, Origins};
 pub use program::{LinkOptions, Program, NX_PRELUDE_MODULE_IDENTITY};
 pub use text::float32_text;
-pub use tree::{HostEffect, InstanceTree};
+pub use tree::{HostEffect, InstanceTree, TreeChanges};
 pub use usage::Usage;
 pub use value::{FunctionValue, ValueFields, ValueItems, ValueKind, ValueView};
 

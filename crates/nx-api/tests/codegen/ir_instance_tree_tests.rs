@@ -208,6 +208,7 @@ const CONTENT: &str = "
 component <Box extends Node content Children:Node+ /> = {
   state { opened:int = 0 }
   <Stack>
+    <Label Text={\"opened \" + opened} />
     <Button Text=\"Open\" onTapped=<State.Update opened={opened + 1} /> />
     {Children}
   </Stack>
@@ -567,6 +568,7 @@ component <Card extends Node title:string emits { Logged { text:string } } /> = 
   state { logs:int = 0 }
   <Stack>
     <Label Text={title} />
+    <Label Text={\"logs \" + logs} />
     <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
   </Stack>
 }
@@ -669,7 +671,10 @@ fn an_equal_descriptor_from_a_parent_initialized_again_keeps_the_child() {
         "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Stack>
+    <Label Text={\"logs \" + logs} />
+    <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  </Stack>
 }
 component <Page tag:string /> = {
   state { last:string = \"\" }
@@ -739,23 +744,28 @@ fn a_visible_handler_with_another_capture_is_a_changed_descriptor() {
 
 /// `Page` puts a button of its own in a `Panel`'s content and binds a handler for the `Panel`'s
 /// emit; the `Panel` binds one for its `Card`'s emit, which captures the `Panel`'s content. The
-/// Page's `Same` button renders it again with nothing changed.
+/// Page's `Same` button renders it again with nothing changed that the Panel is handed.
 const PANEL: &str = "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Stack>
+    <Label Text={\"logs \" + logs} />
+    <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  </Stack>
 }
 component <Panel extends Node content Children:Node+ emits { Noted { text:string } } /> = {
   state { notes:int = 0 }
   <Stack>
+    <Label Text={\"notes \" + notes} />
     {Children}
     <Card onLogged={<State.Update notes={notes + 1} /> <Panel.Noted text={action.text} />} />
   </Stack>
 }
 component <Page /> = {
-  state { mode:string = \"a\" taps:int = 0 last:string = \"\" }
+  state { mode:string = \"a\" taps:int = 0 last:string = \"\" same:int = 0 }
   <Stack>
-    <Button Text=\"Same\" onTapped=<State.Update mode=\"a\" /> />
+    <Label Text={\"same \" + same} />
+    <Button Text=\"Same\" onTapped=<State.Update same={same + 1} /> />
     <Panel onNoted=<State.Update last={action.text} />>
       <Button Text=\"More\" onTapped=<State.Update taps={taps + 1} /> />
     </Panel>
@@ -807,7 +817,7 @@ fn a_kept_child_and_the_node_under_it_are_rebound_and_their_tokens_stay_valid() 
     assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 1 }"#));
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 0, "last": "hi" }"#)
+        json(r#"{ "mode": "a", "taps": 0, "last": "hi", "same": 1 }"#)
     );
 }
 
@@ -822,7 +832,7 @@ fn a_handler_handed_through_a_kept_child_runs_against_its_owner() {
     tap(&mut tree, "root/panel", "More").unwrap();
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 1, "last": "" }"#)
+        json(r#"{ "mode": "a", "taps": 1, "last": "", "same": 1 }"#)
     );
     assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 0 }"#));
     assert!(Arc::ptr_eq(&panel, &rendered(&tree, "root/panel")));
@@ -906,7 +916,7 @@ fn a_pass_that_fails_after_a_rebinding_leaves_the_tree_as_it_was() {
     tap(&mut tree, "root/panel", "More").unwrap();
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 1, "last": "" }"#)
+        json(r#"{ "mode": "a", "taps": 1, "last": "", "same": 1 }"#)
     );
 }
 
@@ -955,9 +965,9 @@ let root() = { <Page /> }",
 
 #[test]
 fn a_kept_child_dispatched_against_before_its_parent_rendered_is_rebound_with_what_is_under_it() {
-    // The Page's handler for the Panel's emit sets what it holds already, so the Page renders
-    // again with nothing changed.
-    let mut tree = linked(&PANEL.replace("last={action.text}", "mode=\"a\""));
+    // The Page's handler for the Panel's emit patches only what the Page shows, so the Page
+    // renders again with nothing changed that the Panel is handed.
+    let mut tree = linked(&PANEL.replace("last={action.text}", "same={same + 1}"));
     panel_pass(&mut tree);
     // The Card's emit reaches the Panel, whose own emit reaches the Page: all three render, and
     // the Card was initialized through the instance the Panel held before.
@@ -1004,7 +1014,7 @@ fn a_node_visited_before_its_ancestor_is_rebound_counts_as_visited() {
     tap(&mut tree, "root/panel/card", "Log").unwrap();
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 0, "last": "hi" }"#)
+        json(r#"{ "mode": "a", "taps": 0, "last": "hi", "same": 1 }"#)
     );
 }
 
@@ -1249,12 +1259,18 @@ fn a_node_visited_before_its_parent_rendered_again_does_not_count_as_visited() {
 const SETTLED: &str = "
 component <Leaf extends Node /> = {
   state { taps:int = 0 }
-  <Button Text=\"Leaf\" onTapped=<State.Update taps={taps + 1} /> />
+  <Stack>
+    <Label Text={\"\" + taps} />
+    <Button Text=\"Leaf\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
 }
 component <Middle extends Node /> = { <Stack><Label Text=\"middle\" /><Leaf /></Stack> }
 component <Side extends Node /> = {
   state { taps:int = 0 }
-  <Button Text=\"Side\" onTapped=<State.Update taps={taps + 1} /> />
+  <Stack>
+    <Label Text={\"\" + taps} />
+    <Button Text=\"Side\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
 }
 component <Top /> = { <Stack><Middle /><Side /></Stack> }
 let root() = { <Top /> }
@@ -1528,7 +1544,10 @@ component <Child extends Node emits { A { } B { } } /> = {
 }
 component <Page /> = {
   state { a:int = 0 b:int = 0 }
-  <Child onA=<State.Update a={a + 1} /> onB=<State.Update b={b + a} /> />
+  <Stack>
+    <Label Text={\"\" + a + \",\" + b} />
+    <Child onA=<State.Update a={a + 1} /> onB=<State.Update b={b + a} /> />
+  </Stack>
 }
 let root() = { <Page /> }",
     );
@@ -1551,6 +1570,7 @@ component <Card extends Node emits { Logged { text:string } } /> = {
 component <Page /> = {
   state { last:string = \"\" taps:int = 0 }
   <Stack>
+    <Label Text={last + \" \" + taps} />
     <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
     <Card onLogged=<State.Update last={last + action.text} /> />
   </Stack>
@@ -1657,10 +1677,12 @@ let root() = { <Top /> }",
     assert_eq!(state(&tree, "root"), json(r#"{ "picked": "deeper" }"#));
     assert!(renders(&tree, "root", "Label", "picked deeper"));
     assert!(renders(&tree, "root/middle", "Label", "passed 1"));
-    // Each of the three was dispatched against once.
-    for key in ["root", "root/middle", "root/middle/leaf"] {
+    // Each of the three was dispatched against once. The leaf's handler patched nothing it
+    // read, so it kept its render; the other two rendered again.
+    for key in ["root", "root/middle"] {
         assert_eq!(generation(&tree, key), 2, "{key}");
     }
+    assert_eq!(generation(&tree, "root/middle/leaf"), 1);
     // What no component handled is the host's, named after the component that produced it.
     assert_eq!(
         effects,
@@ -1686,7 +1708,7 @@ let root() = { <Top /> }",
     assert_eq!(state(&tree, "root/middle"), json(r#"{ "passed": 1 }"#));
     assert!(Arc::ptr_eq(&middle, &rendered(&tree, "root/middle")));
     assert_eq!(generation(&tree, "root/middle"), 2);
-    assert_eq!(generation(&tree, "root/middle/leaf"), 2);
+    assert_eq!(generation(&tree, "root/middle/leaf"), 1);
     let effects = tap(&mut tree, "root/middle/leaf", "Pick").unwrap();
     assert_eq!(effects.len(), 1);
     assert_eq!(state(&tree, "root/middle"), json(r#"{ "passed": 2 }"#));
