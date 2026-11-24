@@ -20,7 +20,9 @@ use nx_hir::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 mod constraints;
+mod with;
 pub use constraints::{pattern_interval_at, ConstraintCheckSite};
+pub use with::{WithKind, WithPathStep, WithSite};
 
 /// What kind of value an editor hint edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -445,6 +447,8 @@ pub struct InferenceContext<'a> {
     /// The visible binding each environment read and override resolved to, keyed by the read's
     /// expression and, for an override, by its value expression.
     environment_bindings: FxHashMap<ExprId, Name>,
+    /// What each `with` does, decided by its left side's type, for the rewrite after checking.
+    with_sites: FxHashMap<ExprId, WithSite>,
     /// The type each use site bound to each of its target's type parameters, by element.
     ///
     /// Nothing in analysis reads this back; it is kept in the analysis result so that carrying
@@ -540,6 +544,7 @@ impl<'a> InferenceContext<'a> {
             consumed_type_arguments: FxHashSet::default(),
             function_value_calls: FxHashMap::default(),
             environment_bindings: FxHashMap::default(),
+            with_sites: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
             range_for_expressions: FxHashSet::default(),
             indexed_loops: Vec::new(),
@@ -789,22 +794,43 @@ impl<'a> InferenceContext<'a> {
 
             // The overrides are checked where they are written, and the block is its body.
             ast::Expr::Provide {
-                overrides, body, ..
+                overrides,
+                bundle,
+                body,
+                ..
             } => {
-                let (overrides, body) = (overrides.clone(), *body);
+                let (overrides, bundle, body) = (overrides.clone(), *bundle, *body);
                 self.check_environment_overrides(&overrides);
+                if let Some(bundle) = bundle {
+                    let actual = self.infer_expr(bundle);
+                    let span = self.module.raw_module().expr_span(bundle);
+                    self.check_environment_bundle(&actual, span);
+                }
                 self.infer_expr(body)
             }
 
             // A bundle: each entry is checked as an override, a record value also taking its
-            // update record, and the bundle is an `env.Update`.
-            ast::Expr::EnvUpdate { overrides, .. } => {
-                let overrides = overrides.clone();
+            // update record, and the bundle is an `env.Update`. Its bases are bundles too.
+            ast::Expr::EnvUpdate {
+                bases, overrides, ..
+            } => {
+                let (bases, overrides) = (bases.clone(), overrides.clone());
+                for base in bases {
+                    let actual = self.infer_expr(base);
+                    let span = self.module.raw_module().expr_span(base);
+                    self.check_environment_bundle(&actual, span);
+                }
                 self.check_environment_duplicates(&overrides);
                 for provided in &overrides {
                     self.check_environment_entry(provided, true);
                 }
                 Type::named(nx_hir::ENVIRONMENT_UPDATE_TYPE)
+            }
+
+            // `left with right`: typed by the left side, which decides what the `with` does.
+            ast::Expr::With { left, right, span } => {
+                let (left, right, span) = (*left, right.clone(), *span);
+                self.infer_with(expr_id, left, &right, span)
             }
 
             // Identifiers look up in environment, then in the narrowings in force.
@@ -1176,6 +1202,7 @@ impl<'a> InferenceContext<'a> {
                 record,
                 properties,
                 span,
+                ..
             } => self.infer_record_literal(record, properties, *span),
             ast::Expr::ActionHandler {
                 action_name,
@@ -7885,8 +7912,8 @@ impl<'a> InferenceContext<'a> {
         self.error(
             "value-type-mismatch",
             format!(
-                "`provide` applies an `env.Update` bundle, but this is a {actual}; to set one \
-                 value, write `provide env.name = value`"
+                "`provide env with` applies an `env.Update` bundle, but this is a {actual}; to \
+                 set one value, write `env.name=value`"
             ),
             span,
         );

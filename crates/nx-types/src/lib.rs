@@ -138,6 +138,7 @@ pub mod env;
 pub mod infer;
 pub mod semantics;
 pub mod ty;
+mod with_rewrite;
 
 // Re-export main types
 pub use check::{

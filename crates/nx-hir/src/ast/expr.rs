@@ -555,6 +555,9 @@ pub enum Expr {
         record: Name,
         /// Property assignments
         properties: Vec<RecordLiteralProperty>,
+        /// The module `record` is resolved in, when it is not the module holding the literal: the
+        /// update record a `with` builds is named where its record is declared.
+        declared_in: Option<String>,
         /// Source span
         span: TextSpan,
     },

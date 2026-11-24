@@ -201,10 +201,21 @@ impl<'a> Explainer<'a> {
         let mut lines = Vec::new();
         for entry in overrides {
             let entry = self.list(entry, "override")?;
-            let target = self.reference_item(self.operand(entry, 0, "override")?)?;
-            let path = self.path(self.list_operand(entry, 1, "override")?)?;
+            let target = self.list(self.operand(entry, 0, "override")?, "reference")?;
             let value = self.node(self.int_operand(entry, 2, "override")?)?;
-            lines.extend(prefixed(format!("{target}{path}="), value));
+            if target.is_empty() {
+                // A bundle: its entries are the overrides.
+                lines.extend(prefixed("env with ".to_string(), value));
+                continue;
+            }
+            let target = self.reference(
+                self.int_operand(target, 0, "reference")?,
+                self.int_operand(target, 1, "reference")?,
+            )?;
+            let path = self.path(self.list_operand(entry, 1, "override")?)?;
+            // A formula is computed where the value is read; `:=` marks it.
+            let assign = if entry.len() > 3 { ":=" } else { "=" };
+            lines.extend(prefixed(format!("{target}{path}{assign}"), value));
         }
         Ok(lines)
     }
@@ -816,13 +827,21 @@ impl<'a> Explainer<'a> {
             }
             kinds::node::ENV_UPDATE => {
                 let overrides = self.overrides(self.list_operand(entry, 1, "envUpdate")?)?;
-                if overrides.is_empty() {
+                let update = if overrides.is_empty() {
                     vec!["<env.Update />".to_string()]
                 } else {
                     let mut lines = vec!["<env.Update".to_string()];
                     lines.extend(indent(overrides));
                     lines.push("/>".to_string());
                     lines
+                };
+                match entry.get(2) {
+                    // `base with <env.Update … />`: the base's entries first.
+                    Some(_) => {
+                        let base = self.node(self.int_operand(entry, 2, "envUpdate")?)?;
+                        join_inline(&[base, vec!["with".to_string()], update], "(", " ", ")")
+                    }
+                    None => update,
                 }
             }
             kinds::node::COALESCE => {

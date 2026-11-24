@@ -27,6 +27,9 @@ const DIRECTORY_ENTRY_LEN: usize = 12;
 /// The cell value that spells an absent optional operand.
 pub const NONE: u32 = u32::MAX;
 
+/// The bit a [`Op::FlaggedList`]'s count cell sets when its elements are followed by a flag cell.
+pub const FLAGGED: u32 = 1 << 31;
+
 /// Section kinds, as listed in the directory. A kind, once assigned, is never reused.
 pub mod section {
     pub const STRINGS: u32 = 0;
@@ -117,6 +120,14 @@ enum Op {
     /// A count cell, then each element by the shape: an element of a one-op shape is the item
     /// itself, otherwise a list of items walked with the shape.
     List(&'static [Op]),
+    /// A list whose elements may carry one more operand after the shape, a flag, in the model.
+    /// When none does, the image is [`Op::List`]'s; when one does, the count cell has
+    /// [`FLAGGED`] set and every element is followed by one cell, `0` for an element without the
+    /// flag. Used for the overrides, whose formula flag is written only on a formula.
+    FlaggedList(&'static [Op]),
+    /// Operands at the end of an entry that the model may leave out: written when present, and
+    /// present on reading when the entry has cells left. Only last in a layout.
+    Trailing(&'static [Op]),
     /// A 64-bit integer as two cells, low word first.
     I64,
     /// A 64-bit float's bits as two cells, low word first.
@@ -126,8 +137,10 @@ enum Op {
 const NODES: &[Op] = &[Op::Node];
 const OPT_NODES: &[Op] = &[Op::OptNode];
 const STRS: &[Op] = &[Op::Str];
-/// One override of a `provide` block or bundle: the environment value, the field path, the value.
-const OVERRIDE: &[Op] = &[Op::RefPair, Op::List(STRS), Op::Node];
+/// One override of a `provide` block or bundle: the environment value, absent for a bundle, the
+/// field path, the value; a formula also carries the formula flag, as [`Op::FlaggedList`] writes it.
+const OVERRIDE: &[Op] = &[Op::OptRef, Op::List(STRS), Op::Node];
+const NODE: &[Op] = &[Op::Node];
 /// One top-level provide: the environment value, absent for a bundle, the field path, the value.
 const PROVIDE: &[Op] = &[Op::OptRef, Op::List(STRS), Op::Node];
 const REFS: &[Op] = &[Op::RefPair];
@@ -238,8 +251,9 @@ impl Table {
                 node::ELEMENT => &[Op::Int, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ACTION_HANDLER => &[Op::Ref, Op::Str, Op::Ref, Op::Int, Op::OptRef, Op::Node],
                 node::ENV_READ => &[Op::Ref],
-                node::ENV_PROVIDE => &[Op::List(OVERRIDE), Op::Node],
-                node::ENV_UPDATE => &[Op::List(OVERRIDE)],
+                node::ENV_PROVIDE => &[Op::FlaggedList(OVERRIDE), Op::Node],
+                // The base, the bundle whose entries come first, is left out when there is none.
+                node::ENV_UPDATE => &[Op::FlaggedList(OVERRIDE), Op::Trailing(NODE)],
                 _ => return None,
             },
             Table::Declarations => match kind {
@@ -435,6 +449,16 @@ fn write_seq(ops: &[Op], mut items: &[IrItem], pool: &mut Vec<u32>) -> Result<()
 
 /// Writes one operand from the front of `items` and returns the rest.
 fn write_op<'a>(op: Op, items: &'a [IrItem], pool: &mut Vec<u32>) -> Result<&'a [IrItem], String> {
+    if let Op::Trailing(shape) = op {
+        if items.is_empty() {
+            return Ok(items);
+        }
+        let mut rest = items;
+        for op in shape {
+            rest = write_op(*op, rest, pool)?;
+        }
+        return Ok(rest);
+    }
     let (first, rest) = items.split_first().ok_or("an operand is missing")?;
     let int = |item: &IrItem| {
         item.as_int()
@@ -495,6 +519,36 @@ fn write_op<'a>(op: Op, items: &'a [IrItem], pool: &mut Vec<u32>) -> Result<&'a 
                 }
             }
         }
+        Op::FlaggedList(shape) => {
+            let elements = first.as_list().ok_or("a list operand is not a list")?;
+            let mut flags = Vec::with_capacity(elements.len());
+            for element in elements {
+                let items = element.as_list().ok_or("a list element is not a list")?;
+                flags.push(match items.len() {
+                    len if len == shape.len() => None,
+                    len if len == shape.len() + 1 => Some(int(&items[len - 1])?),
+                    _ => return Err("a list element has the wrong number of operands".to_string()),
+                });
+            }
+            let flagged = flags.iter().any(Option::is_some);
+            let count = u32::try_from(elements.len())
+                .ok()
+                .filter(|count| count & FLAGGED == 0)
+                .ok_or("a list is too long")?;
+            pool.push(if flagged { count | FLAGGED } else { count });
+            for (element, flag) in elements.iter().zip(flags) {
+                let items = element.as_list().ok_or("a list element is not a list")?;
+                write_seq(shape, &items[..shape.len()], pool)?;
+                if flagged {
+                    let flag = flag.unwrap_or(0);
+                    if flag == 0 && items.len() > shape.len() {
+                        return Err("a list element's flag is 0, which is written by leaving it out".to_string());
+                    }
+                    pool.push(cell(flag)?);
+                }
+            }
+        }
+        Op::Trailing(_) => unreachable!("handled above"),
         Op::I64 => {
             let value = int(first)? as u64;
             pool.push(value as u32);
@@ -1504,6 +1558,21 @@ fn validate_op(cursor: &mut Cursor<'_>, op: Op, bounds: &Bounds) -> Result<(), N
                 validate_seq(cursor, shape, bounds)?;
             }
         }
+        Op::FlaggedList(shape) => {
+            let count = cursor.next()?;
+            let flagged = count & FLAGGED != 0;
+            for _ in 0..count & !FLAGGED {
+                validate_seq(cursor, shape, bounds)?;
+                if flagged {
+                    cursor.next()?;
+                }
+            }
+        }
+        Op::Trailing(shape) => {
+            if !cursor.finished() {
+                validate_seq(cursor, shape, bounds)?;
+            }
+        }
         Op::I64 | Op::F64 => {
             cursor.next()?;
             cursor.next()?;
@@ -1593,6 +1662,24 @@ fn visit_references(cursor: &mut Cursor<'_>, ops: &[Op], visit: &mut impl FnMut(
                     visit_references(cursor, shape, visit);
                 }
             }
+            Op::FlaggedList(shape) => {
+                let count = cursor.next().unwrap_or(0);
+                let flagged = count & FLAGGED != 0;
+                for _ in 0..count & !FLAGGED {
+                    if cursor.finished() {
+                        break;
+                    }
+                    visit_references(cursor, shape, visit);
+                    if flagged {
+                        let _ = cursor.next();
+                    }
+                }
+            }
+            Op::Trailing(shape) => {
+                if !cursor.finished() {
+                    visit_references(cursor, shape, visit);
+                }
+            }
         }
     }
 }
@@ -1615,6 +1702,33 @@ fn decode_seq(cursor: &mut Cursor<'_>, ops: &[Op], items: &mut Vec<IrItem>) {
 }
 
 fn decode_op(cursor: &mut Cursor<'_>, op: Op, items: &mut Vec<IrItem>) {
+    match op {
+        Op::FlaggedList(shape) => {
+            let count = cursor.next().expect("validated cell");
+            let flagged = count & FLAGGED != 0;
+            let mut elements = Vec::new();
+            for _ in 0..count & !FLAGGED {
+                let mut element = Vec::with_capacity(shape.len() + 1);
+                decode_seq(cursor, shape, &mut element);
+                if flagged {
+                    let flag = cursor.next().expect("validated cell");
+                    if flag != 0 {
+                        element.push(IrItem::Int(i64::from(flag)));
+                    }
+                }
+                elements.push(IrItem::List(element));
+            }
+            items.push(IrItem::List(elements));
+            return;
+        }
+        Op::Trailing(shape) => {
+            if !cursor.finished() {
+                decode_seq(cursor, shape, items);
+            }
+            return;
+        }
+        _ => {}
+    }
     let mut next = || i64::from(cursor.next().expect("validated cell"));
     match op {
         Op::Int | Op::Code(_) | Op::Str | Op::Type | Op::Const | Op::Node => {
@@ -1656,6 +1770,7 @@ fn decode_op(cursor: &mut Cursor<'_>, op: Op, items: &mut Vec<IrItem>) {
             }
             items.push(IrItem::List(elements));
         }
+        Op::FlaggedList(_) | Op::Trailing(_) => unreachable!("handled above"),
         Op::I64 => {
             let low = next() as u64;
             let high = next() as u64;

@@ -253,7 +253,10 @@ fn collect_expression_source_codegen_diagnostics(
             }
             collect_expression_source_codegen_diagnostics(module, body, diagnostics);
         }
-        CodegenExpressionKind::EnvUpdate { overrides } => {
+        CodegenExpressionKind::EnvUpdate { base, overrides } => {
+            if let Some(base) = base {
+                collect_expression_source_codegen_diagnostics(module, base, diagnostics);
+            }
             for entry in overrides {
                 collect_expression_source_codegen_diagnostics(module, &entry.value, diagnostics);
             }
@@ -3798,10 +3801,17 @@ fn emit_expression(
             emit_env_overrides(current_module_id, overrides, context),
             emit_expression(current_module_id, body, context)
         ),
-        CodegenExpressionKind::EnvUpdate { overrides } => format!(
-            "nxEnvUpdate({})",
-            emit_env_overrides(current_module_id, overrides, context)
-        ),
+        CodegenExpressionKind::EnvUpdate { base, overrides } => match base {
+            Some(base) => format!(
+                "nxEnvUpdate({}, {})",
+                emit_env_overrides(current_module_id, overrides, context),
+                emit_expression(current_module_id, base, context)
+            ),
+            None => format!(
+                "nxEnvUpdate({})",
+                emit_env_overrides(current_module_id, overrides, context)
+            ),
+        },
         CodegenExpressionKind::IntervalPattern { .. } => {
             "nxRuntimeError(\"numeric patterns are not supported by executable source codegen yet\")"
                 .to_string()
@@ -5145,7 +5155,10 @@ fn collect_expression_value_references(
             collect_env_override_value_references(current_module_id, overrides, output);
             collect_expression_value_references(current_module_id, body, output);
         }
-        CodegenExpressionKind::EnvUpdate { overrides } => {
+        CodegenExpressionKind::EnvUpdate { base, overrides } => {
+            if let Some(base) = base {
+                collect_expression_value_references(current_module_id, base, output);
+            }
             collect_env_override_value_references(current_module_id, overrides, output);
         }
         CodegenExpressionKind::IntervalPattern { .. } => {}
@@ -5596,13 +5609,22 @@ fn collect_expression_runtime_helpers(
         CodegenExpressionKind::Provide { overrides, body } => {
             output.insert("nxProvide");
             for entry in overrides {
+                if entry.formula {
+                    output.insert("nxFormula");
+                }
                 collect_expression_runtime_helpers(&entry.value, output);
             }
             collect_expression_runtime_helpers(body, output);
         }
-        CodegenExpressionKind::EnvUpdate { overrides } => {
+        CodegenExpressionKind::EnvUpdate { base, overrides } => {
             output.insert("nxEnvUpdate");
+            if let Some(base) = base {
+                collect_expression_runtime_helpers(base, output);
+            }
             for entry in overrides {
+                if entry.formula {
+                    output.insert("nxFormula");
+                }
                 collect_expression_runtime_helpers(&entry.value, output);
             }
         }
@@ -6045,7 +6067,10 @@ fn environment_key(module: &CodegenModule, declaration_name: &str) -> String {
 }
 
 /// The overrides of a provide or a bundle as the runtime helpers take them:
-/// `[[declaration, [path], value], …]`, each value evaluated in order.
+/// `[[declaration, [path], value], …]`, each value evaluated in order, or `[[null, [], bundle]]`
+/// for a bundle. A formula's value is `nxFormula(() => value, module, { local: value, … })`: a
+/// function of no arguments closing over its locals, which also holds the module and the locals
+/// as data.
 fn emit_env_overrides(
     current_module_id: RuntimeModuleId,
     overrides: &[CodegenEnvOverride],
@@ -6054,16 +6079,52 @@ fn emit_env_overrides(
     let entries = overrides
         .iter()
         .map(|entry| {
+            let target = match &entry.target {
+                Some(target) => context.reference_name(current_module_id, target),
+                None => "null".to_string(),
+            };
+            let value = emit_expression(current_module_id, &entry.value, context);
+            let value = if entry.formula {
+                let module = context
+                    .modules
+                    .get(&current_module_id)
+                    .map(crate::ir::module_identity)
+                    .unwrap_or_default();
+                let locals = crate::formulas::free_locals(&entry.value)
+                    .iter()
+                    .map(|name| {
+                        let read = CodegenExpression {
+                            expr_id: entry.value.expr_id,
+                            span: entry.value.span,
+                            ty: None,
+                            kind: CodegenExpressionKind::Identifier {
+                                name: name.clone(),
+                                reference: None,
+                            },
+                        };
+                        format!(
+                            "{}: {}",
+                            js_string(name),
+                            emit_expression(current_module_id, &read, context)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "nxFormula(() => {value}, {}, {{ {locals} }})",
+                    js_string(&module)
+                )
+            } else {
+                value
+            };
             format!(
-                "[{}, [{}], {}]",
-                context.reference_name(current_module_id, &entry.target),
+                "[{target}, [{}], {value}]",
                 entry
                     .path
                     .iter()
                     .map(|field| js_string(field))
                     .collect::<Vec<_>>()
                     .join(", "),
-                emit_expression(current_module_id, &entry.value, context)
             )
         })
         .collect::<Vec<_>>();
@@ -6076,8 +6137,10 @@ fn collect_env_override_value_references(
     output: &mut Vec<CodegenReference>,
 ) {
     for entry in overrides {
-        if entry.target.module_id != current_module_id {
-            output.push(entry.target.clone());
+        if let Some(target) = &entry.target {
+            if target.module_id != current_module_id {
+                output.push(target.clone());
+            }
         }
         collect_expression_value_references(current_module_id, &entry.value, output);
     }

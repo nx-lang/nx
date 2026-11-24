@@ -771,6 +771,7 @@ pub fn apply_range_constructions(module: &mut PreparedModule) -> Vec<ExprId> {
                     span,
                 },
             ],
+            declared_in: None,
             span,
         };
     }

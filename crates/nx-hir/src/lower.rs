@@ -3381,6 +3381,7 @@ impl LoweringContext {
                 return self.alloc_expr(Expr::RecordLiteral {
                     record: record_def.name.clone(),
                     properties: props,
+                    declared_in: None,
                     span,
                 });
             }

@@ -83,6 +83,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         .collect::<Vec<_>>();
     component_entrypoints.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
+    crate::formulas::mark_formulas(&mut modules);
     diagnostics.extend(crate::environment_cycles::environment_cycle_diagnostics(
         &modules,
     ));
@@ -524,6 +525,37 @@ fn environment_target(
     reference
 }
 
+/// Builds a bundle applied by `provide env with`, or added by `a with b`, as one override that
+/// names no declaration.
+#[allow(clippy::too_many_arguments)]
+fn build_bundle_override(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    bundle: ExprId,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenEnvOverride> {
+    let value = build_expression(
+        artifact,
+        resolved_module,
+        prepared_cache,
+        lowered_module,
+        type_env,
+        bundle,
+        scope,
+        diagnostics,
+    )?;
+    Some(CodegenEnvOverride {
+        target: None,
+        path: Vec::new(),
+        value,
+        formula: false,
+    })
+}
+
 /// Builds the overrides of a `provide` block, element or bundle.
 #[allow(clippy::too_many_arguments)]
 fn build_env_overrides(
@@ -557,13 +589,15 @@ fn build_env_overrides(
             diagnostics,
         )?;
         built.push(CodegenEnvOverride {
-            target,
+            target: Some(target),
             path: provided
                 .path
                 .iter()
                 .map(|field| field.as_str().to_string())
                 .collect(),
             value,
+            // Decided once every declaration is built; see `crate::formulas`.
+            formula: false,
         });
     }
     Some(built)
@@ -1560,18 +1594,33 @@ fn build_expression(
             )?,
         },
         ast::Expr::Provide {
-            overrides, body, ..
+            overrides,
+            bundle,
+            body,
+            ..
         } => {
-            let overrides = build_env_overrides(
-                artifact,
-                resolved_module,
-                prepared_cache,
-                lowered_module,
-                type_env,
-                overrides,
-                scope,
-                diagnostics,
-            )?;
+            let overrides = match bundle {
+                Some(bundle) => vec![build_bundle_override(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    *bundle,
+                    scope,
+                    diagnostics,
+                )?],
+                None => build_env_overrides(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    overrides,
+                    scope,
+                    diagnostics,
+                )?,
+            };
             let body = build_expression(
                 artifact,
                 resolved_module,
@@ -1587,8 +1636,37 @@ fn build_expression(
                 body: Box::new(body),
             }
         }
-        ast::Expr::EnvUpdate { overrides, .. } => CodegenExpressionKind::EnvUpdate {
-            overrides: build_env_overrides(
+        ast::Expr::EnvUpdate {
+            bases, overrides, ..
+        } => {
+            let base = match bases.first() {
+                Some(base) => Some(Box::new(build_expression(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    *base,
+                    scope,
+                    diagnostics,
+                )?)),
+                None => None,
+            };
+            // `a with b` on bundles: `b` is one bundle override after `a`'s entries.
+            let mut built = Vec::new();
+            for extra in bases.iter().skip(1) {
+                built.push(build_bundle_override(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    *extra,
+                    scope,
+                    diagnostics,
+                )?);
+            }
+            built.extend(build_env_overrides(
                 artifact,
                 resolved_module,
                 prepared_cache,
@@ -1597,8 +1675,21 @@ fn build_expression(
                 overrides,
                 scope,
                 diagnostics,
-            )?,
-        },
+            )?);
+            CodegenExpressionKind::EnvUpdate {
+                base,
+                overrides: built,
+            }
+        }
+        // The checker rewrites every `with` it typed; one left here was not typed.
+        ast::Expr::With { span, .. } => {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                *span,
+                "a `with` the type checker did not resolve cannot be emitted",
+            ));
+            return None;
+        }
         ast::Expr::Ident(name) => {
             let in_scope = scope.contains(name.as_str());
             let reference = if in_scope {

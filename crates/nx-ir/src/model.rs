@@ -52,6 +52,11 @@ pub const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1: &str = "constraints-v1";
 /// top-level provides, so a runtime that predates environment values refuses the module by name.
 pub const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1: &str = "environment-v1";
 
+/// Required as well by a module that holds a formula override, a bundle applied by an
+/// `envProvide`, or an `envUpdate` with a base, so a runtime that evaluates every override where it
+/// is written refuses the module by name rather than giving formulas the wrong values.
+pub const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2: &str = "environment-v2";
+
 /// The kind numbers of schema 5. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
