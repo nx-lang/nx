@@ -59,6 +59,7 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxField",
     "nxFloat32Schema",
     "nxForOne",
+    "nxFormula",
     "nxFloat32Text",
     "nxIntDiv",
     "nxItems",

@@ -12,7 +12,7 @@ mod model;
 pub use explain::{explain_nx_ir, explain_nx_ir_image, ExplainError};
 pub use image::{
     section, write_nx_ir_image, Cells, NxIrImage, NxIrImageBuf, NxIrImageError, NxIrModuleRef,
-    Table, NONE, NX_IR_MAGIC,
+    Table, FLAGGED, NONE, NX_IR_MAGIC,
 };
 pub use model::{
     kinds, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrModuleEntry,

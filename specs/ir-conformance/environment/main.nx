@@ -9,7 +9,7 @@ let theme: env.Update = <env.Update radius=12 color=<Colors.Update surface="gray
 
 provide env.space = 8
 provide env.size.width = 12
-provide theme
+provide env with theme
 
 component <Badge /> = { <span text={env.locale} /> }
 external component <Stack content Children?: Element+ />

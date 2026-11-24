@@ -650,7 +650,9 @@ impl<'p> Machine<'p> {
             Node::EnvProvide { overrides, body } => {
                 self.eval_provide(cx, frame, index, overrides, *body)
             }
-            Node::EnvUpdate(overrides) => self.eval_bundle(cx, frame, index, overrides),
+            Node::EnvUpdate { overrides, base } => {
+                self.eval_bundle(cx, frame, index, overrides, *base)
+            }
         }
     }
 

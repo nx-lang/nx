@@ -1280,10 +1280,8 @@ fn corpus_artifacts_fit_the_size_budget() {
 }
 
 /// Entrypoints whose generated JavaScript is known to differ, each for a limitation `specs/future.md`
-/// records. `design-tokens-theme`'s `darkAccent` reads the main-module bundle under a local
-/// `provide env.colorMode=dark`; generated code evaluates the bundle once at load, in light mode
-/// ("Generated values are evaluated at load").
-const KNOWN_GENERATED_DIVERGENCES: [&str; 1] = ["design-tokens-theme: main.nx::darkAccent"];
+/// records. None remain.
+const KNOWN_GENERATED_DIVERGENCES: [&str; 0] = [];
 
 /// Whether generated-code diagnostics refuse a construct executable source codegen does not
 /// support, rather than report a failure of the emitter.
@@ -1296,8 +1294,22 @@ fn is_unsupported_by_source_codegen(message: &str) -> bool {
 /// <para>A function value in generated JavaScript is the JavaScript function itself, which knows
 /// its name and not its module, so the harness prints it as a `Function` record without `module`
 /// and it agrees with the recorded record of that name.</para>
+///
+/// <para>A formula in generated JavaScript is a closure holding its `module` and `locals`, which
+/// the harness prints as a `Formula` record; it agrees with a recorded formula of that module and
+/// those locals, whatever its `declaration`, `node` and `fingerprint`.</para>
 fn canonical_values_agree(left: &Value, right: &Value) -> bool {
     match (left, right) {
+        (Value::Object(left), Value::Object(right))
+            if left.get("$type").and_then(Value::as_str) == Some("Formula") =>
+        {
+            right.contains_key("node")
+                && left.get("module") == right.get("module")
+                && match (left.get("locals"), right.get("locals")) {
+                    (Some(left), Some(right)) => canonical_values_agree(left, right),
+                    (left, right) => left == right,
+                }
+        }
         (Value::Object(left), Value::Object(right))
             if left.get("$type").and_then(Value::as_str) == Some("Function")
                 && !left.contains_key("module") =>
@@ -1398,9 +1410,14 @@ fn generated_javascript_agrees_with_the_recorded_results() {
                try {{ out[name] = {{ ok: m[name]() }}; }}\n\
                catch (error) {{ out[name] = {{ error: String(error && error.message || error) }}; }}\n\
              }}\n\
-             const fn = (key, value) => typeof value === 'function'\n\
-               ? {{ $type: 'Function', name: value.name }} : value;\n\
-             console.log(JSON.stringify(out, fn));",
+             const plain = (value) => typeof value === 'function'\n\
+               ? ('module' in value && 'locals' in value\n\
+                 ? {{ $type: 'Formula', module: value.module, locals: plain(value.locals) }}\n\
+                 : {{ $type: 'Function', name: value.name }})\n\
+               : Array.isArray(value) ? value.map(plain)\n\
+               : value !== null && typeof value === 'object'\n\
+                 ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plain(v)])) : value;\n\
+             console.log(JSON.stringify(plain(out)));",
             format!("file://{}", dir.path().join("index.js").display())
         );
         let run = std::process::Command::new("node")
