@@ -139,12 +139,12 @@ fn override_cycle(
         return Some(
             Diagnostic::error("environment-cycle")
                 .with_message(format!(
-                    "This override of 'env.{name}' reads 'env.{through}', whose default reads                      '{name}' again, through {}.",
+                    "This override of 'env.{name}' reads 'env.{through}', whose default reads '{name}' again, through {}.",
                     steps.join(", ")
                 ))
                 .with_label(Label::primary(module_identity(module), value.span))
                 .with_help(format!(
-                    "Under this override, a read of 'env.{through}' evaluates its default, then                      the override, then 'env.{through}' again with nothing left to give it; read                      '{through}' outside the override, or give it a value here too."
+                    "Under this override, a read of 'env.{through}' evaluates its default, then the override, then 'env.{through}' again with nothing left to give it; read '{through}' outside the override, or give it a value here too."
                 ))
                 .build(),
         );

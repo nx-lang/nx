@@ -1,7 +1,7 @@
 {
   "main.nx::appRadius": [],
   "main.nx::card": [
-    {"path": "", "module": "main.nx", "start": 1769, "end": 1801}
+    {"path": "", "module": "main.nx", "start": 1885, "end": 1917}
   ],
   "main.nx::darkAccent": [],
   "main.nx::darkAccent#rootDark": [],
@@ -11,6 +11,7 @@
   "main.nx::nearer#rootSpace": [],
   "main.nx::passed": [],
   "main.nx::patched": [],
+  "main.nx::renamed": [],
   "main.nx::scaled": [],
   "main.nx::stepped": []
 }

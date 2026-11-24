@@ -153,7 +153,7 @@ fn a_top_level_provide_is_checked() {
 fn a_bundle_checks_its_entries() {
     assert_clean(&format!(
         "{MODES}let theme: env.Update = <env.Update locale=\"fr-FR\" color.accent=\"red\" />\n\
-         provide theme"
+         provide env with theme"
     ));
     assert_code(
         &format!("{MODES}let theme: env.Update = <env.Update locale=3 />"),
@@ -169,14 +169,14 @@ fn a_bundle_checks_its_entries() {
 fn a_bundle_takes_an_update_record_for_a_record_value() {
     assert_clean(&format!(
         "{MODES}let theme: env.Update = <env.Update color=<SemanticColors.Update accent=\"red\" /> />\n\
-         provide theme"
+         provide env with theme"
     ));
 }
 
 #[test]
 fn a_provide_of_something_else_is_rejected() {
     assert_code(
-        &format!("{MODES}let n = 3\nprovide n"),
+        &format!("{MODES}let n = 3\nprovide env with n"),
         "value-type-mismatch",
     );
 }

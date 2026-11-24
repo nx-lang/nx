@@ -30,5 +30,7 @@ let scaled() = { for scale in scales() { provide env.gap={env.space * scale} { p
 /// A bundle passed as an argument.
 let section(look: env.Update) = { provide env with look { env.radius + env.gap } }
 let passed() = { section(dense with { radius=9 }) }
+/// An override whose value is a read of another value.
+let renamed() = { provide env.gap={env.space} { env.gap } }
 /// A descriptor carries a formula in its `$env`.
 let card() = { <Card env.gap={env.space * 2} /> }

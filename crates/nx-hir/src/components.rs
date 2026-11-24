@@ -1004,11 +1004,16 @@ pub struct StringConversions {
 /// one.</para>
 /// Fills in the binding of every environment read and override the type checker resolved.
 ///
-/// <para>`bindings` is keyed by the read's expression, and by an override's value expression.
+/// <para>`bindings` is keyed by the read's expression, and `override_bindings` by an override's
+/// value expression, which may itself be a read.
 /// Code generation resolves the binding as it resolves any value reference, so an environment
 /// value is reached by its declaration wherever it was declared.</para>
-pub fn apply_environment_bindings(module: &mut PreparedModule, bindings: &FxHashMap<ExprId, Name>) {
-    if bindings.is_empty() {
+pub fn apply_environment_bindings(
+    module: &mut PreparedModule,
+    bindings: &FxHashMap<ExprId, Name>,
+    override_bindings: &FxHashMap<ExprId, Name>,
+) {
+    if bindings.is_empty() && override_bindings.is_empty() {
         return;
     }
     let raw_module = module.raw_module_mut();
@@ -1031,7 +1036,7 @@ pub fn apply_environment_bindings(module: &mut PreparedModule, bindings: &FxHash
             }
             ast::Expr::Provide { overrides, .. } | ast::Expr::EnvUpdate { overrides, .. } => {
                 for provided in overrides {
-                    if let Some(resolved) = bindings.get(&provided.value) {
+                    if let Some(resolved) = override_bindings.get(&provided.value) {
                         provided.binding = Some(resolved.clone());
                     }
                 }
@@ -1041,7 +1046,7 @@ pub fn apply_environment_bindings(module: &mut PreparedModule, bindings: &FxHash
     }
     for provide in raw_module.provides_mut() {
         if let crate::ProvideDecl::Override(provided) = provide {
-            if let Some(resolved) = bindings.get(&provided.value) {
+            if let Some(resolved) = override_bindings.get(&provided.value) {
                 provided.binding = Some(resolved.clone());
             }
         }

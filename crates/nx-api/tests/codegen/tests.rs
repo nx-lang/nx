@@ -3852,6 +3852,31 @@ let root() = { env.d }",
 }
 
 #[test]
+fn an_override_that_reads_a_value_whose_default_reads_it_is_an_environment_cycle() {
+    // `b`'s default reads `a`, so an override of `a` that reads `b` reaches `a` again.
+    for body in [
+        "let root() = { provide env.a={env.b} { env.a } }",
+        "let root() = { <Card env.a={env.b} /> }",
+        "let theme: env.Update = <env.Update a={env.b} />\nlet root() = { provide env with theme { env.a } }",
+        "provide env.a = { env.b }\nlet root() = { env.a }",
+    ] {
+        let artifact = artifact_from_source(&format!(
+            "environment a: int = 1\nenvironment b: int = {{ env.a + 1 }}\ncomponent <Card /> = {{ <span a={{env.a}} /> }}\n{body}"
+        ));
+        assert_eq!(
+            codegen_error_codes(&artifact),
+            vec!["environment-cycle".to_string()],
+            "{body}"
+        );
+    }
+    // An override that reads only the value it sets sees the sources outside it.
+    let artifact = artifact_from_source(
+        "environment a: int = 1\nlet root() = { provide env.a={env.a + 1} { env.a } }",
+    );
+    assert_eq!(codegen_error_codes(&artifact), Vec::<String>::new());
+}
+
+#[test]
 fn a_provide_in_an_imported_module_is_refused() {
     let modules = [
         (

@@ -25,6 +25,13 @@ evaluated with arguments: the values a host passes, which no entrypoint without 
 supply, with the input size of each, and `argument-diagnostics`, whose cases are calls every
 runtime fails alike, each with the code of its diagnostic and the argument it names.
 
+`with-expressions` patches records and update records with `with`: field lists, paths through
+fields (one of them through a record its module does not import), chains, operands and `??`, beside
+the `apply` program it means. `environment-formulas` holds overrides that read the environment,
+which are formulas computed where the value is read: bundles in `provide` blocks, inline, named and
+passed as an argument, a `with` step after a bundle, an override read under a nearer one, captured
+locals, and a descriptor whose `$env` carries a formula.
+
 Two programs are of the size a host runs, where the others are as small as what they cover allows.
 `large-catalog` is a library of 45 external components, 11 of them abstract bases three levels
 deep, with 37 types and 399 properties, and a screen compiled against it as an implicit import: 61
@@ -142,10 +149,11 @@ program as JavaScript and run every entrypoint of its entry module, whose value 
 recorded one. A case is not run there: its result comes from one IR runtime and is checked in the
 other. A program executable source codegen refuses (a match on patterns other than union cases, a
 call of a function-typed value, an action handler) is skipped, and so is an entrypoint that reaches
-such a construct at run time. An entrypoint whose generated result is known to differ, for a
-limitation `specs/future.md` records, is named in the test's `KNOWN_GENERATED_DIVERGENCES` and
-skipped: `design-tokens-theme`'s `darkAccent`, since generated code evaluates top-level values, and
-so the main module's bundle, when it loads. A function value in generated JavaScript is the
+such a construct at run time. No other entrypoint is skipped: `design-tokens-theme`'s `darkAccent`,
+which reads the main module's bundle under a local mode, agrees because a bundle entry that reads
+the environment is a formula computed at each read, even in a bundle generated code evaluates when
+it loads. A formula in generated JavaScript is a closure holding its `module` and `locals`, so it is
+compared with a recorded formula by those, not by `node` or `fingerprint`. A function value in generated JavaScript is the
 JavaScript function, which knows its name and not its module, so a recorded `Function` record is
 compared with it by name. `occurrences` and `occurrence-lifting` avoid all of them so that the
 occurrence rules are checked in all three engines, which is why the `{}` pattern has a program of

@@ -447,6 +447,9 @@ pub struct InferenceContext<'a> {
     /// The visible binding each environment read and override resolved to, keyed by the read's
     /// expression and, for an override, by its value expression.
     environment_bindings: FxHashMap<ExprId, Name>,
+    /// The binding each override resolved to, by the override's value expression. Kept apart
+    /// from the reads' bindings, since an override's value may itself be a read of another value.
+    override_bindings: FxHashMap<ExprId, Name>,
     /// What each `with` does, decided by its left side's type, for the rewrite after checking.
     with_sites: FxHashMap<ExprId, WithSite>,
     /// The type each use site bound to each of its target's type parameters, by element.
@@ -544,6 +547,7 @@ impl<'a> InferenceContext<'a> {
             consumed_type_arguments: FxHashSet::default(),
             function_value_calls: FxHashMap::default(),
             environment_bindings: FxHashMap::default(),
+            override_bindings: FxHashMap::default(),
             with_sites: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
             range_for_expressions: FxHashSet::default(),
@@ -7712,10 +7716,14 @@ impl<'a> InferenceContext<'a> {
         &self.function_value_calls
     }
 
-    /// The visible binding each environment read resolved to, by the read's expression, and each
-    /// override, by its value expression.
+    /// The visible binding each environment read resolved to, by the read's expression.
     pub fn environment_bindings(&self) -> &FxHashMap<ExprId, Name> {
         &self.environment_bindings
+    }
+
+    /// The visible binding each override resolved to, by its value expression.
+    pub fn override_bindings(&self) -> &FxHashMap<ExprId, Name> {
+        &self.override_bindings
     }
 
     /// Resolves `env.name` among the environment values the module can see: its own, the
@@ -7858,7 +7866,7 @@ impl<'a> InferenceContext<'a> {
         else {
             return;
         };
-        self.environment_bindings.insert(provided.value, binding);
+        self.override_bindings.insert(provided.value, binding);
         let Some(expected) =
             self.environment_path_type(&provided.name, ty, &provided.path, provided.span)
         else {

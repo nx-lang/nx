@@ -5,17 +5,67 @@
     "design.nx"
   ],
   "entrypoints": [
-    { "module": "main.nx", "function": "appRadius" },
-    { "module": "main.nx", "function": "darkAccent" },
-    { "module": "main.nx", "function": "patched" },
-    { "module": "main.nx", "function": "denseGap" },
-    { "module": "main.nx", "function": "inline" },
-    { "module": "main.nx", "function": "stepped" },
-    { "module": "main.nx", "function": "nearer" },
-    { "module": "main.nx", "function": "scaled" },
-    { "module": "main.nx", "function": "passed" },
-    { "module": "main.nx", "function": "card" },
-    { "module": "main.nx", "function": "darkAccent", "case": "rootDark", "arguments": [], "environment": { "colorMode": "dark" } },
-    { "module": "main.nx", "function": "nearer", "case": "rootSpace", "arguments": [], "environment": { "space": 10 } }
+    {
+      "module": "main.nx",
+      "function": "appRadius"
+    },
+    {
+      "module": "main.nx",
+      "function": "darkAccent"
+    },
+    {
+      "module": "main.nx",
+      "function": "patched"
+    },
+    {
+      "module": "main.nx",
+      "function": "denseGap"
+    },
+    {
+      "module": "main.nx",
+      "function": "inline"
+    },
+    {
+      "module": "main.nx",
+      "function": "stepped"
+    },
+    {
+      "module": "main.nx",
+      "function": "nearer"
+    },
+    {
+      "module": "main.nx",
+      "function": "scaled"
+    },
+    {
+      "module": "main.nx",
+      "function": "passed"
+    },
+    {
+      "module": "main.nx",
+      "function": "renamed"
+    },
+    {
+      "module": "main.nx",
+      "function": "card"
+    },
+    {
+      "module": "main.nx",
+      "function": "darkAccent",
+      "case": "rootDark",
+      "arguments": [],
+      "environment": {
+        "colorMode": "dark"
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "nearer",
+      "case": "rootSpace",
+      "arguments": [],
+      "environment": {
+        "space": 10
+      }
+    }
   ]
 }

@@ -10,6 +10,7 @@
     "main.nx::nearer#rootSpace": 10,
     "main.nx::passed": 19,
     "main.nx::patched": 13,
+    "main.nx::renamed": 12,
     "main.nx::scaled": 31,
     "main.nx::stepped": 13
   }

@@ -1,7 +1,7 @@
-module main.nx fingerprint 6484701942961368350
+module main.nx fingerprint 9669964192548133085
 links design.nx version "" fingerprint 5107991466796297217
 requires environment-v1 environment-v2
-entrypoints functions [appRadius darkAccent patched denseGap inline stepped nearer scales scaled section passed card] components [Card]
+entrypoints functions [appRadius darkAccent patched denseGap inline stepped nearer scales scaled section passed renamed card] components [Card]
 
 value theme: object @5:1-5:113 =
   <env.Update
@@ -95,7 +95,12 @@ function passed() @32:1-32:52 =
     )
   )
 
-function card() @34:1-34:50 =
+function renamed() @34:1-34:60 =
+  provide design.nx:env.gap:=design.nx:env.space {
+    design.nx:env.gap
+  }
+
+function card() @36:1-36:50 =
   provide design.nx:env.gap:=(design.nx:env.space mul 2) {
     <Card />
   }

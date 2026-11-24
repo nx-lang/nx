@@ -5,10 +5,10 @@
       {
         "formula": {
           "declaration": "card",
-          "fingerprint": "6484701942961368350",
+          "fingerprint": "9669964192548133085",
           "locals": {},
           "module": "main.nx",
-          "node": 69
+          "node": 72
         },
         "path": [],
         "value": "design.nx::gap"
@@ -24,6 +24,7 @@
   "main.nx::nearer#rootSpace": 2,
   "main.nx::passed": 15,
   "main.nx::patched": 13,
+  "main.nx::renamed": 4,
   "main.nx::scaled": [
     2,
     6
