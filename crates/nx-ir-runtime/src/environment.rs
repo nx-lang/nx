@@ -673,9 +673,16 @@ impl<'p> Machine<'p> {
                     key: capped_key,
                     below,
                 }) if capped_key == key => {
-                    capped = true;
-                    info.capped = true;
                     info.low = Some(info.low.map_or(position, |low| low.min(position)));
+                    // A read inside the source of a layer the call pushed itself goes on to
+                    // what is beneath that layer, which a lookup at the place would find too, so
+                    // it is tracked as a read of its own. A read inside any other source is one
+                    // that source's read stands for.
+                    let own_source = matches!(below, Below::Layer(at) if at >= base_len);
+                    if !own_source {
+                        capped = true;
+                        info.capped = true;
+                    }
                     match below {
                         Below::Layer(at) => position = at,
                         Below::Provide(index) => {

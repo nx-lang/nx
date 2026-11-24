@@ -407,10 +407,7 @@ impl<'p> Machine<'p> {
     }
 
     /// Ends the render [`begin_render`](Self::begin_render) started: the slots it read, and its
-    /// track's direct inputs in a call that tracks, each read beneath the render's own overrides
-    /// with the value found there, read again in a machine of its own over the same place. That
-    /// read is not charged, as the check's reads are not; one that fails is kept as `None`,
-    /// which counts as changed, so tracking never fails a render.
+    /// track's direct inputs in a call that tracks.
     pub(crate) fn end_render(&self) -> (Vec<bool>, Option<Vec<crate::kept::Input>>) {
         self.render_frame.set(0);
         let slots = std::mem::take(&mut *self.render_slots.borrow_mut());
@@ -418,26 +415,9 @@ impl<'p> Machine<'p> {
             return (slots.read, None);
         }
         let track = self.env.borrow_mut().tracks.pop();
-        let mut inputs = track
+        let inputs = track
             .map(crate::reuse::Track::into_inputs)
             .unwrap_or_default();
-        let mut beneath: Option<Option<Machine<'_>>> = None;
-        for input in &mut inputs {
-            if let crate::kept::Input::Beneath { key, value } = input {
-                let machine = beneath.get_or_insert_with(|| {
-                    let machine = Machine::new(self.program, self.options);
-                    machine.begin_environment().ok().map(|()| machine)
-                });
-                let cx = Cx {
-                    module: key.0,
-                    declaration: key.1,
-                    depth: 0,
-                };
-                *value = machine
-                    .as_ref()
-                    .and_then(|machine| machine.environment_value(cx, None, *key).ok());
-            }
-        }
         (slots.read, Some(inputs))
     }
 

@@ -151,10 +151,10 @@ impl Track {
             (
                 Input::Root { key: known, .. }
                 | Input::Override { key: known, .. }
-                | Input::Beneath { key: known, .. },
+                | Input::Unchecked { key: known },
                 Input::Root { key: new, .. }
                 | Input::Override { key: new, .. }
-                | Input::Beneath { key: new, .. },
+                | Input::Unchecked { key: new },
             ) => known == new,
             _ => false,
         });
@@ -269,11 +269,14 @@ impl EnvState {
     ///
     /// <para>A read no layer of the place sets is a root read, followed by the direct inputs of
     /// what it evaluated on its way that no kept result stands for. A read a layer of the place
-    /// sets is an override-supplied read, whose value stands for everything beneath it; when a
-    /// source of it was evaluated under the render's own overrides of other values, the value
-    /// beneath those overrides is compared instead, beside those direct inputs. A read the call's
-    /// own layer sets wholly, and a read inside one of the value's own sources, add only what they
-    /// evaluated.</para>
+    /// sets is an override-supplied read, whose value stands for everything beneath the call's
+    /// own layers, followed in the same way by the direct inputs of what it evaluated, the
+    /// formulas of those layers included. When a source of it was evaluated under a layer the
+    /// call pushed itself, the value it found is not one a lookup at the place gives, so the read
+    /// counts as changed at every check, beside those direct inputs. A read the call's own layer
+    /// sets wholly, and a read inside a source that is not one of the call's own layers, add only
+    /// what they evaluated; a read inside the source of a layer the call pushed itself goes on
+    /// beneath that layer and is a read of its own.</para>
     pub(crate) fn end_read(&mut self, key: EnvKey, info: ReadInfo) {
         let Some(track) = self.tracks.pop() else {
             return;
@@ -297,17 +300,20 @@ impl EnvState {
         let (own, forward_edges, forward_inputs) = if info.own_whole.is_some() || info.capped {
             (None, true, true)
         } else if info.host {
-            if parent.kind == TrackKind::Render && nested.is_some() {
-                // A source was evaluated under the render's own overrides of other values: what
-                // the place's layers make of it is compared beneath them.
-                (Some(Input::Beneath { key, value: None }), true, true)
+            if nested.is_some() {
+                // A source was evaluated under a layer the call pushed itself: what it found
+                // there cannot be compared with a lookup at the place.
+                (Some(Input::Unchecked { key }), true, true)
             } else {
+                // The value found beneath the call's own layers stands for the place's sources,
+                // but not for the formulas of the call's own path overrides on top of it, whose
+                // direct inputs follow it.
                 let own = info.beneath.map(|value| Input::Override {
                     key,
                     value,
                     lookup: leaves.into_iter().collect(),
                 });
-                (own, false, false)
+                (own, false, true)
             }
         } else {
             let own = Input::Root {

@@ -3404,3 +3404,102 @@ fn a_prop_default_a_new_descriptor_falls_back_on_joins_the_record() {
         .unwrap();
     assert!(renders(&tree, "host", "Label", "dark"));
 }
+
+/// `locale` at the card's place is a formula that reads `mode`, which the body overrides, so what
+/// a source the body evaluates finds for `locale` is not what a lookup at the place gives.
+fn place_formula_tree(card: &str, region: &str) -> InstanceTree {
+    let source = format!(
+        "
+environment mode: string = \"light\"
+environment region: string = \"fixed\"
+environment locale: string = \"x\"
+environment loud: string = {{ env.mode + \"!\" + env.locale }}
+component <Card extends Node /> = {{ {card} }}
+component <Page /> = {{
+  <Stack env.locale={{ if env.mode == \"dark\" {{ env.region }} else {{ \"fixed\" }} }}><Card /></Stack>
+}}
+let root() = {{ <Page /> }}
+"
+    );
+    let start = roots(&[("region", region)]);
+    let mut tree = InstanceTree::with_environment(program(&format!("{CONTROLS}{source}")), start);
+    cards_pass(&mut tree, "root", "Card");
+    tree
+}
+
+#[test]
+fn a_place_formula_read_under_the_bodys_override_follows_what_the_formula_reads() {
+    for (card, before, after) in [
+        (
+            "provide env.mode=\"dark\" { <Label Text={env.loud} /> }",
+            "dark!fixed",
+            "dark!us",
+        ),
+        (
+            "provide env.mode=\"dark\" { <Label Text={env.locale} /> }",
+            "fixed",
+            "us",
+        ),
+    ] {
+        let mut tree = place_formula_tree(card, "fixed");
+        assert!(renders(&tree, "root/0", "Label", before), "{card}");
+        tree.set_environment(roots(&[("region", "us")]), &options())
+            .unwrap();
+        cards_pass(&mut tree, "root", "Card");
+        assert!(renders(&tree, "root/0", "Label", after), "{card}");
+        let fresh = place_formula_tree(card, "us");
+        assert_eq!(
+            rendered(&tree, "root/0"),
+            rendered(&fresh, "root/0"),
+            "{card}"
+        );
+    }
+}
+
+#[test]
+fn a_formula_the_body_provides_that_reads_its_own_value_follows_what_is_beneath_it() {
+    let mut tree = linked(
+        "
+environment x: int = 1
+component <Card extends Node /> = {
+  <Stack>{ provide env.x={env.x + 1} { <Label Text={\"\" + env.x} /> } }</Stack>
+}
+component <Page /> = { <Stack><Card /><Stack env.x={5}><Card /></Stack></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "2"));
+    assert!(renders(&tree, "root/1", "Label", "6"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("x", NxValue::Int(10))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "11"));
+    assert!(renders(&tree, "root/1", "Label", "6"));
+}
+
+#[test]
+fn a_field_the_body_provides_from_a_formula_follows_what_the_formula_reads_under_a_place_override()
+{
+    let mut tree = linked(
+        "
+type Colors = { accent:string tone:string }
+environment locale: string = \"en\"
+environment colors: Colors = { <Colors accent=\"a\" tone=\"t\" /> }
+component <Card extends Node /> = {
+  <Stack>{
+    provide env.colors.accent={env.locale} { <Label Text={env.colors.accent + env.colors.tone} /> }
+  }</Stack>
+}
+component <Page /> = { <Stack><Stack env.colors.tone=\"p\"><Card /></Stack></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "enp"));
+    tree.set_environment(roots(&[("locale", "fr")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "frp"));
+}

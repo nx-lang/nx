@@ -129,12 +129,12 @@ struct Node {
 }
 
 impl Node {
-    /// Whether the record can never be found valid: it holds a read beneath the render's own
-    /// overrides that failed there.
+    /// Whether the record can never be found valid: it holds a read that counts as changed at
+    /// every check.
     fn always_stale(&self) -> bool {
         self.record
             .iter()
-            .any(|input| matches!(input, Input::Beneath { value: None, .. }))
+            .any(|input| matches!(input, Input::Unchecked { .. }))
     }
 }
 

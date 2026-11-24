@@ -48,11 +48,11 @@ pub(crate) enum Input {
         value: Value,
         lookup: Arc<[EnvKey]>,
     },
-    /// A read of a node's render that a layer of the place sets, made while evaluating a source
-    /// under the render's own overrides of other values: the value found beneath those
-    /// overrides, or none when reading it there failed, which counts as changed. The direct
-    /// inputs of what it evaluated follow it in the record.
-    Beneath { key: EnvKey, value: Option<Value> },
+    /// A read that a layer of the place sets, when a source of it was evaluated under a layer the
+    /// call pushed itself: the value found there is not one a lookup at the place gives, so it
+    /// counts as changed at every check. The direct inputs of what it evaluated follow it in the
+    /// record, so that a change of what they read reaches the record through the indexes.
+    Unchecked { key: EnvKey },
 }
 
 /// What depends on a kept result or on a root value: a node, by key, or a variant.
@@ -232,14 +232,14 @@ fn edges_of(input: &Input) -> Vec<VariantId> {
     match input {
         Input::Root { edges, .. } => edges.to_vec(),
         Input::Edge(id) => vec![*id],
-        Input::Override { .. } | Input::Beneath { .. } => Vec::new(),
+        Input::Override { .. } | Input::Unchecked { .. } => Vec::new(),
     }
 }
 
 /// The environment values an input is indexed under.
 fn keys_of(input: &Input) -> Vec<EnvKey> {
     match input {
-        Input::Root { key, .. } | Input::Beneath { key, .. } => vec![*key],
+        Input::Root { key, .. } | Input::Unchecked { key } => vec![*key],
         Input::Override { key, lookup, .. } => {
             let mut keys = lookup.to_vec();
             if !keys.contains(key) {
@@ -556,7 +556,7 @@ impl<'p> Machine<'p> {
         match input {
             Input::Root { key, .. } => !self.place_sets(*key),
             Input::Override { key, .. } => self.place_sets(*key),
-            Input::Edge(_) | Input::Beneath { .. } => true,
+            Input::Edge(_) | Input::Unchecked { .. } => true,
         }
     }
 
@@ -592,10 +592,7 @@ impl<'p> Machine<'p> {
                     Validity::Other
                 })
             }
-            Input::Beneath { key, value } => Ok(match value {
-                Some(value) if self.lookup_equals(*key, value)? => Validity::Valid,
-                _ => Validity::Stale,
-            }),
+            Input::Unchecked { .. } => Ok(Validity::Stale),
         }
     }
 
