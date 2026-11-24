@@ -394,7 +394,7 @@ export type PreparedDeclarationKind = {
     readonly tag: "typeAlias";
 } | {
     readonly tag: "environment";
-    /** Node index of the default, evaluated at each read that reaches it. */
+    /** Node index of the default, evaluated at a read that reaches it unless the call reuses an earlier result. */
     readonly default: number;
     readonly ty: PreparedType;
 } | {

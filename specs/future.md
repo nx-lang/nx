@@ -1071,12 +1071,12 @@ closure (React's compiler and `useCallback`; Compose remembering a lambda on wha
 NX has the comparison already, `handlers_equal`: the same handler node with an equal capture. Two
 things stand between that and using it:
 
-- **What a handler captures.** It captures the whole frame of the body, every prop and every state
-  field, so after any change of state every handler the body binds is unequal to the one before,
-  whether or not it reads what changed. A handler the component's own body bound reads state live
-  when it is dispatched in any case. The capture has to shrink to what the handler reads, which
-  the compiler knows, before equality by value says anything useful. That is a change to the
-  image format and to both runtimes.
+- **What a handler captures.** *(Done in `add-tracked-reactivity`.)* It captured the whole frame of
+  the body, every prop and every state field, so after any change of state every handler the body
+  bound was unequal to the one before, whether or not it read what changed. A handler now captures
+  only the slots its node reads, which both runtimes find from the image as they find a formula's
+  locals, with no change to the image format, held and compared in ascending slot index. Two
+  handlers made by one node are equal when only a slot they do not read changed.
 - **Identity.** The tree finds the node a handler belongs to by the handler's identity, the one
   allocation, and it must: comparing by value is what let a component nested under itself patch
   its ancestor (`support-rust-hosts`, review finding RF1). A child that is left alone keeps the
@@ -1093,11 +1093,15 @@ handlers. Handlers bound for its emits only need to be present on both sides, si
 sees them. That leaves the capture problem open for handlers the child's body can see, such as a
 button handler inside a `Stack`'s content. Those still compare unequal after any change to the
 owner's state, so such a child renders again. **Narrowing captures** to the frame slots a handler
-actually reads would let those skip too. The compiler knows which slots those are, but the change
-touches the image format (a handler node would list its captured slots) and both runtimes, which
-must capture the same slots so that equality and operation counts agree. Do it once a program shows
-content-heavy components rendering again for nothing, or together with read tracking for
-environment values if that needs the same per-node read sets.
+actually reads lets those skip too, and `add-tracked-reactivity` does it in both runtimes, from the
+image and without a format change.
+
+**Looking up a kept result by the variant last used.** When the instance tree keeps several
+variants of one derived result, one per situation it was used in (the light and the dark palette,
+say), a lookup tries them in the order they were kept. A lookup could try first the variant the
+same node's last render used, which is the one it most often needs again. This is left out for
+simplicity: a result has few variants, and a miss costs only the free revision checks of the
+variant tried.
 
 Nobody has measured a program where any of this matters. The cost before step 1 was one render
 for each component under the one that changed, which for a view of a few hundred components is
@@ -2373,9 +2377,6 @@ then pass a few hundred times in a row.
   be skipped.
 - **Restored instances have no recorded reads.** An instance restored from saved state has no read
   list until it renders once, so a root value change does not reach it before then.
-- **A bundle's values are computed at every read.** Each value a `provide env with brand` sets is
-  computed each time a read reaches it, as a default is. Hoisting it, like memoizing defaults
-  below, changes operation counts and so the cost model.
 - **Generated path overrides are not checked.** Generated code applies `env.size.width=…` without
   checking that the field exists in the value it patches, where the IR runtimes refuse a path that
   does not.
@@ -2398,8 +2399,6 @@ then pass a few hundred times in a row.
 - **`$env` on host elements.** A host element carries no `$env` today, so a host that wants to set
   `dir` or a CSS color scheme from the environment asks the runtime. Stamping host elements is easy
   to add if hosts want it.
-- **Memoizing defaults.** A body that reads `env.color` ten times evaluates its default ten times.
-  Memoizing per environment would change operation counts, so the cost model would change with it.
 - **An element form of `with`.** `<ada with age=37 />` or similar, if markup-heavy code wants it;
   `{ ada with { age=37 } }` covers it today.
 - **`with` on union cases.** Patching a value of a union type whose cases are records, keeping the
@@ -2409,15 +2408,13 @@ then pass a few hundred times in a row.
 
 ## Design Tokens: What `add-design-tokens` Left For Later
 
-- **Reading a token is expensive.** In `specs/ir-conformance/design-tokens-theme`, one
-  `env.color.accent` read costs 28,440 operations and one `env.button.radius` read 231,969, even
-  though the brand sets the radius outright. Three things multiply: a default is evaluated at every
-  read (see "Memoizing defaults" above); reading one field of a record default evaluates the whole
-  record, so `env.button.radius` also evaluates `env.color` twice and all of `env.text`; and a
-  top-level value is rebuilt each time it is read, so each of the dozen `standardPalette.…` reads in
-  the `env.color` default builds all 55 colors. Caching top-level values once per program and
-  memoizing defaults per environment would remove most of it; both change operation counts and so
-  the cost model.
+- **Reading a token evaluates the whole record it is a field of.** Within one call, defaults,
+  entry-module provides and top-level values are evaluated once for each environment they depend on
+  (`add-tracked-reactivity`), so in `specs/ir-conformance/design-tokens-theme` one
+  `env.button.radius` read costs 2,328 operations, down from 48,905, and one `env.color.accent`
+  read 1,957, down from 23,475. What remains is that reading one field of a record default
+  evaluates the whole record once, so `env.button.radius` still builds all of `env.button` and
+  what it reads. Evaluating fields lazily would change when errors appear.
 - **A palette generator.** `paletteFromHue(…)` building eleven steps from an OKLCH lightness curve,
   mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard steps.
 - **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's

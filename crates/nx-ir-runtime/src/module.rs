@@ -290,7 +290,8 @@ pub(crate) enum DeclarationKind {
     Component(ComponentDecl),
     Union(UnionDecl),
     TypeAlias,
-    /// An environment value: its default node, evaluated at each read that uses it, and its type.
+    /// An environment value: its default node, evaluated at a read that uses it unless the call
+    /// reuses an earlier result, and its type.
     Environment {
         default: u32,
         ty: Arc<Type>,

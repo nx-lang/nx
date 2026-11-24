@@ -194,6 +194,13 @@ inside the ones it holds; a malformed `$env` is `nx-ir-boundary-type`. A compone
 `$env` among its props. See *Environment values* in `docs/nx-ir-format.md` for the lookup order and
 the cost.
 
+Within one call, a top-level value, a default, an entry-module provide and a formula are evaluated
+again only when a value their last evaluation read would now be found from another override: every
+layer of the call's environment has an identity, and each kept result records, for every value it
+read, the layer that supplied it. A reused result costs nothing beyond the node that asked for it,
+and nothing is kept from one call to the next (*Reusing derived results* in
+`docs/nx-ir-format.md`).
+
 ```rust,no_run
 use nx_ir_runtime::{Environment, Program, RuntimeOptions};
 use nx_value::NxValue;
@@ -331,8 +338,9 @@ What the tree does:
   `==` costs, and rebinding costs one operation for each handler, list and record it walks, walking
   a value many handlers capture once. They leave the usage and origins reports alone, and a visit
   that compares and then initializes the node spends a budget on each. A handler inside content
-  captures the whole frame of the body that bound it, so after any change to its owner's state it
-  is unequal, and a child holding it renders again.
+  captures the slots its node reads, so it stays equal across a change to its owner's state or
+  props that it does not read, and a child holding it renders again only when one it reads
+  changed.
 - **An instance lives as long as its place in the output.** `finish` drops what a pass left
   unvisited under a node it visited that had rendered since the last pass: the host has just
   walked that node's new output and did not find the place in it. Under a visited node that had

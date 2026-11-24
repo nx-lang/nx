@@ -151,7 +151,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 16 | unionCase | `[16, ref, str, [[str, node]...], [node...]]` | Constructs a case of the union the reference names. The string is the case name. A constant case evaluates to its bare name. |
 | 17 | element | `[17, id, str, [[str, node]...], [node...]]` | An intrinsic element with a module-local id, a tag, properties and content children. |
 | 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
-| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<State.Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
+| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<State.Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the slots the node and the nodes beneath it read; the body runs when a host dispatches the action. See *Action handlers*. |
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
 | 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, in source order like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
 | 22 | forRange | `[22, slot, str, slot?, str?, node, node]` | A `for` whose iterable evaluates to a `Range` record, with the layout of a `for`. The body runs once per integer from the range's `start` upward, stopping before `end` or after it when `endInclusive` is true, with the item bound to that integer and the index, when present, to its position from zero. An empty or reversed range runs the body no times. Yields the list of body values. Requires `ranges-v1`. |
@@ -652,8 +652,12 @@ function value in a result.
 
 ## Action handlers
 
-A handler node captures the frame when it is evaluated: the body reads every local it closes over
-through the slot it already had, so the image carries no environment, and a handler for a component
+A handler node captures, when it is evaluated, the slots it and the nodes beneath it read, as the
+frame holds them then, and no other slot: the body reads every local it closes over through the
+slot it already had, so the image carries no environment. A runtime finds those slots from the
+image, as it finds a formula's locals, at no charge, and holds them in ascending slot index. Two
+handlers made by one node are therefore equal when the slots that node reads hold equal values,
+whatever the rest of the frame held, and a handler for a component
 declared in another module resolves its component and action by reference like any other node.
 Whether the owner reference is present decides nothing by itself; what matters is which instance
 dispatches the handler. A handler whose owner is the component an instance was initialized from
@@ -695,8 +699,9 @@ runtime finds the value at a read from, in order:
 
 An override with a field path applies its value at that path to what the later sources give, so
 `env.color.accent=X` reads as the color the rest of the lookup finds, with `accent` set to `X`. A
-default and an entry-module provide are evaluated at each read that reaches them, in the
-environment of the read. While an entry-module provide of a value is evaluated, a read of that
+default and an entry-module provide are evaluated at a read that reaches them, in the environment
+of the read, unless the call can reuse an earlier result, as *Reusing derived results* below
+defines; a reused result is the one evaluating it there would give. While an entry-module provide of a value is evaluated, a read of that
 value sees only the sources after it, so a provide that reads the value it sets cannot loop. A
 bundle provide applies each of its entries as an override; an entry whose value is a `*.Update`
 record is applied as a patch of the fields it sets.
@@ -745,25 +750,80 @@ in the program has it, and otherwise by its qualified name. An unknown or ambigu
 diagnostics. A malformed `$env` on a descriptor is refused with `nx-ir-boundary-type`.
 
 **Cost.** An `envRead` costs one operation, and a default, entry-module provide or formula evaluated
-for it is charged node by node each time it is evaluated. Capturing a formula costs one operation. An `envProvide` costs one operation, and its
+for it is charged node by node each time it is evaluated; one whose earlier result is reused costs
+nothing more. Capturing a formula costs one operation. An `envProvide` costs one operation, and its
 override values and body are charged as any other children. Adding the overrides to one component
 descriptor costs one operation. The lookup itself costs nothing beyond the nodes it evaluates.
 
+### Reusing derived results
+
+Within one call, a runtime keeps the last result of each *derived result* it evaluates and reuses
+it while nothing it read could have changed. The derived results, and what identifies each, are:
+
+| Derived result | Identified by |
+| --- | --- |
+| A top-level value's value, checked against its declared type | The declaration |
+| An environment value's default, checked against its type | The environment declaration |
+| A targeted entry-module provide's value | The provide's index |
+| An entry-module bundle provide's bundle | The provide's index and the value being read |
+| A formula a layer of the environment holds | That layer, within the call |
+
+None of them reads a local slot, so the environment is the only input two uses can differ in. A
+formula in an entry-module bundle is evaluated at each read; the bundle it comes from is reused.
+Parameter and field defaults are not derived results: they can read the parameters.
+
+**Tokens.** Every layer a call pushes on its environment stack, the host's overrides of `$env`, an
+`envProvide`'s overrides and the cap pushed while a source of a value is evaluated, gets an
+identity of its own, the next number of a counter the call keeps. The *token* of a value at a
+position of the stack is the identity of the topmost layer below that position that sets the value,
+wholly or at a field path, or caps reads of it, or none when no layer does. The stack only grows and
+shrinks at the top, so a layer still present has the layers beneath it that it had when it was
+pushed, and two reads of a value with the same token find it from the same sources. A new override
+has a new token even when it sets an equal value.
+
+**Where an evaluation begins.** A derived result's evaluation begins at the stack as it stands when
+the result is asked for, before the evaluation pushes its own cap. Every read of an environment
+value made while it is evaluated, at any depth, inside other derived results it evaluates or reuses
+included, is recorded for it once, with the value's token below where it began. The layers above
+that position are its own cap, which its identity fixes, and the layers its nested evaluations push
+and pop, which the layers below fix. That is why a bundle provide is identified by the value being
+read: it is evaluated under a cap of that value. With `provide env with sized(env.scale)` in the
+entry module, setting `scale` and `ring`, a read of `ring` evaluates the bundle under a cap of
+`ring`, where `env.scale` reaches the bundle again under a cap of `scale`, where `env.scale` falls
+through to the default. The two entries give different bundles, and each later read reuses its
+own.
+
+**Reuse.** At a use, a runtime reuses the kept result when the current token of every value it
+recorded equals the recorded one, and otherwise evaluates it again and keeps the new result in the
+place of the old. A reused result's recorded values count as reads of every derived result being
+evaluated around the use, each with its token computed again below where that evaluation began.
+Comparing tokens costs nothing, so a reused result costs nothing beyond the node that asked for
+it: one operation for the `reference` or `envRead` node. Its nodes are not evaluated and its value
+is not checked against its type again. Nothing is kept from one call to the next, so a call's count
+depends only on its images and input. A failure ends the call, so no failure is kept. For a call
+the instance tree makes, a reused result's reads are added to the render's record of what it read,
+as evaluating it would have added them.
+
+Reuse changes no result. Because it does less work, a call may stay under a call depth, native
+stack or operation limit that evaluating every use afresh would reach: a default evaluated near the
+top of a call and reused far down it is not evaluated at the depth of the deep read. Both runtimes
+reuse alike, so they reach the same limits.
+
 ## Evaluation cost
 
-The cost of an evaluation is counted in *operations*, and the count is a property of the images and
-the input alone: two runtimes that evaluate the same images with the same values and compute the
+The cost of an evaluation is counted in *operations*, and the count is a property of the images,
+the input and, for a call the instance tree makes, the state the tree holds: two runtimes that evaluate the same images with the same values and compute the
 same result count the same operations, in the same order. That is what lets a host give one
 evaluation a budget of operations and mean the same thing in every runtime. Six things cost
 operations:
 
 | Charge | Cost | When |
 | --- | --- | --- |
-| A node is evaluated | 1 | Before any of its children. Every evaluation counts: a loop body once per iteration, a parameter's default each time a call leaves the parameter out, a field's or a state field's default each time it is evaluated, a value's initializer each time a `reference` evaluates it, and a handler's body each time a dispatch runs it. |
+| A node is evaluated | 1 | Before any of its children. Every evaluation counts: a loop body once per iteration, a parameter's default each time a call leaves the parameter out, a field's or a state field's default each time it is evaluated, a value's initializer each time a `reference` evaluates it rather than reusing its result (*Reusing derived results*), and a handler's body each time a dispatch runs it. |
 | An item is placed in a sequence a node builds | 1 per item | As the item is placed, after the child that produced it. The sequences are the value of an `array`, `for` or `forRange` node and the content list of a `record`, `unionCase`, `element` or `component` node. A child whose value is a sequence places each of its items; an empty one places none. A `for` over one item rather than a sequence yields its body's value and places nothing. A call that binds a sequence to a content parameter builds the list anew: each item of the argument costs 1, empty or not, or 1 for each item it contributes when it is itself a sequence of several. |
 | A `concat` produces a string | 1 per 64 UTF-16 code units, rounded down | After both operands, before the string exists. |
 | A value is checked against a declared type | 1 per value that is not a sequence | Before the value is checked. A sequence type costs nothing itself: each item is checked, and a one-item sequence at a type that is not a sequence type is read as its item. A record, or a union case with fields, is one and then each of its field values, defaults included; a field left out with no default is not checked. A value at the type `object` is one value whatever it holds. |
-| Two values are compared | 1 per pair, and 1 more per 64 UTF-16 code units of text read | Before the pair is compared. Two sequences of one length compare their items in order, and two handlers of one node their captured values slot by slot, each up to and including the first pair that differs. Two records of one type are lined up by field name: a name both hold compares the pair of its values, and a name only one holds costs 1, all of them compared and counted whether or not an earlier one differed. The text read is the shorter of two strings, the shorter of two records' type names, and every field name of two records of one type, for each record that holds it. |
+| Two values are compared | 1 per pair, and 1 more per 64 UTF-16 code units of text read | Before the pair is compared. Two sequences of one length compare their items in order, and two handlers of one node their captured values slot by slot in ascending slot index, each up to and including the first pair that differs. Two records of one type are lined up by field name: a name both hold compares the pair of its values, and a name only one holds costs 1, all of them compared and counted whether or not an earlier one differed. The text read is the shorter of two strings, the shorter of two records' type names, and every field name of two records of one type, for each record that holds it. |
 | A value is written for the host | 1 per value, and 1 more per 64 UTF-16 code units of text written | Before the value is written. Every value is one, because every value takes a place in what is written: a sequence, the empty value included, and then its items; a record and then its field values. The text written is a string, a record's type name, and each of its field names. A function value and an action handler are one each, and only a value the runtime made is one of them: a record a host passes with the type name or the internal marking of one is a record, entered and paid for like any other, and so is the `nx.int` record canonical JSON spells a large integer with. |
 
 The first three are what a program does. The last three are the walks a runtime makes over a value,
@@ -785,7 +845,8 @@ does not hold comparing as the empty value. A pattern matches by equality unless
 scrutinee is the empty value, or both are records and the pattern names a type: those are decided
 by emptiness or by the type name and compare nothing. A record holds a field when it stores a
 value for it, so an optional field that was left out or is empty is not compared, and a field an
-update record clears is. A handler captures the slots of its frame as they stood when it was made.
+update record clears is. A handler captures the slots its node reads, as they stood when it was
+made, and only those are compared.
 A value is written when a call returns it: a function's result, a descriptor, rendered output, each
 effect, and component state. A value reached from several places is written once for each, and a
 `null` inside a value the host passed at `object` is the empty value: one value where it is
@@ -1509,7 +1570,9 @@ truncation of them and every cell overwrite of the small ones; and the corpus is
 runtime starts. It covers
 every node, type and declaration kind, a program spanning two images, derived declarations, a
 document that is a single trailing element, components that bind action handlers, and one that
-holds records it built in its state, whose origins every runtime must keep. Two of its
+holds records it built in its state, whose origins every runtime must keep, and
+`environment-reuse`, which pins with their counts the derived results a call reuses and evaluates
+again. Two of its
 programs are of the size a host runs, a snippet against a catalog of 45 external components and a
 question flow with state over a library of 31 question kinds, and they are what the TypeScript
 runtime's performance harness times. It also holds
