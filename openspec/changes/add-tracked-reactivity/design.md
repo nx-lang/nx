@@ -249,11 +249,20 @@ place like any other: a layer the render pushed changes the value it finds only 
 render itself recorded, so a root read of `locale` there still holds when `locale`'s root value
 is unchanged.
 
-The one case that still compares by value is a read that a layer of the place sets, wholly or at
-a field path, when a source of it was evaluated under the render's own overrides of other values:
-the override-supplied value found under those overrides is not the one a lookup at the place
-gives. It holds the value found beneath the render's overrides, or none, which counts as changed,
-compared as an override-supplied read is, beside the direct inputs of what it evaluated.
+An override-supplied read holds the value found beneath the render's own layers, which a lookup
+at the place gives, and is followed by the direct inputs of what it evaluated, so that the
+formulas of the render's own field overrides on top of it, as in
+`provide env.colors.accent={env.locale}` under a place that sets `colors.tone`, are recorded. A
+read inside the source of a layer the render pushed itself, as `env.x` in `provide env.x={env.x +
+1}`, goes on beneath that layer and is recorded as a read of its own, root or override-supplied.
+
+One case cannot be checked by value: a read that a layer of the place sets, wholly or at a field
+path, when a source of it was evaluated under a layer the render pushed itself. If the place sets
+`locale` to `if env.mode == "dark" { env.region } else { "fixed" }` and the body overrides `mode`,
+the value found under the body's override is not the one a lookup at the place gives, and both can
+stay equal while what the body reads changes. Such a read counts as changed at every check, so the
+node renders again whenever its record is checked, and the direct inputs of what it evaluated
+follow it, so that a change of `region` reaches the node through the indexes.
 
 A node's record also holds the props and state fields its render read (Decisions 9 and 10), and
 the node holds its own `verified` revision, the revision at which its record was last found valid.

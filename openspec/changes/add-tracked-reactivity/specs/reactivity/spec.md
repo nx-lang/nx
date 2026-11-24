@@ -113,10 +113,13 @@ read, found from its inputs and edges, used only to take it into a call. An eval
 kept result, a formula, a formula entry of an entry-module bundle and a result evaluated under the
 render's own overrides, SHALL give its direct inputs to the record that encloses it, so that a
 record holds every read, at any depth, that no kept result stands for, and a read the render's own
-override supplies wholly SHALL NOT be one. A read that a layer of the place sets, when a source of
-it was evaluated under the render's own overrides of other values, SHALL hold the value found
-beneath those overrides, or none, and SHALL compare by value, beside the direct inputs of what it
-evaluated. An override-supplied value SHALL compare as a host would see it written, with the rule
+override supplies wholly SHALL NOT be one. An override-supplied read SHALL be followed by the
+direct inputs of what it evaluated, the formulas of the render's own field overrides on top of it
+included, and a read inside the source of a layer the render pushed itself SHALL be a read of what
+is beneath that layer. A read that a layer of the place sets, when a source of it was evaluated
+under a layer the render pushed itself, SHALL count as changed at every check, since what it found
+is not what a lookup at the place gives, and the direct inputs of what it evaluated SHALL follow
+it. An override-supplied value SHALL compare as a host would see it written, with the rule
 of the equality cutoff. A render's record SHALL start with what normalizing its props read, so
 that a prop default that reads the environment is a source of the render. A node's record SHALL
 also hold the props and state fields its render read, and the node SHALL hold the revision at
@@ -150,6 +153,17 @@ whether a derived result was evaluated or reused.
   `env.loud` inside its own `provide env.mode="dark"`
 - **THEN** a host change of the root value of `mode` SHALL NOT render the node again
 - **AND** a host change of the root value of `locale` SHALL render it again with the new `locale`
+
+#### Scenario: A place's formula read under the body's own override follows what it reads
+- **WHEN** a node's place sets `locale` to `if env.mode == "dark" { env.region } else { "fixed" }`,
+  its body renders `env.loud`, whose default reads `env.locale`, inside its own
+  `provide env.mode="dark"`, and a host changes the root value of `region`
+- **THEN** the node SHALL render again and show what a fresh render shows
+
+#### Scenario: A formula the body provides that reads its own value follows what is beneath it
+- **WHEN** a body renders `env.x` inside its own `provide env.x={env.x + 1}`, and a host changes the
+  root value of `x`
+- **THEN** the node SHALL render again with the new value plus one
 
 #### Scenario: A prop default that reads the environment is a source
 - **WHEN** a host visits a descriptor that leaves out a prop whose default is `{ env.mode }`, and
