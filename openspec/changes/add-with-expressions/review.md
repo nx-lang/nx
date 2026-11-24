@@ -409,7 +409,7 @@ rule:
 
 "A `with` step after a bundle wins" follows from bundle entries being looked up last first.
 
-### 🟡 Fixed - RF24 It isn't settled whether a field list may come right after `provide env with`
+### ✅ Verified - RF24 It isn't settled whether a field list may come right after `provide env with`
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/environment-values/spec.md:5-11. `bundle` is "an operand of the kind a `with`
@@ -424,8 +424,9 @@ rule:
   (with a message suggesting `provide env.name=value`), or "a field list is allowed and means an inline
   bundle". Add a grammar test to task 1.2.
 - **Fix:** A field list right after `env with` is an inline bundle: `provide env with { colorMode=dark } { … }` means `env with <env.Update colorMode=dark />` (environment-values requirement and a new scenario; design decision 2 notes it equals the `env.` form, which the style guide prefers for single values; task 1.2 grammar test; task 7.3 style rule).
+- **Verification:** The rule is now settled. A field list right after `env with` is an inline bundle (environment-values spec.md:7-9, with the scenario "A field list after `provide env with`"), and design decision 2 and task 1.2 match. Because it is an inline bundle, it follows the bundle rules already in nx-ir-format. It emits a bundle override, which requires `environment-v2`, and `$env` holds a `bundle` entry. So "means the same as `provide env.colorMode=dark`" is about the values read, not the IR. That is consistent, and the style rule in task 7.3 steers single values to the `env.` form.
 
-### 🟡 Fixed - RF25 The suggested fix for a mixed block changes the meaning when the attributes come first
+### ✅ Verified - RF25 The suggested fix for a mixed block changes the meaning when the attributes come first
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/environment-values/spec.md:10-11 ("suggests a `with { name=value }` step in place
@@ -439,8 +440,9 @@ rule:
   those written after become a trailing `with { … }` step. Alternatively, have the message say only
   "use one `env with` chain". Add a scenario or test for the attributes-first order.
 - **Fix:** The suggestion keeps the written order: overrides after the bundle become a `with { … }` step after it, ones before it a field list before it (`provide env.radius=0 env with marketing` suggests `provide env with { radius=0 } with marketing`). New scenario; task 1.2 tests both orders.
+- **Verification:** The suggestion now keeps the written order. Overrides after the bundle become a trailing `with { … }` step, and overrides before it become a leading field list (spec.md:12-15). There is a scenario for the attributes-first order (`provide env with { radius=0 } with marketing`), and task 1.2 tests both orders. A mix with overrides on both sides of the bundle follows from the same rule.
 
-### 🟡 Fixed - RF26 The environment docs task doesn't mention the "not both" rule
+### ✅ Verified - RF26 The environment docs task doesn't mention the "not both" rule
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** tasks.md 7.2 ("`provide env with` for bundles, bundles in blocks, …").
@@ -449,6 +451,7 @@ rule:
 - **Recommendation:** Add the rule to task 7.2: a block holds `env.` overrides or one `env with` chain,
   and a bundle is patched further with `with { … }`. Include an example of the rewrite.
 - **Fix:** Task 7.2 now covers the rule and how to rewrite a mixed block as a chain.
+- **Verification:** Task 7.2 now covers the rule and how to rewrite a mixed block as a chain. Task 7.3 adds the style-guide preference for `env.x=` for single values and `env with` for bundles.
 
 ## Questions
 
@@ -491,17 +494,8 @@ rule:
 
 ## Summary
 
-`openspec validate add-with-expressions --strict` passes.
-
-| Findings | Status |
-| --- | --- |
-| RF1–RF23 | ✅ Verified |
-| RF24–RF26 | 🔴 Open, all Low |
-
-The "bundle or attributes, not both" change is consistent across the proposal, design, tasks and specs,
-with no leftover combined-form examples. The IR rule, the lookup and the section-theme scenario still
-hold under the where-read rule. Three Low findings remain:
-
-- **RF24:** whether a field list may come right after `provide env with`.
-- **RF25:** the suggested fix for a mixed block reverses the order when the attributes come first.
-- **RF26:** the docs task doesn't mention the new rule.
+All 26 findings, RF1–RF26, are ✅ Verified, and the latest fixes introduced no new issues.
+`openspec validate add-with-expressions --strict` passes. The rule that a block holds `env.` overrides
+or one `env with` chain is consistent across the proposal, design, tasks and specs. It now includes a
+field list right after `env with` as an inline bundle, and a mixed-block suggestion that keeps the
+written order.
