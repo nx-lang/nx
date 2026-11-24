@@ -22,7 +22,7 @@ use crate::environment::{EnvKey, Layer};
 use crate::error::{Result, RESOURCE_LIMIT};
 use crate::eval::{Cx, Machine, Meter, Stack};
 use crate::reuse::Derived;
-use crate::value::{handlers_equal, values_equal, Value};
+use crate::value::{handlers_equal, Value};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -48,9 +48,10 @@ pub(crate) enum Input {
         value: Value,
         lookup: Arc<[EnvKey]>,
     },
-    /// A read of a node's render made while evaluating a source under the render's own
-    /// overrides of other values: the value found beneath those overrides, or none when reading
-    /// it there failed, which counts as changed.
+    /// A read of a node's render that a layer of the place sets, made while evaluating a source
+    /// under the render's own overrides of other values: the value found beneath those
+    /// overrides, or none when reading it there failed, which counts as changed. The direct
+    /// inputs of what it evaluated follow it in the record.
     Beneath { key: EnvKey, value: Option<Value> },
 }
 
@@ -90,6 +91,9 @@ pub(crate) struct Store {
     /// For each environment value, the nodes and variants with a root read of it, an
     /// override-supplied read whose lookup read it, or a read beneath a render's own overrides.
     readers: HashMap<EnvKey, BTreeSet<User>>,
+    /// The variants that were kept or lost a user since the last sweep: the only ones a sweep
+    /// can find unused.
+    orphans: BTreeSet<VariantId>,
 }
 
 impl Store {
@@ -157,6 +161,7 @@ impl Store {
                     users.remove(user);
                     if users.is_empty() {
                         self.users.remove(&edge);
+                        self.orphans.insert(edge);
                     }
                 }
             }
@@ -172,15 +177,13 @@ impl Store {
     }
 
     /// Drops every variant no node's record and no other variant's record holds an edge to,
-    /// and in turn what only those held. Done when a tree operation ends.
+    /// and in turn what only those held. Done when a tree operation ends, starting from the
+    /// variants kept or left without a user since the last sweep, so it costs what changed.
     pub(crate) fn sweep(&mut self) {
-        let mut unused: Vec<VariantId> = self
-            .variants
-            .keys()
-            .filter(|id| !self.users.contains_key(id))
-            .copied()
-            .collect();
-        while let Some(id) = unused.pop() {
+        while let Some(id) = self.orphans.pop_first() {
+            if self.users.contains_key(&id) {
+                continue;
+            }
             let Some(variant) = self.variants.remove(&id) else {
                 continue;
             };
@@ -190,14 +193,19 @@ impl Store {
                     self.by_derived.remove(&variant.derived);
                 }
             }
-            let user = User::Variant(id);
-            self.unlink(&user, &variant.inputs);
-            for input in variant.inputs.iter() {
-                for edge in edges_of(input) {
-                    if !self.users.contains_key(&edge) {
-                        unused.push(edge);
-                    }
-                }
+            // What only this variant used becomes an orphan in turn.
+            self.unlink(&User::Variant(id), &variant.inputs);
+        }
+    }
+
+    /// Takes on what a session found and kept.
+    pub(crate) fn commit(&mut self, changes: Committed) {
+        if let Some(store) = changes.store {
+            *self = store;
+        }
+        for (id, verified) in changes.verified {
+            if let Some(variant) = self.variants.get_mut(&id) {
+                variant.verified = verified;
             }
         }
     }
@@ -254,25 +262,66 @@ pub(crate) enum Validity {
     Other,
 }
 
-/// One tree operation's use of the store at one place: a working copy of the store, committed
-/// when the operation succeeds, and what has been found of each variant there.
+/// One tree operation's use of the store at one place: the tree's store, read in place and copied
+/// only when the operation keeps a result, the revisions at which variants were found valid, and
+/// what has been found of each variant there. What it found is committed when the operation
+/// succeeds.
 #[derive(Debug)]
-pub(crate) struct Session {
-    pub store: RefCell<Store>,
+pub(crate) struct Session<'s> {
+    base: &'s Store,
+    /// The working copy, made at the first change other than a variant found valid.
+    own: RefCell<Option<Store>>,
+    /// The revision at which each variant was found valid in the session.
+    verified: RefCell<HashMap<VariantId, u64>>,
     memo: RefCell<HashMap<VariantId, Validity>>,
 }
 
-impl Session {
-    pub(crate) fn new(store: Store) -> Self {
+/// What a session changes in the tree's store.
+#[derive(Debug)]
+pub(crate) struct Committed {
+    store: Option<Store>,
+    verified: HashMap<VariantId, u64>,
+}
+
+impl<'s> Session<'s> {
+    pub(crate) fn new(base: &'s Store) -> Self {
         Self {
-            store: RefCell::new(store),
+            base,
+            own: RefCell::new(None),
+            verified: RefCell::new(HashMap::new()),
             memo: RefCell::new(HashMap::new()),
         }
     }
 
-    /// The store as the session left it.
-    pub(crate) fn into_store(self) -> Store {
-        self.store.into_inner()
+    /// What the session changed, for [`Store::commit`].
+    pub(crate) fn into_changes(self) -> Committed {
+        Committed {
+            store: self.own.into_inner(),
+            verified: self.verified.into_inner(),
+        }
+    }
+
+    /// `look` over the store as the session stands.
+    fn read<T>(&self, look: impl FnOnce(&Store) -> T) -> T {
+        match &*self.own.borrow() {
+            Some(store) => look(store),
+            None => look(self.base),
+        }
+    }
+
+    /// `change` over the session's working copy of the store, made now if there is none.
+    fn write<T>(&self, change: impl FnOnce(&mut Store) -> T) -> T {
+        let mut own = self.own.borrow_mut();
+        change(own.get_or_insert_with(|| self.base.clone()))
+    }
+
+    /// The revision at which variant `variant` was last found valid.
+    fn verified_of(&self, id: VariantId, variant: &Variant) -> u64 {
+        self.verified
+            .borrow()
+            .get(&id)
+            .copied()
+            .unwrap_or(variant.verified)
     }
 }
 
@@ -386,31 +435,18 @@ impl<'p> Machine<'p> {
         if matches!(derived, Derived::Formula(_)) {
             return Ok(None);
         }
-        let ids = session
-            .store
-            .borrow()
-            .by_derived
-            .get(&derived)
-            .cloned()
-            .unwrap_or_default();
+        let ids = session.read(|store| store.by_derived.get(&derived).cloned().unwrap_or_default());
         for id in ids {
             let mut leaves = BTreeSet::new();
-            session
-                .store
-                .borrow()
-                .leaves(id, &mut leaves, &mut BTreeSet::new());
+            session.read(|store| store.leaves(id, &mut leaves, &mut BTreeSet::new()));
             if self.pushed_touches(&leaves, start) {
                 continue;
             }
             if self.validity_here(id)? != Validity::Valid {
                 continue;
             }
-            let Some(value) = session
-                .store
-                .borrow()
-                .variants
-                .get(&id)
-                .map(|variant| variant.value.clone())
+            let Some(value) =
+                session.read(|store| store.variants.get(&id).map(|variant| variant.value.clone()))
             else {
                 continue;
             };
@@ -461,16 +497,15 @@ impl<'p> Machine<'p> {
         if let Some(known) = session.memo.borrow().get(&id) {
             return Ok(*known);
         }
-        let found = {
-            let store = session.store.borrow();
+        let found = session.read(|store| {
             store.variants.get(&id).map(|variant| {
                 (
                     Arc::clone(&variant.inputs),
-                    variant.verified,
+                    session.verified_of(id, variant),
                     variant.origins,
                 )
             })
-        };
+        });
         let Some((inputs, verified, origins)) = found else {
             return Ok(Validity::Other);
         };
@@ -480,19 +515,24 @@ impl<'p> Machine<'p> {
             Validity::Other
         };
         if validity == Validity::Valid {
-            for input in inputs.iter() {
+            for (position, input) in inputs.iter().enumerate() {
                 validity = self.input_holds(input, verified)?;
+                if validity == Validity::Stale {
+                    // Replaceable here only if it is this place's: the reads after the one that
+                    // changed are classified too, which costs nothing.
+                    let rest = inputs.get(position.saturating_add(1)..).unwrap_or_default();
+                    if !rest.iter().all(|input| self.classified_as_recorded(input)) {
+                        validity = Validity::Other;
+                    }
+                }
                 if validity != Validity::Valid {
                     break;
                 }
             }
         }
         if validity == Validity::Valid {
-            let mut store = session.store.borrow_mut();
-            let revision = store.revision;
-            if let Some(variant) = store.variants.get_mut(&id) {
-                variant.verified = revision;
-            }
+            let revision = session.read(|store| store.revision);
+            session.verified.borrow_mut().insert(id, revision);
         }
         session.memo.borrow_mut().insert(id, validity);
         Ok(validity)
@@ -509,6 +549,17 @@ impl<'p> Machine<'p> {
         Ok(true)
     }
 
+    /// Whether a read is classified at this machine's place as it was recorded: a root read where
+    /// no layer of the place sets the value, and an override-supplied read where one does. An
+    /// edge and a read beneath the render's own overrides are classified by what they lead to.
+    fn classified_as_recorded(&self, input: &Input) -> bool {
+        match input {
+            Input::Root { key, .. } => !self.place_sets(*key),
+            Input::Override { key, .. } => self.place_sets(*key),
+            Input::Edge(_) | Input::Beneath { .. } => true,
+        }
+    }
+
     /// Whether one input of a record found valid at revision `verified` holds here.
     fn input_holds(&self, input: &Input, verified: u64) -> Result<Validity> {
         let Some(session) = self.session else {
@@ -519,7 +570,7 @@ impl<'p> Machine<'p> {
                 if self.place_sets(*key) {
                     return Ok(Validity::Other);
                 }
-                if session.store.borrow().root_revision(*key) > verified {
+                if session.read(|store| store.root_revision(*key)) > verified {
                     return Ok(Validity::Stale);
                 }
                 for edge in edges.iter() {
@@ -548,8 +599,9 @@ impl<'p> Machine<'p> {
         }
     }
 
-    /// Whether what the lookup of `key` gives at the place equals `recorded`, charged as the
-    /// skip check's reads and comparisons are. A lookup that fails does not equal it.
+    /// Whether what the lookup of `key` gives at the place is the same as `recorded` as a host
+    /// would see it written, origins included when the call collects them, charged as the skip
+    /// check's reads and comparisons are. A lookup that fails is not the same.
     fn lookup_equals(&self, key: EnvKey, recorded: &Value) -> Result<bool> {
         let cx = Cx {
             module: key.0,
@@ -557,7 +609,13 @@ impl<'p> Machine<'p> {
             depth: 0,
         };
         match self.environment_value(cx, None, key) {
-            Ok(current) => values_equal(&current, recorded, &self.meter(cx, None), &self.stack),
+            Ok(current) => same_written(
+                &current,
+                recorded,
+                self.tracks_origins(),
+                &self.meter(cx, None),
+                &self.stack,
+            ),
             Err(error) if is_limit(&error) => Err(error),
             Err(_) => Ok(false),
         }
@@ -570,13 +628,8 @@ impl<'p> Machine<'p> {
         let Some(session) = self.session else {
             return Ok(Validity::Other);
         };
-        let changed = |session: &Session| {
-            session
-                .store
-                .borrow()
-                .variants
-                .get(&edge)
-                .map(|variant| variant.changed)
+        let changed = |session: &Session<'_>| {
+            session.read(|store| store.variants.get(&edge).map(|variant| variant.changed))
         };
         match self.validate(edge)? {
             Validity::Valid => Ok(match changed(session) {
@@ -585,12 +638,8 @@ impl<'p> Machine<'p> {
             }),
             Validity::Other => Ok(Validity::Other),
             Validity::Stale => {
-                let Some(derived) = session
-                    .store
-                    .borrow()
-                    .variants
-                    .get(&edge)
-                    .map(|variant| variant.derived)
+                let Some(derived) =
+                    session.read(|store| store.variants.get(&edge).map(|variant| variant.derived))
                 else {
                     return Ok(Validity::Other);
                 };
@@ -619,7 +668,7 @@ impl<'p> Machine<'p> {
         &self,
         derived: Derived,
         value: &Value,
-        inputs: Vec<Input>,
+        inputs: Arc<[Input]>,
     ) -> Result<Option<VariantId>> {
         let Some(session) = self.session else {
             return Ok(None);
@@ -628,24 +677,18 @@ impl<'p> Machine<'p> {
             return Ok(None);
         }
         let origins = self.tracks_origins();
-        let target = {
-            let store = session.store.borrow();
+        let target = session.read(|store| {
             let memo = session.memo.borrow();
             store.by_derived.get(&derived).and_then(|ids| {
                 ids.iter()
                     .find(|id| memo.get(id) == Some(&Validity::Stale))
                     .copied()
             })
-        };
-        let inputs: Arc<[Input]> = Arc::from(inputs);
+        });
         let id = match target {
             Some(id) => {
                 let old = session
-                    .store
-                    .borrow()
-                    .variants
-                    .get(&id)
-                    .map(|variant| variant.value.clone());
+                    .read(|store| store.variants.get(&id).map(|variant| variant.value.clone()));
                 let same = match &old {
                     Some(old) => same_written(
                         old,
@@ -656,29 +699,30 @@ impl<'p> Machine<'p> {
                     )?,
                     None => false,
                 };
-                let mut store = session.store.borrow_mut();
-                let revision = store.revision;
-                let user = User::Variant(id);
-                if let Some(previous) = store
-                    .variants
-                    .get(&id)
-                    .map(|variant| Arc::clone(&variant.inputs))
-                {
-                    store.unlink(&user, &previous);
-                }
-                store.link(&user, &inputs);
-                if let Some(variant) = store.variants.get_mut(&id) {
-                    if !same {
-                        variant.value = value.clone();
-                        variant.changed = revision;
+                session.write(|store| {
+                    let revision = store.revision;
+                    let user = User::Variant(id);
+                    if let Some(previous) = store
+                        .variants
+                        .get(&id)
+                        .map(|variant| Arc::clone(&variant.inputs))
+                    {
+                        store.unlink(&user, &previous);
                     }
-                    variant.inputs = inputs;
-                    variant.verified = revision;
-                }
+                    store.link(&user, &inputs);
+                    if let Some(variant) = store.variants.get_mut(&id) {
+                        if !same {
+                            variant.value = value.clone();
+                            variant.changed = revision;
+                        }
+                        variant.inputs = inputs;
+                        variant.verified = revision;
+                    }
+                });
+                session.verified.borrow_mut().remove(&id);
                 id
             }
-            None => {
-                let mut store = session.store.borrow_mut();
+            None => session.write(|store| {
                 let id = store.next;
                 store.next = store.next.saturating_add(1);
                 let revision = store.revision;
@@ -695,8 +739,10 @@ impl<'p> Machine<'p> {
                     },
                 );
                 store.by_derived.entry(derived).or_default().push(id);
+                // Kept for a use whose record has not been linked yet.
+                store.orphans.insert(id);
                 id
-            }
+            }),
         };
         session.memo.borrow_mut().insert(id, Validity::Valid);
         Ok(Some(id))

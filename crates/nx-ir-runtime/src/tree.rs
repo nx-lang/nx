@@ -34,13 +34,15 @@
 
 use crate::component::{
     handler_property, ComponentInit, ComponentInstance, InitProps, NormalizedProps, Rebinding,
+    TreeCall,
 };
 use crate::environment::{Environment, ENV_FIELD};
 use crate::error::{fail, fail_limit, Limit, Result};
 use crate::eval::{Meter, RuntimeOptions, Stack};
-use crate::kept::{Input, Session, Store, User};
+use crate::kept::{Committed, Input, Session, Store, User};
 use crate::module::{ComponentDecl, DeclarationKind};
 use crate::program::Program;
+use crate::reuse::{Track, TrackKind};
 use crate::value::{
     get_field, handlers_equal, too_deep, Handler, Value, ACTION_HANDLER_TYPE,
     HANDLER_INVOCATION_TYPE, MAX_VALUE_DEPTH,
@@ -116,8 +118,12 @@ struct Node {
     /// The node's identity: one no other node of the tree has had, kept while the node renders
     /// again, so the change set tells a node replaced at its key from one that rendered.
     id: u64,
-    /// The direct inputs of the node's last render, in the order it read them.
+    /// The direct inputs of the node's last render, in the order it read them, those of
+    /// normalizing its props first.
     record: Arc<[Input]>,
+    /// The direct inputs of normalizing the node's props: what their defaults read. A dispatch,
+    /// which renders from the props the instance holds, starts its record with them.
+    props_record: Arc<[Input]>,
     /// The revision at which the record was last found valid in the node's environment.
     verified: u64,
 }
@@ -129,6 +135,23 @@ impl Node {
         self.record
             .iter()
             .any(|input| matches!(input, Input::Beneath { value: None, .. }))
+    }
+}
+
+/// What checking a node's record found.
+#[derive(Debug, Clone, Copy)]
+struct Check {
+    holds: bool,
+    /// The operations the check spent, when it ran, until a lifecycle call takes them on.
+    pending: Option<u64>,
+}
+
+/// Reports a check that ran and that no lifecycle call took on as a call of its own: the usage
+/// report then holds what it spent.
+fn report_check(options: &RuntimeOptions, pending: Option<u64>) {
+    if let (Some(spent), Some(usage)) = (pending, options.usage.as_deref()) {
+        usage.clear();
+        usage.record(options.max_operations.map(|_| spent), None);
     }
 }
 
@@ -245,38 +268,51 @@ impl InstanceTree {
         Some(node)
     }
 
-    /// A session over the tree's kept results for one place of one operation.
-    fn session(&self) -> Session {
-        Session::new(self.store.clone())
+    /// A session over the tree's kept results for one place of one operation. It copies the
+    /// store only when the operation keeps a result.
+    fn session(&self) -> Session<'_> {
+        Session::new(&self.store)
     }
 
-    /// Takes on what `session` found and kept.
-    fn commit(&mut self, session: Session) {
-        self.store = session.into_store();
+    /// Takes on what a session found and kept.
+    fn commit(&mut self, changes: Committed) {
+        self.store.commit(changes);
     }
 
     /// Whether `node`'s record of its last render holds in `environment`, checked by the rule on
     /// kept results with `session`. A record found valid at the current revision in the
-    /// environment the node holds needs no check.
+    /// environment the node holds, and an empty one, need no check.
     fn record_holds(
         &self,
         node: &Node,
         environment: &Environment,
         options: &RuntimeOptions,
-        session: &Session,
-    ) -> Result<bool> {
+        session: &Session<'_>,
+    ) -> Result<Check> {
         if node.always_stale() {
-            return Ok(false);
+            return Ok(Check {
+                holds: false,
+                pending: None,
+            });
         }
-        if node.environment == *environment && node.verified == self.store.revision {
-            return Ok(true);
+        if node.record.is_empty()
+            || (node.environment == *environment && node.verified == self.store.revision)
+        {
+            return Ok(Check {
+                holds: true,
+                pending: None,
+            });
         }
-        self.program.record_holds(
+        let (holds, spent) = self.program.record_holds(
             &node.record,
             node.verified,
             &self.options_for(environment, options),
             session,
-        )
+        )?;
+        Ok(Check {
+            holds,
+            pending: Some(spent),
+        })
     }
 
     /// The change set: what changed among the nodes since the host last took it, which this
@@ -347,7 +383,7 @@ impl InstanceTree {
         for (name, value) in &after {
             let same = before.iter().any(|(known, old)| {
                 known == name
-                    && crate::value::values_equal(old, value, &Meter::free(), &stack)
+                    && crate::kept::same_written(old, value, false, &Meter::free(), &stack)
                         .unwrap_or(false)
             });
             if !same {
@@ -387,15 +423,10 @@ impl InstanceTree {
             };
             let session = self.session();
             let node_options = self.options_for(&node.environment, options);
-            if !node.always_stale()
-                && self.program.record_holds(
-                    &node.record,
-                    node.verified,
-                    &node_options,
-                    &session,
-                )?
-            {
-                self.commit(session);
+            let check = self.record_holds(&node, &node.environment, options, &session)?;
+            if check.holds {
+                self.commit(session.into_changes());
+                report_check(options, check.pending);
                 if let Some(node) = self.nodes.get_mut(&key) {
                     node.verified = revision;
                 }
@@ -412,16 +443,21 @@ impl InstanceTree {
                     state: Some(&node.state),
                 },
                 &node_options,
-                &session,
+                TreeCall {
+                    session: &session,
+                    spent: check.pending.unwrap_or(0),
+                    seed: &[],
+                },
             )?;
-            self.commit(session);
+            self.commit(session.into_changes());
             let renewed = Node {
                 instance: result.instance,
                 state: Arc::new(result.state),
                 rendered: Arc::new(result.rendered),
                 unwalked: true,
                 unsettled: true,
-                record: Arc::from(record),
+                record: Arc::from(record.inputs),
+                props_record: Arc::from(record.props),
                 verified: self.store.revision,
                 ..node
             };
@@ -726,13 +762,14 @@ impl InstanceTree {
                 (None, None) => true,
                 _ => false,
             };
-            let holds = self.record_holds(node, &environment, options, &session)?;
-            if holds {
-                self.commit(session);
+            let check = self.record_holds(node, &environment, options, &session)?;
+            if check.holds {
+                self.commit(session.into_changes());
                 let revision = self.store.revision;
                 if let Some(node) = self.nodes.get_mut(&key) {
                     node.verified = revision;
                 }
+                let mut pending = check.pending;
                 let kept = self.keep_node(
                     &key,
                     node,
@@ -743,9 +780,12 @@ impl InstanceTree {
                     &environment,
                     options,
                     &stack,
+                    &mut pending,
                 )?;
                 match kept {
                     Kept::Rendered(rendered) => {
+                        // No lifecycle call took the check on: it is reported as one of its own.
+                        report_check(options, pending);
                         self.inert.append(&mut inert);
                         self.store.sweep();
                         return Ok(rendered);
@@ -764,10 +804,26 @@ impl InstanceTree {
                     &mut inert,
                     options,
                     &stack,
+                    pending.unwrap_or(0),
                 );
             }
+            self.commit(session.into_changes());
+            return self.initialize_node(
+                key,
+                existing.as_ref(),
+                component,
+                descriptor,
+                fields,
+                normalized.as_ref(),
+                above,
+                environment,
+                &mut inert,
+                options,
+                &stack,
+                check.pending.unwrap_or(0),
+            );
         }
-        self.commit(session);
+        self.commit(session.into_changes());
         self.initialize_node(
             key,
             existing.as_ref(),
@@ -780,13 +836,15 @@ impl InstanceTree {
             &mut inert,
             options,
             &stack,
+            0,
         )
     }
 
     /// Initializes the node at `key` from `descriptor`, whose fields less the inert handlers are
     /// `fields`, or from the props already `normalized` from them, with the state `existing`
     /// holds when it is the node of the same component under the same parent; otherwise the node
-    /// is new and what stood at the key goes with what was under it.
+    /// is new and what stood at the key goes with what was under it. The initialization takes on
+    /// the `spent` operations of the check made ahead of it.
     #[allow(clippy::too_many_arguments)]
     fn initialize_node(
         &mut self,
@@ -801,6 +859,7 @@ impl InstanceTree {
         inert: &mut Vec<String>,
         options: &RuntimeOptions,
         stack: &Stack,
+        spent: u64,
     ) -> Result<Arc<NxValue>> {
         let session = self.session();
         let props = match normalized {
@@ -815,10 +874,14 @@ impl InstanceTree {
                 state: existing.map(|node| &*node.state),
             },
             &self.options_for(&environment, options),
-            &session,
+            TreeCall {
+                session: &session,
+                spent,
+                seed: &[],
+            },
         )?;
         let descriptor = Arc::new(copy(descriptor, 0, stack)?);
-        self.commit(session);
+        self.commit(session.into_changes());
         let id = match existing {
             Some(node) => node.id,
             None => self.new_id(),
@@ -836,7 +899,8 @@ impl InstanceTree {
             unwalked: true,
             unsettled: true,
             id,
-            record: Arc::from(record),
+            record: Arc::from(record.inputs),
+            props_record: Arc::from(record.props),
             verified: self.store.revision,
         };
         let rendered = Arc::clone(&node.rendered);
@@ -863,7 +927,8 @@ impl InstanceTree {
     /// to it through another it is rebound; and with one whose recorded props, normalized, equal
     /// the ones it holds it takes the new props and is rebound when it needs to be. Otherwise it
     /// says the node is to be initialized again, from the props normalized for the comparison
-    /// when there are some.
+    /// when there are some. Normalizing them is the lifecycle call that takes on the check's
+    /// `pending` operations.
     #[allow(clippy::too_many_arguments)]
     fn keep_node(
         &mut self,
@@ -876,6 +941,7 @@ impl InstanceTree {
         environment: &Environment,
         options: &RuntimeOptions,
         stack: &Stack,
+        pending: &mut Option<u64>,
     ) -> Result<Kept> {
         let equal = same_descriptor(&node.descriptor, descriptor, stack)?;
         if through_same && equal {
@@ -920,12 +986,19 @@ impl InstanceTree {
             }
         }
         // Another descriptor: the node keeps its render when no prop it read differs.
+        let session = self.session();
         let normalized = self.program.normalize_component_props(
             component,
             fields,
             now,
             &self.options_for(environment, options),
+            TreeCall {
+                session: &session,
+                spent: pending.take().unwrap_or(0),
+                seed: &[],
+            },
         )?;
+        self.commit(session.into_changes());
         let changes = self.program.metered(component, options, |meter, stack| {
             let mut rebinding = Rebinding::default();
             let props = Props {
@@ -944,6 +1017,20 @@ impl InstanceTree {
         let Some(mut changes) = changes else {
             return Ok(Kept::Normalized(normalized));
         };
+        // The node takes the new props, so what their defaults read now joins its record.
+        let props_record: Arc<[Input]> = Arc::from(normalized.record.as_slice());
+        let mut joined = Track::new(TrackKind::Render);
+        for input in props_record.iter().chain(node.record.iter()) {
+            joined.input(input.clone());
+        }
+        let record: Arc<[Input]> = Arc::from(joined.into_inputs());
+        let user = User::Node(Arc::clone(key));
+        self.store.unlink(&user, &node.record);
+        self.store.link(&user, &record);
+        if let Some(node) = self.nodes.get_mut(key) {
+            node.record = record;
+            node.props_record = props_record;
+        }
         let kept = copy(descriptor, 0, stack)?;
         match changes.first_mut() {
             Some(first) => {
@@ -1181,16 +1268,20 @@ impl InstanceTree {
             let (_, node) = self.node(&deepest)?;
             let node = node.clone();
             let session = self.session();
-            let holds = self.record_holds(&node, &node.environment, options, &session)?;
+            let check = self.record_holds(&node, &node.environment, options, &session)?;
             let node_options = self.options_for(&node.environment, options);
             let (result, record) = self.program.dispatch_tracked(
                 &node.instance,
                 &batch,
-                !holds,
+                !check.holds,
                 &node_options,
-                &session,
+                TreeCall {
+                    session: &session,
+                    spent: check.pending.unwrap_or(0),
+                    seed: &node.props_record,
+                },
             )?;
-            self.commit(session);
+            self.commit(session.into_changes());
             let revision = self.store.revision;
             let rendered = result.rendered.is_some();
             let node = match result.rendered {

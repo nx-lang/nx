@@ -1563,21 +1563,31 @@ impl crate::program::Program {
     }
 
     /// Whether a node's record of its last render, found valid at revision `verified`, holds in
-    /// `options`' environment, the node's place, with the tree's kept results in `session`. The
-    /// check runs under its own budget and reports no usage.
+    /// `options`' environment, the node's place, with the tree's kept results in `session`, and
+    /// the operations the check spent, which the lifecycle call that follows it takes on under
+    /// the same budget. A check that fails reports what it spent as the operation's usage.
     pub(crate) fn record_holds(
         &self,
         record: &[crate::kept::Input],
         verified: u64,
         options: &crate::RuntimeOptions,
-        session: &crate::kept::Session,
-    ) -> Result<bool> {
-        if record.is_empty() {
-            return Ok(true);
-        }
+        session: &crate::kept::Session<'_>,
+    ) -> Result<(bool, u64)> {
         let machine = Machine::with_session(&self.data, options, session);
-        machine.begin_environment()?;
-        machine.record_holds(record, verified)
+        let result = machine
+            .begin_environment()
+            .and_then(|()| machine.record_holds(record, verified));
+        let spent = machine.used();
+        match result {
+            Ok(holds) => Ok((holds, spent.unwrap_or(0))),
+            Err(error) => {
+                if let Some(usage) = options.usage.as_deref() {
+                    usage.clear();
+                    usage.record(spent, None);
+                }
+                Err(error)
+            }
+        }
     }
 
     /// The qualified name's key of an environment value the program declares.

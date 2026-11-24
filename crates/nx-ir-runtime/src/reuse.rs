@@ -21,9 +21,12 @@
 //! <para>In a call the instance tree makes, the call also *tracks* what it reads, for the tree's
 //! records ([`crate::kept`]): each derived evaluation, each environment read and the render
 //! itself keeps its direct inputs in the order it read them, the values it read at any depth,
-//! and the lowest layer the call pushed itself that a read under it met. A reused result adds to
-//! what encloses its use exactly what evaluating it added, so the tree's records come out alike
-//! whether a result was evaluated or reused.</para>
+//! and the lowest layer the call pushed itself that a read under it met. A result the tree does
+//! not keep, such as a formula or one evaluated under the render's own overrides, and a formula
+//! entry of an entry-module bundle, which is evaluated inside the read, give their direct inputs
+//! to what encloses them, so a record holds every read at any depth that no kept result stands
+//! for. A reused result adds to what encloses its use exactly what evaluating it added, so the
+//! tree's records come out alike whether a result was evaluated or reused.</para>
 
 use crate::environment::{EnvKey, EnvState, Layer};
 use crate::error::Result;
@@ -90,6 +93,9 @@ pub(crate) struct Tracked {
     /// The values the evaluation read at any depth, but for those a layer the call pushed
     /// supplied wholly. `None` in a call that does not track.
     leaves: Option<Arc<BTreeSet<EnvKey>>>,
+    /// The direct inputs of a result the tree does not keep, which its use gives to what
+    /// encloses it in place of an edge.
+    inputs: Option<Arc<[Input]>>,
 }
 
 /// What a track is for.
@@ -107,7 +113,8 @@ pub(crate) enum TrackKind {
 #[derive(Debug)]
 pub(crate) struct Track {
     kind: TrackKind,
-    /// The direct inputs, in the order they were read: a render's and a derived evaluation's.
+    /// The direct inputs, in the order they were read. A read's are those of what it evaluated
+    /// on its way that no kept result stands for, such as a formula entry of a bundle.
     inputs: Vec<Input>,
     /// The variants a read used on its way to the value.
     edges: Vec<VariantId>,
@@ -128,12 +135,17 @@ impl Track {
         }
     }
 
+    /// The direct inputs the track has recorded so far, in the order they were read.
+    pub(crate) fn inputs(&self) -> &[Input] {
+        &self.inputs
+    }
+
     /// The direct inputs the track recorded, in the order they were read.
     pub(crate) fn into_inputs(self) -> Vec<Input> {
         self.inputs
     }
 
-    fn input(&mut self, input: Input) {
+    pub(crate) fn input(&mut self, input: Input) {
         let known = self.inputs.iter().any(|known| match (known, &input) {
             (Input::Edge(known), Input::Edge(new)) => known == new,
             (
@@ -233,9 +245,8 @@ impl EnvState {
     }
 
     /// Adds to the innermost track what a derived result's use adds: its variant as an edge,
-    /// the lowest layer the call pushed that it met, and the values it read. A result used
-    /// directly by a render that may not be kept gives the render a read beneath its own
-    /// overrides of each value it read.
+    /// or, for a result the tree does not keep, its direct inputs; the lowest layer the call
+    /// pushed that it met; and the values it read.
     fn add_use(&mut self, tracked: &Tracked) {
         let Some(top) = self.tracks.last_mut() else {
             return;
@@ -245,20 +256,24 @@ impl EnvState {
         top.low = lowest(top.low, tracked.passed);
         match tracked.variant {
             Some(variant) => top.edge(variant),
-            None if top.kind == TrackKind::Render && tracked.passed.is_some() => {
-                for key in leaves.into_iter().flatten() {
-                    top.input(Input::Beneath {
-                        key: *key,
-                        value: None,
-                    });
+            None => {
+                for input in tracked.inputs.iter().flat_map(|inputs| inputs.iter()) {
+                    top.input(input.clone());
                 }
             }
-            None => {}
         }
     }
 
     /// Ends the track of a read of `key` that found its value as `info` says, and adds the read
     /// to the track around it.
+    ///
+    /// <para>A read no layer of the place sets is a root read, followed by the direct inputs of
+    /// what it evaluated on its way that no kept result stands for. A read a layer of the place
+    /// sets is an override-supplied read, whose value stands for everything beneath it; when a
+    /// source of it was evaluated under the render's own overrides of other values, the value
+    /// beneath those overrides is compared instead, beside those direct inputs. A read the call's
+    /// own layer sets wholly, and a read inside one of the value's own sources, add only what they
+    /// evaluated.</para>
     pub(crate) fn end_read(&mut self, key: EnvKey, info: ReadInfo) {
         let Some(track) = self.tracks.pop() else {
             return;
@@ -266,50 +281,54 @@ impl EnvState {
         let Some(parent) = self.tracks.last_mut() else {
             return;
         };
-        let mut leaves = track.leaves;
+        let Track {
+            inputs: nested_inputs,
+            edges,
+            mut leaves,
+            low: nested,
+            ..
+        } = track;
         if info.own_whole.is_none() {
             leaves.insert(key);
         }
         parent.leaves.extend(leaves.iter().copied());
         // What the read met on its way, nested evaluations included.
-        let nested = track.low;
         parent.low = lowest(parent.low, lowest(nested, info.low));
-        if parent.kind == TrackKind::Read {
-            for edge in track.edges {
-                parent.edge(edge);
+        let (own, forward_edges, forward_inputs) = if info.own_whole.is_some() || info.capped {
+            (None, true, true)
+        } else if info.host {
+            if parent.kind == TrackKind::Render && nested.is_some() {
+                // A source was evaluated under the render's own overrides of other values: what
+                // the place's layers make of it is compared beneath them.
+                (Some(Input::Beneath { key, value: None }), true, true)
+            } else {
+                let own = info.beneath.map(|value| Input::Override {
+                    key,
+                    value,
+                    lookup: leaves.into_iter().collect(),
+                });
+                (own, false, false)
             }
-            return;
-        }
-        if info.own_whole.is_some() {
-            return;
-        }
-        if info.capped {
-            for edge in track.edges {
-                parent.edge(edge);
-            }
-            return;
-        }
-        if parent.kind == TrackKind::Render && nested.is_some() {
-            // A source was evaluated under the render's own overrides of other values: what it
-            // found may differ beneath them.
-            parent.input(Input::Beneath { key, value: None });
-            return;
-        }
-        if info.host {
-            let Some(value) = info.beneath else {
-                return;
-            };
-            parent.input(Input::Override {
+        } else {
+            let own = Input::Root {
                 key,
-                value,
-                lookup: leaves.into_iter().collect(),
-            });
-            return;
+                edges: Arc::from(edges.as_slice()),
+            };
+            (Some(own), false, true)
+        };
+        if let Some(own) = own {
+            parent.input(own);
         }
-        parent.input(Input::Root {
-            key,
-            edges: Arc::from(track.edges),
-        });
+        if forward_edges {
+            for edge in edges {
+                parent.edge(edge);
+            }
+        }
+        if forward_inputs {
+            for input in nested_inputs {
+                parent.input(input);
+            }
+        }
     }
 
     /// Enters variant `variant` of the tree's kept results into the call's reuse as the result
@@ -336,6 +355,7 @@ impl EnvState {
                     variant: Some(variant),
                     passed: None,
                     leaves: Some(Arc::new(leaves)),
+                    inputs: None,
                 },
             },
         );
@@ -425,14 +445,16 @@ impl Machine<'_> {
             Some(track) => {
                 // A layer at or above where the evaluation began is its own.
                 let passed = track.low.filter(|position| *position < start);
+                let inputs: Arc<[Input]> = Arc::from(track.inputs);
                 let variant = match passed {
-                    None => self.keep(derived, &value, track.inputs)?,
+                    None => self.keep(derived, &value, Arc::clone(&inputs))?,
                     Some(_) => None,
                 };
                 Tracked {
                     variant,
                     passed,
                     leaves: Some(Arc::new(track.leaves)),
+                    inputs: variant.is_none().then_some(inputs),
                 }
             }
             None => Tracked::default(),

@@ -536,6 +536,30 @@ pub(crate) struct TrackedDispatch {
 pub(crate) struct NormalizedProps {
     pub props: Fields,
     pub handler_props: HandlerProps,
+    /// The direct inputs of normalizing them, in a call the instance tree made: what the
+    /// defaults read.
+    pub record: Vec<Input>,
+}
+
+/// What a call the instance tree makes brings beside its options.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TreeCall<'a, 's> {
+    /// The tree's kept results.
+    pub session: &'a Session<'s>,
+    /// The operations a record check spent at the node ahead of the call, under the same
+    /// budget: the call starts with what the check left and reports them as its own.
+    pub spent: u64,
+    /// The direct inputs of normalizing the props the call starts from, when it does not
+    /// normalize them itself.
+    pub seed: &'a [Input],
+}
+
+/// A render's record in a call the instance tree makes: its direct inputs in the order it read
+/// them, normalizing its props first, and those of normalizing its props alone.
+#[derive(Debug, Default)]
+pub(crate) struct RenderRecord {
+    pub inputs: Vec<Input>,
+    pub props: Vec<Input>,
 }
 
 /// The props an initialization starts from.
@@ -1086,12 +1110,12 @@ impl Program {
         self.call_in(options, None, input, body)
     }
 
-    /// [`call`](Self::call) in a call the instance tree makes, with its kept results in
-    /// `session`, when it gives one.
+    /// [`call`](Self::call) in a call the instance tree makes, with its kept results and what a
+    /// check spent ahead of it, when it gives them.
     fn call_in<T>(
         &self,
         options: &RuntimeOptions,
-        session: Option<&Session>,
+        tree: Option<TreeCall<'_, '_>>,
         input: impl FnOnce(&mut Measure),
         body: impl FnOnce(&Machine<'_>) -> Result<T>,
     ) -> Result<T> {
@@ -1120,8 +1144,12 @@ impl Program {
                 }
             }
         };
-        let machine = match session {
-            Some(session) => Machine::with_session(&self.data, options, session),
+        let machine = match tree {
+            Some(tree) => {
+                let machine = Machine::with_session(&self.data, options, tree.session);
+                machine.take_on(tree.spent);
+                machine
+            }
             None => Machine::new(&self.data, options),
         };
         let result = machine.begin_environment().and_then(|()| body(&machine));
@@ -1280,16 +1308,23 @@ impl Program {
 
     /// The instance tree's initialization: from props as the host gives them or as
     /// [`normalize_component_props`](Self::normalize_component_props) normalized them, with the
-    /// tree's kept results in `session`. Returns the render's record of its direct inputs too.
+    /// tree's kept results. Returns the render's record too.
     pub(crate) fn initialize_tracked(
         &self,
         name: &str,
         props: InitProps<'_>,
         init: &ComponentInit<'_>,
         options: &RuntimeOptions,
-        session: &Session,
-    ) -> Result<(ComponentInitResult, Vec<Input>)> {
-        self.initialize(name, props, init, options, Some(session))
+        tree: TreeCall<'_, '_>,
+    ) -> Result<(ComponentInitResult, RenderRecord)> {
+        let tree = match props {
+            InitProps::Normalized(normalized) => TreeCall {
+                seed: &normalized.record,
+                ..tree
+            },
+            InitProps::Host(_) => tree,
+        };
+        self.initialize(name, props, init, options, Some(tree))
             .map(|(result, record)| (result, record.unwrap_or_default()))
     }
 
@@ -1299,11 +1334,11 @@ impl Program {
         props: InitProps<'_>,
         init: &ComponentInit<'_>,
         options: &RuntimeOptions,
-        session: Option<&Session>,
-    ) -> Result<(ComponentInitResult, Option<Vec<Input>>)> {
+        tree: Option<TreeCall<'_, '_>>,
+    ) -> Result<(ComponentInitResult, Option<RenderRecord>)> {
         self.call_in(
             options,
-            session,
+            tree,
             |input| {
                 if let InitProps::Host(props) = props {
                     input.record(props);
@@ -1324,6 +1359,8 @@ impl Program {
                     belongs(&self.data, &parent.data.program, &parent.data.component)?;
                 }
                 let cx = entry_cx(index);
+                // What the props' defaults read is the render's.
+                machine.begin_render_track(tree.map(|tree| tree.seed).unwrap_or_default());
                 let (props, handler_props, mut frame) = match props {
                     InitProps::Host(props) => {
                         let normalized =
@@ -1348,6 +1385,11 @@ impl Program {
                         )
                     }
                 };
+                let track = machine.suspend_render_track();
+                let props_record = track
+                    .as_ref()
+                    .map(|track| track.inputs().to_vec())
+                    .unwrap_or_default();
                 let state_path = Labeled(name, " state");
                 let state = match init.state {
                     None => machine.normalize_fields(
@@ -1367,6 +1409,7 @@ impl Program {
                         true,
                     )?,
                 };
+                machine.resume_render_track(track);
                 let mut tokens = Tokens::new(1);
                 let output = machine.meter(cx, None);
                 machine.begin_render(&frame, component.props.len(), component.state.len());
@@ -1392,7 +1435,10 @@ impl Program {
                             }),
                         },
                     },
-                    record,
+                    record.map(|inputs| RenderRecord {
+                        inputs,
+                        props: props_record,
+                    }),
                 ))
             },
         )
@@ -1400,18 +1446,20 @@ impl Program {
 
     /// Normalizes the props of a descriptor of `name` without rendering, charged as
     /// initialization charges normalizing them: handler records resolved through `parent`,
-    /// handlers bound for emits split off, each prop checked and each default evaluated. The
-    /// instance tree compares what a node's render read of them with what it holds, and
-    /// initializes the node from them when they differ.
+    /// handlers bound for emits split off, each prop checked and each default evaluated, with
+    /// what the defaults read recorded. The instance tree compares what a node's render read of
+    /// them with what it holds, and initializes the node from them when they differ.
     pub(crate) fn normalize_component_props(
         &self,
         name: &str,
         props: &BTreeMap<String, NxValue>,
         parent: Option<&ComponentInstance>,
         options: &RuntimeOptions,
+        tree: TreeCall<'_, '_>,
     ) -> Result<NormalizedProps> {
-        self.call(
+        self.call_in(
             options,
+            Some(tree),
             |input| {
                 input.record(props);
             },
@@ -1420,10 +1468,16 @@ impl Program {
                 if let Some(parent) = parent {
                     belongs(&self.data, &parent.data.program, &parent.data.component)?;
                 }
+                machine.begin_render_track(&[]);
                 let normalized = machine.normalize_props(index, name, component, props, parent)?;
+                let record = machine
+                    .suspend_render_track()
+                    .map(crate::reuse::Track::into_inputs)
+                    .unwrap_or_default();
                 Ok(NormalizedProps {
                     props: normalized.props,
                     handler_props: normalized.handler_props,
+                    record,
                 })
             },
         )
@@ -1517,16 +1571,17 @@ impl Program {
     /// when `must_render`, because the node's other records do not hold, or when a state field
     /// the last render read was patched to another value, each field compared once, its value
     /// at the end against its value at the start, charged as `diff` charges a field. Otherwise
-    /// nothing is rendered or written for the output, and the instance keeps its render.
+    /// nothing is rendered or written for the output, and the instance keeps its render. A
+    /// render's record starts with the tree's `seed`, what normalizing the instance's props read.
     pub(crate) fn dispatch_tracked(
         &self,
         instance: &ComponentInstance,
         batch: &[NxValue],
         must_render: bool,
         options: &RuntimeOptions,
-        session: &Session,
+        tree: TreeCall<'_, '_>,
     ) -> Result<(TrackedDispatch, Vec<Input>)> {
-        self.dispatch(instance, batch, Some((must_render, session)), options)
+        self.dispatch(instance, batch, Some((must_render, tree)), options)
             .map(|(result, record)| (result, record.unwrap_or_default()))
     }
 
@@ -1534,12 +1589,12 @@ impl Program {
         &self,
         instance: &ComponentInstance,
         batch: &[NxValue],
-        tree: Option<(bool, &Session)>,
+        tree: Option<(bool, TreeCall<'_, '_>)>,
         options: &RuntimeOptions,
     ) -> Result<(TrackedDispatch, Option<Vec<Input>>)> {
         self.call_in(
             options,
-            tree.map(|(_, session)| session),
+            tree.map(|(_, tree)| tree),
             |input| {
                 input.values(batch);
             },
@@ -1719,6 +1774,7 @@ impl Program {
                 }
                 let generation = instance.render.generation.saturating_add(1);
                 let mut tokens = Tokens::new(generation);
+                machine.begin_render_track(tree.map(|(_, tree)| tree.seed).unwrap_or_default());
                 machine.begin_render(&frame, component.props.len(), component.state.len());
                 let value = machine.eval(entry_cx(index), &mut frame, body)?;
                 let (read, record) = machine.end_render();

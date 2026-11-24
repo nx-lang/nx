@@ -19,6 +19,7 @@ use std::sync::Arc;
 const CONTROLS: &str = "
 abstract external component <Node />
 external component <Label extends Node Text?:string />
+external component <Num extends Node Value?:float64 />
 external component <Button extends Node Text?:string emits { Tapped { } } />
 external component <Stack extends Node content Children?:Node+ />
 ";
@@ -2146,8 +2147,8 @@ fn a_body_that_cascades_its_own_override_is_left_alone_by_an_equal_visit() {
     assert!(renders(&tree, "root/reader", "Label", "night"));
 }
 
-/// A read whose default fails beneath the body's own override still renders, and the node then
-/// renders again on every visit, since what it read cannot be checked there.
+/// A read whose default fails beneath the body's own override still renders. The record holds
+/// what the default read under the override, so an equal visit keeps the render.
 #[test]
 fn a_read_that_fails_beneath_the_bodys_override_still_renders() {
     let mut tree = open(
@@ -2165,8 +2166,14 @@ let root() = { <Card /> }
     let root = evaluated(&tree, "root");
     tree.begin();
     tree.visit("root", &root, None, &options()).unwrap();
-    assert!(renders(&tree, "root", "Label", "5"));
-    assert!(!Arc::ptr_eq(&card, &rendered(&tree, "root")));
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root")));
+    // The body overrides `divisor` itself, so the root's `divisor` reaches nothing it read.
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("divisor", NxValue::Int(5))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root")));
 }
 
 #[test]
@@ -3083,4 +3090,317 @@ fn a_rebound_node_is_reported_as_rendered() {
         reported.rendered.contains(&"root/panel".to_string()),
         "{reported:?}"
     );
+}
+
+// ------------------------------------------------------------------------------------------------
+// A record holds every read a fresh render would depend on
+// ------------------------------------------------------------------------------------------------
+
+/// The cards of a pass over what `function` renders at `root`, visited at `root/0`, `root/1` and
+/// so on in the order the output holds them.
+fn cards_pass(tree: &mut InstanceTree, function: &str, component: &str) {
+    let root = evaluated(tree, function);
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    let output = rendered(tree, "root");
+    let mut cards = Vec::new();
+    collect(&output, component, &mut cards);
+    for (index, card) in cards.into_iter().enumerate() {
+        tree.visit(&format!("root/{index}"), card, Some("root"), &options())
+            .unwrap();
+    }
+    tree.finish();
+}
+
+/// The `Value` of the first `Num` the node at `key` rendered.
+fn number(tree: &InstanceTree, key: &str) -> NxValue {
+    let output = rendered(tree, key);
+    field(find(&output, "Num", None).expect("a Num"), "Value")
+        .cloned()
+        .unwrap_or(NxValue::Null)
+}
+
+const ZEROS: &str = "
+type Box = { v:float64 }
+environment z: float64 = 1.0
+environment boxed: Box = { <Box v={env.z} /> }
+component <Card extends Node /> = { <Num Value={env.boxed.v} /> }
+component <Page /> = {
+  <Stack>
+    <Stack env.z={0.0}><Card /></Stack>
+    <Stack env.z={-0.0}><Card /></Stack>
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+#[test]
+fn a_kept_result_is_not_taken_where_an_override_supplies_a_value_written_otherwise() {
+    let mut tree = linked(ZEROS);
+    cards_pass(&mut tree, "root", "Card");
+    let NxValue::Float(first) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    let NxValue::Float(second) = number(&tree, "root/1") else {
+        panic!("a float");
+    };
+    assert!(first == 0.0 && first.is_sign_positive());
+    assert!(second == 0.0 && second.is_sign_negative());
+}
+
+#[test]
+fn a_root_value_changed_to_one_written_otherwise_is_a_change() {
+    let source = "
+environment z: float64 = 1.0
+component <Card extends Node /> = { <Num Value={env.z} /> }
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+";
+    let start = nx_ir_runtime::Environment::root([("z", NxValue::Float(0.0))]);
+    let mut tree = InstanceTree::with_environment(program(&format!("{CONTROLS}{source}")), start);
+    cards_pass(&mut tree, "root", "Card");
+    tree.take_changes();
+    let change = nx_ir_runtime::Environment::root([("z", NxValue::Float(-0.0))]);
+    tree.set_environment(change, &options()).unwrap();
+    let NxValue::Float(now) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    assert!(now == 0.0 && now.is_sign_negative());
+    assert_eq!(tree.take_changes().rendered, ["root/0"]);
+}
+
+#[test]
+fn a_read_through_a_bundle_formula_entry_follows_the_values_the_formula_reads() {
+    let mut tree = linked(
+        "
+environment space: int = 4
+environment gap: int = 0
+provide env with <env.Update gap={env.space * 2} />
+component <Card extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "8"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(10))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "20"));
+}
+
+#[test]
+fn a_read_through_a_formula_the_body_provides_follows_the_values_the_formula_reads() {
+    let mut tree = linked(
+        "
+environment space: int = 4
+environment gap: int = 0
+component <Card extends Node /> = {
+  <Stack>{ provide env.gap={env.space * 2} { <Label Text={\"\" + env.gap} /> } }</Stack>
+}
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "8"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(10))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "20"));
+}
+
+#[test]
+fn a_source_read_beneath_the_bodys_override_follows_the_other_values_it_reads() {
+    let mut tree = linked(
+        "
+environment locale: string = \"en\"
+environment mode: string = \"light\"
+environment loud: string = { env.mode + \"!\" + env.locale }
+component <Card extends Node /> = {
+  <Stack>{ provide env.mode=\"dark\" { <Label Text={env.loud} /> } }</Stack>
+}
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "dark!en"));
+    let card = rendered(&tree, "root/0");
+    // The body overrides `mode`, so the root's `mode` reaches nothing it read.
+    tree.set_environment(roots(&[("mode", "night")]), &options())
+        .unwrap();
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root/0")));
+    tree.set_environment(roots(&[("locale", "fr")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "dark!fr"));
+}
+
+/// `color` reads `locale` and then `colorMode`, so a variant kept under the dark section is
+/// stale at the light card's place at its first read, and only its second tells it is not this
+/// place's.
+const TWO_VARIANTS: &str = "
+type Mode = light | dark
+type Colors = { accent:string }
+environment locale: string = \"en\"
+environment colorMode: Mode = light
+environment color: Colors = {
+  if env.locale == \"zz\" { <Colors accent=\"zz\" /> } else {
+    if env.colorMode is { light => <Colors accent=\"blue\" /> dark => <Colors accent=\"navy\" /> }
+  }
+}
+component <Card extends Node /> = { <Label Text={env.color.accent} /> }
+component <DarkFirst /> = { <Stack><Stack env.colorMode=dark><Card /></Stack><Card /></Stack> }
+component <LightFirst /> = { <Stack><Card /><Stack env.colorMode=dark><Card /></Stack></Stack> }
+let darkFirst() = { <DarkFirst /> }
+let lightFirst() = { <LightFirst /> }
+";
+
+#[test]
+fn an_equal_result_stops_a_change_whichever_variant_is_checked_first() {
+    for function in ["darkFirst", "lightFirst"] {
+        for reversed in [false, true] {
+            let mut tree = linked(TWO_VARIANTS);
+            let root = evaluated(&tree, function);
+            tree.begin();
+            tree.visit("root", &root, None, &options()).unwrap();
+            let output = rendered(&tree, "root");
+            let mut cards = Vec::new();
+            collect(&output, "Card", &mut cards);
+            // Keys that sort against the order the cards are kept in, and with it.
+            for (index, card) in cards.into_iter().enumerate() {
+                let key = if reversed { 1 - index } else { index };
+                tree.visit(&format!("root/{key}"), card, Some("root"), &options())
+                    .unwrap();
+            }
+            tree.finish();
+            tree.take_changes();
+            let held = [rendered(&tree, "root/0"), rendered(&tree, "root/1")];
+            tree.set_environment(roots(&[("locale", "fr")]), &options())
+                .unwrap();
+            for (index, held) in held.iter().enumerate() {
+                let key = format!("root/{index}");
+                assert!(
+                    Arc::ptr_eq(held, &rendered(&tree, &key)),
+                    "{function} {reversed} {key}"
+                );
+            }
+            assert!(tree.take_changes().is_empty(), "{function} {reversed}");
+        }
+    }
+}
+
+#[test]
+fn a_kept_result_evaluated_again_during_a_check_is_charged_to_the_render_that_follows() {
+    let mut tree = open(THEME);
+    tree.finish();
+    // The check evaluates `color` again in the dark mode, and the render takes it.
+    let (_, operations) = measured(|options| {
+        tree.set_environment(roots(&[("colorMode", "dark")]), options)
+            .unwrap()
+    });
+    assert_eq!(weighed(&tree, operations), 1);
+    assert!(renders(&tree, "root", "Label", "std navy 0"));
+    // As a fresh render of the same card does.
+    let start = roots(&[("colorMode", "dark")]);
+    let mut fresh = InstanceTree::with_environment(program(&format!("{CONTROLS}{THEME}")), start);
+    let card = evaluated(&fresh, "root");
+    let (_, fresh_operations) =
+        measured(|options| fresh.visit("root", &card, None, options).unwrap());
+    assert_eq!(weighed(&fresh, fresh_operations), 2);
+}
+
+#[test]
+fn a_check_that_holds_is_reported_as_a_call_of_its_own() {
+    let mut tree = kept_tree();
+    let output = rendered(&tree, "root/Direction");
+    // `direction` is evaluated again during the check and gives `ltr`, so no render follows.
+    let (_, operations) = measured(|options| {
+        tree.set_environment(roots(&[("locale", "en-GB")]), options)
+            .unwrap()
+    });
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root/Direction")));
+    assert!(operations > 0);
+}
+
+/// A parent's render fills in the defaults of the descriptors it writes, so a node's own render
+/// evaluates a prop default only for a descriptor a host wrote without the prop.
+const DEFAULTED: &str = "
+environment mode: string = \"light\"
+component <Shown extends Node label:string = { env.mode } /> = {
+  state { taps:int = 0 }
+  <Stack>
+    <Label Text={label} />
+    <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
+}
+component <Page /> = { <Stack><Shown env.mode=\"dark\" /></Stack> }
+let root() = { <Page /> }
+";
+
+/// A descriptor of `Shown` as a host writes it, with the `$env` given.
+fn shown(env: Option<&NxValue>, label: Option<&str>) -> NxValue {
+    let mut properties = BTreeMap::new();
+    if let Some(env) = env {
+        properties.insert("$env".to_string(), env.clone());
+    }
+    if let Some(label) = label {
+        properties.insert("label".to_string(), NxValue::String(label.to_string()));
+    }
+    NxValue::Record {
+        type_name: Some("Shown".to_string()),
+        properties,
+    }
+}
+
+#[test]
+fn a_prop_default_that_reads_the_environment_follows_a_root_change() {
+    let mut tree = linked(DEFAULTED);
+    tree.visit("host", &shown(None, None), None, &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "light"));
+    tree.set_environment(roots(&[("mode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dark"));
+    // A dispatch renders from the props the instance holds, and keeps what their defaults read.
+    tap(&mut tree, "host", "Tap").unwrap();
+    tree.set_environment(roots(&[("mode", "dim")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dim"));
+}
+
+#[test]
+fn a_prop_default_that_reads_the_environment_follows_a_new_place() {
+    let mut tree = open(DEFAULTED);
+    let output = rendered(&tree, "root");
+    let env = field(find(&output, "Shown", None).unwrap(), "$env")
+        .expect("an $env")
+        .clone();
+    tree.visit("host", &shown(None, None), None, &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "light"));
+    // The same descriptor under a new `$env`: what the default read differs there.
+    tree.visit("host", &shown(Some(&env), None), None, &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dark"));
+}
+
+#[test]
+fn a_prop_default_a_new_descriptor_falls_back_on_joins_the_record() {
+    let mut tree = linked(DEFAULTED);
+    tree.visit("host", &shown(None, Some("light")), None, &options())
+        .unwrap();
+    let held = rendered(&tree, "host");
+    // The descriptor loses its `label`, whose default gives the same `light`: the node keeps its
+    // render, and what the default read now counts.
+    tree.visit("host", &shown(None, None), None, &options())
+        .unwrap();
+    assert!(Arc::ptr_eq(&held, &rendered(&tree, "host")));
+    tree.set_environment(roots(&[("mode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dark"));
 }

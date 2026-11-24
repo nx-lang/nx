@@ -272,7 +272,7 @@ pub(crate) struct Machine<'p> {
     handler_slots: RefCell<HandlerSlots>,
     /// The instance tree's kept results and what has been found of them at the call's place, in
     /// a call the tree makes: the call then tracks what it reads.
-    pub(crate) session: Option<&'p crate::kept::Session>,
+    pub(crate) session: Option<&'p crate::kept::Session<'p>>,
     /// The address of the frame of the body being rendered, while one is; zero otherwise.
     render_frame: Cell<usize>,
     /// The render's record of its prop and state slots, while a body is being rendered.
@@ -313,7 +313,7 @@ impl<'p> Machine<'p> {
     pub(crate) fn with_session(
         program: &'p ProgramData,
         options: &'p RuntimeOptions,
-        session: &'p crate::kept::Session,
+        session: &'p crate::kept::Session<'p>,
     ) -> Self {
         Self {
             session: Some(session),
@@ -341,21 +341,50 @@ impl<'p> Machine<'p> {
         self.remaining.set(fork.remaining.get());
     }
 
+    /// In a call that tracks, starts the render's own track, holding `seed` first: the direct
+    /// inputs of normalizing the props the render reads, whose defaults can read the environment.
+    /// It is started before the props are normalized, so what their defaults read is the render's.
+    pub(crate) fn begin_render_track(&self, seed: &[crate::kept::Input]) {
+        if self.session.is_none() {
+            return;
+        }
+        let mut track = crate::reuse::Track::new(crate::reuse::TrackKind::Render);
+        for input in seed {
+            track.input(input.clone());
+        }
+        self.env.borrow_mut().tracks.push(track);
+    }
+
+    /// Takes the render's track off while something that is not the render's is evaluated, such
+    /// as the defaults of the state, which are evaluated only when the node is created.
+    pub(crate) fn suspend_render_track(&self) -> Option<crate::reuse::Track> {
+        self.session?;
+        self.env.borrow_mut().tracks.pop()
+    }
+
+    /// Puts back the track [`suspend_render_track`](Self::suspend_render_track) took off.
+    pub(crate) fn resume_render_track(&self, track: Option<crate::reuse::Track>) {
+        if let Some(track) = track {
+            self.env.borrow_mut().tracks.push(track);
+        }
+    }
+
     /// Starts recording what the render of a body over `frame`, whose first `props` slots are
-    /// the props and the `state` after them the state, reads of them, and, in a call that
-    /// tracks, the render's own track.
+    /// the props and the `state` after them the state, reads of them. In a call that tracks,
+    /// the render's own track was started with [`begin_render_track`](Self::begin_render_track).
     pub(crate) fn begin_render(&self, frame: &Frame, props: usize, state: usize) {
         self.render_frame.set(frame_address(frame));
         *self.render_slots.borrow_mut() = RenderSlots {
             props,
             read: vec![false; props.saturating_add(state)],
         };
-        if self.session.is_some() {
-            self.env
-                .borrow_mut()
-                .tracks
-                .push(crate::reuse::Track::new(crate::reuse::TrackKind::Render));
-        }
+    }
+
+    /// Takes on `spent` operations a check charged before this call, under the same budget, so
+    /// that the call's usage counts them.
+    pub(crate) fn take_on(&self, spent: u64) {
+        self.remaining
+            .set(self.remaining.get().saturating_sub(spent));
     }
 
     /// Whether `frame` is the frame of the body being rendered.
