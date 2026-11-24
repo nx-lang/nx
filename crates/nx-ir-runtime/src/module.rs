@@ -1759,8 +1759,8 @@ fn check_environment_v2_entries(image: &NxIrImage<'_>, diagnostics: &mut Vec<Dia
             if entry.get(position) == Some(NONE) {
                 return true;
             }
-            let path = entry.get(position + 2).unwrap_or(0) as usize;
-            position += 3 + path + 1;
+            let path = entry.get(position.saturating_add(2)).unwrap_or(0) as usize;
+            position = position.saturating_add(4).saturating_add(path);
         }
         kind == Some(node::ENV_UPDATE) && entry.len() > position
     });

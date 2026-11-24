@@ -118,10 +118,9 @@ impl InferenceContext<'_> {
             let patchable =
                 matches!(item, Type::Named(named) if self.record_definition_for(named).is_some());
             let hint = if patchable {
-                format!(
-                    "; a `with` patches one value, so unwrap it first: `(x ?? fallback) with {{ … }}`, \
-                     or test it with `if x is {{ some }}`"
-                )
+                "; a `with` patches one value, so unwrap it first: `(x ?? fallback) with { … }`, \
+                 or test it with `if x is { some }`"
+                    .to_string()
             } else {
                 String::new()
             };

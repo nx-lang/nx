@@ -675,8 +675,8 @@ impl<'p> Machine<'p> {
         let mut provides_below: Option<usize> = None;
         let mut found: Option<Value> = None;
         let mut position = top;
-        while position > 0 {
-            position -= 1;
+        while let Some(below) = position.checked_sub(1) {
+            position = below;
             let layer = self.env.borrow().layers.get(position).cloned();
             match layer {
                 Some(Layer::Set {
@@ -760,7 +760,7 @@ impl<'p> Machine<'p> {
             })
             .unwrap_or(0);
         let mut path: Vec<Arc<str>> = vec![index.qualified(key)];
-        for layer in &state.layers[start..] {
+        for layer in state.layers.get(start..).unwrap_or_default() {
             if let Layer::Cap { key: capped, .. } = layer {
                 let name = index.qualified(*capped);
                 if path.last() != Some(&name) {
@@ -1146,8 +1146,9 @@ impl<'p> Machine<'p> {
     ) -> Result<Value> {
         let depth = {
             let mut state = self.env.borrow_mut();
+            let depth = state.layers.len();
             state.layers.push(Layer::Cap { key, below });
-            state.layers.len() - 1
+            depth
         };
         let result = work();
         self.env.borrow_mut().layers.truncate(depth);
