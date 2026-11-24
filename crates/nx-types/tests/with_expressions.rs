@@ -64,13 +64,18 @@ fn with_on_an_optional_suggests_unwrapping_it() {
         &format!("{TYPES}let h(u: User) = {{ u.home with {{ city=\"Rome\" }} }}"),
         "with-target",
     );
-    assert!(message.contains('?') || message.contains("optional"), "{message}");
+    assert!(
+        message.contains('?') || message.contains("optional"),
+        "{message}"
+    );
 }
 
 #[test]
 fn with_on_a_sequence_is_with_target() {
     message_of(
-        &format!("{TYPES}let all(): User+ = {{ ada() ada() }}\nlet s() = {{ all() with {{ age=1 }} }}"),
+        &format!(
+            "{TYPES}let all(): User+ = {{ ada() ada() }}\nlet s() = {{ all() with {{ age=1 }} }}"
+        ),
         "with-target",
     );
 }
@@ -122,7 +127,10 @@ fn an_operand_of_another_type_is_rejected() {
 fn with_is_reserved_as_a_name() {
     message_of("let with = 1", "reserved-name");
     message_of("let f(with: int) = { with }", "reserved-name");
-    message_of("let f(xs: int+) = { for with in xs { 1 } }", "reserved-name");
+    message_of(
+        "let f(xs: int+) = { for with in xs { 1 } }",
+        "reserved-name",
+    );
 }
 
 #[test]
