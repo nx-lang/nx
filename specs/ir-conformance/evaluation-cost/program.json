@@ -19,6 +19,8 @@
     { "module": "main.nx", "function": "compared" },
     { "module": "main.nx", "function": "comparedLists" },
     { "module": "main.nx", "function": "comparedHandlers" },
+    { "module": "main.nx", "function": "notedHandlers" },
+    { "module": "main.nx", "function": "orderedHandlers" },
     { "module": "main.nx", "function": "comparedText" },
     { "module": "main.nx", "function": "written" },
     { "module": "main.nx", "function": "bound" },

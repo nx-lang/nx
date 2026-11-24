@@ -1,7 +1,7 @@
-module main.nx fingerprint 4527554670836314352
+module main.nx fingerprint 3890449845862289337
 links @nx/prelude.nx version "1" fingerprint 3805895034114390176
 requires update-records-v1 update-intrinsics-v1 action-handlers-v1 function-values-v1 ranges-v1
-entrypoints functions [corners one triple through twice greet button sum both Count repeated patterns directCall valueCall spliced forItems forRange content concat defaults valueReference checked compared comparedLists comparedHandlers comparedText written bound updated misaligned patched] components [Button Tally]
+entrypoints functions [corners one triple through twice greet button sum both Count repeated patterns directCall valueCall spliced forItems forRange content concat defaults valueReference checked compared comparedLists comparedHandlers noted notedHandlers tallied orderedHandlers comparedText written bound updated misaligned patched] components [Button Tally]
 
 union Shape
   case dot constant
@@ -27,6 +27,10 @@ record Button.Tapped
 
 record Ping
   n: int required
+
+record Counted
+  n: int required
+  xs: int+ required
 
 value numbers =
   [1, 2, 3]
@@ -130,6 +134,26 @@ function comparedLists() =
 
 function comparedHandlers() =
   (button(9, 9) eq button(1, 2))
+
+function noted(a: int, note: string, extra: int) =
+  <Button
+    onTapped=handler Button.Tapped action@3:Button.Tapped =>
+      <Ping n=a />
+  >
+  </Button>
+
+function notedHandlers() =
+  (noted(1, "x", 1) eq noted(1, "y", 2))
+
+function tallied(a: int, xs: int+) =
+  <Button
+    onTapped=handler Button.Tapped action@2:Button.Tapped =>
+      <Counted n=a xs=xs />
+  >
+  </Button>
+
+function orderedHandlers() =
+  (tallied(1, numbers) eq tallied(2, numbers))
 
 function comparedText() =
   ((accents concat accents) eq (accents concat accents))

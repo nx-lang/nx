@@ -20,6 +20,8 @@
     "main.nx::forItems": 25,
     "main.nx::forRange": 34,
     "main.nx::misaligned": 12,
+    "main.nx::notedHandlers": 25,
+    "main.nx::orderedHandlers": 32,
     "main.nx::patched": 5,
     "main.nx::patterns": 15,
     "main.nx::spliced": 28,
@@ -34,9 +36,9 @@
         "budget": 9,
         "declaration": "main.nx::numbers",
         "source": {
-          "end": 425,
+          "end": 460,
           "identity": "main.nx",
-          "start": 416
+          "start": 451
         }
       },
       {
@@ -59,9 +61,9 @@
         "budget": 7,
         "declaration": "main.nx::compared",
         "source": {
-          "end": 2843,
+          "end": 2929,
           "identity": "main.nx",
-          "start": 2842
+          "start": 2928
         }
       },
       {
@@ -74,9 +76,9 @@
         "budget": 10,
         "declaration": "main.nx::comparedHandlers",
         "source": {
-          "end": 3262,
+          "end": 3348,
           "identity": "main.nx",
-          "start": 3256
+          "start": 3342
         }
       },
       {
@@ -89,9 +91,9 @@
         "budget": 10,
         "declaration": "main.nx::others",
         "source": {
-          "end": 448,
+          "end": 483,
           "identity": "main.nx",
-          "start": 439
+          "start": 474
         }
       },
       {
@@ -104,9 +106,9 @@
         "budget": 6,
         "declaration": "main.nx::comparedText",
         "source": {
-          "end": 3429,
+          "end": 4132,
           "identity": "main.nx",
-          "start": 3412
+          "start": 4115
         }
       },
       {
@@ -119,9 +121,9 @@
         "budget": 3,
         "declaration": "main.nx::concat",
         "source": {
-          "end": 2218,
+          "end": 2253,
           "identity": "main.nx",
-          "start": 2211
+          "start": 2246
         }
       },
       {
@@ -134,9 +136,9 @@
         "budget": 17,
         "declaration": "main.nx::content",
         "source": {
-          "end": 2089,
+          "end": 2124,
           "identity": "main.nx",
-          "start": 2088
+          "start": 2123
         }
       },
       {
@@ -149,9 +151,9 @@
         "budget": 4,
         "declaration": "main.nx::greet",
         "source": {
-          "end": 1018,
+          "end": 1053,
           "identity": "main.nx",
-          "start": 1002
+          "start": 1037
         }
       },
       {
@@ -164,9 +166,9 @@
         "budget": 2,
         "declaration": "main.nx::one",
         "source": {
-          "end": 837,
+          "end": 872,
           "identity": "main.nx",
-          "start": 836
+          "start": 871
         }
       },
       {
@@ -179,9 +181,9 @@
         "budget": 12,
         "declaration": "main.nx::forItems",
         "source": {
-          "end": 1879,
+          "end": 1914,
           "identity": "main.nx",
-          "start": 1853
+          "start": 1888
         }
       },
       {
@@ -194,9 +196,9 @@
         "budget": 17,
         "declaration": "main.nx::forRange",
         "source": {
-          "end": 1918,
+          "end": 1953,
           "identity": "main.nx",
-          "start": 1917
+          "start": 1952
         }
       },
       {
@@ -209,14 +211,44 @@
         "budget": 6,
         "declaration": "main.nx::misaligned",
         "source": {
-          "end": 4336,
+          "end": 5039,
           "identity": "main.nx",
-          "start": 4335
+          "start": 5038
         }
       },
       {
         "budget": 11,
         "declaration": "main.nx::misaligned"
+      }
+    ],
+    "main.nx::notedHandlers": [
+      {
+        "budget": 12,
+        "declaration": "main.nx::notedHandlers",
+        "source": {
+          "end": 3665,
+          "identity": "main.nx",
+          "start": 3660
+        }
+      },
+      {
+        "budget": 24,
+        "declaration": "main.nx::notedHandlers"
+      }
+    ],
+    "main.nx::orderedHandlers": [
+      {
+        "budget": 16,
+        "declaration": "main.nx::tallied",
+        "source": {
+          "end": 3902,
+          "identity": "main.nx",
+          "start": 3857
+        }
+      },
+      {
+        "budget": 31,
+        "declaration": "main.nx::orderedHandlers"
       }
     ],
     "main.nx::patched": [
@@ -234,9 +266,9 @@
         "budget": 7,
         "declaration": "main.nx::corners",
         "source": {
-          "end": 819,
+          "end": 854,
           "identity": "main.nx",
-          "start": 779
+          "start": 814
         }
       },
       {
@@ -249,9 +281,9 @@
         "budget": 14,
         "declaration": "main.nx::twice",
         "source": {
-          "end": 964,
+          "end": 999,
           "identity": "main.nx",
-          "start": 955
+          "start": 990
         }
       },
       {
@@ -264,9 +296,9 @@
         "budget": 11,
         "declaration": "main.nx::updated",
         "source": {
-          "end": 4110,
+          "end": 4813,
           "identity": "main.nx",
-          "start": 4109
+          "start": 4812
         }
       },
       {
@@ -289,9 +321,9 @@
         "budget": 3,
         "declaration": "main.nx::answer",
         "source": {
-          "end": 465,
+          "end": 500,
           "identity": "main.nx",
-          "start": 464
+          "start": 499
         }
       },
       {
@@ -304,9 +336,9 @@
         "budget": 11,
         "declaration": "main.nx::both",
         "source": {
-          "end": 1148,
+          "end": 1183,
           "identity": "main.nx",
-          "start": 1147
+          "start": 1182
         }
       },
       {

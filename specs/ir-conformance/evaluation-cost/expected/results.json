@@ -78,6 +78,8 @@
     16
   ],
   "main.nx::misaligned": false,
+  "main.nx::notedHandlers": true,
+  "main.nx::orderedHandlers": false,
   "main.nx::patched": {
     "$type": "Opt.Update",
     "b": 5
