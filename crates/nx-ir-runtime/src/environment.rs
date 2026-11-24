@@ -650,8 +650,14 @@ impl<'p> Machine<'p> {
                     } else {
                         info.host = true;
                     }
+                    let mark = if is_own {
+                        self.env.borrow().inputs_mark()
+                    } else {
+                        None
+                    };
                     let value =
                         self.source_value(cx, node, key, Below::Layer(position), id, &source)?;
+                    self.env.borrow_mut().take_own_inputs(mark);
                     let patch = bundle && is_update_record(&value);
                     if path.is_empty() && !patch {
                         if is_own {

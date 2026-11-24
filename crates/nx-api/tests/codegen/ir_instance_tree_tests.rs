@@ -3503,3 +3503,60 @@ let root() = { <Page /> }
         .unwrap();
     assert!(renders(&tree, "root/0", "Label", "frp"));
 }
+
+#[test]
+fn a_place_formula_that_gives_the_same_value_stops_a_change() {
+    let mut tree = linked(
+        "
+environment space: int = 1
+environment gap: int = 0
+component <Card extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Page /> = {
+  <Stack><Stack env.gap={if env.space > 0 { 1 } else { 0 }}><Card /></Stack></Stack>
+}
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    tree.take_changes();
+    let card = rendered(&tree, "root/0");
+    assert!(renders(&tree, "root/0", "Label", "1"));
+    // `gap` is still `1` at the card's place, so the override-supplied read holds.
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(5))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root/0")));
+    assert!(tree.take_changes().is_empty());
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(0))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "0"));
+}
+
+#[test]
+fn a_field_the_body_provides_from_a_kept_value_follows_it_under_a_place_override() {
+    let mut tree = linked(
+        "
+type Colors = { accent:string tone:string }
+environment locale: string = \"en\"
+environment colors: Colors = { <Colors accent=\"a\" tone=\"t\" /> }
+let accent: string = { env.locale + \"!\" }
+component <Card extends Node /> = {
+  <Stack>{
+    provide env.colors.accent={accent} { <Label Text={env.colors.accent + env.colors.tone} /> }
+  }</Stack>
+}
+component <Page /> = { <Stack><Stack env.colors.tone=\"p\"><Card /></Stack></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "en!p"));
+    tree.set_environment(roots(&[("locale", "fr")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "fr!p"));
+}

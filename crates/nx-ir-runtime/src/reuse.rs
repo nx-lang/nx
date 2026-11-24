@@ -122,6 +122,9 @@ pub(crate) struct Track {
     /// The lowest position of a layer the call pushed that a read under the track met, outside
     /// a derived evaluation that began below it.
     low: Option<usize>,
+    /// A read's direct inputs that came from the sources of layers the call pushed itself, which
+    /// the value found beneath those layers does not stand for.
+    own_inputs: Vec<Input>,
 }
 
 impl Track {
@@ -132,6 +135,13 @@ impl Track {
             edges: Vec::new(),
             leaves: BTreeSet::new(),
             low: None,
+            own_inputs: Vec::new(),
+        }
+    }
+
+    fn input_all(&mut self, input: Option<Input>) {
+        if let Some(input) = input {
+            self.input(input);
         }
     }
 
@@ -229,6 +239,31 @@ impl EnvState {
             .and_then(|position| self.id(position))
     }
 
+    /// How many direct inputs the innermost track holds, for [`take_own_inputs`].
+    ///
+    /// [`take_own_inputs`]: Self::take_own_inputs
+    pub(crate) fn inputs_mark(&self) -> Option<(usize, usize)> {
+        self.tracks
+            .last()
+            .map(|track| (track.inputs.len(), track.edges.len()))
+    }
+
+    /// Moves the direct inputs and edges the innermost track, a read's, recorded since `mark`
+    /// among the inputs of the sources of the call's own layers.
+    pub(crate) fn take_own_inputs(&mut self, mark: Option<(usize, usize)>) {
+        let (Some((inputs, edges)), Some(track)) = (mark, self.tracks.last_mut()) else {
+            return;
+        };
+        if inputs < track.inputs.len() {
+            let own: Vec<Input> = track.inputs.drain(inputs..).collect();
+            track.own_inputs.extend(own);
+        }
+        if edges < track.edges.len() {
+            let own: Vec<Input> = track.edges.drain(edges..).map(Input::Edge).collect();
+            track.own_inputs.extend(own);
+        }
+    }
+
     /// Notes a read of `key` in every derived evaluation under way.
     pub(crate) fn note_read(&mut self, key: EnvKey) {
         if self.evaluating.is_empty() {
@@ -289,6 +324,7 @@ impl EnvState {
             edges,
             mut leaves,
             low: nested,
+            own_inputs,
             ..
         } = track;
         if info.own_whole.is_none() {
@@ -307,13 +343,17 @@ impl EnvState {
             } else {
                 // The value found beneath the call's own layers stands for the place's sources,
                 // but not for the formulas of the call's own path overrides on top of it, whose
-                // direct inputs follow it.
+                // direct inputs alone follow it.
                 let own = info.beneath.map(|value| Input::Override {
                     key,
                     value,
                     lookup: leaves.into_iter().collect(),
                 });
-                (own, false, true)
+                parent.input_all(own);
+                for input in own_inputs {
+                    parent.input(input);
+                }
+                return;
             }
         } else {
             let own = Input::Root {
@@ -331,7 +371,7 @@ impl EnvState {
             }
         }
         if forward_inputs {
-            for input in nested_inputs {
+            for input in own_inputs.into_iter().chain(nested_inputs) {
                 parent.input(input);
             }
         }
