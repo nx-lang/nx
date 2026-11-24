@@ -2,6 +2,7 @@
   "main.nx::branchNotTaken": [],
   "main.nx::branchNotTaken#highContrast": [],
   "main.nx::bundleReads": [],
+  "main.nx::deepRead": [],
   "main.nx::defaultTwice": [],
   "main.nx::defaultTwice#rootDark": [],
   "main.nx::equalOverride": [],

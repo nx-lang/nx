@@ -4,30 +4,78 @@
     "main.nx"
   ],
   "entrypoints": [
-    { "module": "main.nx", "function": "defaultTwice" },
-    { "module": "main.nx", "function": "valueTwice" },
-    { "module": "main.nx", "function": "valueOverride" },
-    { "module": "main.nx", "function": "modeOverride" },
-    { "module": "main.nx", "function": "unrelatedOverride" },
-    { "module": "main.nx", "function": "branchNotTaken" },
-    { "module": "main.nx", "function": "equalOverride" },
-    { "module": "main.nx", "function": "fieldOverride" },
-    { "module": "main.nx", "function": "bundleReads" },
-    { "module": "main.nx", "function": "formulaTwice" },
-    { "module": "main.nx", "function": "formulaOverride" },
+    {
+      "module": "main.nx",
+      "function": "defaultTwice"
+    },
+    {
+      "module": "main.nx",
+      "function": "valueTwice"
+    },
+    {
+      "module": "main.nx",
+      "function": "valueOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "modeOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "unrelatedOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "branchNotTaken"
+    },
+    {
+      "module": "main.nx",
+      "function": "equalOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "fieldOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "bundleReads"
+    },
+    {
+      "module": "main.nx",
+      "function": "formulaTwice"
+    },
+    {
+      "module": "main.nx",
+      "function": "formulaOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "deepRead"
+    },
     {
       "module": "main.nx",
       "function": "defaultTwice",
       "case": "rootDark",
       "arguments": [],
-      "environment": { "colorMode": "dark" }
+      "environment": {
+        "colorMode": "dark"
+      }
     },
     {
       "module": "main.nx",
       "function": "branchNotTaken",
       "case": "highContrast",
       "arguments": [],
-      "environment": { "highContrast": true }
+      "environment": {
+        "highContrast": true
+      }
+    },
+    {
+      "module": "main.nx",
+      "function": "deepFresh",
+      "case": "atDepth",
+      "arguments": [],
+      "fails": true
     }
   ]
 }

@@ -1,6 +1,6 @@
-module main.nx fingerprint 17676314224546825656
+module main.nx fingerprint 112762604960138090
 requires environment-v1 environment-v2
-entrypoints functions [sized darkAccent lightAccent frenchAccent redAccent darkTone spaceOne tripledOne defaultTwice valueTwice valueOverride modeOverride unrelatedOverride branchNotTaken equalOverride fieldOverride bundleReads formulaTwice formulaOverride] components []
+entrypoints functions [sized darkAccent lightAccent frenchAccent redAccent darkTone spaceOne tripledOne defaultTwice valueTwice valueOverride modeOverride unrelatedOverride branchNotTaken equalOverride fieldOverride bundleReads formulaTwice formulaOverride chain dive deepRead deepFresh] components []
 
 union Mode @5:1-5:25
   case light constant
@@ -131,5 +131,26 @@ function formulaOverride(): int+ @65:1-65:89 =
   provide env.gap:=(env.space mul 2) {
     [env.gap, spaceOne()]
   }
+
+function chain(n: int): int @68:1-68:70 =
+  if (n eq 0) then
+    1
+  else
+    (chain((n sub 1)) add 1)
+
+environment deep: int @69:1-69:38 =
+  chain(10)
+
+function dive(n: int): int @70:1-70:71 =
+  if (n eq 0) then
+    env.deep
+  else
+    dive((n sub 1))
+
+function deepRead(): int+ @73:1-73:45 =
+  [env.deep, dive(95)]
+
+function deepFresh(): int @75:1-75:36 =
+  dive(95)
 
 provide sized(env.scale)

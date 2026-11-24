@@ -3,6 +3,7 @@
     "main.nx::branchNotTaken": 59,
     "main.nx::branchNotTaken#highContrast": 74,
     "main.nx::bundleReads": 44,
+    "main.nx::deepRead": 1338,
     "main.nx::defaultTwice": 64,
     "main.nx::defaultTwice#rootDark": 53,
     "main.nx::equalOverride": 81,

@@ -63,3 +63,13 @@ let bundleReads(): int+ = { env.ring env.scale env.ring env.scale }
 let formulaTwice(): int+ = { provide env.gap={env.space * 2} { env.gap env.gap } }
 /// And again under a new `space`.
 let formulaOverride(): int+ = { provide env.gap={env.space * 2} { env.gap spaceOne() } }
+
+/// `chain` nests calls `n` deep.
+let chain(n:int): int = { if n == 0 { 1 } else { chain(n - 1) + 1 } }
+environment deep: int = { chain(10) }
+let dive(n:int): int = { if n == 0 { env.deep } else { dive(n - 1) } }
+/// `deep`'s default is evaluated at the first read, near the top, and reused at the read 95 calls
+/// down, where evaluating it would pass the call depth limit.
+let deepRead(): int+ = { env.deep dive(95) }
+/// The read 95 calls down alone evaluates it there, and fails.
+let deepFresh(): int = { dive(95) }

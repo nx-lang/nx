@@ -4403,3 +4403,228 @@ fn component_explicit_state_preserves_numeric_sites_and_polymorphic_results() {
         r#"{"$type":"ShortTextQuestion","label":"Name","placeholder":"Enter your name"}"#,
     );
 }
+
+// ------------------------------------------------------------------------------------------------
+// Derived results reused within one call
+// ------------------------------------------------------------------------------------------------
+
+/// Every derived result here calls `weight`, which costs thousands of operations while the rest of
+/// an entrypoint costs a few dozen, so an entrypoint's count divided by `weight`'s, rounded, is how
+/// many derived results it evaluated.
+const REUSE_SOURCE: &str = "
+type Mode = light | dark
+type Colors = { accent:string surface:string }
+let count(xs?:int+): int = { 1 }
+let weight(): int = { count(for i in 0..2000 { i }) }
+let weighOnce(): int = { weight() }
+environment colorMode: Mode = light
+environment highContrast: boolean = false
+environment locale: string = \"en-US\"
+environment color: Colors = {
+  if weight() == 1 {
+    if env.colorMode is {
+      light => <Colors accent=\"blue\" surface=\"white\" />
+      dark => <Colors accent=\"navy\" surface=\"black\" />
+    }
+  } else { <Colors accent=\"\" surface=\"\" /> }
+}
+environment tone: string = {
+  if weight() == 1 {
+    if env.highContrast { if env.colorMode is { light => \"ink\" dark => \"chalk\" } } else { \"soft\" }
+  } else { \"\" }
+}
+environment space: int = 4
+environment gap: int = 0
+let palette: int = { weight() }
+let tripled: int = { env.space * weight() * 3 }
+let darkAccent(): string = { provide env.colorMode=dark { env.color.accent } }
+let lightAccent(): string = { provide env.colorMode=light { env.color.accent } }
+let frenchAccent(): string = { provide env.locale=\"fr-FR\" { env.color.accent } }
+let redAccent(): string = { provide env.color.accent=\"red\" { env.color.accent } }
+let darkTone(): string = { provide env.colorMode=dark { env.tone } }
+let spaceOne(): int = { provide env.space=1 { env.gap } }
+let tripledOne(): int = { provide env.space=1 { tripled } }
+let once(): string = { env.color.accent }
+let both(): string+ = { env.color.accent env.color.surface }
+let modeOverride(): string+ = { env.color.accent darkAccent() }
+let unrelatedOverride(): string+ = { env.color.accent frenchAccent() }
+let branchNotTaken(): string+ = { env.tone darkTone() }
+let equalOverride(): string+ = { env.color.accent lightAccent() }
+let fieldOverride(): string+ = { env.color.accent redAccent() }
+let valueTwice(): int+ = { palette palette }
+let valueOverride(): int+ = { tripled tripled tripledOne() }
+let formulaTwice(): int+ = { provide env.gap={env.space * weight()} { env.gap env.gap } }
+let formulaOverride(): int+ = { provide env.gap={env.space * weight()} { env.gap spaceOne() } }
+";
+
+/// The entry module's bundle reads `scale`, which it sets.
+const REUSE_BUNDLE_SOURCE: &str = "
+let count(xs?:int+): int = { 1 }
+let weight(): int = { count(for i in 0..2000 { i }) }
+let weighOnce(): int = { weight() }
+environment scale: int = 1
+environment ring: int = 0
+let sized(scale:int): env.Update = <env.Update scale={scale + weight()} ring={scale * 10} />
+provide env with sized(env.scale)
+let ringOnce(): int = { env.ring }
+let scaleOnce(): int = { env.scale }
+let reads(): int+ = { env.ring env.scale env.ring env.scale }
+";
+
+/// What `function` gives with `roots`, and how many derived results it evaluated.
+fn evaluations(program: &Program, function: &str, roots: &[(&str, NxValue)]) -> (NxValue, u64) {
+    let environment = nx_ir_runtime::Environment::root(roots.iter().cloned());
+    let run = |function: &str, options: &RuntimeOptions| {
+        program.evaluate_function(
+            function,
+            &[],
+            &RuntimeOptions {
+                environment: environment.clone(),
+                ..options.clone()
+            },
+        )
+    };
+    let weight = cost(|options: &RuntimeOptions| run("weighOnce", options));
+    let count = cost(|options: &RuntimeOptions| run(function, options));
+    let value = run(function, &options()).unwrap_or_else(|error| panic!("{function}: {error}"));
+    (value, (count + weight / 2) / weight)
+}
+
+fn strings(items: &[&str]) -> NxValue {
+    NxValue::Array(
+        items
+            .iter()
+            .map(|item| NxValue::String(item.to_string()))
+            .collect(),
+    )
+}
+
+#[test]
+fn a_default_is_evaluated_once_in_one_environment() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "both", &[]),
+        (strings(&["blue", "white"]), 1)
+    );
+    // The default is paid for once whatever reads it: the second read costs only its own nodes.
+    assert_eq!(evaluations(&program, "once", &[]).1, 1);
+}
+
+#[test]
+fn an_override_of_a_value_a_default_read_evaluates_it_again() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "modeOverride", &[]),
+        (strings(&["blue", "navy"]), 2)
+    );
+}
+
+#[test]
+fn an_override_of_a_value_a_default_did_not_read_reuses_it() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "unrelatedOverride", &[]),
+        (strings(&["blue", "blue"]), 1)
+    );
+}
+
+#[test]
+fn only_the_reads_a_default_made_are_its_dependencies() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "branchNotTaken", &[]),
+        (strings(&["soft", "soft"]), 1)
+    );
+    // With the branch taken, `colorMode` is a read, and its override a reason to evaluate again.
+    assert_eq!(
+        evaluations(
+            &program,
+            "branchNotTaken",
+            &[("highContrast", NxValue::Bool(true))]
+        ),
+        (strings(&["ink", "chalk"]), 2)
+    );
+}
+
+#[test]
+fn an_equal_override_is_still_a_new_override() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "equalOverride", &[]),
+        (strings(&["blue", "blue"]), 2)
+    );
+}
+
+#[test]
+fn a_field_override_is_applied_to_a_reused_default() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "fieldOverride", &[]),
+        (strings(&["blue", "red"]), 1)
+    );
+}
+
+#[test]
+fn a_value_read_twice_is_evaluated_once_and_again_under_a_new_override_of_what_it_reads() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "valueTwice", &[]),
+        (NxValue::Array(vec![NxValue::Int(1), NxValue::Int(1)]), 1)
+    );
+    assert_eq!(
+        evaluations(&program, "valueOverride", &[]),
+        (
+            NxValue::Array(vec![NxValue::Int(12), NxValue::Int(12), NxValue::Int(3)]),
+            2
+        )
+    );
+}
+
+#[test]
+fn a_formula_is_evaluated_again_only_under_a_new_override_of_what_it_reads() {
+    let program = program(REUSE_SOURCE);
+    assert_eq!(
+        evaluations(&program, "formulaTwice", &[]),
+        (NxValue::Array(vec![NxValue::Int(4), NxValue::Int(4)]), 1)
+    );
+    assert_eq!(
+        evaluations(&program, "formulaOverride", &[]),
+        (NxValue::Array(vec![NxValue::Int(4), NxValue::Int(1)]), 2)
+    );
+}
+
+#[test]
+fn a_bundle_that_reads_a_value_it_sets_is_kept_for_each_value_read() {
+    let program = program(REUSE_BUNDLE_SOURCE);
+    // A read of `scale` alone builds the bundle from `scale`'s default; a read of `ring` builds
+    // it from the provided `scale`, which needs the bundle read for `scale` first.
+    assert_eq!(
+        evaluations(&program, "scaleOnce", &[]),
+        (NxValue::Int(2), 1)
+    );
+    assert_eq!(
+        evaluations(&program, "ringOnce", &[]),
+        (NxValue::Int(20), 2)
+    );
+    // Each read gives what a fresh evaluation gives, and the bundle is evaluated once for each
+    // value read, not again for the reads that follow.
+    assert_eq!(
+        evaluations(&program, "reads", &[]),
+        (
+            NxValue::Array(vec![
+                NxValue::Int(20),
+                NxValue::Int(2),
+                NxValue::Int(20),
+                NxValue::Int(2)
+            ]),
+            2
+        )
+    );
+}
+
+#[test]
+fn results_do_not_survive_the_call() {
+    let program = program(REUSE_SOURCE);
+    let run = |options: &RuntimeOptions| program.evaluate_function("both", &[], options);
+    assert_eq!(cost(run), cost(run));
+}

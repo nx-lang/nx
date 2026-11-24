@@ -2299,3 +2299,30 @@ fn a_formula_of_another_build_is_refused_at_the_read() {
     assert_eq!(error.code(), "nx-ir-boundary-type", "{error}");
     assert!(error.to_string().contains("another build"), "{error}");
 }
+
+// ------------------------------------------------------------------------------------------------
+// Results reused within a render
+// ------------------------------------------------------------------------------------------------
+
+/// `Footer` evaluates `accent` for its state's default, before the render records its reads, and
+/// the body reuses it: the reads `accent` made are replayed into the render's record.
+const REUSED_READER: &str = "
+type Mode = light | dark
+environment colorMode: Mode = light
+let accent: string = { if env.colorMode is { light => \"blue\" dark => \"navy\" } }
+component <Footer /> = {
+  state { seen:string = {accent} }
+  <Label Text={accent} />
+}
+let root() = <Footer />
+";
+
+#[test]
+fn a_reader_through_a_reused_result_renders_again_when_what_it_read_changes() {
+    let mut tree = open(REUSED_READER);
+    assert!(renders(&tree, "root", "Label", "blue"));
+    tree.set_environment(roots(&[("colorMode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root", "Label", "navy"));
+    assert!(!tree.is_settled("root"));
+}

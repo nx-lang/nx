@@ -53,6 +53,7 @@
         "constraints",
         "conversions",
         "design-tokens",
+        "environment-reuse",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -134,6 +135,7 @@
       ],
       "sub": [
         "constraints",
+        "environment-reuse",
         "expressions",
         "generic-records",
         "geometry-library"
