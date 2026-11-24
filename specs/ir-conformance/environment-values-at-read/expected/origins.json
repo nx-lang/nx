@@ -1,8 +1,15 @@
 {
+  "main.nx::defaulted": [],
   "main.nx::direct": [],
+  "main.nx::element": [
+    {"path": "", "module": "main.nx", "start": 1413, "end": 1420}
+  ],
   "main.nx::imported": [],
   "main.nx::named": [],
+  "main.nx::qualified": [],
+  "main.nx::qualifiedOverride": [],
   "main.nx::record": [
-    {"path": "", "module": "main.nx", "start": 396, "end": 445}
-  ]
+    {"path": "", "module": "main.nx", "start": 422, "end": 471}
+  ],
+  "main.nx::throughFunction": []
 }

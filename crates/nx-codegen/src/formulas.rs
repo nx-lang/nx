@@ -48,7 +48,12 @@ fn direct_reads(expression: &CodegenExpression) -> Reads {
                 reads.environment = true;
             }
         }
+        // A name, bare or qualified through an import alias (`sh.triple`).
         CodegenExpressionKind::Identifier {
+            reference: Some(reference),
+            ..
+        }
+        | CodegenExpressionKind::Member {
             reference: Some(reference),
             ..
         } if matches!(
@@ -57,6 +62,11 @@ fn direct_reads(expression: &CodegenExpression) -> Reads {
         ) =>
         {
             reads.named.push(key(reference))
+        }
+        // Making a component element fills its absent props from their defaults, which may read
+        // the environment.
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            reads.named.push(key(&descriptor.component))
         }
         _ => {}
     });
@@ -75,6 +85,11 @@ fn reading_declarations(modules: &[CodegenModule]) -> FxHashSet<Key> {
                     .chain(std::iter::once(body))
                     .collect(),
                 CodegenDeclarationKind::Value { value, .. } => vec![value],
+                CodegenDeclarationKind::Component(component) => component
+                    .props
+                    .iter()
+                    .filter_map(|prop| prop.default.as_ref())
+                    .collect(),
                 // A value's default is evaluated wherever it is read, so a read of it reads the
                 // environment by definition; it is named by its `env.` read, never called.
                 _ => continue,
@@ -158,7 +173,22 @@ pub(crate) fn mark_formulas(modules: &mut [CodegenModule]) {
 pub(crate) fn free_locals(expression: &CodegenExpression) -> Vec<String> {
     let mut read = Vec::new();
     let mut bound = FxHashSet::default();
+    // `sh.triple` resolves to a declaration, so its `sh` is an import alias, not a local.
+    let mut aliases: FxHashMap<String, usize> = FxHashMap::default();
     visit_expression(expression, &mut |expression| match &expression.kind {
+        CodegenExpressionKind::Member {
+            base,
+            reference: Some(_),
+            ..
+        } => {
+            if let CodegenExpressionKind::Identifier {
+                name,
+                reference: None,
+            } = &base.kind
+            {
+                *aliases.entry(name.clone()).or_default() += 1;
+            }
+        }
         CodegenExpressionKind::Identifier {
             name,
             reference: None,
@@ -183,6 +213,13 @@ pub(crate) fn free_locals(expression: &CodegenExpression) -> Vec<String> {
             bound.insert("action".to_string());
         }
         _ => {}
+    });
+    read.retain(|name| match aliases.get_mut(name) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            false
+        }
+        _ => true,
     });
     read.retain(|name| !bound.contains(name));
     read.sort();

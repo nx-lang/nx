@@ -177,6 +177,10 @@ fn reached_environment(
         CodegenExpressionKind::Identifier {
             reference: Some(reference),
             ..
+        }
+        | CodegenExpressionKind::Member {
+            reference: Some(reference),
+            ..
         } if matches!(
             reference.kind,
             ResolvedItemKind::Function | ResolvedItemKind::Value
@@ -233,6 +237,10 @@ impl Walk<'_> {
         visit_expression(expression, &mut |expression| match &expression.kind {
             CodegenExpressionKind::EnvRead { reference } => reached.push(reference.clone()),
             CodegenExpressionKind::Identifier {
+                reference: Some(reference),
+                ..
+            }
+            | CodegenExpressionKind::Member {
                 reference: Some(reference),
                 ..
             } if matches!(

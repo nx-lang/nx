@@ -1,7 +1,8 @@
-module main.nx fingerprint 2958448438234778377
+module main.nx fingerprint 4477416778341812224
 links shared.nx version "" fingerprint 5641542836582198659
+links other.nx version "" fingerprint 1915734367421540943
 requires environment-v1 environment-v2
-entrypoints functions [named direct record imported] components []
+entrypoints functions [named direct record imported qualified qualifiedOverride tripled throughFunction element padded defaulted] components [Box]
 
 environment gap: int =
   0
@@ -42,4 +43,49 @@ function record() =
 function imported() =
   provide shared.nx:env.space=10 {
     shared.nx:triple
+  }
+
+value viaAlias: int =
+  other.nx:quadruple
+
+function qualified() =
+  provide shared.nx:env.space=1 {
+    viaAlias
+  }
+
+function qualifiedOverride() =
+  provide env.gap:=other.nx:quadruple {
+    provide shared.nx:env.space=2 {
+      env.gap
+    }
+  }
+
+function tripled(): int =
+  tv
+
+function throughFunction() =
+  provide shared.nx:env.space=3 {
+    tripled()
+  }
+
+component Box
+  props
+    pad: int = shared.nx:env.space
+  body =
+    <span pad=pad />
+
+value box =
+  <Box />
+
+function element() =
+  provide shared.nx:env.space=1 {
+    box
+  }
+
+function padded(extra: int = tv): int =
+  (extra add 1)
+
+function defaulted() =
+  provide shared.nx:env.space=2 {
+    padded()
   }

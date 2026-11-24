@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
-### Requirement: Generated code evaluates environment values Generated TypeScript and JavaScript
-SHALL evaluate `env.` reads, `provide` blocks, elements with `env.` attributes, bundles, `with`
+### Requirement: Generated code evaluates environment values
+Generated TypeScript and JavaScript SHALL evaluate `env.` reads, `provide` blocks, elements with `env.` attributes, bundles, `with`
 steps and the entry module's provides with the results the native runtime gives, including the
 `$env` field of component descriptors. A caller SHALL run a generated entry function in an
 environment with the `nxWithEnvironment` helper, and component evaluation SHALL take an environment

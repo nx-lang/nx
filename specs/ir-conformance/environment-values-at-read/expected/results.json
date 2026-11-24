@@ -1,10 +1,25 @@
 {
+  "main.nx::defaulted": 7,
   "main.nx::direct": 25,
+  "main.nx::element": {
+    "$env": [
+      {
+        "path": [],
+        "to": 1,
+        "value": "shared.nx::space"
+      }
+    ],
+    "$type": "Box",
+    "pad": 1
+  },
   "main.nx::imported": 30,
   "main.nx::named": 3,
+  "main.nx::qualified": 4,
+  "main.nx::qualifiedOverride": 8,
   "main.nx::record": {
     "$type": "Insets",
     "bottom": 10,
     "top": 5
-  }
+  },
+  "main.nx::throughFunction": 9
 }

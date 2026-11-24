@@ -748,3 +748,99 @@ The rest are Low: diagnostic wording, a TextMate edge case and a missing image-e
   comparison to lifecycles' initial render.
 - **Fix:** Added plain entrypoints to `environment-inline-provide` that generated JavaScript runs: `sectioned()` applies the mode-dependent theme with `provide env with theme` and reads it in a section set to dark mode (`navy`), and `shown()` returns `<Branded look={theme} />`, a descriptor whose bundle prop carries a formula entry, compared by module and locals. 335 parity tests (including `generated_javascript_agrees_with_the_recorded_results`) and the TypeScript suite pass.
 - **Verification:** `sectioned()` (`navy`: a theme that varies by mode, under a mode set inside the section) and `shown()` (a `Branded` descriptor carrying `theme` as its prop) are now entrypoints. `generated_javascript_agrees_with_the_recorded_results` passes with 167 entrypoints compared, 2 more than before, and `environment-inline-provide` isn't skipped. The corpus tests and the TypeScript `corpus.test` pass. `shown()` compares the descriptor, with the bundle's formula entry, rather than a rendered read of the prop. That covers passing a bundle as a prop, and my manual render already showed the engines agree on applying it.
+
+## New Findings Discovered During 2026-11-24 10:30 Review
+
+**Scope:** `git diff d9e34192..ae7fcd2d`, the RF31 fix that makes generated top-level values that
+read the environment lazy: `crates/nx-codegen/src/emit.rs`, `formulas.rs`
+(`environment_reading_values`), the `environment-values-at-read` corpus program, and the updated
+executable-code-generation delta, design.md, tasks 4.3, README and specs/future.md.
+
+**How it was checked:** I generated JavaScript and TypeScript and compared generated JavaScript
+with the TypeScript IR runtime on small programs that reach a lazy value through each of these
+positions:
+- a record field default and an `environment` default;
+- a component prop default and a sequence value;
+- string concatenation, a comparison and a `for` loop;
+- a value read through a function;
+- a cross-module value, read directly and through a qualified import;
+- a top-level component element.
+
+These agree: a record field default, an environment default, a prop default, a sequence, a string,
+a comparison, a `for` loop, a value through a function, and a qualified import read directly inside
+a function. The generated `index.js` exports only functions and components, so the change doesn't
+alter what a host can import. A value that reads no environment stays a constant (`export const k:
+number = 5`). The generated TypeScript type of a lazy value is `(): T => (…)`.
+
+### 🟡 Fixed - RF38 A value or override that names an imported value through a qualified import doesn't follow the read
+- **Severity:** Medium
+- **Confidence:** High (reproduced)
+- **Evidence:** `direct_reads` (crates/nx-codegen/src/formulas.rs:33-62) records a named
+  declaration only for `CodegenExpressionKind::Identifier { reference: Some(..) }`. It never does
+  this for a `Member` that carries a reference, which is how `sh.triple` after `import "./shared.nx"
+  as sh` is lowered. Given `export let triple: int = { env.unit * 3 }` in shared.nx:
+  - `let viaQualified: int = { sh.triple }` isn't counted as reading the environment. It is
+    generated as `export const viaQualified = m1_triple();`, a constant that calls the lazy value
+    once at load. Under `provide env.unit=1 { viaQualified }`, TypeScript IR gives `3` and generated
+    JavaScript gives `6`.
+  - `provide env.gap={sh.triple} { provide env.unit=1 { env.gap } }` is not flagged as a formula, so
+    *both* engines give `6`. Written as `{tv}` within one module, the same override gives `3`.
+
+  `sh.triple` read directly inside a function is fine, because `emit_expression` calls it.
+- **Recommendation:** In `direct_reads`, also push the key of a `Member { reference: Some(reference)
+  }` whose kind is `Function` or `Value`. This fixes both formula marking and lazy values. Add a
+  qualified-import value and override to `environment-values-at-read`.
+- **Fix:** `direct_reads` (crates/nx-codegen/src/formulas.rs) now counts a `Member` that carries a reference, as it counts an `Identifier`, so `sh.quadruple` makes a value lazy and an override a formula; the cycle check's two walks (environment_cycles.rs) follow it too. `free_locals` no longer captures the import alias of such a member (`sh` was captured as a local and failed in generated JavaScript). Corpus cases `qualified()` (4) and `qualifiedOverride()` (8) in `environment-values-at-read`, through a new `other.nx` imported `as sh`, agree in all three engines.
+
+### 🟡 Fixed - RF39 A top-level component element keeps the environment of load time in generated code
+- **Severity:** Medium
+- **Confidence:** High (reproduced)
+- **Evidence:** Given `component <C n:int = {env.space} />`, `let el = { <C /> }` and `let e() = {
+  provide env.space=1 { el } }`, rendering `e()` gives `n=1` in TypeScript IR and `n=4` in generated
+  JavaScript. The IR runtimes compute `el` at the read, so its descriptor's `$env` holds
+  `space=1`. Generated code emits `export const el = C({  });` at load, so its `$env` is empty.
+  `reading_declarations` doesn't treat creating a component element, which captures the
+  environment into `$env`, as an environment read. So the spec's new rule, "a top-level value whose
+  evaluation can read the environment … SHALL be generated as a function", misses this case. The
+  same gap probably affects an override whose value is a component element.
+- **Recommendation:** Count a component element, which captures `$env`, as reading the environment
+  in `direct_reads`, or as a dedicated `captures_environment` flag, and add the case to the corpus.
+- **Fix:** Making a component element now names the component in `direct_reads`, and a component counts as reading the environment when a prop default does (`reading_declarations`), so `let box = { <Box /> }` with `pad: int = {env.space}` is generated as a function. Corpus case `element()` gives `pad` 1 under `provide env.space=1` in all three engines.
+
+### 🟡 Fixed - RF40 The spec delta's requirement header was merged into its body text
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** The reflow in specs/executable-code-generation/spec.md:3 turned the header into
+  `### Requirement: Generated code evaluates environment values Generated TypeScript and JavaScript`,
+  with the requirement text starting on the next line as "SHALL evaluate …". The MODIFIED header no
+  longer matches the main spec's `### Requirement: Generated code evaluates environment values`
+  (openspec/specs/executable-code-generation/spec.md:883). So syncing or archiving would fail to
+  find the requirement, or would add a second one. (`openspec validate` couldn't run here, because
+  it needs network access.)
+- **Recommendation:** Restore the header line and start the body with "Generated TypeScript and
+  JavaScript SHALL …".
+- **Fix:** The requirement header is restored on its own line (`### Requirement: Generated code evaluates environment values`), with the body starting on the next line.
+
+### 🟡 Fixed - RF41 `environment-values-at-read` doesn't cover the reference paths most likely to stay constant
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** The program covers a same-module value, a value through a value, a record value, an
+  unqualified cross-module value and a named override. It has no case for a qualified import
+  (RF38), a component element value (RF39), a value through a function (`let v: int = { helper()
+  }`), or a lazy value in a record field default, prop default or `environment` default. Those
+  agree today in my manual checks, but nothing pins them. The generated-JavaScript comparison runs
+  only JavaScript, so the TypeScript form, `const tv = (): T => (…)`, is never type-checked against
+  a call site.
+- **Recommendation:** Add these as entrypoints, including the RF38 and RF39 cases once they are
+  fixed. Consider a `tsc --noEmit` smoke check of one generated TypeScript program that uses lazy
+  values.
+- **Fix:** `environment-values-at-read` gains a qualified import (`qualified`, `qualifiedOverride`), a component element value (`element`), a value read through a function (`throughFunction`, 9) and a lazy value as a parameter default (`defaulted`, 7). New test `generated_typescript_with_values_computed_at_each_read_type_checks` checks the `const tv = (): number => (…)` form, a constant left as is, and the calls, and runs `tsc` on the output. 335 parity tests and the TypeScript suite pass.
+
+## Summary (2026-11-24 10:30 review)
+
+The lazy-value approach is sound and covers the main reference paths: identifiers, members inside
+functions, defaults, sequences and cross-module identifiers. Two read paths are missed. A qualified
+import reference isn't seen by `direct_reads`, which also leaves such overrides out of formula
+marking in every engine (RF38). A top-level component element captures its `$env` at load (RF39).
+The spec delta's header was broken by a reflow (RF40), and the corpus lacks cases for these paths
+(RF41).

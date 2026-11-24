@@ -3961,3 +3961,25 @@ fn a_with_emits_the_image_of_its_apply_or_merge_form() {
         );
     }
 }
+
+#[test]
+fn generated_typescript_with_values_computed_at_each_read_type_checks() {
+    let artifact = artifact_from_source(
+        r#"
+environment space: int = 4
+environment gap: int = 0
+type Insets = { top:int bottom:int }
+let tv: int = { env.space * 3 }
+let doubled: int = { tv * 2 }
+let insets: Insets = <Insets top={env.space} bottom={tv} />
+let plain: int = { 7 }
+let named(): int = { provide env.gap={tv} { provide env.space=1 { env.gap } } }
+let direct(): int = { tv + doubled + plain + insets.top }
+"#,
+    );
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(module.contains("const tv = (): number => ("), "{}", module);
+    assert!(module.contains("const plain: number = 7;"), "{}", module);
+    assert!(module.contains("tv() + doubled()"), "{}", module);
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
