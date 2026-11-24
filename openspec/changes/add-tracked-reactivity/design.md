@@ -404,11 +404,31 @@ comparison of values. When the values are the same, the tree keeps the old value
 `changed` alone, so nothing that used it is evaluated or rendered again. When they differ, the new
 value takes the next revision.
 
-**Variants.** A result used at places whose reads are classified differently, or whose
-override-supplied values differ, such as a light and a dark section, keeps one variant for each.
-Variants are told apart by those classes and values. A use checks the variants in the order they
-were kept, each by the rule above, and uses the first valid one; with none, it evaluates the result
-and keeps a variant, replacing the one it is compared with for the cutoff or adding one.
+**Variants.** One result can come out differently in different places. On a page with a normal
+section and a section inside `<div env.colorMode=dark>`, `color`'s default gives the light palette
+in one and the dark palette in the other. If the tree kept only one `color`, each render would
+discard the other section's palette and build it again. So the tree keeps one copy for each
+situation, a *variant*.
+
+A situation is how each value the result read is supplied where it is used:
+
+- whether the value comes from no override (the root value, a provide or the default) or from an
+  override above that place;
+- for a value that comes from an override, the value it sets.
+
+In the example the two variants are "`colorMode` from the root" (light) and "`colorMode` overridden
+to `dark`".
+
+When a render reads `env.color`, the tree tries the variants in the order they were kept and checks
+each with the validity rule above: inputs in the order they were read, revisions, and
+override-supplied values compared. It uses the first valid one. When none is valid, it evaluates the
+result at that place and keeps the new value as a variant:
+
+- If a variant for the same situation exists but is out of date, for example because the root
+  value of `colorMode` changed, the new value replaces it. The new value is first compared with
+  the old one, and when they are equal the variant keeps its old revision, so nothing that used it
+  is evaluated or rendered again. This is the equality cutoff.
+- If no variant is for this situation, the new value is added as one.
 
 **Lifetime.** A variant is referenced by the node records and kept-result records that hold an edge
 to it. When a node renders again, is replaced, removed or dropped, or a variant is replaced or
