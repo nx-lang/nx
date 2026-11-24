@@ -816,27 +816,40 @@ pushed; a formula, and the bundle of a render's own `envProvide`, is reused with
 A kept result has a record of its *direct inputs* in the order it read them: a read no layer of
 its place sets is a root read, with an edge to the kept result that supplied it when a default or
 a provide did; a read a layer sets is an override-supplied read holding the value found; and a
-kept result used otherwise is an edge. A render's record has the same form, with the props and
+kept result used otherwise is an edge. What no kept result stands for is a direct input of what
+encloses it: a formula's reads, the reads of a formula entry of an entry-module bundle, and the
+reads of a result evaluated under the render's own overrides. So with
+`provide env with <env.Update gap={env.space * 2} />`, a read of `gap` is a root read of `gap`, with
+an edge to the bundle, and a root read of `space`. A render's record has the same form, starting
+with what normalizing its props read, a default that reads `env` included, with the props and
 state fields it read beside it.
 
 A kept result is taken into a later render, of any node, when no layer that render pushed sets a
 value any of its reads reached, and it is valid there: each input, in order, is classified at the
 use as it was recorded, a root read's value has not changed since the result was last found valid,
-an override-supplied read's lookup gives an equal value (evaluating any formula there), and an
+an override-supplied read's lookup gives the same value as a host sees it written (evaluating any
+formula there), and an
 edge's result, validated first by the same rule and evaluated again when it is not valid, has not
 changed since. The check stops at the first input that does not hold, and the result is then
 evaluated again, so a check never evaluates what a fresh evaluation would not. A result evaluated
 again keeps its old value when the two are the same as a host sees them written: of one number
 kind, `-0.0` distinct from `0.0`, NaN never the same, and with equal origins when origins are
 collected. A result whose reads are classified or supplied differently at two places keeps a
-variant for each, and a use takes the first valid one in the order they were kept.
+variant for each, and a use takes the first valid one in the order they were kept. The variant a
+result evaluated again replaces is the first one found not valid at the place whose reads are all
+classified there as they were recorded, those after the input that stopped its check included.
+A root value that a host changes to one written otherwise, such as `0.0` to `-0.0`, is a change.
 
 Taking a kept result costs nothing beyond the node that asked for it, as reuse within a call does;
 the render that evaluated it first paid for it. Classifying a read and comparing revisions cost
 nothing. Looking up an override-supplied value costs what the lookup's reads and its comparison
 cost, evaluating a kept result again costs what the evaluation costs, and comparing it with the
-value it replaces costs what a comparison of the two values costs. So a render's count is a
-function of its images, its input and what the tree holds.
+value it replaces costs what a comparison of the two values costs. Checking a node's record before
+a visit, a `set_environment` or a dispatch decides whether it renders is charged to the lifecycle
+call that follows it at the node: the call starts with what the check left of the operation budget
+and reports the check's operations as its own. A check that holds with nothing after it is
+reported as a call of its own. So a render's count is a function of its images, its input and
+what the tree holds.
 
 ## Evaluation cost
 

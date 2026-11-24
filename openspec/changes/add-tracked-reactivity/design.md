@@ -107,7 +107,8 @@ the provide's index and the value read makes each entry's own cap part of its id
 (Decision 3). A targeted provide is evaluated only for its target, a default only for its value and
 a formula only for its layer's value, so their caps are already fixed by their identity. A formula
 among an entry-module bundle's entries is held by no layer, so it is not a derived result of its
-own: it is evaluated at each read, from the bundle that is reused.
+own: it is evaluated at each read, from the bundle that is reused. In the instance tree its reads
+are direct inputs of the read that evaluated it (Decision 8).
 
 What is cached is the result of the source, not of the read. A read of `env.color` with
 `env.color.accent=red` on top still applies that field override to the cached default each time.
@@ -235,9 +236,24 @@ set is used only when a variant is taken into a call (Decision 11): for the chec
 render pushed touches a value it read, and for the tokens it enters the call with. It is bounded by
 the program's environment declarations, and building it from the edges' sets is free.
 
-A read where a source was evaluated under the render's own overrides of other values keeps today's
-handling (`take_environment_reads`): it holds the value found beneath those overrides, or none,
-which counts as changed, and is compared by value like an override-supplied read.
+Some evaluations are not kept results, and no edge stands for their reads: a formula, in `$env`
+or in an `envProvide`; a formula entry of an entry-module bundle, which is evaluated inside the
+read that found it (Decision 2); and a result evaluated under the render's own overrides, which
+the tree does not keep (Decision 11). Each gives its direct inputs to what encloses it, as if its
+reads had been made there. So a read of `gap` that an entry-module `provide env with
+<env.Update gap={env.space * 2} />` supplies is a root read of `gap`, with an edge to the bundle,
+followed by a root read of `space`; and a body that overrides `mode` and reads `loud`, whose
+default reads `mode` and `locale`, records a root read of `loud` and of `locale`, but not of
+`mode`, which its own override supplies. A read inside such an evaluation is classified at the
+place like any other: a layer the render pushed changes the value it finds only through what the
+render itself recorded, so a root read of `locale` there still holds when `locale`'s root value
+is unchanged.
+
+The one case that still compares by value is a read that a layer of the place sets, wholly or at
+a field path, when a source of it was evaluated under the render's own overrides of other values:
+the override-supplied value found under those overrides is not the one a lookup at the place
+gives. It holds the value found beneath the render's overrides, or none, which counts as changed,
+compared as an override-supplied read is, beside the direct inputs of what it evaluated.
 
 A node's record also holds the props and state fields its render read (Decisions 9 and 10), and
 the node holds its own `verified` revision, the revision at which its record was last found valid.
@@ -326,6 +342,15 @@ only `title` depends on `label` too, and comparing the normalized `title` sees i
 the new normalized props anyway, since a later dispatch builds the body's frame from
 `instance.props`.
 
+A prop's default can also read the environment, as with `label: string = { env.mode }` in a
+descriptor a host wrote without `label` (a parent's render fills in the defaults of the
+descriptors it writes). The render's record starts before the props are normalized, so what the
+defaults read is part of it, first. The node also keeps those inputs apart: a dispatch renders
+from the props the instance holds without normalizing them, and starts its record with them; and
+a prop skip that takes new props joins what their normalization read to the node's record. The
+defaults of the state are evaluated only when the node is created, and the state is kept, so
+their reads are not the render's.
+
 When a visit hands a node a descriptor that differs from the one it holds, and its environment
 record holds at its new place, the tree normalizes the new descriptor's props through an internal
 Rust lifecycle entry, charged as initialization charges normalizing them (each check, each
@@ -362,7 +387,9 @@ overrides is not kept, matching the "found under the call's own overrides" flag.
 only: they are identified by a layer, and layers are numbered per call.
 
 **Revisions.** The tree has one counter, which each `set_environment` advances once. Each root
-value it changes, set or cleared, takes the new revision, and each kept result whose value changes
+value it changes, set or cleared, takes the new revision; a root value changes when it is not the
+same as before as a host would see it written, by the cutoff's rule below, so `0.0` becoming `-0.0`
+is a change, and each kept result whose value changes
 when it is evaluated again takes the current revision, as Salsa's derived queries do: a result is
 only evaluated again because something changed after its users were last verified, so the current
 revision is already later than their `verified`. (The proposal said "the next revision"; with one
@@ -406,7 +433,10 @@ render. A variant or node found valid takes the current revision as its `verifie
 
 **Equality cutoff.** A result evaluated again is compared with the variant it replaces: the first
 variant whose reads are classified at the place as they were recorded and that was found not valid
-there, because a root value or an override-supplied value it read changed. It is the same value when a host
+there, because a root value or an override-supplied value it read changed. Validation stops at the
+first input that does not hold, so for a variant found stale there the reads after that input are
+classified too, which costs nothing; one of them classified otherwise makes the variant another
+place's, not one to replace. It is the same value when a host
 could not tell the two apart in written output: the same number kind (`1` and `1.0` differ), `-0.0`
 and `0.0` distinct, a NaN never the same as anything, so it never cuts off, and, when the host
 collects origins, equal origins. `values_equal` alone is not enough: it equates `Int(1)` with
@@ -465,10 +495,22 @@ and a host that wants a count independent of history evaluates outside the tree.
 shared by several nodes is paid for by whichever render evaluates it first, so which node's budget
 pays depends on the order of the host's calls, as the tree's held state already does.
 
+Checking a node's record can evaluate kept results again, which can be the expensive part, and the
+render that follows takes them for free. So the check is charged to the lifecycle call that
+follows it at the node: the visit's initialization or prop normalization, the pull's render, or
+the dispatch. That call starts with what the check left of the operation budget and reports the
+check's operations with its own, so the check and the call share one budget, and the reported
+count includes every evaluation the render needed that the tree did not already hold. A check that
+holds with no lifecycle call after it, because the node keeps its render, is reported as a call of
+its own: the usage report holds what the check spent. A check that fails reports what it spent.
+A record found valid at the current revision in the environment the node holds needs no check and
+reports nothing.
+
 **All or nothing.** `atomically` snapshots and restores, with the nodes, `visited`, `inert` and
 `roots`, the kept results, the revision counter, the reverse indexes and the change set, which one
-store holds. A tree operation that evaluates works on a copy of the store and puts it back only
-when it succeeds. A `set_environment` or dispatch that fails, and a pass run as one change that
+store holds. A tree operation that evaluates works through a session over the store, which reads
+the store in place, holds the revisions at which variants were found valid beside it, and copies
+the store only when it keeps a result; what it found is put back only when it succeeds. A `set_environment` or dispatch that fails, and a pass run as one change that
 fails, leave all of them as they were.
 
 ### 12. Changes are pushed, then pulled
@@ -526,14 +568,22 @@ Points the decisions above left open, settled while implementing them in
 - **Failures during a check.** A lookup or an evaluation that fails while a record is checked makes
   that input not hold, and the evaluation that follows raises the failure where a fresh one would.
   A resource limit is not swallowed: it ends the operation, as it would have ended a fresh render.
-- **Reads under the render's own overrides** are indexed under the value they read. A body that
-  overrides `mode` and reads `loud`, whose default reads `mode`, is not reached by a change of the
-  root `mode`, which is what the existing cascade scenario asks.
+- **Reads under the render's own overrides.** A source evaluated under the render's own override
+  is not kept, and gives its direct inputs to the read (Decision 8). A body that overrides `mode`
+  and reads `loud`, whose default reads `mode` and `locale`, records `loud` and `locale`: it is not
+  reached by a change of the root `mode`, which is what the existing cascade scenario asks, and it
+  is reached by a change of `locale`.
+- **Override-supplied reads compare by written identity.** A kept result is taken at other places
+  than the one it was kept at, so an override-supplied read is compared with `same_written`, the
+  cutoff's rule, origins included when the call collects them: a variant kept under
+  `env.z={0.0}` is not taken under `env.z={-0.0}`.
 - **State fields compare by written identity.** A dispatch compares a patched field the render read
   with `same_written`, the equality cutoff's rule, charged as `diff` charges a field, so a field
   patched from `1` to `1.0` renders, as the host would see it written otherwise.
 - **Dropping variants.** Each variant knows its users, nodes and other variants; every tree
-  operation sweeps the variants with none at its end, releasing their edges in turn.
+  operation sweeps the variants with none at its end, releasing their edges in turn. The sweep
+  starts from the variants kept or left without a user since the last one, so it costs what the
+  operation changed, not what the tree holds.
 - **Testing what is not checked.** That an unrelated kept result is not validated has no outcome a
   host can see, since validating it would evaluate nothing; the tests hold the nodes that use it to
   their output and settledness instead.

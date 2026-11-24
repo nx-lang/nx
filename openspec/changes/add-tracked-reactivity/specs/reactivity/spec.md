@@ -109,12 +109,20 @@ kept result SHALL NOT be direct inputs of the records that use it: the edge stan
 checking an edge SHALL validate the used result first, evaluating it again with the equality cutoff
 when it is not valid, the edge holding when that result has not changed since the record was last
 found valid. A kept result SHALL also have the flattened set of the environment values its leaf reads
-read, found from its inputs and edges, used only to take it into a call. A read where a source was evaluated under the render's own
-overrides of other values SHALL hold the value found beneath those overrides, or none, and SHALL
-compare by value. A node's record SHALL also hold the props and state fields its render read, and
-the node SHALL hold the revision at which its record was last found valid. `set_environment`, the
-skip check of a visit and a dispatch SHALL check a node's record by the rule on kept derived
-results, so that the tree decides alike whether a derived result was evaluated or reused.
+read, found from its inputs and edges, used only to take it into a call. An evaluation that is not a
+kept result, a formula, a formula entry of an entry-module bundle and a result evaluated under the
+render's own overrides, SHALL give its direct inputs to the record that encloses it, so that a
+record holds every read, at any depth, that no kept result stands for, and a read the render's own
+override supplies wholly SHALL NOT be one. A read that a layer of the place sets, when a source of
+it was evaluated under the render's own overrides of other values, SHALL hold the value found
+beneath those overrides, or none, and SHALL compare by value, beside the direct inputs of what it
+evaluated. An override-supplied value SHALL compare as a host would see it written, with the rule
+of the equality cutoff. A render's record SHALL start with what normalizing its props read, so
+that a prop default that reads the environment is a source of the render. A node's record SHALL
+also hold the props and state fields its render read, and the node SHALL hold the revision at
+which its record was last found valid. `set_environment`, the skip check of a visit and a dispatch
+SHALL check a node's record by the rule on kept derived results, so that the tree decides alike
+whether a derived result was evaluated or reused.
 
 #### Scenario: A reader through a reused default renders again
 - **WHEN** a `Footer` node's render reads `env.color.accent` twice, the second read reuses
@@ -131,6 +139,22 @@ results, so that the tree decides alike whether a derived result was evaluated o
 #### Scenario: A result evaluated again to a value written otherwise is a change
 - **WHEN** a kept result of type `object` evaluates to `1` and, after a root change, to `1.0`
 - **THEN** the result SHALL count as changed, and every node that used it SHALL render again
+
+#### Scenario: A read through a bundle's formula entry follows what the formula reads
+- **WHEN** the entry module declares `provide env with <env.Update gap={env.space * 2} />`, a node
+  renders `env.gap`, and a host changes the root value of `space`
+- **THEN** the node SHALL render again and read the new `gap`
+
+#### Scenario: A source read under the body's own override follows its other reads
+- **WHEN** `loud`'s default reads `env.mode` and `env.locale`, and a node's body renders
+  `env.loud` inside its own `provide env.mode="dark"`
+- **THEN** a host change of the root value of `mode` SHALL NOT render the node again
+- **AND** a host change of the root value of `locale` SHALL render it again with the new `locale`
+
+#### Scenario: A prop default that reads the environment is a source
+- **WHEN** a host visits a descriptor that leaves out a prop whose default is `{ env.mode }`, and
+  then changes the root value of `mode`
+- **THEN** the node SHALL render again with the prop's new default
 
 ### Requirement: A dispatch in the instance tree renders again only when a state field the render read changed
 A component render SHALL record the state fields its body read: a state field's `slot` node it

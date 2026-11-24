@@ -62,7 +62,8 @@ reuse as if evaluated at the call's start, with that set's reads and their token
 Validation SHALL use the direct inputs only.
 
 The tree SHALL keep one revision counter, which each `set_environment` advances once. Each root
-value it sets, changes or clears SHALL take the new revision, and each kept result whose value
+value it sets, changes or clears SHALL take the new revision, a value changing when it is not the
+same as before as a host would see it written, by the cutoff's rule below, and each kept result whose value
 changes when it is evaluated again SHALL take the current revision. Each variant of a kept result SHALL hold the revision at which its value last changed, the
 revision at which it was last found valid, and its record of direct inputs. A variant SHALL be valid
 at a use when its inputs, checked in the order they were read, all hold there: each read classified
@@ -70,7 +71,7 @@ at the use as it was recorded, a root read whose root value has not changed sinc
 last found valid, an edge whose variant, validated first at the use by this rule and evaluated again
 there with the cutoff below when it is not valid, has changed no later than the record was last
 found valid, and an override-supplied read whose value the environment lookup gives at the use is
-equal. The lookup SHALL evaluate any formula there and SHALL be charged as the skip check's reads
+the same as a host would see it written, by the cutoff's rule below. The lookup SHALL evaluate any formula there and SHALL be charged as the skip check's reads
 and comparisons are. An evaluation of the used result that gives another variant than the edge names
 SHALL count as a change. The check SHALL stop at the first input that does not hold, and the result
 SHALL then be evaluated again without checking the rest, so that the check never evaluates what a
@@ -81,13 +82,19 @@ operation. Classifying a read and comparing revisions SHALL cost no operations.
 
 A result evaluated again SHALL be compared with the variant it replaces, the first variant of the
 result whose reads are classified at the place as they were recorded and that was found not valid
-there, charged as a comparison of values. When the two are the same value as a host would see it written, of the same number kind,
+there, charged as a comparison of values. For a variant whose check stopped at an input that
+changed, the reads after it SHALL be classified too, at no cost, and one classified otherwise
+SHALL make the variant another place's. When the two are the same value as a host would see it written, of the same number kind,
 with `-0.0` distinct from `0.0`, a NaN the same as nothing, and, when the host collects origins,
 with equal origins, the tree SHALL keep the old value and its revision. A result whose reads are
 classified differently, or whose override-supplied values differ, at two places SHALL keep one
 variant for each, and a use SHALL take the first valid variant in the order they were kept. A
 variant SHALL be dropped when no node's record and no other kept result references it. A kept result
-shared by several nodes SHALL be paid for by the render that evaluates it first. A render's
+shared by several nodes SHALL be paid for by the render that evaluates it first. The check of a
+node's record, with any kept result it evaluates again, SHALL be charged to the lifecycle call that
+follows it at the node: that call SHALL start with what the check left of the operation budget and
+SHALL report the check's operations with its own. A check that holds with no lifecycle call after
+it SHALL be reported as a call of its own, and one that fails SHALL report what it spent. A render's
 operation count SHALL be a function of the images, its input and what the tree holds. Running a
 change through `atomically` SHALL restore the kept results, the revision counter, the reverse
 indexes and the change set with the nodes when it fails.
@@ -142,6 +149,22 @@ indexes and the change set with the nodes when it fails.
 #### Scenario: A failed change leaves the kept results as they were
 - **WHEN** a `set_environment` re-evaluates a kept result and then fails in a render
 - **THEN** the tree's kept results, revisions and change set SHALL be as they were before the call
+
+#### Scenario: A kept result is not taken where an override supplies a value written otherwise
+- **WHEN** a kept result reads `env.z`, and a page renders the same `Card` under `env.z={0.0}` and
+  under `env.z={-0.0}`
+- **THEN** each card SHALL show the zero its section supplies, as a fresh render does
+
+#### Scenario: An equal result stops a change whichever variant is checked first
+- **WHEN** `color` reads `env.locale` and then `env.colorMode`, a light card and a card under
+  `env.colorMode=dark` each keep a variant of it, and a host changes `locale` to a value that leaves
+  both colors as they were
+- **THEN** neither card SHALL render again, in whichever order their keys are checked
+
+#### Scenario: A kept result evaluated again during a check is charged to the render that follows
+- **WHEN** a host changes `colorMode`, the check of a `Card` node's record evaluates `color`'s
+  default again, and the card renders
+- **THEN** the usage the call reports SHALL count `color`'s evaluation, under one operation budget
 
 ### Requirement: A change notifies only the computations that read it
 The tree SHALL keep, for each environment value, an index of the nodes and kept results with a root
@@ -223,7 +246,7 @@ operations yield for the same props, state and batches, and every rendered outpu
 one the lifecycle renders for its props and state, with the tokens of the render that produced it.
 Every operation of the tree that evaluates SHALL take runtime options and SHALL pass them to each
 lifecycle call it makes; the operation budget and the input limit SHALL apply to each of those calls
-separately. The tree SHALL say whether a name is a component the program can instantiate, which is
+separately, a record check sharing the budget of the call that follows it. The tree SHALL say whether a name is a component the program can instantiate, which is
 what the lifecycle can initialize: a component entrypoint of the entry module declared with a body.
 A host tells by it an authored component in rendered output from a record that is the host's own to
 interpret.
