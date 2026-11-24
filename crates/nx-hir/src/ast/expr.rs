@@ -198,6 +198,36 @@ pub struct EnvOverride {
     pub span: TextSpan,
 }
 
+/// One entry of a `with` field list: `name=value`, or `name.field=value` for a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithField {
+    /// The field the entry sets, then the fields of the path inside it; never empty.
+    pub path: Vec<Name>,
+    /// The value, typed by the field it sets.
+    pub value: ExprId,
+    /// Where the entry was written.
+    pub span: TextSpan,
+}
+
+/// What a `with` applies to its left side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WithRight {
+    /// A field list, `{ name=value path.field=value }`, applied entry by entry in order.
+    Fields(Vec<WithField>),
+    /// An update value of the left side's update type, or a bundle for a bundle.
+    Value(ExprId),
+}
+
+impl WithRight {
+    /// The expressions the right side holds, in source order.
+    pub fn exprs(&self) -> Vec<ExprId> {
+        match self {
+            WithRight::Fields(fields) => fields.iter().map(|field| field.value).collect(),
+            WithRight::Value(value) => vec![*value],
+        }
+    }
+}
+
 /// Expression AST node.
 ///
 /// All expressions are stored in an arena and referenced by `ExprId`.
@@ -279,21 +309,42 @@ pub enum Expr {
     /// The body evaluated with environment overrides in effect: a `provide` block, or what an
     /// element with `env.` attributes lowers to.
     ///
+    /// <para>A block holds attribute-form `overrides` or one `bundle`, an `env.Update` value
+    /// applied as `provide env with bundle`, never both.</para>
+    ///
     /// Example: `provide env.locale="fr-FR" { formatDate(today) }`
     Provide {
         overrides: Vec<EnvOverride>,
+        bundle: Option<ExprId>,
         body: ExprId,
         span: TextSpan,
     },
 
-    /// An `env.Update` bundle: overrides as one value, for a top-level `provide` to apply.
+    /// An `env.Update` bundle: overrides as one value, for a `provide` to apply.
     ///
     /// <para>Each override's `name` is the attribute's first segment, without `env.`, and its
-    /// path the rest; the type checker binds each as it binds an `env.` read.</para>
+    /// path the rest; the type checker binds each as it binds an `env.` read. `bases` are the
+    /// bundles whose entries come first, in order: `brand with { radius=4 }` becomes a bundle with
+    /// base `brand` once the checker has typed the `with`, and lowering leaves it empty.</para>
     ///
     /// Example: `<env.Update space=8 color.accent=#e11d48 />`
     EnvUpdate {
+        bases: Vec<ExprId>,
         overrides: Vec<EnvOverride>,
+        span: TextSpan,
+    },
+
+    /// `left with right`: the left side with the changes on the right on top.
+    ///
+    /// <para>On a record it is `apply`, on an update record `merge`, and on an `env.Update`
+    /// bundle a bundle with the right side's entries after the left's. The type checker decides
+    /// which from the left side's type; a bundle `with` becomes an [`Expr::EnvUpdate`] after it.
+    /// </para>
+    ///
+    /// Example: `light with { accent=#16a34a }`
+    With {
+        left: ExprId,
+        right: WithRight,
         span: TextSpan,
     },
 
@@ -504,6 +555,10 @@ pub enum Expr {
         record: Name,
         /// Property assignments
         properties: Vec<RecordLiteralProperty>,
+        /// The declaration the literal constructs, when it is named by origin rather than resolved
+        /// by `record` in the module holding the literal: the update record a `with` builds may be
+        /// declared in a module the literal's module does not import.
+        declared_in: Option<crate::DeclaringOrigin>,
         /// Source span
         span: TextSpan,
     },
@@ -582,6 +637,7 @@ impl Expr {
             Expr::EnvRead { span, .. } => *span,
             Expr::Provide { span, .. } => *span,
             Expr::EnvUpdate { span, .. } => *span,
+            Expr::With { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
             Expr::Range { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,

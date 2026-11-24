@@ -1,0 +1,7 @@
+module other.nx fingerprint 1915734367421540943
+links shared.nx version "" fingerprint 5641542836582198659
+requires environment-v1
+entrypoints functions [] components []
+
+value quadruple: int @4:1-4:46 =
+  (shared.nx:env.space mul 4)

@@ -399,6 +399,11 @@
     "operators": {
       "patterns": [
         {
+          "comment": "`with` after an operand: `light with { accent=… }`, `a with b`. A `with` after `.` or before `=` is a name: `x.with`, `<T with=3 />`, `{ with=3 }`.",
+          "name": "keyword.operator.with.nx",
+          "match": "(?<=[A-Za-z0-9_)\\]}\"'>])\\s+\\K\\bwith\\b(?!\\s*[=:?])"
+        },
+        {
           "name": "keyword.operator.arrow.nx",
           "match": "=>"
         },
@@ -3189,7 +3194,7 @@
       ]
     },
     "provide-definition": {
-      "comment": "A top-level `provide env.name = value` or `provide bundle`. `provide` is a keyword only as a module member's first token followed by a name; `provide:` and `provide =` keep the scope a name has.",
+      "comment": "A top-level `provide env.name = value` or `provide env with bundle`. `provide` is a keyword only as a module member's first token followed by a name; `provide:` and `provide =` keep the scope a name has.",
       "begin": "^(\\s*)(provide)\\b(?=\\s+[A-Za-z_])",
       "beginCaptures": {
         "2": {
@@ -3218,14 +3223,30 @@
       ]
     },
     "env-namespace": {
-      "comment": "`env` before `.` names the environment: `env.space` in an expression, `env.colorMode=dark` in attributes.",
-      "name": "support.variable.env.nx",
-      "match": "\\benv(?=\\.[A-Za-z_])"
+      "patterns": [
+        {
+          "comment": "`env with` after `provide` applies a bundle: `provide env with brand { … }`.",
+          "match": "\\b(env)\\s+(with)\\b",
+          "captures": {
+            "1": {
+              "name": "support.variable.env.nx"
+            },
+            "2": {
+              "name": "keyword.operator.with.nx"
+            }
+          }
+        },
+        {
+          "comment": "`env` before `.` names the environment: `env.space` in an expression, `env.colorMode=dark` in attributes.",
+          "name": "support.variable.env.nx",
+          "match": "\\benv(?=\\.[A-Za-z_])"
+        }
+      ]
     },
     "provide-keyword": {
-      "comment": "`provide` opens a provide block when `env.` follows it.",
+      "comment": "`provide` opens a provide block when `env.` or `env with` follows it.",
       "name": "keyword.control.provide.nx",
-      "match": "\\bprovide\\b(?=\\s+env\\.)"
+      "match": "\\bprovide\\b(?=\\s+env(?:\\.|\\s+with\\b))"
     }
   }
 }

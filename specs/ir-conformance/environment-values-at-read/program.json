@@ -1,0 +1,46 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx",
+    "shared.nx",
+    "other.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "named"
+    },
+    {
+      "module": "main.nx",
+      "function": "direct"
+    },
+    {
+      "module": "main.nx",
+      "function": "record"
+    },
+    {
+      "module": "main.nx",
+      "function": "imported"
+    },
+    {
+      "module": "main.nx",
+      "function": "qualified"
+    },
+    {
+      "module": "main.nx",
+      "function": "qualifiedOverride"
+    },
+    {
+      "module": "main.nx",
+      "function": "throughFunction"
+    },
+    {
+      "module": "main.nx",
+      "function": "element"
+    },
+    {
+      "module": "main.nx",
+      "function": "defaulted"
+    }
+  ]
+}

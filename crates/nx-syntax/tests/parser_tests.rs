@@ -298,7 +298,7 @@ fn test_parse_environment_and_provide_forms() {
         import "./brand" as brand
         export environment colorMode: ColorMode = light
         environment locale: string
-        provide brand.theme
+        provide env with brand.theme
         provide env.radius = <Radius small=4 />
         provide env.color.accent = #ffffff
         let label() = { provide env.locale="fr-FR" env.color.accent=#fff { env.locale } }
@@ -320,13 +320,140 @@ fn test_parse_environment_and_provide_forms() {
         .children()
         .filter(|child| child.kind() == SyntaxKind::PROVIDE_DEFINITION)
         .collect::<Vec<_>>();
+    let bundle = provides[0]
+        .children()
+        .find(|child| child.kind() == SyntaxKind::PROVIDE_BUNDLE)
+        .expect("bundle provide");
     assert_eq!(
-        provides[0].child_by_field("bundle").map(|node| node.text()),
+        bundle.child_by_field("bundle").map(|node| node.text()),
         Some("brand.theme")
     );
     assert_eq!(
         provides[1].child_by_field("target").map(|node| node.text()),
         Some("env.radius")
+    );
+}
+
+#[test]
+fn test_parse_with_expressions() {
+    let source = r#"
+        provide env with brand.theme with { radius=4 }
+        let a = { light with { accent=#16a34a text.muted="x" } }
+        let b = { a ?? b with c }
+        let c = { x with y ?? z }
+        let d = { base with { size=2 } == other }
+        let e = { x.with }
+        let f = { x with { with=3 } }
+        let g = { provide env with marketing with { radius=4 colorMode=dark } { <Banner /> } }
+        let h = { provide env with { colorMode=dark } { <Banner /> } }
+        let i = { a with b with c }
+        let j = { provide env.x=1 { <T with=3 /> } }
+        let k = { x with {} }
+        let l = { provide env with theme(dark) { <Banner /> } }
+        let m = { provide env with <env.Update radius=12 /> { <Banner /> } }
+        <App>Text with words</App>
+    "#;
+    let result = parse_str(source, "with.nx");
+
+    assert!(
+        result.is_ok(),
+        "with forms should parse: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should have root node");
+    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_BUNDLE), 5);
+    assert_eq!(count_kind(&root, SyntaxKind::WITH_EXPRESSION), 8);
+    assert_eq!(count_kind(&root, SyntaxKind::TEXT_RUN), 1);
+}
+
+#[test]
+fn test_with_binds_tighter_than_coalesce_and_looser_than_member_access() {
+    let source = "let b = { a ?? b with c.d }";
+    let result = parse_str(source, "with-precedence.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let root = result.root().expect("Should have root node");
+    let with = find_first_kind(&root, SyntaxKind::WITH_EXPRESSION).expect("with expression");
+    assert_eq!(with.text(), "b with c.d");
+}
+
+#[test]
+fn test_removed_provide_bundle_suggests_env_with() {
+    let result = parse_str("provide brand.theme\n", "legacy.nx");
+    assert!(!result.is_ok());
+    let message = result
+        .errors
+        .iter()
+        .map(|error| error.message().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        message.contains("provide env with brand.theme"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+fn test_provide_bundle_with_steps_but_no_env_suggests_env_with() {
+    for (source, suggestion) in [
+        (
+            "provide marketing with { radius=1 }\n",
+            "provide env with marketing with { radius=1 }",
+        ),
+        (
+            "let a = { provide marketing with { radius=4 } { env.radius } }\n",
+            "provide env with marketing with { radius=4 }",
+        ),
+        ("provide m()\nlet root() = { 1 }\n", "provide env with m()`"),
+        (
+            "provide m() with { radius=1 }\nlet root() = { 1 }\n",
+            "provide env with m() with { radius=1 }`",
+        ),
+    ] {
+        let result = parse_str(source, "steps.nx");
+        let message = result
+            .errors
+            .iter()
+            .map(|error| error.message().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(message.contains(suggestion), "{source}: {message}");
+        assert!(!message.contains("Syntax error"), "{source}: {message}");
+    }
+}
+
+#[test]
+fn test_provide_block_that_mixes_a_bundle_and_overrides_suggests_a_chain() {
+    let after = parse_str(
+        "let a = { provide env with marketing env.colorMode=dark { <Banner /> } }",
+        "mixed.nx",
+    );
+    let message = after
+        .errors
+        .iter()
+        .map(|error| error.message().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        message.contains("provide env with marketing with { colorMode=dark }"),
+        "{}",
+        message
+    );
+
+    let before = parse_str(
+        "let a = { provide env.radius=0 env with marketing { <Banner /> } }",
+        "mixed-before.nx",
+    );
+    let message = before
+        .errors
+        .iter()
+        .map(|error| error.message().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        message.contains("provide env with { radius=0 } with marketing"),
+        "{}",
+        message
     );
 }
 

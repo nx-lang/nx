@@ -14,6 +14,7 @@
 mod builder;
 mod emit;
 mod environment_cycles;
+mod formulas;
 mod ir;
 mod ir_bundle;
 mod model;

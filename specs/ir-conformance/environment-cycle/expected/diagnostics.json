@@ -1,0 +1,5 @@
+{
+  "main.nx::cycle#throughB": {
+    "code": "nx-ir-environment-cycle"
+  }
+}

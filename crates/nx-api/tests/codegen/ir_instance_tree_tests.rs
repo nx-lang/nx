@@ -2222,3 +2222,80 @@ fn a_refused_root_value_leaves_the_tree_as_it_was() {
         NxValue::String("light".to_string())
     );
 }
+
+const FORMULAS: &str = "
+environment space: int = 4
+environment gap: int = 0
+component <Reader extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Card extends Node /> = { <Stack><Reader /></Stack> }
+let root() = { <Card env.gap={env.space * 2} /> }
+let readGap() = { env.gap }
+";
+
+/// A formula is computed where the value is read, so a node that reads through one renders again
+/// when a value the formula reads changes.
+#[test]
+fn a_read_through_a_formula_follows_the_values_the_formula_reads() {
+    let mut tree = open(FORMULAS);
+    visit_child(&mut tree, "root/reader", "Reader", "root");
+    tree.finish();
+    assert!(renders(&tree, "root/reader", "Label", "8"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(5))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/reader", "Label", "10"));
+}
+
+/// A formula in a descriptor's `$env` is checked only for its shape when it is entered; one made
+/// by another build of its module is refused at the read that evaluates it.
+#[test]
+fn a_formula_of_another_build_is_refused_at_the_read() {
+    let tree = linked(FORMULAS);
+    let card = evaluated(&tree, "root");
+    let NxValue::Record {
+        type_name,
+        mut properties,
+    } = card
+    else {
+        panic!("a Card descriptor");
+    };
+    let Some(NxValue::Array(entries)) = properties.get_mut("$env") else {
+        panic!("the Card carries $env: {properties:?}");
+    };
+    let NxValue::Record {
+        properties: entry, ..
+    } = &mut entries[0]
+    else {
+        panic!("an entry");
+    };
+    let Some(NxValue::Record {
+        properties: formula,
+        ..
+    }) = entry.get_mut("formula")
+    else {
+        panic!("a formula entry: {entry:?}");
+    };
+    formula.insert("fingerprint".into(), NxValue::String("1".to_string()));
+    let stale = NxValue::Record {
+        type_name,
+        properties,
+    };
+    let environment = nx_ir_runtime::Environment::default()
+        .enter(&stale)
+        .expect("only the shape is checked on entry");
+    let error = tree
+        .program()
+        .evaluate_function(
+            "readGap",
+            &[],
+            &RuntimeOptions {
+                environment,
+                ..options()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.code(), "nx-ir-boundary-type", "{error}");
+    assert!(error.to_string().contains("another build"), "{error}");
+}

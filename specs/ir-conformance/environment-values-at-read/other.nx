@@ -1,0 +1,4 @@
+import "./shared.nx"
+
+/// A top-level value that reads the environment, reached through an import alias.
+export let quadruple: int = { env.space * 4 }

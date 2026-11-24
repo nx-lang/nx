@@ -2827,6 +2827,23 @@ test("a host composes a child's environment from the descriptor's $env", () => {
   assertEqual(page.enter({ $type: "Badge" }) === page, true);
 });
 
+test("a formula in a descriptor's $env is computed where the child reads it, and refused from another build", () => {
+  const program = corpusProgram("environment-formulas", "main.nx", ["design.nx"], true);
+  const card = evaluateFunction(program, "card", []) as NxHostValue;
+  // A formula is data: it survives the host's serialization.
+  const carried = JSON.parse(JSON.stringify(card)) as NxHostValue;
+  const gap = (given: ReturnType<typeof environment>) =>
+    initializeComponent(program, "Card", {}, { environment: given.enter(carried) }).rendered;
+  assertEqual(gap(environment()), { $type: "span", gap: 8 });
+  assertEqual(gap(environment({ space: 10 })), { $type: "span", gap: 20 });
+  const stale = JSON.parse(JSON.stringify(card)) as { $env: { formula: { fingerprint: string } }[] };
+  stale.$env[0]!.formula.fingerprint = "1";
+  // Only the shape is checked on entry; the read that evaluates the formula refuses it.
+  const entered = environment().enter(stale as unknown as NxHostValue);
+  const error = assertThrows(() => initializeComponent(program, "Card", {}, { environment: entered }), "another build");
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-boundary-type");
+});
+
 test("root values and overrides are named and checked at the boundary", () => {
   const program = environmentProgram();
   const run = (given: ReturnType<typeof environment>) => evaluateFunction(program, "mode", [], { environment: given });

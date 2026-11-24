@@ -3852,6 +3852,33 @@ let root() = { env.d }",
 }
 
 #[test]
+fn an_override_that_reads_a_value_whose_default_reads_it_is_an_environment_cycle() {
+    // `b`'s default reads `a`, so an override of `a` that reads `b` reaches `a` again.
+    for body in [
+        "let root() = { provide env.a={env.b} { env.a } }",
+        "let root() = { <Card env.a={env.b} /> }",
+        "let theme: env.Update = <env.Update a={env.b} />\nlet root() = { provide env with theme { env.a } }",
+        "provide env.a = { env.b }\nlet root() = { env.a }",
+        "provide env with { a={env.b} }\nlet root() = { env.b }",
+        "let theme: env.Update = <env.Update />\nprovide env with theme with { a={env.b} }\nlet root() = { env.b }",
+    ] {
+        let artifact = artifact_from_source(&format!(
+            "environment a: int = 1\nenvironment b: int = {{ env.a + 1 }}\ncomponent <Card /> = {{ <span a={{env.a}} /> }}\n{body}"
+        ));
+        assert_eq!(
+            codegen_error_codes(&artifact),
+            vec!["environment-cycle".to_string()],
+            "{body}"
+        );
+    }
+    // An override that reads only the value it sets sees the sources outside it.
+    let artifact = artifact_from_source(
+        "environment a: int = 1\nlet root() = { provide env.a={env.a + 1} { env.a } }",
+    );
+    assert_eq!(codegen_error_codes(&artifact), Vec::<String>::new());
+}
+
+#[test]
 fn a_provide_in_an_imported_module_is_refused() {
     let modules = [
         (
@@ -3886,4 +3913,73 @@ fn a_provide_in_an_imported_module_is_refused() {
     let workspace = NxWorkspace::new(modules).expect("workspace");
     build_workspace_program_artifact(&workspace, "theme.nx", &ProgramBuildContext::empty())
         .expect("a main module's provide is allowed");
+}
+
+/// The stripped image of a one-module program, explained, without the fingerprint, which hashes
+/// the source text.
+fn explained_stripped_image(source: &str) -> String {
+    let codegen = build_codegen_program(&artifact_from_source(source)).expect("codegen program");
+    let artifacts = nx_codegen::build_nx_ir_artifacts(
+        &codegen,
+        &nx_codegen::NxIrEmitOptions {
+            modules: Some(vec!["main.nx".to_string()]),
+            debug: false,
+        },
+    )
+    .expect("artifacts");
+    nx_ir::explain_nx_ir(&artifacts[0])
+        .expect("explain")
+        .lines()
+        .filter(|line| !line.contains("fingerprint"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn a_with_emits_the_image_of_its_apply_or_merge_form() {
+    const TYPES: &str = "type Address = { city:string zip?:string }\n\
+                         type User = { name:string address:Address }\n\
+                         let ada(): User = { <User name=\"Ada\" address=<Address city=\"London\" /> /> }\n";
+    for (with, written) in [
+        (
+            "let f() = { ada() with { name=\"Kai\" } }",
+            "let f() = { apply(ada(), <User.Update name=\"Kai\" />) }",
+        ),
+        (
+            "let f() = { ada() with <User.Update name=\"Kai\" /> }",
+            "let f() = { apply(ada(), <User.Update name=\"Kai\" />) }",
+        ),
+        (
+            "let f(p: User.Update) = { p with { name=\"Kai\" } }",
+            "let f(p: User.Update) = { merge(p, <User.Update name=\"Kai\" />) }",
+        ),
+    ] {
+        assert_eq!(
+            explained_stripped_image(&format!("{TYPES}{with}")),
+            explained_stripped_image(&format!("{TYPES}{written}")),
+            "{with}"
+        );
+    }
+}
+
+#[test]
+fn generated_typescript_with_values_computed_at_each_read_type_checks() {
+    let artifact = artifact_from_source(
+        r#"
+environment space: int = 4
+environment gap: int = 0
+type Insets = { top:int bottom:int }
+let tv: int = { env.space * 3 }
+let doubled: int = { tv * 2 }
+let insets: Insets = <Insets top={env.space} bottom={tv} />
+let plain: int = { 7 }
+let named(): int = { provide env.gap={tv} { provide env.space=1 { env.gap } } }
+let direct(): int = { tv + doubled + plain + insets.top }
+"#,
+    );
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(module.contains("const tv = (): number => ("), "{}", module);
+    assert!(module.contains("const plain: number = 7;"), "{}", module);
+    assert!(module.contains("tv() + doubled()"), "{}", module);
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }

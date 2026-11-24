@@ -1,0 +1,20 @@
+module main.nx fingerprint 2922398435001037902
+requires function-values-v1 environment-v1 environment-v2
+entrypoints functions [readB cycle plain] components []
+
+environment a: int =
+  1
+
+environment b: int =
+  (env.a add 1)
+
+function readB(): int =
+  env.b
+
+function cycle(read: <function />: int): int =
+  provide env.a:=<read /> {
+    env.b
+  }
+
+function plain(): int =
+  env.b

@@ -17,10 +17,10 @@
   "main.nx::focus": [],
   "main.nx::focus#rootDark": [],
   "main.nx::root": [
-    {"path": "", "module": "main.nx", "start": 190, "end": 418},
-    {"path": "/Children/0", "module": "main.nx", "start": 259, "end": 281},
-    {"path": "/Children/1", "module": "main.nx", "start": 286, "end": 409},
-    {"path": "/Children/1/Children/0", "module": "main.nx", "start": 376, "end": 398},
+    {"path": "", "module": "main.nx", "start": 199, "end": 427},
+    {"path": "/Children/0", "module": "main.nx", "start": 268, "end": 290},
+    {"path": "/Children/1", "module": "main.nx", "start": 295, "end": 418},
+    {"path": "/Children/1/Children/0", "module": "main.nx", "start": 385, "end": 407},
     {"path": "/fill", "module": "@nx/design/tokens.nx", "start": 2444, "end": 2451}
   ],
   "main.nx::text": [

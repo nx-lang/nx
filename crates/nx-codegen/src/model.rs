@@ -66,14 +66,20 @@ pub struct CodegenProvide {
     pub value: CodegenExpression,
 }
 
-/// One override of a `provide` block, an element's `env.` attribute or an `env.Update` entry.
+/// One override of a `provide` block, an element's `env.` attribute or an `env.Update` entry,
+/// or a bundle applied by `provide env with`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodegenEnvOverride {
-    /// The environment declaration the override sets.
-    pub target: CodegenReference,
-    /// The field path it sets, empty for the whole value.
+    /// The environment declaration the override sets, or `None` for a bundle, whose value is an
+    /// `env.Update` contributing its own entries. A list holds either overrides with targets or
+    /// one bundle, never both.
+    pub target: Option<CodegenReference>,
+    /// The field path it sets, empty for the whole value and for a bundle.
     pub path: Vec<String>,
     pub value: CodegenExpression,
+    /// Whether the value is a formula: its static read set is not empty, so it is computed where
+    /// the value is read rather than where it is written. Never set on a bundle.
+    pub formula: bool,
 }
 
 /// Origin of one generated module.
@@ -499,8 +505,10 @@ pub enum CodegenExpressionKind {
         overrides: Vec<CodegenEnvOverride>,
         body: Box<CodegenExpression>,
     },
-    /// `<env.Update …/>`: the overrides, evaluated, as one bundle value.
+    /// `<env.Update …/>`: the overrides, evaluated, as one bundle value, after the entries of
+    /// `base` when there is one (`brand with { space=2 }`).
     EnvUpdate {
+        base: Option<Box<CodegenExpression>>,
         overrides: Vec<CodegenEnvOverride>,
     },
     /// An action-handler binding, `onTapped=<State.Update count={count + 1} />`.

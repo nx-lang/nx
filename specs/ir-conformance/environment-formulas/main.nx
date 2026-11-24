@@ -1,0 +1,36 @@
+// Overrides that read the environment are formulas, computed where the value is read.
+import "./design.nx"
+
+/// The app theme: its accent follows the mode wherever it is read.
+let theme: env.Update = <env.Update radius=12 accent={if env.colorMode is { light => "blue" dark => "navy" }} />
+
+/// A bundle whose entry reads a value the bundle itself sets.
+let dense: env.Update = <env.Update space=2 gap={env.space * 3} />
+
+provide env with theme
+
+component <Card /> = { <span gap={env.gap} /> }
+
+let appRadius() = { env.radius }
+/// The theme's accent follows a mode set inside the section.
+let darkAccent() = { provide env.colorMode=dark { env.accent } }
+/// A formula reads the value it overrides from the sources outside it.
+let patched() = { provide env with { radius={env.radius + 1} } { env.radius } }
+/// A named bundle in a block; its `gap` reads the bundle's own `space`.
+let denseGap() = { provide env with dense { env.gap } }
+/// An inline bundle.
+let inline() = { provide env with { space=3 } { env.space } }
+/// A `with` step after a bundle sets `space` after the bundle's own.
+let stepped() = { provide env with dense with { space=5 } { env.gap } }
+/// An override is computed at the read, so a `space` set nearer the reader is the one it reads.
+let nearer() = { provide env.gap={env.space * 2} { provide env.space=1 { env.gap } } }
+/// A formula keeps the locals it reads.
+let scales(): int+ = { 1 3 }
+let scaled() = { for scale in scales() { provide env.gap={env.space * scale} { provide env.space=2 { env.gap } } } }
+/// A bundle passed as an argument.
+let section(look: env.Update) = { provide env with look { env.radius + env.gap } }
+let passed() = { section(dense with { radius=9 }) }
+/// An override whose value is a read of another value.
+let renamed() = { provide env.gap={env.space} { env.gap } }
+/// A descriptor carries a formula in its `$env`.
+let card() = { <Card env.gap={env.space * 2} /> }

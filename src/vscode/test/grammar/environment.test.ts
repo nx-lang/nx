@@ -42,16 +42,27 @@ describe('NX environment values', function () {
   it('scopes a top-level provide and ends it at the next declaration', function () {
     const result = tokenizeLines(grammar, [
       'provide env.space = 8',
-      'provide brand.theme',
+      'provide env with brand.theme',
       'let gap() = { 1 }'
     ]);
 
     expectScopes(scopesAt(result, 'provide env', 'provide'), 'provide').toInclude('keyword.control.provide.nx');
     expectScopes(scopesAt(result, 'provide env', 'env'), 'env').toInclude('support.variable.env.nx');
-    expectScopes(scopesAt(result, 'provide brand', 'provide'), 'provide').toInclude('keyword.control.provide.nx');
+    expectScopes(scopesAt(result, 'provide env with', 'provide'), 'provide').toInclude('keyword.control.provide.nx');
+    expectScopes(scopesAt(result, 'provide env with', 'with'), 'with').toInclude('keyword.operator.with.nx');
     expectScopes(scopesAt(result, 'let gap', 'let'), 'let')
       .toInclude('keyword.declaration.let.nx')
       .toNotInclude('meta.definition.provide.nx');
+  });
+
+  it('scopes a bundle in a provide block', function () {
+    const result = tokenizeLines(grammar, [
+      'let page() = { provide env with marketing with { radius=4 } { <Banner /> } }'
+    ]);
+
+    expectScopes(scopesAt(result, 'let page', 'provide'), 'provide').toInclude('keyword.control.provide.nx');
+    expectScopes(scopesAt(result, 'let page', 'env'), 'env').toInclude('support.variable.env.nx');
+    expectScopes(scopesAt(result, 'let page', 'with'), 'with').toInclude('keyword.operator.with.nx');
   });
 
   it('keeps provide and environment as names elsewhere', function () {

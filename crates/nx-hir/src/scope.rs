@@ -358,6 +358,9 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             if item.name().as_str() == "provide" {
                 self.report_reserved_provide(item.span());
             }
+            if item.name().as_str() == "with" {
+                self.report_reserved_with(item.span());
+            }
         }
         for item in self.module.raw_module().items() {
             match item {
@@ -450,6 +453,9 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         if name.as_str() == "provide" {
             self.report_reserved_provide(span);
         }
+        if name.as_str() == "with" {
+            self.report_reserved_with(span);
+        }
         self.scope_manager
             .define(scope, Symbol::new(name, kind, span));
     }
@@ -464,6 +470,40 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         self.diagnostics.push(
             Diagnostic::error("reserved-name")
                 .with_message(message)
+                .with_label(Label::primary(
+                    self.module.module_identity().to_string(),
+                    span,
+                ))
+                .build(),
+        );
+    }
+
+    /// Reports `with` used as a name: after an operand it always continues a `with` expression,
+    /// so a binding of that name could not be read where one is most often written.
+    fn report_reserved_with(&mut self, span: TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("reserved-name")
+                .with_message(
+                    "'with' is reserved: after a value it continues a `with` expression, so it can't name a declaration, parameter or binding"
+                        .to_string(),
+                )
+                .with_label(Label::primary(
+                    self.module.module_identity().to_string(),
+                    span,
+                ))
+                .build(),
+        );
+    }
+
+    /// Reports `env with` outside a `provide`: the environment is not a value, so it is patched
+    /// only by applying a bundle with `provide env with bundle { … }`.
+    fn report_reserved_env_with(&mut self, span: TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("reserved-name")
+                .with_message(
+                    "'env' is reserved: `env with` is written only after `provide`, as `provide env with bundle { … }`"
+                        .to_string(),
+                )
                 .with_label(Label::primary(
                     self.module.module_identity().to_string(),
                     span,
@@ -529,16 +569,39 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             | ast::Expr::Error(_) => {}
             ast::Expr::EnvRead { .. } => {}
             ast::Expr::Provide {
-                overrides, body, ..
+                overrides,
+                bundle,
+                body,
+                ..
             } => {
                 for provided in overrides {
                     self.check_expr(provided.value, scope);
                 }
+                if let Some(bundle) = bundle {
+                    self.check_expr(*bundle, scope);
+                }
                 self.check_expr(*body, scope);
             }
-            ast::Expr::EnvUpdate { overrides, .. } => {
+            ast::Expr::EnvUpdate {
+                bases, overrides, ..
+            } => {
+                for base in bases {
+                    self.check_expr(*base, scope);
+                }
                 for provided in overrides {
                     self.check_expr(provided.value, scope);
+                }
+            }
+            ast::Expr::With { left, right, .. } => {
+                let right = right.exprs();
+                match self.module.raw_module().expr(*left) {
+                    ast::Expr::Ident(name) if name.as_str() == "env" => {
+                        self.report_reserved_env_with(self.module.raw_module().expr_span(expr_id));
+                    }
+                    _ => self.check_expr(*left, scope),
+                }
+                for value in right {
+                    self.check_expr(value, scope);
                 }
             }
             ast::Expr::Ident(name) if name.as_str() == "env" => {

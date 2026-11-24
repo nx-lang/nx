@@ -1,0 +1,22 @@
+module design.nx fingerprint 5107991466796297217
+requires environment-v1
+entrypoints functions [] components []
+
+union ColorMode @2:1-2:37
+  case light constant
+  case dark constant
+
+environment colorMode: ColorMode @4:1-4:48 =
+  ColorMode.light
+
+environment space: int @5:1-5:34 =
+  4
+
+environment gap: int @6:1-6:32 =
+  0
+
+environment radius: int @7:1-7:35 =
+  2
+
+environment accent: string @8:1-8:43 =
+  "gray"

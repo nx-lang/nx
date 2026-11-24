@@ -249,10 +249,10 @@ let root() = { provide env.color.accent=#15803d { env.button.fill } }
 ## Themes
 
 A theme is an `env.Update` bundle that sets roles through their `.Update` records. Apply it
-app-wide with `provide` at the top of the main module. A bundle can't be applied to one section
-yet; a section changes single values with `env.` attributes, such as `env.colorMode=dark`.
-A theme that varies by mode matches on `env.colorMode` in its fields, and follows an
-`env.colorMode` override wherever it is read.
+app-wide with `provide env with brand` at the top of the main module, or to one section with a
+`provide env with brand { … }` block. A theme that varies by mode matches on `env.colorMode` in its
+fields, and follows an `env.colorMode` override wherever it is read, because each value is
+computed where it is read.
 
 ```nx
 import "@nx/design"
@@ -272,7 +272,7 @@ let brand: env.Update = <env.Update
   radius=<RadiusScale.Update md=8 lg=12 />
 />
 
-provide brand
+provide env with brand
 
 let root() = { provide env.colorMode=dark { env.color.accent } }
 ```
@@ -296,7 +296,7 @@ let brand: env.Update = <env.Update
   }
 />
 
-provide brand
+provide env with brand
 
 let root() = { env.color.text.muted }
 ```
@@ -321,11 +321,8 @@ most likely to need one:
 ## Generated code
 
 Programs that import `@nx/design` can be generated as JavaScript, which reads tokens as the IR
-runtimes do, with two gaps for now:
+runtimes do, computing each value where it is read. One gap remains for now:
 
-- A main-module `provide bundle` is evaluated once, when the generated module loads. A theme that
-  matches on `env.colorMode` then keeps the root mode's values in a section that sets
-  `env.colorMode=dark`; the IR runtimes evaluate it where it is read.
 - Generated TypeScript doesn't type-check yet, because the library's `Color` names a type from
   `@nx/color` that the generated file doesn't import.
 

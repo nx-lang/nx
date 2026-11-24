@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "main.nx::defaulted": 15,
+    "main.nx::direct": 22,
+    "main.nx::element": 14,
+    "main.nx::imported": 8,
+    "main.nx::named": 11,
+    "main.nx::qualified": 10,
+    "main.nx::qualifiedOverride": 11,
+    "main.nx::record": 16,
+    "main.nx::throughFunction": 11
+  }
+}

@@ -8,19 +8,57 @@ export type NxEnvironmentDeclaration<T> = {
   readonly schema: NxSchema;
 };
 
-/** One override a provide sets: the declaration, the field path and the value. */
-export type NxEnvOverride = readonly [NxEnvironmentDeclaration<any>, readonly string[], unknown];
+/**
+ * A formula: an override's value computed where the environment value is read. It is a function
+ * of no arguments that closes over the locals it reads, and holds the module it was written in and
+ * those locals as data. It is meaningful only to the generated program that made it.
+ */
+export type NxFormula = (() => any) & { readonly module: string; readonly locals: Readonly<Record<string, unknown>> };
 
-/** One entry of a component descriptor's `$env`. */
-export type NxEnvironmentEntry = { readonly value: string; readonly path: readonly string[]; readonly to: any };
+/**
+ * One override a provide or a bundle sets: the declaration, the field path and the value, which is
+ * an {@link NxFormula} for an override computed at each read. For a bundle the declaration is
+ * `null`, the path is empty and the value is the bundle.
+ */
+export type NxEnvOverride = readonly [NxEnvironmentDeclaration<any> | null, readonly string[], unknown];
+
+/**
+ * One entry of a component descriptor's `$env`, outermost first: an override's value, a formula,
+ * or the entries of a bundle applied by `provide env with`.
+ */
+export type NxEnvironmentEntry =
+  | { readonly value: string; readonly path: readonly string[]; readonly to: any }
+  | { readonly value: string; readonly path: readonly string[]; readonly formula: NxFormula }
+  | { readonly bundle: readonly NxEnvironmentEntry[] };
+
+/** What an override or a bundle entry sets: a value, or a formula. */
+type NxEnvironmentSource = { readonly value: any } | { readonly formula: () => any };
+
+/** Where a read continues while a source of the value is evaluated: the sources after it. */
+type NxEnvironmentBelow = { readonly layer: number } | { readonly provide: number } | { readonly exhausted: true };
 
 type NxEnvironmentLayer =
-  | { readonly set: true; readonly key: string; readonly path: readonly string[]; readonly value: any }
-  | { readonly set: false; readonly key: string; readonly index: number };
+  | {
+      readonly set: true;
+      readonly key: string;
+      readonly path: readonly string[];
+      readonly source: NxEnvironmentSource;
+      /** An entry of a bundle, whose update-record value patches the value rather than replacing it. */
+      readonly bundle: boolean;
+    }
+  | { readonly set: false; readonly key: string; readonly below: NxEnvironmentBelow };
 
 type NxEnvironmentState = { readonly layers: NxEnvironmentLayer[]; base: number; readonly roots: Map<string, any> };
 
 type NxPendingOverride = { readonly path: readonly string[]; readonly value: any; readonly patch: boolean };
+
+/** An evaluated override: the declaration's key, the field path and what it sets. */
+type NxEvaluatedOverride = { readonly key: string; readonly path: readonly string[]; readonly source: NxEnvironmentSource };
+
+/** What a provide's or bundle's override gives once evaluated where it is written. */
+type NxEvaluatedEntry =
+  | { readonly set: NxEvaluatedOverride }
+  | { readonly bundle: readonly NxEvaluatedOverride[]; readonly items: readonly any[] };
 
 const nxEnvironmentDeclarations = new Map<string, NxEnvironmentDeclaration<any>>();
 const nxEnvironmentComponents = new Set<string>();
@@ -89,34 +127,52 @@ function nxEnvironmentEntries(carried: unknown): NxEnvironmentEntry[] {
   if (!Array.isArray(carried)) {
     nxMalformedEnvironment("it is not a list");
   }
-  return carried.map((item: unknown): NxEnvironmentEntry => {
-    const entry = item as any;
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      nxMalformedEnvironment("an entry is not a record");
+  return carried.map(nxEnvironmentEntry);
+}
+
+function nxEnvironmentEntry(item: unknown): NxEnvironmentEntry {
+  const entry = item as any;
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+    nxMalformedEnvironment("an entry is not a record");
+  }
+  if (entry.bundle !== undefined) {
+    if (!Array.isArray(entry.bundle)) {
+      nxMalformedEnvironment("a 'bundle' entry is not a list");
     }
-    if (typeof entry.value !== "string") {
-      nxMalformedEnvironment("an entry has no 'value' string");
+    return { bundle: entry.bundle.map(nxEnvironmentEntry) };
+  }
+  if (typeof entry.value !== "string") {
+    nxMalformedEnvironment("an entry has no 'value' string");
+  }
+  let path: string[];
+  if (entry.path === undefined || entry.path === null) {
+    path = [];
+  } else if (typeof entry.path === "string") {
+    path = [entry.path];
+  } else if (Array.isArray(entry.path)) {
+    path = entry.path.map((field: unknown) => {
+      if (typeof field !== "string") {
+        nxMalformedEnvironment("a 'path' entry is not a string");
+      }
+      return field as string;
+    });
+  } else {
+    nxMalformedEnvironment("an entry's 'path' is not a list");
+  }
+  if (entry.formula !== undefined) {
+    if (!nxIsFormula(entry.formula)) {
+      // A formula another program wrote down is meaningful only to that program.
+      throw nxEnvironmentError(
+        "nx-ir-boundary-type",
+        `A '$env' entry for '${entry.value}' holds a formula that is not one of this generated program's.`,
+      );
     }
-    let path: string[];
-    if (entry.path === undefined || entry.path === null) {
-      path = [];
-    } else if (typeof entry.path === "string") {
-      path = [entry.path];
-    } else if (Array.isArray(entry.path)) {
-      path = entry.path.map((field: unknown) => {
-        if (typeof field !== "string") {
-          nxMalformedEnvironment("a 'path' entry is not a string");
-        }
-        return field as string;
-      });
-    } else {
-      nxMalformedEnvironment("an entry's 'path' is not a list");
-    }
-    if (entry.to === undefined) {
-      nxMalformedEnvironment("an entry has no 'to'");
-    }
-    return { value: entry.value, path, to: entry.to };
-  });
+    return nxFormulaEntry(entry.value, path, entry.formula);
+  }
+  if (entry.to === undefined) {
+    nxMalformedEnvironment("an entry has no 'to' and no 'formula'");
+  }
+  return { value: entry.value, path, to: entry.to };
 }
 
 /** Props without the reserved `$env` field, which is not a prop. */
@@ -163,10 +219,79 @@ function nxEnvironmentSchemaAt(schema: NxSchema, path: readonly string[]): NxSch
   return current;
 }
 
+/** The formulas this generated program made, which a `$env` entry may hold. */
+const nxFormulas = new WeakSet<object>();
+
+function nxIsFormula(value: unknown): value is NxFormula {
+  return typeof value === "function" && nxFormulas.has(value);
+}
+
+/**
+ * `value` as a formula of `module` that closes over `locals`: evaluated where the environment
+ * value is read. Serializing one throws rather than drop it.
+ */
+export function nxFormula(evaluate: () => any, module: string, locals: Readonly<Record<string, unknown>>): NxFormula {
+  const formula = Object.assign(() => evaluate(), {
+    module,
+    locals: Object.freeze({ ...locals }),
+    toJSON(): never {
+      throw nxEnvironmentError("nx-ir-boundary-type", "An environment formula of generated code cannot be serialized.");
+    },
+  });
+  nxFormulas.add(formula);
+  return Object.freeze(formula);
+}
+
+/** A `$env` entry holding a formula, which throws naming the value when it is serialized. */
+function nxFormulaEntry(key: string, path: readonly string[], formula: NxFormula): NxEnvironmentEntry {
+  const entry = { value: key, path: [...path], formula };
+  Object.defineProperty(entry, "toJSON", {
+    enumerable: false,
+    value(): never {
+      throw nxEnvironmentError(
+        "nx-ir-boundary-type",
+        `The '$env' entry for environment value '${key}' holds a formula of generated code, which cannot be serialized.`,
+      );
+    },
+  });
+  return entry;
+}
+
+/** The layers one host `$env` entry gives: one, or one for each entry of a bundle. */
+function nxHostEnvironmentLayers(entry: NxEnvironmentEntry, bundle: boolean, layers: NxEnvironmentLayer[]): void {
+  if ("bundle" in entry) {
+    for (const inner of entry.bundle) {
+      nxHostEnvironmentLayers(inner, true, layers);
+    }
+    return;
+  }
+  const declaration = nxEnvironmentDeclarations.get(entry.value);
+  if (declaration === undefined) {
+    throw nxEnvironmentError("nx-ir-environment-name", `A '$env' entry names '${entry.value}', which the program does not declare.`);
+  }
+  let source: NxEnvironmentSource;
+  if ("formula" in entry) {
+    source = { formula: entry.formula };
+  } else if (bundle) {
+    // A bundle entry may hold an update record that patches the value, which the value's own type
+    // does not describe.
+    source = { value: entry.to };
+  } else {
+    source = {
+      value: nxNormalizeValue(
+        entry.to,
+        nxEnvironmentSchemaAt(declaration.schema, entry.path),
+        `environment value '${[entry.value, ...entry.path].join(".")}'`,
+      ),
+    };
+  }
+  layers.push({ set: true, key: declaration.key, path: entry.path, source, bundle });
+}
+
 /**
  * Runs `run` in `environment`, or with no root values when it is `undefined`, and restores the
- * environment around it afterwards. Root values and overrides are checked against
- * their declared types first.
+ * environment around it afterwards. Root values and overrides are checked against their declared
+ * types first.
  */
 export function nxWithEnvironment<T>(environment: NxEnvironment | undefined, run: () => T): T {
   const state: NxEnvironmentState = { layers: [], base: 0, roots: new Map() };
@@ -179,16 +304,7 @@ export function nxWithEnvironment<T>(environment: NxEnvironment | undefined, run
       state.roots.set(declaration.key, nxNormalizeValue(value as NxValue, declaration.schema, `environment value '${name}'`));
     }
     for (const entry of environment.entries) {
-      const declaration = nxEnvironmentDeclarations.get(entry.value);
-      if (declaration === undefined) {
-        throw nxEnvironmentError("nx-ir-environment-name", `A '$env' entry names '${entry.value}', which the program does not declare.`);
-      }
-      const value = nxNormalizeValue(
-        entry.to,
-        nxEnvironmentSchemaAt(declaration.schema, entry.path),
-        `environment value '${[entry.value, ...entry.path].join(".")}'`,
-      );
-      state.layers.push({ set: true, key: declaration.key, path: entry.path, value });
+      nxHostEnvironmentLayers(entry, false, state.layers);
     }
     state.base = state.layers.length;
   }
@@ -201,43 +317,96 @@ export function nxWithEnvironment<T>(environment: NxEnvironment | undefined, run
   }
 }
 
-/** `env.name`: the overrides around the read, nearest first, then the root value, the entry module's provides and the default. */
+function nxIsUpdateRecord(value: unknown): boolean {
+  return nxIsRecordValue(value) && typeof value.$type === "string" && value.$type.endsWith(".Update");
+}
+
+function nxShortEnvironmentName(key: string): string {
+  const at = key.lastIndexOf("::");
+  return at < 0 ? key : key.slice(at + 2);
+}
+
+function nxEnvironmentCycle(state: NxEnvironmentState, key: string): never {
+  let start = 0;
+  for (let position = state.layers.length - 1; position >= 0; position -= 1) {
+    const layer = state.layers[position]!;
+    if (!layer.set && layer.key === key && "exhausted" in layer.below) {
+      start = position;
+      break;
+    }
+  }
+  const path = [key];
+  for (const layer of state.layers.slice(start)) {
+    if (!layer.set && path[path.length - 1] !== layer.key) {
+      path.push(layer.key);
+    }
+  }
+  path.push(key);
+  const named = path.map((name) => `'${nxShortEnvironmentName(name)}'`).join(" → ");
+  throw nxEnvironmentError(
+    "nx-ir-environment-cycle",
+    `Environment value '${nxShortEnvironmentName(key)}' is read while its own default is being evaluated: ${named}.`,
+  );
+}
+
+/** What a source gives: its value, or a formula evaluated with reads of `key` capped at `below`. */
+function nxSourceValue(state: NxEnvironmentState, key: string, below: NxEnvironmentBelow, source: NxEnvironmentSource): any {
+  if ("value" in source) {
+    return source.value;
+  }
+  return nxCappedEnvironment(state, key, below, source.formula);
+}
+
+/**
+ * `env.name`: the layers around the read, nearest first, then the root value, the entry module's
+ * provides, last first, and the default. A formula, a provide and the default are evaluated at the
+ * read, each with a cap that makes a read of the value inside it see only the sources after it.
+ */
 export function nxEnvRead<T>(declaration: NxEnvironmentDeclaration<T>): T {
   const state = nxEnvironmentState;
-  const pending: NxPendingOverride[] = [];
-  let local = 0;
+  const own: NxPendingOverride[] = [];
+  const beneath: NxPendingOverride[] = [];
   let found = false;
   let base: any;
-  let cap: number | undefined;
-  for (let position = state.layers.length - 1; position >= 0; position -= 1) {
+  let providesBelow: number | undefined;
+  let position = state.layers.length;
+  while (position > 0) {
+    position -= 1;
     const layer = state.layers[position]!;
     if (layer.key !== declaration.key) {
       continue;
     }
     if (!layer.set) {
-      cap = layer.index;
-      break;
+      const below = layer.below;
+      if ("layer" in below) {
+        position = below.layer;
+        continue;
+      }
+      if ("provide" in below) {
+        providesBelow = below.provide;
+        break;
+      }
+      nxEnvironmentCycle(state, declaration.key);
     }
-    if (layer.path.length === 0) {
-      if (position >= state.base) {
-        return nxApplyEnvironmentOverrides(layer.value, pending);
+    const isOwn = position >= state.base;
+    const value = nxSourceValue(state, declaration.key, { layer: position }, layer.source);
+    const patch = layer.bundle && nxIsUpdateRecord(value);
+    if (layer.path.length === 0 && !patch) {
+      if (isOwn) {
+        return nxApplyEnvironmentOverrides(value, own);
       }
       found = true;
-      base = layer.value;
+      base = value;
       break;
     }
-    if (position >= state.base) {
-      local += 1;
-    }
-    pending.push({ path: layer.path, value: layer.value, patch: false });
+    (isOwn ? own : beneath).push({ path: layer.path, value, patch });
   }
-  if (!found && cap === undefined && state.roots.has(declaration.key)) {
+  if (!found && providesBelow === undefined && state.roots.has(declaration.key)) {
     found = true;
     base = state.roots.get(declaration.key);
   }
-  const value = found ? base : nxProvidedOrDefault(state, declaration, cap ?? Infinity);
-  const own = pending.splice(0, Math.min(local, pending.length));
-  return nxApplyEnvironmentOverrides(nxApplyEnvironmentOverrides(value, pending), own);
+  const value = found ? base : nxProvidedOrDefault(state, declaration, providesBelow ?? Infinity);
+  return nxApplyEnvironmentOverrides(nxApplyEnvironmentOverrides(value, beneath), own);
 }
 
 function nxApplyEnvironmentOverrides(base: any, pending: readonly NxPendingOverride[]): any {
@@ -279,9 +448,10 @@ function nxSetEnvironmentPath(value: any, path: readonly string[], at: number, t
   return { ...value, [field]: next };
 }
 
-function nxCappedEnvironment(state: NxEnvironmentState, key: string, index: number, work: () => any): any {
+/** Runs `work` with a read of `key` seeing only the sources `below` gives. */
+function nxCappedEnvironment(state: NxEnvironmentState, key: string, below: NxEnvironmentBelow, work: () => any): any {
   const depth = state.layers.length;
-  state.layers.push({ set: false, key, index });
+  state.layers.push({ set: false, key, below });
   try {
     return work();
   } finally {
@@ -289,52 +459,122 @@ function nxCappedEnvironment(state: NxEnvironmentState, key: string, index: numb
   }
 }
 
+/** The `$entries` of a bundle value. */
+function nxBundleItems(bundle: unknown): readonly any[] {
+  if (!nxIsRecordValue(bundle) || bundle.$type !== "env.Update" || !Array.isArray(bundle.$entries)) {
+    throw nxEnvironmentError("nx-ir-environment", "A bundle needs an 'env.Update' value.");
+  }
+  return bundle.$entries;
+}
+
+/** The entries of a bundle's `$entries`, in order, a bundle entry's own entries in its place. */
+function nxBundleEntries(items: readonly any[], out: NxEvaluatedOverride[] = []): NxEvaluatedOverride[] {
+  for (const entry of items) {
+    if (nxIsRecordValue(entry) && entry.bundle !== undefined) {
+      if (!Array.isArray(entry.bundle)) {
+        throw nxEnvironmentError("nx-ir-environment", "An 'env.Update' entry is malformed.");
+      }
+      nxBundleEntries(entry.bundle, out);
+      continue;
+    }
+    if (!nxIsRecordValue(entry) || typeof entry.value !== "string" || (entry.to === undefined) === (entry.formula === undefined)) {
+      throw nxEnvironmentError("nx-ir-environment", "An 'env.Update' entry is malformed.");
+    }
+    if (entry.formula !== undefined && !nxIsFormula(entry.formula)) {
+      throw nxEnvironmentError(
+        "nx-ir-boundary-type",
+        `An 'env.Update' entry for '${entry.value}' holds a formula that is not one of this generated program's.`,
+      );
+    }
+    const path: readonly string[] = Array.isArray(entry.path) ? entry.path : [];
+    out.push({
+      key: entry.value,
+      path,
+      source: entry.formula !== undefined ? { formula: entry.formula } : { value: entry.to },
+    });
+  }
+  return out;
+}
+
 function nxProvidedOrDefault(state: NxEnvironmentState, declaration: NxEnvironmentDeclaration<any>, below: number): any {
   const pending: NxPendingOverride[] = [];
   const provides = nxEnvironmentProvides;
   for (let position = Math.min(below, provides.length) - 1; position >= 0; position -= 1) {
     const [target, path, evaluate] = provides[position]!;
+    const cap: NxEnvironmentBelow = { provide: position };
     if (target !== null) {
       if (target.key !== declaration.key) {
         continue;
       }
-      const value = nxCappedEnvironment(state, declaration.key, position, evaluate);
+      const value = nxCappedEnvironment(state, declaration.key, cap, evaluate);
       if (path.length === 0) {
         return nxApplyEnvironmentOverrides(value, pending);
       }
       pending.push({ path, value, patch: false });
       continue;
     }
-    const bundle = nxCappedEnvironment(state, declaration.key, position, evaluate);
-    if (!nxIsRecordValue(bundle) || bundle.$type !== "env.Update" || !Array.isArray(bundle.$entries)) {
-      throw nxEnvironmentError("nx-ir-environment", "A bundle provide needs an 'env.Update' value.");
-    }
-    for (let index = bundle.$entries.length - 1; index >= 0; index -= 1) {
-      const entry = bundle.$entries[index];
-      if (entry.value !== declaration.key) {
+    const entries = nxBundleEntries(nxBundleItems(nxCappedEnvironment(state, declaration.key, cap, evaluate)));
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.key !== declaration.key) {
         continue;
       }
-      const fields: readonly string[] = Array.isArray(entry.path) ? entry.path : [];
-      const patch = nxIsRecordValue(entry.to) && typeof entry.to.$type === "string" && entry.to.$type.endsWith(".Update");
-      if (fields.length === 0 && !patch) {
-        return nxApplyEnvironmentOverrides(entry.to, pending);
+      const value = nxSourceValue(state, declaration.key, cap, entry.source);
+      const patch = nxIsUpdateRecord(value);
+      if (entry.path.length === 0 && !patch) {
+        return nxApplyEnvironmentOverrides(value, pending);
       }
-      pending.push({ path: fields, value: entry.to, patch });
+      pending.push({ path: entry.path, value, patch });
     }
   }
-  return nxApplyEnvironmentOverrides(declaration.defaultValue(), pending);
+  const value = nxCappedEnvironment(state, declaration.key, { exhausted: true }, declaration.defaultValue);
+  return nxApplyEnvironmentOverrides(value, pending);
 }
 
-function nxEnvironmentEntryValues(overrides: readonly NxEnvOverride[]): NxEnvironmentEntry[] {
-  return overrides.map(([declaration, path, value]) => ({ value: declaration.key, path: [...path], to: value }));
+/** The overrides of a provide or bundle, as the caller evaluated them. */
+function nxEvaluatedEntries(overrides: readonly NxEnvOverride[]): NxEvaluatedEntry[] {
+  return overrides.map(([declaration, path, value]): NxEvaluatedEntry => {
+    if (declaration === null) {
+      const items = nxBundleItems(value);
+      return { bundle: nxBundleEntries(items), items };
+    }
+    const source: NxEnvironmentSource = nxIsFormula(value) ? { formula: value } : { value };
+    return { set: { key: declaration.key, path, source } };
+  });
+}
+
+/**
+ * The `$env` or `$entries` entries for evaluated overrides. In `$env` a bundle is one `{bundle}`
+ * entry; in a bundle's `$entries` its entries take its place.
+ */
+function nxEnvironmentEntryValues(evaluated: readonly NxEvaluatedEntry[], nest: boolean): any[] {
+  const out: any[] = [];
+  for (const item of evaluated) {
+    if ("set" in item) {
+      const { key, path, source } = item.set;
+      out.push("value" in source ? { value: key, path: [...path], to: source.value } : nxFormulaEntry(key, path, source.formula as NxFormula));
+    } else if (nest) {
+      out.push({ bundle: [...item.items] });
+    } else {
+      out.push(...item.items);
+    }
+  }
+  return out;
 }
 
 /** `provide overrides { body }`: the overrides, evaluated by the caller, in effect while the body runs, then added to the `$env` of every component descriptor the result reaches. */
 export function nxProvide<T>(overrides: readonly NxEnvOverride[], body: () => T): T {
+  const evaluated = nxEvaluatedEntries(overrides);
   const state = nxEnvironmentState;
   const depth = state.layers.length;
-  for (const [declaration, path, value] of overrides) {
-    state.layers.push({ set: true, key: declaration.key, path, value });
+  for (const item of evaluated) {
+    if ("set" in item) {
+      state.layers.push({ set: true, key: item.set.key, path: item.set.path, source: item.set.source, bundle: false });
+    } else {
+      for (const { key, path, source } of item.bundle) {
+        state.layers.push({ set: true, key, path, source, bundle: true });
+      }
+    }
   }
   let result: T;
   try {
@@ -342,15 +582,17 @@ export function nxProvide<T>(overrides: readonly NxEnvOverride[], body: () => T)
   } finally {
     state.layers.length = depth;
   }
-  return nxStampEnvironment(result, nxEnvironmentEntryValues(overrides)) as T;
+  return nxStampEnvironment(result, nxEnvironmentEntryValues(evaluated, true)) as T;
 }
 
-/** `<env.Update … />`: the overrides as one bundle value. */
-export function nxEnvUpdate(overrides: readonly NxEnvOverride[]): any {
-  return { $type: "env.Update", $entries: nxEnvironmentEntryValues(overrides) };
+/** `<env.Update … />` or `base with { … }`: the base's entries, then the overrides, as one bundle value. */
+export function nxEnvUpdate(overrides: readonly NxEnvOverride[], base?: unknown): any {
+  const entries = base === undefined ? [] : [...nxBundleItems(base)];
+  entries.push(...nxEnvironmentEntryValues(nxEvaluatedEntries(overrides), false));
+  return { $type: "env.Update", $entries: entries };
 }
 
-function nxStampEnvironment(value: unknown, entries: readonly NxEnvironmentEntry[]): unknown {
+function nxStampEnvironment(value: unknown, entries: readonly unknown[]): unknown {
   if (entries.length === 0) {
     return value;
   }

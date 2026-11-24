@@ -1,0 +1,91 @@
+module main.nx fingerprint 4477416778341812224
+links shared.nx version "" fingerprint 5641542836582198659
+links other.nx version "" fingerprint 1915734367421540943
+requires environment-v1 environment-v2
+entrypoints functions [named direct record imported qualified qualifiedOverride tripled throughFunction element padded defaulted] components [Box]
+
+environment gap: int @6:1-6:25 =
+  0
+
+value tv: int @8:1-8:32 =
+  (shared.nx:env.space mul 3)
+
+value doubled: int @10:1-10:30 =
+  (tv mul 2)
+
+record Insets @12:1-12:37
+  top: int required
+  bottom: int required
+
+value insets: Insets @13:1-13:71 =
+  <Insets top=shared.nx:env.space bottom=(shared.nx:env.space mul 2) />
+
+value plain: int @14:1-14:23 =
+  7
+
+function named() @17:1-17:75 =
+  provide env.gap:=tv {
+    provide shared.nx:env.space=1 {
+      env.gap
+    }
+  }
+
+function direct() @19:1-19:64 =
+  provide shared.nx:env.space=2 {
+    ((tv add doubled) add plain)
+  }
+
+function record() @20:1-20:50 =
+  provide shared.nx:env.space=5 {
+    insets
+  }
+
+function imported() @21:1-21:53 =
+  provide shared.nx:env.space=10 {
+    shared.nx:triple
+  }
+
+value viaAlias: int @24:1-24:37 =
+  other.nx:quadruple
+
+function qualified() @25:1-25:55 =
+  provide shared.nx:env.space=1 {
+    viaAlias
+  }
+
+function qualifiedOverride() @26:1-26:97 =
+  provide env.gap:=other.nx:quadruple {
+    provide shared.nx:env.space=2 {
+      env.gap
+    }
+  }
+
+function tripled(): int @28:1-28:28 =
+  tv
+
+function throughFunction() @29:1-29:62 =
+  provide shared.nx:env.space=3 {
+    tripled()
+  }
+
+component Box @31:1-31:66
+  props
+    pad: int = shared.nx:env.space
+  body =
+    <span pad=pad />
+
+value box @32:1-32:22 =
+  <Box />
+
+function element() @33:1-33:48 =
+  provide shared.nx:env.space=1 {
+    box
+  }
+
+function padded(extra: int = tv): int @35:1-35:51 =
+  (extra add 1)
+
+function defaulted() @36:1-36:55 =
+  provide shared.nx:env.space=2 {
+    padded()
+  }

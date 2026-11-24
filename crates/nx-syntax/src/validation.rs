@@ -91,10 +91,145 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Report the removed `enum` keyword by name.
     validate_reserved_enum_keyword(tree, file_name, &mut diagnostics);
 
+    // Report the removed `provide bundle` form and blocks that mix a bundle with `env.` overrides.
+    validate_provide_forms(&root, file_name, &mut diagnostics);
+
     // Report doc comments that document nothing, or document an item ambiguously or twice.
     crate::doc_comments::validate_doc_comments(&root, file_name, &mut diagnostics);
 
     diagnostics
+}
+
+/// Reports the two `provide` shapes the grammar admits only to name their rewrite.
+///
+/// <para>The main module's `provide brand.theme` became `provide env with brand.theme`. A `provide`
+/// block holds attribute-form `env.` overrides or one `env with` chain, never both, and the
+/// suggestion is one chain that keeps the written order: overrides written before a bundle become a
+/// field list before it, those after it a `with { … }` step after it.</para>
+fn validate_provide_forms(node: &SyntaxNode, file_name: &str, diagnostics: &mut Vec<Diagnostic>) {
+    match node.kind() {
+        SyntaxKind::PROVIDE_DEFINITION => {
+            if let Some(legacy) = node.child_by_field("legacy_bundle") {
+                // The bundle and any `with` steps after it, as written.
+                let written = node
+                    .text()
+                    .strip_prefix("provide")
+                    .unwrap_or(legacy.text())
+                    .trim();
+                let suggestion = format!("provide env with {written}");
+                diagnostics.push(
+                    Diagnostic::error("syntax-error")
+                        .with_message(format!(
+                            "A bundle is applied with `provide env with`: write `{}`",
+                            suggestion
+                        ))
+                        .with_label(
+                            Label::primary(file_name, node.span())
+                                .with_message("`provide` needs `env with` before a bundle"),
+                        )
+                        .with_note(format!("Write `{}`.", suggestion))
+                        .build(),
+                );
+            }
+        }
+        SyntaxKind::PROVIDE_EXPRESSION => {
+            let overrides = node
+                .children()
+                .filter(|child| {
+                    matches!(
+                        child.kind(),
+                        SyntaxKind::PROPERTY_VALUE | SyntaxKind::PROVIDE_BUNDLE
+                    )
+                })
+                .collect::<Vec<_>>();
+            let bundles = overrides
+                .iter()
+                .filter(|child| child.kind() == SyntaxKind::PROVIDE_BUNDLE)
+                .count();
+            let mixed = bundles > 0 && bundles < overrides.len();
+            if mixed || bundles > 1 {
+                let suggestion = provide_chain_suggestion(&overrides);
+                let (message, label) = if mixed {
+                    (
+                        "A `provide` block holds `env.` overrides or one `env with` chain, not both",
+                        "a bundle and `env.` overrides in one block",
+                    )
+                } else {
+                    (
+                        "A `provide` block holds one `env with` chain: join the bundles with `with`",
+                        "two bundles in one block",
+                    )
+                };
+                let start = overrides.first().map(|first| first.span().start());
+                let end = overrides.last().map(|last| last.span().end());
+                let range = match (start, end) {
+                    (Some(start), Some(end)) => TextRange::new(start, end),
+                    _ => node.span(),
+                };
+                diagnostics.push(
+                    Diagnostic::error("syntax-error")
+                        .with_message(format!("{}: write `{}`", message, suggestion))
+                        .with_label(Label::primary(file_name, range).with_message(label))
+                        .with_note(format!(
+                            "Write `{}`, which applies them in the same order.",
+                            suggestion
+                        ))
+                        .build(),
+                );
+            }
+        }
+        SyntaxKind::PROVIDE_BUNDLE => {
+            // `provide marketing with { … }` reads as a bundle applied by `marketing`: the bundle
+            // is the first operand of an `env with` chain, so keep it and its steps.
+            if let Some(head) = node.children().next().filter(|head| head.text() != "env") {
+                let suggestion = format!("provide env with {}", node.text());
+                diagnostics.push(
+                    Diagnostic::error("syntax-error")
+                        .with_message(format!(
+                            "A bundle is applied with `provide env with`: write `{}`",
+                            suggestion
+                        ))
+                        .with_label(
+                            Label::primary(file_name, head.span())
+                                .with_message("`provide` needs `env with` before a bundle"),
+                        )
+                        .with_note(format!("Write `{}`.", suggestion))
+                        .build(),
+                );
+            }
+        }
+        _ => {}
+    }
+    for child in node.children() {
+        validate_provide_forms(&child, file_name, diagnostics);
+    }
+}
+
+/// The single `env with` chain that applies a block's overrides in their written order.
+fn provide_chain_suggestion(overrides: &[SyntaxNode]) -> String {
+    let mut steps: Vec<String> = Vec::new();
+    let mut fields: Vec<String> = Vec::new();
+    for item in overrides {
+        if item.kind() == SyntaxKind::PROVIDE_BUNDLE {
+            if !fields.is_empty() {
+                steps.push(format!("{{ {} }}", fields.join(" ")));
+                fields.clear();
+            }
+            let text = item.text();
+            let chain = text
+                .split_once("with")
+                .map(|(_, rest)| rest.trim())
+                .unwrap_or(text);
+            steps.push(chain.to_string());
+        } else {
+            let text = item.text();
+            fields.push(text.strip_prefix("env.").unwrap_or(text).to_string());
+        }
+    }
+    if !fields.is_empty() {
+        steps.push(format!("{{ {} }}", fields.join(" ")));
+    }
+    format!("provide env with {}", steps.join(" with "))
 }
 
 /// Reports the removed `enum` keyword in declaration position, naming the `type` form to write.

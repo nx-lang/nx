@@ -1067,7 +1067,8 @@ impl<'a> TreeBuilder<'a> {
                 let index = self.push_expression(SourceRole::Literal, node, parent, segment, flags);
                 self.nodes[index].value = Some(node.text().to_string());
             }
-            SyntaxKind::IDENTIFIER_EXPRESSION => {
+            // A bundle after `env with` is written as a name, `brand.theme`, not an expression.
+            SyntaxKind::IDENTIFIER_EXPRESSION | SyntaxKind::QUALIFIED_NAME => {
                 let name = node.text().to_string();
                 let index =
                     self.push_expression(SourceRole::Reference, node, parent, segment, flags);
@@ -1111,6 +1112,7 @@ impl<'a> TreeBuilder<'a> {
             SyntaxKind::BINARY_EXPRESSION
             | SyntaxKind::PREFIX_UNARY_EXPRESSION
             | SyntaxKind::EXISTS_EXPRESSION => self.operator(node, parent, segment, flags),
+            SyntaxKind::WITH_EXPRESSION => self.with_expression(node, parent, segment, flags),
             SyntaxKind::CALL_EXPRESSION => self.call(node, parent, segment, flags),
             SyntaxKind::MEMBER_ACCESS_EXPRESSION | SyntaxKind::OPTIONAL_MEMBER_EXPRESSION => {
                 self.member_access(node, parent, segment, flags)
@@ -1258,6 +1260,46 @@ impl<'a> TreeBuilder<'a> {
             }
             if let Some(slot @ ("left" | "right" | "operand")) = field {
                 self.expression(child, Some(index), slot.to_string(), &[]);
+            }
+        }
+    }
+
+    /// `left with right`: an operator whose right side is an expression, or a field list whose
+    /// entries are attributes of the operator, as an element's are.
+    fn with_expression(
+        &mut self,
+        node: SyntaxNode<'_>,
+        parent: Option<usize>,
+        segment: String,
+        flags: &[SourceFlag],
+    ) {
+        let index = self.push_expression(SourceRole::Operator, node, parent, segment, flags);
+        self.nodes[index].value = Some("with".to_string());
+        for (field, child) in fields(node) {
+            if self.trivia(child, Some(index)) || !child.raw().is_named() {
+                continue;
+            }
+            match field {
+                Some("left") => self.expression(child, Some(index), "left".to_string(), &[]),
+                Some("right") => self.with_operand(child, index, "right"),
+                _ => {}
+            }
+        }
+    }
+
+    /// The right side of a `with`: a field list's entries as attributes of `owner`, or an
+    /// expression in `slot`.
+    fn with_operand(&mut self, node: SyntaxNode<'_>, owner: usize, slot: &str) {
+        if node.kind() != SyntaxKind::WITH_FIELD_LIST {
+            self.expression(node, Some(owner), slot.to_string(), &[]);
+            return;
+        }
+        for (field, entry) in fields(node) {
+            if self.trivia(entry, Some(owner)) || !entry.raw().is_named() {
+                continue;
+            }
+            if field == Some("entry") {
+                self.attribute(entry, owner, "", &[]);
             }
         }
     }
@@ -1616,8 +1658,38 @@ impl<'a> TreeBuilder<'a> {
                 continue;
             }
             match field {
+                Some("override") if child.kind() == SyntaxKind::PROVIDE_BUNDLE => {
+                    self.provide_bundle(child, index)
+                }
                 Some("override") => self.attribute(child, index, "", &[]),
                 Some("body") => self.branch(child, index, ""),
+                _ => {}
+            }
+        }
+    }
+
+    /// `env with bundle with step …` in a `provide`: an operator whose operands are the bundle and
+    /// each step, a field list's entries as its attributes.
+    fn provide_bundle(&mut self, node: SyntaxNode<'_>, owner: usize) {
+        let index = self.push_expression(
+            SourceRole::Operator,
+            node,
+            Some(owner),
+            "bundle".to_string(),
+            &[],
+        );
+        self.nodes[index].value = Some("env with".to_string());
+        let mut step = 0;
+        for (field, child) in fields(node) {
+            if self.trivia(child, Some(index)) || !child.raw().is_named() {
+                continue;
+            }
+            match field {
+                Some("bundle") => self.with_operand(child, index, "bundle"),
+                Some("step") => {
+                    step += 1;
+                    self.with_operand(child, index, &format!("step{step}"));
+                }
                 _ => {}
             }
         }

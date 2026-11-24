@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "app/main.nx::applied": 17,
+    "app/main.nx::chained": 25,
+    "app/main.nx::fallback": 22,
+    "app/main.nx::merged": 14,
+    "app/main.nx::mergedApplied": 50,
+    "app/main.nx::moved": 17,
+    "app/main.nx::optionalCleared": 43,
+    "app/main.nx::relocated": 53,
+    "app/main.nx::renamed": 44,
+    "app/main.nx::retagged": 48
+  }
+}

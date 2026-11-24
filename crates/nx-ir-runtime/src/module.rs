@@ -18,7 +18,7 @@ use nx_ir::{
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 13] = [
+const KNOWN_FEATURES: [&str; 14] = [
     nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
     "standard-color-v2",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
@@ -32,6 +32,7 @@ const KNOWN_FEATURES: [&str; 13] = [
     NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
     nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
+    nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2,
 ];
 
 /// How deeply one type may nest others. A type is a tree of shared nodes that is dropped
@@ -298,12 +299,15 @@ pub(crate) enum DeclarationKind {
     Provides(Box<[Provide]>),
 }
 
-/// One override of an `envProvide` or `envUpdate` node.
+/// One override of an `envProvide` or `envUpdate` node, or with no target a bundle whose entries
+/// it contributes.
 #[derive(Debug)]
 pub(crate) struct Override {
-    pub target: Ref,
+    pub target: Option<Ref>,
     pub path: Box<[Arc<str>]>,
     pub value: u32,
+    /// The value reads the environment, so it is captured and computed where the value is read.
+    pub formula: bool,
 }
 
 /// One top-level provide: an override, or with no target a bundle.
@@ -540,8 +544,11 @@ pub(crate) enum Node {
         overrides: Box<[Override]>,
         body: u32,
     },
-    /// `[32, overrides]`: a bundle.
-    EnvUpdate(Box<[Override]>),
+    /// `[32, overrides, base?]`: a bundle, after the entries of `base` when there is one.
+    EnvUpdate {
+        overrides: Box<[Override]>,
+        base: Option<u32>,
+    },
 }
 
 impl Node {
@@ -621,7 +628,12 @@ impl Node {
                 overrides.iter().for_each(|entry| visit(entry.value));
                 visit(*body);
             }
-            Node::EnvUpdate(overrides) => overrides.iter().for_each(|entry| visit(entry.value)),
+            Node::EnvUpdate { overrides, base } => {
+                if let Some(base) = base {
+                    visit(*base);
+                }
+                overrides.iter().for_each(|entry| visit(entry.value));
+            }
         }
     }
 }
@@ -687,6 +699,10 @@ impl<'a> Reader<'a> {
             .ok_or_else(|| "an entry ends before its layout does".to_string())?;
         self.position = self.position.saturating_add(1);
         Ok(cell)
+    }
+
+    fn finished(&self) -> bool {
+        self.position >= self.cells.len()
     }
 
     fn optional(&mut self) -> std::result::Result<Option<u32>, Malformed> {
@@ -775,15 +791,30 @@ impl<'a> Decoder<'a> {
         &self,
         reader: &mut Reader<'_>,
     ) -> std::result::Result<Box<[Override]>, Malformed> {
-        Ok(reader
-            .list(|reader| {
-                Ok(Override {
-                    target: self.reference(reader)?,
-                    path: self.path(reader)?,
-                    value: reader.next()?,
-                })
-            })?
-            .into_boxed_slice())
+        // The count cell's top bit says each override is followed by its formula flag.
+        let count = reader.next()?;
+        let flagged = count & nx_ir::FLAGGED != 0;
+        let count = (count & !nx_ir::FLAGGED) as usize;
+        if count > reader.cells.len().saturating_sub(reader.position) {
+            return Err("a list is longer than its entry".to_string());
+        }
+        let mut overrides = Vec::with_capacity(count);
+        for _ in 0..count {
+            let target = self.optional_reference(reader)?;
+            let path = self.path(reader)?;
+            let value = reader.next()?;
+            let formula = flagged && reader.next()? != 0;
+            if formula && target.is_none() {
+                return Err("a bundle override is flagged as a formula".to_string());
+            }
+            overrides.push(Override {
+                target,
+                path,
+                value,
+                formula,
+            });
+        }
+        Ok(overrides.into_boxed_slice())
     }
 
     fn nodes(&self, reader: &mut Reader<'_>) -> std::result::Result<Box<[u32]>, Malformed> {
@@ -992,7 +1023,15 @@ impl<'a> Decoder<'a> {
                 overrides: self.overrides(&mut reader)?,
                 body: reader.next()?,
             },
-            node::ENV_UPDATE => Node::EnvUpdate(self.overrides(&mut reader)?),
+            node::ENV_UPDATE => {
+                let overrides = self.overrides(&mut reader)?;
+                let base = if reader.finished() {
+                    None
+                } else {
+                    Some(reader.next()?)
+                };
+                Node::EnvUpdate { overrides, base }
+            }
             other => return Err(format!("unknown node kind {other}")),
         })
     }
@@ -1338,6 +1377,7 @@ impl PreparedModule {
         check_nodes(&image, &mut diagnostics);
         check_constraint_nodes(&image, &mut diagnostics);
         check_environment_entries(&image, &mut diagnostics);
+        check_environment_v2_entries(&image, &mut diagnostics);
 
         let strings: Vec<OnceLock<Arc<str>>> =
             (0..image.string_count()).map(|_| OnceLock::new()).collect();
@@ -1685,6 +1725,49 @@ fn check_environment_entries(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagno
         diagnostics.push(malformed(format!(
             "the module uses environment values, which requires the feature '{}' the module does not list",
             nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1
+        )));
+    }
+}
+
+/// A formula, a bundle in an `envProvide` or an `envUpdate` with a base needs `environment-v2`,
+/// so a module that has one without listing it is refused rather than evaluated where written.
+fn check_environment_v2_entries(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    use kinds::node;
+    if image
+        .required_features()
+        .any(|feature| feature == nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2)
+    {
+        return;
+    }
+    let uses = (0..image.entry_count(Table::Nodes) as u32).any(|index| {
+        let Some(entry) = image.entry(Table::Nodes, index) else {
+            return false;
+        };
+        let kind = entry.get(0).map(i64::from);
+        if !matches!(kind, Some(node::ENV_PROVIDE | node::ENV_UPDATE)) {
+            return false;
+        }
+        let Some(count) = entry.get(1) else {
+            return false;
+        };
+        if count & nx_ir::FLAGGED != 0 {
+            return true;
+        }
+        // Walk the overrides: a bundle names no declaration.
+        let mut position = 2;
+        for _ in 0..count {
+            if entry.get(position) == Some(NONE) {
+                return true;
+            }
+            let path = entry.get(position.saturating_add(2)).unwrap_or(0) as usize;
+            position = position.saturating_add(4).saturating_add(path);
+        }
+        kind == Some(node::ENV_UPDATE) && entry.len() > position
+    });
+    if uses {
+        diagnostics.push(malformed(format!(
+            "the module holds a formula, a bundle in a provide or a bundle built on another, which requires the feature '{}' the module does not list",
+            nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2
         )));
     }
 }

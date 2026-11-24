@@ -1,0 +1,8 @@
+// The environment values the entry module overrides.
+export type ColorMode = light | dark
+
+export environment colorMode: ColorMode = light
+export environment space: int = 4
+export environment gap: int = 0
+export environment radius: int = 2
+export environment accent: string = "gray"

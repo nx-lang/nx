@@ -1,0 +1,50 @@
+{
+  "entry": "app/main.nx",
+  "emit": [
+    "app/main.nx",
+    "shared/model.nx",
+    "shared/tags.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "app/main.nx",
+      "function": "moved"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "applied"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "relocated"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "chained"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "renamed"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "merged"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "mergedApplied"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "fallback"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "optionalCleared"
+    },
+    {
+      "module": "app/main.nx",
+      "function": "retagged"
+    }
+  ]
+}

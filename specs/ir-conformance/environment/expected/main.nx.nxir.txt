@@ -1,6 +1,6 @@
-module main.nx fingerprint 4197849879551866255
+module main.nx fingerprint 13291814230594613214
 links design.nx version "" fingerprint 9671487728751124515
-requires environment-v1
+requires environment-v1 environment-v2
 entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle hosted] components [Badge Stack]
 
 record Size @3:1-3:37
@@ -56,7 +56,7 @@ function nestedPath() @24:1-24:62 =
   }
 
 function readsOutside() @25:1-25:73 =
-  provide design.nx:env.space=(design.nx:env.space mul 2) {
+  provide design.nx:env.space:=(design.nx:env.space mul 2) {
     design.nx:env.space
   }
 

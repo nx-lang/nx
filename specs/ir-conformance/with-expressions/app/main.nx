@@ -1,0 +1,28 @@
+// `with` on records and update records: field lists, paths, chains, operands and `??`.
+import "../shared/model.nx"
+
+type Point = { x:int y:int }
+
+let origin(): Point = { <Point x=0 y=0 /> }
+
+/// A field list sets the fields it names and keeps the rest.
+let moved() = { origin() with { x=3 } }
+/// The same patch written with `apply`.
+let applied() = { apply(origin(), <Point.Update x=3 />) }
+/// A path sets a field of a field; the left side is evaluated once.
+let relocated() = { ada() with { address.city="Paris" age=37 } }
+/// Steps apply left to right.
+let chained() = { origin() with { x=1 } with { y=2 } with { x=5 } }
+/// An update record as the operand.
+let patch(): User.Update = { <User.Update name="Grace" /> }
+let renamed() = { ada() with patch() }
+/// Update records `with` update records merge, the right side winning.
+let merged() = { patch() with { age=40 } }
+let mergedApplied() = { ada() with merged() }
+/// `with` binds tighter than `??`.
+let missing(): Point? = { if false { origin() } }
+let fallback() = { missing() ?? origin() with { y=9 } }
+/// A field written as `with` stays a field.
+let optionalCleared() = { ada() with { nickname="A" } with { nickname={} } }
+/// A path through a field whose record this module does not import.
+let retagged() = { ada() with { tag.label="owner" } }

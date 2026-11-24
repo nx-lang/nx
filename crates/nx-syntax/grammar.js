@@ -264,8 +264,10 @@ module.exports = grammar({
     ),
 
     // An app-wide provide at the top level of the main module: `provide env.radius = …` sets one
-    // value or field, and `provide brand.theme` applies an `env.Update` bundle. Lowering checks
-    // that a target starts with `env` and the type checker that a bundle is an `env.Update`.
+    // value or field, and `provide env with brand.theme` applies an `env.Update` bundle. Lowering
+    // checks that a target starts with `env` and the type checker that a bundle is an
+    // `env.Update`. The removed form `provide brand.theme` still parses, as `legacy_bundle`, so
+    // that validation can report it with the new spelling.
     provide_definition: $ => seq(
       'provide',
       choice(
@@ -274,22 +276,69 @@ module.exports = grammar({
           '=',
           field('value', $.rhs_expression),
         ),
-        field('bundle', choice(
+        $.provide_bundle,
+        field('legacy_bundle', choice(
           $.qualified_name,
           $.element,
           $.values_braced_expression,
         )),
+        // `provide m() with { … }`: a name followed by `with` parses as `provide_bundle`, a call
+        // does not, so its steps are kept here for the suggestion.
+        seq(
+          field('legacy_bundle', alias($.bundle_call_expression, $.call_expression)),
+          repeat(seq('with', field('legacy_step', $._bundle_operand))),
+        ),
       ),
     ),
 
-    // `provide env.locale="fr-FR" env.space=8 { body }`: the body evaluated with the overrides in
-    // effect. Overrides are written as an element's `env.` attributes are, so lowering treats an
-    // element's `env.` attributes and a block alike.
+    // `provide env.locale="fr-FR" env.space=8 { body }` or `provide env with brand { body }`: the
+    // body evaluated with the overrides in effect. Overrides are written as an element's `env.`
+    // attributes are, so lowering treats an element's `env.` attributes and a block alike. A block
+    // holds attribute overrides or one bundle, never both; the grammar admits a mix so that
+    // validation can report it with a rewrite that keeps the written order.
     provide_expression: $ => seq(
       'provide',
-      repeat1(field('override', $.property_value)),
+      repeat1(field('override', choice($.property_value, $.provide_bundle))),
       field('body', $.values_braced_expression),
     ),
+
+    // `env with bundle with step …`: a bundle applied in a `provide`. `env` is an identifier here,
+    // checked by lowering, so that `env.name=value` overrides keep their ordinary parse. Each
+    // operand is restricted so that what follows, a body or the next top-level item, can't be read
+    // as part of it.
+    provide_bundle: $ => seq(
+      field('env', $.identifier),
+      'with',
+      field('bundle', $._bundle_operand),
+      repeat(seq('with', field('step', $._bundle_operand))),
+    ),
+
+    _bundle_operand: $ => choice(
+      $.with_field_list,
+      $.qualified_name,
+      $.element,
+      $.values_braced_expression,
+      alias($.bundle_call_expression, $.call_expression),
+    ),
+
+    // `theme(dark)` as a bundle: a call whose callee is a name, so that the operand stays closed.
+    bundle_call_expression: $ => seq(
+      field('callee', alias($.qualified_name, $.identifier_expression)),
+      token.immediate('('),
+      optional(seq(
+        $._call_argument,
+        repeat(seq(',', $._call_argument)),
+      )),
+      ')',
+    ),
+
+    // `{ name=value path.field=value }` after `with`: plain attribute-form entries. A brace whose
+    // first entry is `name=` can only be a field list, and `{}` is the empty one.
+    with_field_list: $ => prec(1, seq(
+      '{',
+      repeat(field('entry', $.property_value)),
+      '}',
+    )),
 
     // A base type followed by at most one occurrence suffix: `?` zero or one, `+` one or more,
     // `*` zero or more. `prec.right` makes a suffix after a function type's result bind to the
@@ -665,7 +714,21 @@ module.exports = grammar({
       $.value_list_item_expression,
       $.prefix_unary_expression,
       $.binary_expression,
+      $.with_expression,
     ),
+
+    // `value with { field=… }` or `value with update`: the value with those changes on top. It binds
+    // above `??` (125) and arithmetic and below prefix unary (130), member access and calls (140),
+    // and chains left to right.
+    with_expression: $ => prec.left(127, seq(
+      field('left', $.value_expression),
+      'with',
+      field('right', choice(
+        $.with_field_list,
+        $.value_expression,
+        $.values_braced_expression,
+      )),
+    )),
 
     identifier_expression: $ => $.identifier,
 

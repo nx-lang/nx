@@ -37,6 +37,11 @@ export declare const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
  * `envProvide` and `envUpdate` nodes.
  */
 export declare const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
+/**
+ * Environment formulas: an override flagged as a formula, a bundle override in an `envProvide`,
+ * and an `envUpdate` with a base.
+ */
+export declare const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2 = "environment-v2";
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export declare const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
 /**
@@ -142,7 +147,7 @@ export declare const nodeKinds: {
     readonly envRead: 30;
     /** `provide overrides { body }`: `[31, overrides, body]`. */
     readonly envProvide: 31;
-    /** `<env.Update … />`: `[32, overrides]`, the overrides as one bundle value. */
+    /** `<env.Update … />`: `[32, overrides, base?]`, the base's entries and the overrides as one bundle value. */
     readonly envUpdate: 32;
 };
 /**
@@ -398,7 +403,7 @@ export type PreparedDeclarationKind = {
 };
 /**
  * One top-level provide of a module: `provide env.name.path = value` with a target, and
- * `provide bundle` without one.
+ * `provide env with bundle` without one.
  */
 export interface PreparedProvide {
     readonly target: NxIrReference | undefined;
@@ -779,15 +784,29 @@ export type NxFunctionRecord = {
  * subset rule allows; a parameter it declares and the arguments lack is a diagnostic naming it.
  */
 export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxHostValue, args?: NxHostRecord, options?: NxRuntimeOptions): NxCanonicalValue;
-/** One override a component descriptor's `$env` carries, outermost first. */
-export interface NxEnvironmentEntry {
+/**
+ * One entry a component descriptor's `$env` carries, outermost first: an override's value, a
+ * formula computed where the value is read, or the entries of a bundle applied by
+ * `provide env with`.
+ */
+export type NxEnvironmentEntry = {
     /** The environment value: its module identity and name, `identity::name`. */
     readonly value: string;
     /** The field path the override sets; empty for the whole value. */
     readonly path: readonly string[];
     /** The value it sets. */
     readonly to: NxHostValue;
-}
+} | {
+    readonly value: string;
+    readonly path: readonly string[];
+    /**
+     * `{module, declaration, node, fingerprint, locals}`. Only its shape is checked when it is
+     * entered; a formula of another build is refused at the read that evaluates it.
+     */
+    readonly formula: NxHostValue;
+} | {
+    readonly bundle: readonly NxEnvironmentEntry[];
+};
 /**
  * The environment a call runs in: the root values a host gives, then the overrides of each
  * component descriptor down to an instance. Immutable: {@link NxEnvironment.enter} answers a new

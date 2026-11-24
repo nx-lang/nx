@@ -82,10 +82,13 @@ impl WorkspaceSnapshot {
         let identity = resolved.document.identity.as_str();
         let lowered = scope.workspace.artifact(identity)?.lowered_module.clone()?;
         let offset = TextSize::from(resolved.offset as u32);
-        let provide = lowered
+        let Some(provide) = lowered
             .provides()
             .iter()
-            .find(|provide| provide.span().contains_inclusive(offset))?;
+            .find(|provide| provide.span().contains_inclusive(offset))
+        else {
+            return block_bundle_hover(scope, identity, &lowered, resolved, inner);
+        };
         let set = match provide {
             nx_hir::ProvideDecl::Override(provided) => {
                 // The override's own name and value already answer for themselves.
@@ -312,7 +315,30 @@ fn bundle_paths(
         return;
     };
     match lowered.expr(value) {
-        nx_hir::ast::Expr::EnvUpdate { overrides, .. } => {
+        // `bundle with step`: the bundle's entries, then the step's.
+        nx_hir::ast::Expr::With { left, right, .. } => {
+            bundle_paths(scope, module, *left, set, visited);
+            match right {
+                nx_hir::ast::WithRight::Fields(fields) => {
+                    for field in fields {
+                        let path = std::iter::once(format!("env.{}", field.path[0]))
+                            .chain(field.path[1..].iter().map(|part| part.to_string()))
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        update_paths(&lowered, field.value, &path, set);
+                    }
+                }
+                nx_hir::ast::WithRight::Value(step) => {
+                    bundle_paths(scope, module, *step, set, visited)
+                }
+            }
+        }
+        nx_hir::ast::Expr::EnvUpdate {
+            bases, overrides, ..
+        } => {
+            for base in bases {
+                bundle_paths(scope, module, *base, set, visited);
+            }
             for provided in overrides {
                 let path = override_path(provided);
                 update_paths(&lowered, provided.value, &path, set);
@@ -508,4 +534,49 @@ pub(crate) fn reads_note(scope: &DocumentScope, declaration: &Declaration) -> Op
             .collect::<Vec<_>>()
             .join(", ")
     ))
+}
+
+/// The hover on the `env with` of a `provide` block the position is on, and its range: what the
+/// bundle sets, after what the position answers on its own. Anywhere else, `inner` unchanged.
+fn block_bundle_hover(
+    scope: &DocumentScope,
+    identity: &str,
+    lowered: &nx_hir::LoweredModule,
+    resolved: &ResolvedPosition<'_>,
+    inner: Option<(String, ByteTextRange)>,
+) -> Option<(String, ByteTextRange)> {
+    let source = resolved.document.source();
+    let offset = resolved.offset;
+    let (bundle, keyword) = lowered.exprs().find_map(|(_, expr)| {
+        let nx_hir::ast::Expr::Provide {
+            bundle: Some(bundle),
+            span,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        // `env with` is written between `provide` and the bundle.
+        let start = usize::from(span.start());
+        let end = usize::from(lowered.expr_span(*bundle).start());
+        let written = source.get(start..end)?;
+        let at = start + written.find("env")?;
+        let keyword_end = start + written.rfind("with")? + "with".len();
+        (at <= offset && offset <= keyword_end).then(|| {
+            (
+                *bundle,
+                ByteTextRange::new(
+                    TextSize::from(at as u32),
+                    TextSize::from(keyword_end as u32),
+                ),
+            )
+        })
+    })?;
+    let mut set = Vec::new();
+    bundle_paths(scope, identity, bundle, &mut set, &mut FxHashSet::default());
+    let note = sets_note(&set);
+    Some(match inner {
+        Some((contents, span)) => (format!("{contents}\n\n{note}"), span),
+        None => (note, keyword),
+    })
 }

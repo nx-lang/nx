@@ -16,7 +16,7 @@
     "main.nx::readPath": 20,
     "main.nx::readProvided": 10,
     "main.nx::readProvided#rootSpace": 3,
-    "main.nx::readsOutside": 14,
+    "main.nx::readsOutside": 15,
     "main.nx::stacked": 17
   }
 }

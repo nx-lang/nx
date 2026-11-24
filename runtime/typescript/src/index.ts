@@ -45,6 +45,13 @@ export const NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1 = "constraints-v1";
  * `envProvide` and `envUpdate` nodes.
  */
 export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
+/**
+ * Environment formulas: an override flagged as a formula, a bundle override in an `envProvide`,
+ * and an `envUpdate` with a base.
+ */
+export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2 = "environment-v2";
+/** The bit a flagged list's count cell sets when each element is followed by a flag cell. */
+const NX_IR_FLAGGED = 0x8000_0000;
 
 const knownFeatures = new Set([
   "standard-color-v2",
@@ -60,6 +67,7 @@ const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
   NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
   NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
+  NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2,
 ]);
 
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
@@ -594,7 +602,7 @@ export const nodeKinds = {
   envRead: 30,
   /** `provide overrides { body }`: `[31, overrides, body]`. */
   envProvide: 31,
-  /** `<env.Update … />`: `[32, overrides]`, the overrides as one bundle value. */
+  /** `<env.Update … />`: `[32, overrides, base?]`, the base's entries and the overrides as one bundle value. */
   envUpdate: 32,
 } as const;
 
@@ -1035,7 +1043,7 @@ export type PreparedDeclarationKind =
 
 /**
  * One top-level provide of a module: `provide env.name.path = value` with a target, and
- * `provide bundle` without one.
+ * `provide env with bundle` without one.
  */
 export interface PreparedProvide {
   readonly target: NxIrReference | undefined;
@@ -1573,7 +1581,11 @@ type Op =
   | "optRef"
   | "i64"
   | "f64"
-  | { readonly list: readonly Op[] };
+  | { readonly list: readonly Op[] }
+  /** A list whose count cell may set {@link NX_IR_FLAGGED}: then each element is followed by a flag cell. */
+  | { readonly flaggedList: readonly Op[] }
+  /** Operands an entry may end without: present when the entry has cells left. Only last in a layout. */
+  | { readonly trailing: readonly Op[] };
 
 const NODES: readonly Op[] = ["node"];
 const OPT_NODES: readonly Op[] = ["optNode"];
@@ -1586,7 +1598,8 @@ const DECLARED_PARAM: readonly Op[] = ["str", "type", "optNode", "int"];
 const ARM: readonly Op[] = [{ list: NODES }, "node"];
 const UNION_CASE: readonly Op[] = ["str", { list: FIELD }, "int"];
 const EMIT: readonly Op[] = ["str", "ref"];
-const OVERRIDE: readonly Op[] = ["ref", { list: STRS }, "node"];
+/** An override: the environment value, absent for a bundle, the field path and the value. */
+const OVERRIDE: readonly Op[] = ["optRef", { list: STRS }, "node"];
 const PROVIDE: readonly Op[] = ["optRef", { list: STRS }, "node"];
 
 /**
@@ -1639,8 +1652,9 @@ const layouts: Record<NxIrTable, readonly (readonly Op[] | undefined)[]> = {
     ["node", "type", "str"],
     ["type"],
     ["ref"],
-    [{ list: OVERRIDE }, "node"],
-    [{ list: OVERRIDE }],
+    [{ flaggedList: OVERRIDE }, "node"],
+    // An `envUpdate`'s base, the bundle whose entries come first, is left out when there is none.
+    [{ flaggedList: OVERRIDE }, { trailing: NODES }],
   ],
   declarations: [
     ["str", { list: DECLARED_PARAM }, "node", "optType", "int"],
@@ -1724,6 +1738,26 @@ class TableReader {
     }
   }
 
+  /** A formula, a bundle in an `envProvide` or an `envUpdate` with a base needs `environment-v2`. */
+  #validateEnvironmentFormulaFeature(entry: Uint32Array, kind: number, what: string): void {
+    if (this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2)) {
+      return;
+    }
+    const count = entry[1]!;
+    let uses = (count & NX_IR_FLAGGED) !== 0;
+    let position = 2;
+    for (let index = 0; index < count && !uses; index += 1) {
+      uses = entry[position] === NX_IR_NONE;
+      position += 3 + entry[position + 2]! + 1;
+    }
+    uses ||= kind === nodeKinds.envUpdate && entry.length > position;
+    if (uses) {
+      this.#fail(
+        `${what} holds a formula, a bundle in a provide or a bundle built on another, which requires the feature '${NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2}' the module does not list.`,
+      );
+    }
+  }
+
   #validateEntry(table: NxIrTable, index: number): void {
     const what = `${table.replace(/s$/, "")} ${index}`;
     const entry = this.#image.entry(table, index);
@@ -1756,6 +1790,9 @@ class TableReader {
       return;
     }
     this.#validateEnvironmentFeature(table, kind);
+    if (table === "nodes" && (kind === nodeKinds.envProvide || kind === nodeKinds.envUpdate)) {
+      this.#validateEnvironmentFormulaFeature(entry, kind, what);
+    }
     if (table === "types" && kind === typeKinds.constrained) {
       this.#validateConstrained(entry, what);
     }
@@ -1867,19 +1904,38 @@ class TableReader {
   }
 
   #validateOp(cursor: Cursor, op: Op, bounds: { nodes: number; types: number }, what: string): boolean {
+    if (typeof op === "object" && "trailing" in op) {
+      return cursor.finished || this.#validateSeq(cursor, op.trailing, bounds, what);
+    }
     const cell = cursor.cells[cursor.position++];
     if (cell === undefined) {
       return this.#fail(`${what} ends before its layout does.`);
     }
     const inRange = (name: string, index: number, count: number): boolean =>
       index < count ? true : this.#fail(`${what} ${name} index ${index} is out of range.`);
-    if (typeof op === "object") {
+    if (typeof op === "object" && "flaggedList" in op) {
+      const flagged = (cell & NX_IR_FLAGGED) !== 0;
+      const count = cell & ~NX_IR_FLAGGED;
+      for (let element = 0; element < count; element += 1) {
+        if (!this.#validateSeq(cursor, op.flaggedList, bounds, what)) {
+          return false;
+        }
+        if (flagged && cursor.cells[cursor.position++] === undefined) {
+          return this.#fail(`${what} ends before its layout does.`);
+        }
+      }
+      return true;
+    }
+    if (typeof op === "object" && "list" in op) {
       for (let element = 0; element < cell; element += 1) {
         if (!this.#validateSeq(cursor, op.list, bounds, what)) {
           return false;
         }
       }
       return true;
+    }
+    if (typeof op === "object") {
+      return this.#fail(`${what} has a layout this reader does not know.`);
     }
     switch (op) {
       case "int":
@@ -4469,15 +4525,30 @@ const bundleEntriesField = "$entries";
 /** The reserved field of a component descriptor that carries the overrides around it. */
 const environmentField = "$env";
 
-/** One override a component descriptor's `$env` carries, outermost first. */
-export interface NxEnvironmentEntry {
-  /** The environment value: its module identity and name, `identity::name`. */
-  readonly value: string;
-  /** The field path the override sets; empty for the whole value. */
-  readonly path: readonly string[];
-  /** The value it sets. */
-  readonly to: NxHostValue;
-}
+/**
+ * One entry a component descriptor's `$env` carries, outermost first: an override's value, a
+ * formula computed where the value is read, or the entries of a bundle applied by
+ * `provide env with`.
+ */
+export type NxEnvironmentEntry =
+  | {
+      /** The environment value: its module identity and name, `identity::name`. */
+      readonly value: string;
+      /** The field path the override sets; empty for the whole value. */
+      readonly path: readonly string[];
+      /** The value it sets. */
+      readonly to: NxHostValue;
+    }
+  | {
+      readonly value: string;
+      readonly path: readonly string[];
+      /**
+       * `{module, declaration, node, fingerprint, locals}`. Only its shape is checked when it is
+       * entered; a formula of another build is refused at the read that evaluates it.
+       */
+      readonly formula: NxHostValue;
+    }
+  | { readonly bundle: readonly NxEnvironmentEntry[] };
 
 /**
  * The environment a call runs in: the root values a host gives, then the overrides of each
@@ -4541,36 +4612,67 @@ function parseEnvironmentEntries(carried: unknown): NxEnvironmentEntry[] {
   if (!Array.isArray(carried)) {
     malformedEnvironment("it is not a list");
   }
-  return carried.map((item: unknown): NxEnvironmentEntry => {
-    if (!isPlainInput(item)) {
-      malformedEnvironment("an entry is not a record");
+  return carried.map(parseEnvironmentEntry);
+}
+
+function parseEnvironmentEntry(item: unknown): NxEnvironmentEntry {
+  if (!isPlainInput(item)) {
+    malformedEnvironment("an entry is not a record");
+  }
+  const entry = item as Readonly<Record<string, unknown>>;
+  if ("bundle" in entry && entry.bundle !== undefined) {
+    if (!Array.isArray(entry.bundle)) {
+      malformedEnvironment("a 'bundle' entry is not a list");
     }
-    const entry = item as Readonly<Record<string, unknown>>;
-    const value = entry.value;
-    if (typeof value !== "string") {
-      malformedEnvironment("an entry has no 'value' string");
+    return { bundle: entry.bundle.map(parseEnvironmentEntry) };
+  }
+  const value = entry.value;
+  if (typeof value !== "string") {
+    malformedEnvironment("an entry has no 'value' string");
+  }
+  const path = entry.path;
+  let fields: string[];
+  if (path === undefined || path === null) {
+    fields = [];
+  } else if (typeof path === "string") {
+    fields = [path];
+  } else if (Array.isArray(path)) {
+    fields = path.map((field: unknown) => {
+      if (typeof field !== "string") {
+        malformedEnvironment("a 'path' entry is not a string");
+      }
+      return field;
+    });
+  } else {
+    malformedEnvironment("an entry's 'path' is not a list");
+  }
+  if ("formula" in entry && entry.formula !== undefined) {
+    checkFormulaShape(entry.formula);
+    return { value, path: fields, formula: entry.formula as NxHostValue };
+  }
+  if (!("to" in entry) || entry.to === undefined) {
+    malformedEnvironment("an entry has no 'to' and no 'formula'");
+  }
+  return { value, path: fields, to: entry.to as NxHostValue };
+}
+
+/** Checks that a `formula` is `{module, declaration, node, fingerprint, locals}`. */
+function checkFormulaShape(formula: unknown): void {
+  if (!isPlainInput(formula)) {
+    malformedEnvironment("a 'formula' is not a record");
+  }
+  const record = formula as Readonly<Record<string, unknown>>;
+  for (const name of ["module", "declaration", "fingerprint"]) {
+    if (typeof record[name] !== "string") {
+      malformedEnvironment(`a 'formula' has no '${name}' string`);
     }
-    const path = entry.path;
-    let fields: string[];
-    if (path === undefined || path === null) {
-      fields = [];
-    } else if (typeof path === "string") {
-      fields = [path];
-    } else if (Array.isArray(path)) {
-      fields = path.map((field: unknown) => {
-        if (typeof field !== "string") {
-          malformedEnvironment("a 'path' entry is not a string");
-        }
-        return field;
-      });
-    } else {
-      malformedEnvironment("an entry's 'path' is not a list");
-    }
-    if (!("to" in entry) || entry.to === undefined) {
-      malformedEnvironment("an entry has no 'to'");
-    }
-    return { value, path: fields, to: entry.to as NxHostValue };
-  });
+  }
+  if (typeof record.node !== "number" || !Number.isInteger(record.node) || record.node < 0) {
+    malformedEnvironment("a 'formula' has no 'node' index");
+  }
+  if (record.locals !== undefined && record.locals !== null && !isPlainInput(record.locals)) {
+    malformedEnvironment("a 'formula's 'locals' is not a record");
+  }
 }
 
 /** Props without the reserved `$env` field, which is not a prop: a host may pass a descriptor's fields as they are. */
@@ -4600,6 +4702,8 @@ interface EnvironmentIndex {
   readonly provides:
     | { readonly linked: LinkedModule; readonly declaration: PreparedDeclaration; readonly list: readonly PreparedProvide[] }
     | undefined;
+  /** The value nodes of each module's formula overrides, the only nodes a formula may name. */
+  readonly formulas: ReadonlyMap<LinkedModule, ReadonlySet<number>>;
 }
 
 const environmentIndexes = new WeakMap<NxPreparedProgram, EnvironmentIndex>();
@@ -4617,8 +4721,10 @@ function environmentIndex(program: NxPreparedProgram): EnvironmentIndex {
   const qualified = new Map<string, EnvironmentDeclaration>();
   const simple = new Map<string, EnvironmentDeclaration[]>();
   const componentNames = new Set<string>();
+  const formulas = new Map<LinkedModule, Set<number>>();
   const modules = new Set<LinkedModule>([program.entry, ...program.modulesByIdentity.values()]);
   for (const linked of modules) {
+    formulas.set(linked, formulaNodes(linked.module.artifact));
     for (const declaration of linked.module.declarations) {
       // An external component's descriptor is the host's to interpret, like an intrinsic element.
       if (declaration.kind.tag === "component" && declaration.kind.body >= 0) {
@@ -4639,9 +4745,26 @@ function environmentIndex(program: NxPreparedProgram): EnvironmentIndex {
     providesDeclaration?.kind.tag === "provides"
       ? { linked: program.entry, declaration: providesDeclaration, list: providesDeclaration.kind.provides }
       : undefined;
-  const index: EnvironmentIndex = { qualified, simple, componentNames, provides };
+  const index: EnvironmentIndex = { qualified, simple, componentNames, provides, formulas };
   environmentIndexes.set(program, index);
   return index;
+}
+
+/** The value nodes of an image's formula overrides. */
+function formulaNodes(image: NxIrImage): Set<number> {
+  const found = new Set<number>();
+  for (let index = 0; index < image.entryCount("nodes"); index += 1) {
+    const entry = image.entry("nodes", index);
+    if (entry[0] !== nodeKinds.envProvide && entry[0] !== nodeKinds.envUpdate) {
+      continue;
+    }
+    for (const override of readOverrideCells(entry, 1).overrides) {
+      if (override.formula) {
+        found.add(override.value);
+      }
+    }
+  }
+  return found;
 }
 
 /** The declaration a host names a root value by: a qualified name, or a simple name exactly one environment value has. */
@@ -4664,11 +4787,46 @@ function environmentByHostName(index: EnvironmentIndex, name: string): Environme
   fail("nx-ir-environment-name", `The program declares no environment value named '${name}'.`);
 }
 
-/** One layer of the environment stack: an override, or a cap while an entry-module provide is evaluated. */
+/**
+ * Where a read of a value continues while one of that value's sources is evaluated: the sources
+ * after the one being evaluated.
+ */
+type EnvironmentBelow =
+  /** The layers beneath this position, then the root value, the provides and the default. */
+  | { readonly layer: number }
+  /** The entry module's provides before this index, then the default. */
+  | { readonly provide: number }
+  /** Nothing: the default is being evaluated, so a read of the value is a cycle. */
+  | { readonly exhausted: true };
+
+/** A captured formula: the node of an override's value, in the declaration it was written in, with the locals it reads. */
+interface EnvironmentFormula {
+  readonly linked: LinkedModule | undefined;
+  readonly declaration: PreparedDeclaration | undefined;
+  readonly node: number;
+  /** The locals the node reads from around it, by name, in name order. */
+  readonly locals: readonly (readonly [string, NxCanonicalValue])[];
+  /** Why the formula is not one of this program's: it is refused when it is evaluated. */
+  readonly refused: string | undefined;
+  /** The formula in canonical form, as `$env` and `$entries` carry it. */
+  readonly data: NxCanonicalValue;
+}
+
+/** What an override or a bundle entry sets: a value, or a formula computed where the value is read. */
+type EnvironmentSource = { readonly value: NxCanonicalValue } | { readonly formula: EnvironmentFormula };
+
+/** One layer of the environment stack: an override, or a cap while a source of `key` is evaluated. */
 type EnvironmentLayer =
-  | { readonly set: true; readonly key: string; readonly path: readonly string[]; readonly value: NxCanonicalValue }
-  /** While the entry module's provide at `index` is evaluated for `key`, a read of `key` sees only the provides before it and the default. */
-  | { readonly set: false; readonly key: string; readonly index: number };
+  | {
+      readonly set: true;
+      readonly key: string;
+      readonly path: readonly string[];
+      readonly source: EnvironmentSource;
+      /** An entry of a bundle, whose update-record value patches the value rather than replacing it. */
+      readonly bundle: boolean;
+    }
+  /** While a source of `key` is evaluated, a read of `key` sees only the sources `below` gives. */
+  | { readonly set: false; readonly key: string; readonly below: EnvironmentBelow };
 
 /** The environment state of one call. */
 interface EnvironmentState {
@@ -4686,16 +4844,23 @@ interface PendingOverride {
   readonly patch: boolean;
 }
 
-/** An evaluated override: the declaration it sets, the field path inside the value, and the value. */
+/** An evaluated override: the declaration it sets, the field path inside the value, and what it sets. */
 interface EvaluatedOverride {
   readonly target: EnvironmentDeclaration;
   readonly path: readonly string[];
-  readonly value: NxCanonicalValue;
+  readonly source: EnvironmentSource;
 }
+
+/** What an `envProvide` or `envUpdate` override gives once evaluated where it is written. */
+type EvaluatedEntry =
+  | { readonly set: EvaluatedOverride }
+  /** A bundle: its entries, and the `$entries` list they came from. */
+  | { readonly bundle: readonly EvaluatedOverride[]; readonly items: readonly NxCanonicalValue[] };
 
 /**
  * Resolves and checks the environment a call was given, before anything is evaluated. A root
- * value of an unknown name, or of the wrong type, fails the call.
+ * value of an unknown name, or of the wrong type, fails the call. A formula is checked only for
+ * its shape here, and refused at the read that evaluates it if it is not one of the program's.
  */
 function beginEnvironment(program: NxPreparedProgram, evaluation: Evaluation): void {
   const given = evaluation.environment;
@@ -4709,14 +4874,41 @@ function beginEnvironment(program: NxPreparedProgram, evaluation: Evaluation): v
     state.roots.set(target.key, hostEnvironmentValue(program, evaluation, target, [], value, name));
   }
   for (const entry of given.entries) {
-    const target = index.qualified.get(entry.value);
-    if (target === undefined) {
-      fail("nx-ir-environment-name", `A '$env' entry names '${entry.value}', which the program does not declare.`);
-    }
-    const value = hostEnvironmentValue(program, evaluation, target, entry.path, entry.to, entry.value);
-    state.layers.push({ set: true, key: target.key, path: entry.path, value });
+    hostEnvironmentLayers(program, evaluation, index, entry, false, state.layers);
   }
   state.base = state.layers.length;
+}
+
+/** The layers one host `$env` entry gives: one, or one for each entry of a bundle. */
+function hostEnvironmentLayers(
+  program: NxPreparedProgram,
+  evaluation: Evaluation,
+  index: EnvironmentIndex,
+  entry: NxEnvironmentEntry,
+  bundle: boolean,
+  layers: EnvironmentLayer[],
+): void {
+  if ("bundle" in entry) {
+    for (const inner of entry.bundle) {
+      hostEnvironmentLayers(program, evaluation, index, inner, true, layers);
+    }
+    return;
+  }
+  const target = index.qualified.get(entry.value);
+  if (target === undefined) {
+    fail("nx-ir-environment-name", `A '$env' entry names '${entry.value}', which the program does not declare.`);
+  }
+  let source: EnvironmentSource;
+  if ("formula" in entry) {
+    source = { formula: formulaFromData(program, readHostValue(entry.formula, "an environment formula")) };
+  } else if (bundle) {
+    // A bundle entry may hold an update record that patches the value, which the value's own
+    // type does not describe.
+    source = { value: readHostValue(entry.to, `environment value '${entry.value}'`) };
+  } else {
+    source = { value: hostEnvironmentValue(program, evaluation, target, entry.path, entry.to, entry.value) };
+  }
+  layers.push({ set: true, key: target.key, path: entry.path, source, bundle });
 }
 
 /** A value the host gave for `target` at `path`, read and checked against the type there. */
@@ -4781,47 +4973,272 @@ function evalEnvironmentRead(context: EvalContext, nodeIndex: number, entry: Uin
 }
 
 /**
- * The environment value `target` at a read: the overrides around it, nearest first, then the
- * host's root value, then the entry module's provides, last first, then the default. A default
- * and a provide are evaluated at each read that reaches them, in the environment of the read.
+ * The environment value `target` at a read.
+ *
+ * <para>The sources of a value, nearest first, are the layers of the stack from the top, then the
+ * host's root value, the entry module's provides, last first, and the default. The first source
+ * that sets the whole value is its base, and the field overrides on the way to it are applied to
+ * the base, outermost first. A formula, a provide and the default are evaluated at the read, each
+ * with a cap that makes a read of the value inside it see only the sources after it; a read of the
+ * value while its default is evaluated is a cycle.</para>
  */
 function environmentValue(context: EvalContext, nodeIndex: number | undefined, target: EnvironmentDeclaration): NxCanonicalValue {
   const state = context.evaluation.env;
-  const pending: PendingOverride[] = [];
-  let local = 0;
-  let base: NxCanonicalValue | undefined;
-  let cap: number | undefined;
-  for (let position = state.layers.length - 1; position >= 0; position -= 1) {
+  const own: PendingOverride[] = [];
+  const beneath: PendingOverride[] = [];
+  let found: NxCanonicalValue | undefined;
+  let providesBelow: number | undefined;
+  let position = state.layers.length;
+  while (position > 0) {
+    position -= 1;
     const layer = state.layers[position]!;
     if (layer.key !== target.key) {
       continue;
     }
     if (!layer.set) {
-      // A provide reading the value it sets: it sees what is beneath it.
-      cap = layer.index;
-      break;
-    }
-    if (layer.path.length === 0) {
-      if (position >= state.base) {
-        // Set by the call itself: nothing beneath it is read.
-        return applyPendingOverrides(context, nodeIndex, layer.value, pending);
+      const below = layer.below;
+      if ("layer" in below) {
+        position = below.layer;
+        continue;
       }
-      base = layer.value;
+      if ("provide" in below) {
+        providesBelow = below.provide;
+        break;
+      }
+      environmentCycle(context, nodeIndex, target);
+    }
+    const isOwn = position >= state.base;
+    const value = environmentSourceValue(context, nodeIndex, target, { layer: position }, layer.source);
+    const patch = layer.bundle && isUpdateRecordValue(value);
+    if (layer.path.length === 0 && !patch) {
+      if (isOwn) {
+        // Set by the call itself: nothing beneath it is read.
+        return applyPendingOverrides(context, nodeIndex, value, own);
+      }
+      found = value;
       break;
     }
-    if (position >= state.base) {
-      local += 1;
+    (isOwn ? own : beneath).push({ path: layer.path, value, patch });
+  }
+  if (found === undefined && providesBelow === undefined) {
+    found = state.roots.get(target.key);
+  }
+  const base = found !== undefined ? found : providedOrDefault(context, nodeIndex, target, providesBelow ?? Infinity);
+  return applyPendingOverrides(context, nodeIndex, applyPendingOverrides(context, nodeIndex, base, beneath), own);
+}
+
+/** Whether a value is an update record, which a bundle entry applies as a patch. */
+function isUpdateRecordValue(value: NxCanonicalValue): boolean {
+  return isObject(value) && typeof value.$type === "string" && value.$type.endsWith(".Update");
+}
+
+/** A qualified name, `identity::name`, without its module. */
+function shortEnvironmentName(key: string): string {
+  const at = key.lastIndexOf("::");
+  return at < 0 ? key : key.slice(at + 2);
+}
+
+/** Fails a read of `target` while its default is evaluated, naming the values on the way. */
+function environmentCycle(context: EvalContext, nodeIndex: number | undefined, target: EnvironmentDeclaration): never {
+  const layers = context.evaluation.env.layers;
+  let start = 0;
+  for (let position = layers.length - 1; position >= 0; position -= 1) {
+    const layer = layers[position]!;
+    if (!layer.set && layer.key === target.key && "exhausted" in layer.below) {
+      start = position;
+      break;
     }
-    pending.push({ path: layer.path, value: layer.value, patch: false });
   }
-  if (base === undefined && cap === undefined) {
-    base = state.roots.get(target.key);
+  const path = [target.key];
+  for (const layer of layers.slice(start)) {
+    if (!layer.set && path[path.length - 1] !== layer.key) {
+      path.push(layer.key);
+    }
   }
-  const found = base !== undefined ? base : providedOrDefault(context, nodeIndex, target, cap ?? Infinity);
-  // The pending overrides were collected innermost first; the call's own are the first `local`
-  // of them, and are applied last.
-  const own = pending.splice(0, Math.min(local, pending.length));
-  return applyPendingOverrides(context, nodeIndex, applyPendingOverrides(context, nodeIndex, found, pending), own);
+  path.push(target.key);
+  const named = path.map((key) => `'${shortEnvironmentName(key)}'`).join(" → ");
+  fail(
+    "nx-ir-environment-cycle",
+    `Environment value '${shortEnvironmentName(target.key)}' is read while its own default is being evaluated: ${named}.`,
+    context,
+    nodeIndex,
+  );
+}
+
+/** What a source gives: its value, or a formula evaluated with reads of `target` capped at `below`. */
+function environmentSourceValue(
+  context: EvalContext,
+  nodeIndex: number | undefined,
+  target: EnvironmentDeclaration,
+  below: EnvironmentBelow,
+  source: EnvironmentSource,
+): NxCanonicalValue {
+  if ("value" in source) {
+    return source.value;
+  }
+  return cappedEnvironment(context.evaluation, target.key, below, () => evalEnvironmentFormula(context, nodeIndex, source.formula));
+}
+
+/** Evaluates a formula in the environment of the read, with its captured locals bound. */
+function evalEnvironmentFormula(context: EvalContext, nodeIndex: number | undefined, formula: EnvironmentFormula): NxCanonicalValue {
+  if (formula.refused !== undefined || formula.linked === undefined || formula.declaration === undefined) {
+    fail(
+      "nx-ir-boundary-type",
+      `A formula an environment override carries is not one of this program's: ${formula.refused ?? "it is malformed"}.`,
+      context,
+      nodeIndex,
+    );
+  }
+  const frame: NxCanonicalValue[] = [];
+  if (formula.locals.length > 0) {
+    for (const [slot, name] of slotsRead(formula.linked, formula.node)) {
+      const local = formula.locals.find(([known]) => known === name);
+      if (local !== undefined) {
+        frame[slot] = local[1];
+      }
+    }
+  }
+  const formulaContext: EvalContext = {
+    program: context.program,
+    linked: formula.linked,
+    declaration: formula.declaration,
+    frame,
+    evaluation: context.evaluation,
+    depth: context.depth,
+  };
+  return evalNode(formula.node, formulaContext);
+}
+
+/** The nodes an image node names, by walking its layout. */
+function nodeChildren(image: NxIrImage, index: number): number[] {
+  const entry = image.entry("nodes", index);
+  const layout = layouts.nodes[entry[0]!];
+  const children: number[] = [];
+  if (layout === undefined) {
+    return children;
+  }
+  const cursor = new Cursor(entry);
+  cursor.position = 1;
+  const walk = (ops: readonly Op[]): void => {
+    for (const op of ops) {
+      if (typeof op === "object") {
+        if ("trailing" in op) {
+          if (!cursor.finished) {
+            walk(op.trailing);
+          }
+          continue;
+        }
+        const cell = cursor.next();
+        if ("flaggedList" in op) {
+          const flagged = (cell & NX_IR_FLAGGED) !== 0;
+          for (let element = 0; element < (cell & ~NX_IR_FLAGGED); element += 1) {
+            walk(op.flaggedList);
+            if (flagged) {
+              cursor.next();
+            }
+          }
+        } else {
+          for (let element = 0; element < cell; element += 1) {
+            walk(op.list);
+          }
+        }
+        continue;
+      }
+      const cell = cursor.next();
+      if (op === "node" || (op === "optNode" && cell !== NX_IR_NONE)) {
+        children.push(cell);
+      } else if (op === "ref" || op === "optRef" || op === "i64" || op === "f64") {
+        cursor.next();
+      }
+    }
+  };
+  walk(layout);
+  return children;
+}
+
+/** The slots node `root` of `linked` and the nodes beneath it read, with their names. */
+function slotsRead(linked: LinkedModule, root: number): (readonly [number, string])[] {
+  const image = linked.module.artifact;
+  const read: (readonly [number, string])[] = [];
+  const stack = [root];
+  const seen = new Set<number>();
+  while (stack.length > 0) {
+    const index = stack.pop()!;
+    if (seen.has(index)) {
+      continue;
+    }
+    seen.add(index);
+    const entry = image.entry("nodes", index);
+    if (entry[0] === nodeKinds.slot) {
+      read.push([entry[1]!, image.string(entry[2]!)]);
+    }
+    stack.push(...nodeChildren(image, index));
+  }
+  return read;
+}
+
+/** Captures the formula an override's value is, in the frame as it stands. Capturing costs one operation. */
+function captureEnvironmentFormula(context: EvalContext, nodeIndex: number, value: number): EnvironmentFormula {
+  charge(context, nodeIndex, 1);
+  const locals: [string, NxCanonicalValue][] = [];
+  for (const [slot, name] of slotsRead(context.linked, value)) {
+    const bound = slot < context.frame.length ? context.frame[slot] : undefined;
+    if (bound !== undefined && locals.every(([known]) => known !== name)) {
+      locals.push([name, bound]);
+    }
+  }
+  locals.sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
+  const data: NxCanonicalValue = {
+    module: context.linked.module.identity,
+    declaration: context.declaration.name,
+    node: value,
+    fingerprint: context.linked.module.fingerprint,
+    locals: Object.fromEntries(locals),
+  };
+  return { linked: context.linked, declaration: context.declaration, node: value, locals, refused: undefined, data };
+}
+
+/** A formula from its canonical form, with the reason it is refused when it is not one of this program's. */
+function formulaFromData(program: NxPreparedProgram, data: NxCanonicalValue): EnvironmentFormula {
+  const record = isObject(data) ? data : undefined;
+  const identity = record?.module;
+  const declarationName = record?.declaration;
+  const node = record?.node;
+  const fingerprint = record?.fingerprint;
+  const localsValue = record?.locals;
+  if (
+    typeof identity !== "string" ||
+    typeof declarationName !== "string" ||
+    typeof node !== "number" ||
+    typeof fingerprint !== "string" ||
+    !(localsValue === undefined || isObject(localsValue) || (Array.isArray(localsValue) && localsValue.length === 0))
+  ) {
+    fail("nx-ir-boundary-type", "An environment formula is malformed: it is not {module, declaration, node, fingerprint, locals}.");
+  }
+  const locals: [string, NxCanonicalValue][] = isObject(localsValue) ? Object.entries(localsValue) : [];
+  const refused = (reason: string): EnvironmentFormula => ({
+    linked: undefined,
+    declaration: undefined,
+    node,
+    locals,
+    refused: reason,
+    data,
+  });
+  const linked = program.modulesByIdentity.get(identity);
+  if (linked === undefined) {
+    return refused(`module '${identity}' is not in the program`);
+  }
+  if (linked.module.fingerprint !== fingerprint) {
+    return refused(`it was made by another build of '${identity}', whose fingerprint was ${fingerprint}`);
+  }
+  const declaration = linked.module.declarationsByName.get(declarationName);
+  if (declaration === undefined) {
+    return refused(`'${identity}' declares nothing named '${declarationName}'`);
+  }
+  if (!environmentIndex(program).formulas.get(linked)?.has(node)) {
+    return refused(`node ${node} of '${identity}' is not the value of a formula override`);
+  }
+  return { linked, declaration, node, locals, refused: undefined, data };
 }
 
 /** `base` with `pending`, collected innermost first, applied outermost first. */
@@ -4895,20 +5312,21 @@ function providedOrDefault(context: EvalContext, nodeIndex: number | undefined, 
         if (declaration.kind.tag !== "environment" || environmentKey(linked, declaration) !== target.key) {
           continue;
         }
-        const value = cappedEnvironment(evaluation, target.key, position, () => evalNode(provide.value, providesContext));
+        const value = cappedEnvironment(evaluation, target.key, { provide: position }, () => evalNode(provide.value, providesContext));
         if (provide.path.length === 0) {
           return applyPendingOverrides(context, nodeIndex, value, pending);
         }
         pending.push({ path: provide.path, value, patch: false });
       } else {
-        const bundle = cappedEnvironment(evaluation, target.key, position, () => evalNode(provide.value, providesContext));
+        const bundle = cappedEnvironment(evaluation, target.key, { provide: position }, () => evalNode(provide.value, providesContext));
         const entries = bundleEntries(providesContext, provide.value, bundle, index);
         for (let entry = entries.length - 1; entry >= 0; entry -= 1) {
-          const { target: set, path, value } = entries[entry]!;
+          const { target: set, path, source } = entries[entry]!;
           if (set.key !== target.key) {
             continue;
           }
-          const patch = isObject(value) && typeof value.$type === "string" && value.$type.endsWith(".Update");
+          const value = environmentSourceValue(context, nodeIndex, target, { provide: position }, source);
+          const patch = isUpdateRecordValue(value);
           if (path.length === 0 && !patch) {
             return applyPendingOverrides(context, nodeIndex, value, pending);
           }
@@ -4921,15 +5339,16 @@ function providedOrDefault(context: EvalContext, nodeIndex: number | undefined, 
     ...declarationContext(context.program, target.linked, target.declaration, evaluation),
     depth: context.depth,
   };
-  const value = normalizeValue(declared, target.ty, evalNode(target.default, declared), `environment value '${target.key}'`);
+  const evaluated = cappedEnvironment(evaluation, target.key, { exhausted: true }, () => evalNode(target.default, declared));
+  const value = normalizeValue(declared, target.ty, evaluated, `environment value '${target.key}'`);
   return applyPendingOverrides(context, nodeIndex, value, pending);
 }
 
-/** Runs `work` with a read of `key` capped below the entry module's provide at `index`. */
-function cappedEnvironment(evaluation: Evaluation, key: string, index: number, work: () => NxCanonicalValue): NxCanonicalValue {
+/** Runs `work` with a read of `key` seeing only the sources `below` gives. */
+function cappedEnvironment(evaluation: Evaluation, key: string, below: EnvironmentBelow, work: () => NxCanonicalValue): NxCanonicalValue {
   const layers = evaluation.env.layers;
   const depth = layers.length;
-  layers.push({ set: false, key, index });
+  layers.push({ set: false, key, below });
   try {
     return work();
   } finally {
@@ -4937,17 +5356,42 @@ function cappedEnvironment(evaluation: Evaluation, key: string, index: number, w
   }
 }
 
-/** The entries of a bundle value, in order. */
-function bundleEntries(context: EvalContext, nodeIndex: number, bundle: NxCanonicalValue, index: EnvironmentIndex): EvaluatedOverride[] {
+/** The `$entries` of a bundle value. */
+function bundleItems(context: EvalContext, nodeIndex: number, bundle: NxCanonicalValue): readonly NxCanonicalValue[] {
   const entries = isObject(bundle) && bundle.$type === bundleTypeName ? bundle[bundleEntriesField] : undefined;
   if (!Array.isArray(entries)) {
-    fail("nx-ir-environment", `A bundle provide needs an '${bundleTypeName}' value, got ${describeValue(bundle)}.`, context, nodeIndex);
+    fail("nx-ir-environment", `A bundle needs an '${bundleTypeName}' value, got ${describeValue(bundle)}.`, context, nodeIndex);
   }
-  return entries.map((entry) => {
+  return entries;
+}
+
+/** The entries of a bundle value, in order, a bundle entry's own entries in its place. */
+function bundleEntries(context: EvalContext, nodeIndex: number, bundle: NxCanonicalValue, index: EnvironmentIndex): EvaluatedOverride[] {
+  const out: EvaluatedOverride[] = [];
+  bundleEntriesOf(context, nodeIndex, bundleItems(context, nodeIndex, bundle), index, out);
+  return out;
+}
+
+function bundleEntriesOf(
+  context: EvalContext,
+  nodeIndex: number,
+  items: readonly NxCanonicalValue[],
+  index: EnvironmentIndex,
+  out: EvaluatedOverride[],
+): void {
+  for (const entry of items) {
+    if (isObject(entry) && entry.bundle !== undefined) {
+      if (!Array.isArray(entry.bundle)) {
+        fail("nx-ir-environment", `An '${bundleTypeName}' entry is malformed.`, context, nodeIndex);
+      }
+      bundleEntriesOf(context, nodeIndex, entry.bundle, index, out);
+      continue;
+    }
     const name = isObject(entry) ? entry.value : undefined;
     const path = isObject(entry) ? entry.path : undefined;
     const to = isObject(entry) ? entry.to : undefined;
-    if (typeof name !== "string" || path === undefined || to === undefined) {
+    const formula = isObject(entry) ? entry.formula : undefined;
+    if (typeof name !== "string" || path === undefined || (to === undefined) === (formula === undefined)) {
       fail("nx-ir-environment", `An '${bundleTypeName}' entry is malformed.`, context, nodeIndex);
     }
     const target = index.qualified.get(name);
@@ -4960,33 +5404,71 @@ function bundleEntries(context: EvalContext, nodeIndex: number, bundle: NxCanoni
       );
     }
     const fields = Array.isArray(path) ? path.filter((field): field is string => typeof field === "string") : [];
-    return { target, path: fields, value: to };
-  });
+    const source: EnvironmentSource = formula !== undefined ? { formula: formulaFromData(context.program, formula) } : { value: to! };
+    out.push({ target, path: fields, source });
+  }
 }
 
-/** The overrides of an `envProvide` or `envUpdate` node, from cell `at`, evaluated in order outside it. */
+/** The overrides of an `envProvide` or `envUpdate` node, as the image holds them, from cell `at`. */
+interface OverrideCells {
+  /** The target's slot and name string, or `undefined` for a bundle. */
+  readonly target: readonly [number, number] | undefined;
+  readonly path: readonly number[];
+  readonly value: number;
+  readonly formula: boolean;
+}
+
+function readOverrideCells(entry: Uint32Array, at: number): { overrides: OverrideCells[]; next: number } {
+  const count = entry[at]!;
+  const flagged = (count & NX_IR_FLAGGED) !== 0;
+  let position = at + 1;
+  const overrides: OverrideCells[] = [];
+  for (let index = 0; index < (count & ~NX_IR_FLAGGED); index += 1) {
+    const slot = entry[position]!;
+    const target = slot === NX_IR_NONE ? undefined : ([slot, entry[position + 1]!] as const);
+    const length = entry[position + 2]!;
+    const path = Array.from(entry.subarray(position + 3, position + 3 + length));
+    const value = entry[position + 3 + length]!;
+    position += 4 + length;
+    let formula = false;
+    if (flagged) {
+      formula = entry[position]! !== 0;
+      position += 1;
+    }
+    overrides.push({ target, path, value, formula });
+  }
+  return { overrides, next: position };
+}
+
+/**
+ * The overrides of an `envProvide` or `envUpdate` node, from cell `at`, evaluated in order
+ * outside it: a formula captured, a bundle evaluated to its entries.
+ */
 function evalEnvironmentOverrides(
   context: EvalContext,
   nodeIndex: number,
   entry: Uint32Array,
   at: number,
-): { overrides: EvaluatedOverride[]; next: number } {
+): { evaluated: EvaluatedEntry[]; next: number } {
   const image = context.linked.module.artifact;
-  const count = entry[at]!;
-  let position = at + 1;
-  const overrides: EvaluatedOverride[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const target = environmentTarget(context, nodeIndex, entry[position]!, image.string(entry[position + 1]!));
-    const length = entry[position + 2]!;
-    const path: string[] = [];
-    for (let field = 0; field < length; field += 1) {
-      path.push(image.string(entry[position + 3 + field]!));
+  const { overrides, next } = readOverrideCells(entry, at);
+  const evaluated: EvaluatedEntry[] = [];
+  for (const override of overrides) {
+    if (override.target === undefined) {
+      const items = bundleItems(context, nodeIndex, evalNode(override.value, context));
+      const entries: EvaluatedOverride[] = [];
+      bundleEntriesOf(context, nodeIndex, items, environmentIndex(context.program), entries);
+      evaluated.push({ bundle: entries, items });
+      continue;
     }
-    const value = evalNode(entry[position + 3 + length]!, context);
-    overrides.push({ target, path, value });
-    position += 4 + length;
+    const target = environmentTarget(context, nodeIndex, override.target[0], image.string(override.target[1]));
+    const path = override.path.map((field) => image.string(field));
+    const source: EnvironmentSource = override.formula
+      ? { formula: captureEnvironmentFormula(context, nodeIndex, override.value) }
+      : { value: evalNode(override.value, context) };
+    evaluated.push({ set: { target, path, source } });
   }
-  return { overrides, next: position };
+  return { evaluated, next };
 }
 
 /**
@@ -4994,11 +5476,17 @@ function evalEnvironmentOverrides(
  * added to every component descriptor the result reaches.
  */
 function evalEnvironmentProvide(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
-  const { overrides, next } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
+  const { evaluated, next } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
   const layers = context.evaluation.env.layers;
   const depth = layers.length;
-  for (const { target, path, value } of overrides) {
-    layers.push({ set: true, key: target.key, path, value });
+  for (const item of evaluated) {
+    if ("set" in item) {
+      layers.push({ set: true, key: item.set.target.key, path: item.set.path, source: item.set.source, bundle: false });
+    } else {
+      for (const { target, path, source } of item.bundle) {
+        layers.push({ set: true, key: target.key, path, source, bundle: true });
+      }
+    }
   }
   let result: NxCanonicalValue;
   try {
@@ -5006,18 +5494,42 @@ function evalEnvironmentProvide(context: EvalContext, nodeIndex: number, entry: 
   } finally {
     layers.length = depth;
   }
-  return stampEnvironment(context, nodeIndex, result, environmentEntryValues(overrides), environmentIndex(context.program));
+  return stampEnvironment(context, nodeIndex, result, environmentEntryValues(evaluated, true), environmentIndex(context.program));
 }
 
-/** An `envUpdate` node: the overrides, evaluated, as one bundle value. */
+/** An `envUpdate` node: the base's entries, then the overrides, evaluated, as one bundle value. */
 function evalEnvironmentBundle(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
-  const { overrides } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
-  return originated({ $type: bundleTypeName, [bundleEntriesField]: environmentEntryValues(overrides) }, context, nodeIndex);
+  const { next } = readOverrideCells(entry, 1);
+  const entries: NxCanonicalValue[] = [];
+  if (next < entry.length) {
+    entries.push(...bundleItems(context, nodeIndex, evalNode(entry[next]!, context)));
+  }
+  const { evaluated } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
+  entries.push(...environmentEntryValues(evaluated, false));
+  return originated({ $type: bundleTypeName, [bundleEntriesField]: entries }, context, nodeIndex);
 }
 
-/** The `$env` entries for evaluated overrides. */
-function environmentEntryValues(overrides: readonly EvaluatedOverride[]): NxCanonicalValue[] {
-  return overrides.map(({ target, path, value }) => ({ value: target.key, path: [...path], to: value }));
+/**
+ * The `$env` or `$entries` entries for evaluated overrides. In `$env` a bundle is one `{bundle}`
+ * entry; in a bundle's `$entries` its entries take its place.
+ */
+function environmentEntryValues(evaluated: readonly EvaluatedEntry[], nest: boolean): NxCanonicalValue[] {
+  const out: NxCanonicalValue[] = [];
+  for (const item of evaluated) {
+    if ("set" in item) {
+      const { target, path, source } = item.set;
+      out.push(
+        "value" in source
+          ? { value: target.key, path: [...path], to: source.value }
+          : { value: target.key, path: [...path], formula: source.formula.data },
+      );
+    } else if (nest) {
+      out.push({ bundle: [...item.items] });
+    } else {
+      out.push(...item.items);
+    }
+  }
+  return out;
 }
 
 /**

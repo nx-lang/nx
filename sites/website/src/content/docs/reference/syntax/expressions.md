@@ -333,6 +333,41 @@ let payload = <User id="456" name="Grace" email="grace@example.com"/>
 <UserCard user={payload}/>
 ```
 
+## Patching a value: `with`
+
+`value with { field=… }` is the value with those fields changed and the rest kept. It works on
+records, on update records and on environment bundles:
+
+```nx
+type Address = { city:string zip:string }
+type User = { name:string age:int address:Address }
+
+let ada = <User name="Ada" age=36 address=<Address city="London" zip="N1" /> />
+
+let older = { ada with { age=37 } }
+let moved = { ada with { address.city="Paris" } }
+let renamed = { ada with <User.Update name="Grace" /> }
+let both = { ada with { age=37 } with { name="Grace" } }
+```
+
+- On a record, `r with { … }` is `apply(r, <T.Update … />)`, and `r with u` takes a `T.Update`
+  value `u`. Each entry is checked as that field of `T.Update`: an unknown field is
+  `unknown-record-field`, one set twice `duplicate-property`.
+- A path, `address.city=…`, means `address=(r.address with { city=… })`, with `r` evaluated once.
+  Each step but the last must name a required field of a record type; an optional field, or
+  anything else, is `with-path`, since there may be nothing to patch. Set the whole field instead.
+- On an update record, `u with v` is `merge(u, v)`, the right side winning. Paths are `with-path`
+  there, since a nested field of a patch may be absent.
+- On an `env.Update` bundle, `b with { … }` is a bundle with the right side's entries after the
+  left's, and its field list names environment values, paths included (see
+  [Environment values](/reference/syntax/environment#bundles-in-a-block)).
+- On any other type, an optional value or a sequence, it is `with-target`. Unwrap an optional
+  first: `if user.home? { user.home with { … } }`.
+- `with` binds tighter than `??` and arithmetic and looser than member access and calls, and chains
+  left to right: `a ?? b with { x=1 }` is `a ?? (b with { x=1 })`.
+- `with` is a keyword after an operand and a name everywhere else, so a field named `with` still
+  works. A declaration, parameter, `for` item or binding named `with` is `reserved-name`.
+
 ## Error Handling and Guarding
 Use a fallback, or a presence test with an `if`, to supply a default where a value may be empty.
 

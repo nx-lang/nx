@@ -276,6 +276,8 @@ pub fn analyze_prepared_module(
     let element_type_arguments = ctx.resolved_type_arguments().clone();
     let function_value_calls = ctx.function_value_calls().clone();
     let environment_bindings = ctx.environment_bindings().clone();
+    let override_bindings = ctx.override_bindings().clone();
+    let with_sites = ctx.with_sites().clone();
     let (mut type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
 
@@ -308,7 +310,14 @@ pub fn analyze_prepared_module(
     // `24.0` and nothing else. The passes are independent — a contextual name is not a numeric
     // literal — so their order does not matter. A constant expression that took a type is first
     // replaced by the literal it folded to, which the conversion then gives the site's width.
-    nx_hir::apply_environment_bindings(&mut prepared_module, &environment_bindings);
+    // A `with` becomes the `apply`, `merge` or bundle it means, first, so the bundles it makes
+    // get their bindings below like the ones source wrote.
+    crate::with_rewrite::apply_with_rewrites(&mut prepared_module, &with_sites, &mut type_env);
+    nx_hir::apply_environment_bindings(
+        &mut prepared_module,
+        &environment_bindings,
+        &override_bindings,
+    );
     nx_hir::apply_constant_folds(&mut prepared_module, &folded_constants);
     nx_hir::apply_literal_conversions(&mut prepared_module, &converted_literals);
 

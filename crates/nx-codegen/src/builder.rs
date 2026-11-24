@@ -83,6 +83,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         .collect::<Vec<_>>();
     component_entrypoints.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
+    crate::formulas::mark_formulas(&mut modules);
     diagnostics.extend(crate::environment_cycles::environment_cycle_diagnostics(
         &modules,
     ));
@@ -140,6 +141,22 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
                 continue;
             }
             match expr {
+                // A `with` names its update record in the module that declares it.
+                ast::Expr::RecordLiteral {
+                    declared_in: Some(declared_in),
+                    ..
+                } => {
+                    if let Some(reference) = resolve_declared_record(artifact, declared_in) {
+                        if is_derived_declaration(
+                            artifact,
+                            reference.module_id,
+                            reference.definition_id,
+                        ) {
+                            referenced
+                                .insert((reference.module_id.as_u32(), reference.definition_id));
+                        }
+                    }
+                }
                 ast::Expr::RecordLiteral { record, .. } => names.push(record.clone()),
                 ast::Expr::Element { element, .. } => {
                     names.push(lowered_module.element(*element).tag.clone())
@@ -524,6 +541,37 @@ fn environment_target(
     reference
 }
 
+/// Builds a bundle applied by `provide env with`, or added by `a with b`, as one override that
+/// names no declaration.
+#[allow(clippy::too_many_arguments)]
+fn build_bundle_override(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    bundle: ExprId,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenEnvOverride> {
+    let value = build_expression(
+        artifact,
+        resolved_module,
+        prepared_cache,
+        lowered_module,
+        type_env,
+        bundle,
+        scope,
+        diagnostics,
+    )?;
+    Some(CodegenEnvOverride {
+        target: None,
+        path: Vec::new(),
+        value,
+        formula: false,
+    })
+}
+
 /// Builds the overrides of a `provide` block, element or bundle.
 #[allow(clippy::too_many_arguments)]
 fn build_env_overrides(
@@ -557,13 +605,15 @@ fn build_env_overrides(
             diagnostics,
         )?;
         built.push(CodegenEnvOverride {
-            target,
+            target: Some(target),
             path: provided
                 .path
                 .iter()
                 .map(|field| field.as_str().to_string())
                 .collect(),
             value,
+            // Decided once every declaration is built; see `crate::formulas`.
+            formula: false,
         });
     }
     Some(built)
@@ -1560,18 +1610,33 @@ fn build_expression(
             )?,
         },
         ast::Expr::Provide {
-            overrides, body, ..
+            overrides,
+            bundle,
+            body,
+            ..
         } => {
-            let overrides = build_env_overrides(
-                artifact,
-                resolved_module,
-                prepared_cache,
-                lowered_module,
-                type_env,
-                overrides,
-                scope,
-                diagnostics,
-            )?;
+            let overrides = match bundle {
+                Some(bundle) => vec![build_bundle_override(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    *bundle,
+                    scope,
+                    diagnostics,
+                )?],
+                None => build_env_overrides(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    overrides,
+                    scope,
+                    diagnostics,
+                )?,
+            };
             let body = build_expression(
                 artifact,
                 resolved_module,
@@ -1587,8 +1652,37 @@ fn build_expression(
                 body: Box::new(body),
             }
         }
-        ast::Expr::EnvUpdate { overrides, .. } => CodegenExpressionKind::EnvUpdate {
-            overrides: build_env_overrides(
+        ast::Expr::EnvUpdate {
+            bases, overrides, ..
+        } => {
+            let base = match bases.first() {
+                Some(base) => Some(Box::new(build_expression(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    *base,
+                    scope,
+                    diagnostics,
+                )?)),
+                None => None,
+            };
+            // `a with b` on bundles: `b` is one bundle override after `a`'s entries.
+            let mut built = Vec::new();
+            for extra in bases.iter().skip(1) {
+                built.push(build_bundle_override(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    lowered_module,
+                    type_env,
+                    *extra,
+                    scope,
+                    diagnostics,
+                )?);
+            }
+            built.extend(build_env_overrides(
                 artifact,
                 resolved_module,
                 prepared_cache,
@@ -1597,8 +1691,21 @@ fn build_expression(
                 overrides,
                 scope,
                 diagnostics,
-            )?,
-        },
+            )?);
+            CodegenExpressionKind::EnvUpdate {
+                base,
+                overrides: built,
+            }
+        }
+        // The checker rewrites every `with` it typed; one left here was not typed.
+        ast::Expr::With { span, .. } => {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                *span,
+                "a `with` the type checker did not resolve cannot be emitted",
+            ));
+            return None;
+        }
         ast::Expr::Ident(name) => {
             let in_scope = scope.contains(name.as_str());
             let reference = if in_scope {
@@ -2226,7 +2333,10 @@ fn build_expression(
             )?),
         },
         ast::Expr::RecordLiteral {
-            record, properties, ..
+            record,
+            properties,
+            declared_in,
+            ..
         } => {
             let mut mapped_properties = Vec::with_capacity(properties.len());
             for property in properties {
@@ -2246,11 +2356,18 @@ fn build_expression(
                     span: property.span,
                 });
             }
+            let (declaring_module, record_name) = match declared_in
+                .as_ref()
+                .and_then(|origin| declared_record_name(artifact, origin))
+            {
+                Some((module_id, name)) => (module_id, name),
+                None => (resolved_module.id, record.as_str().to_string()),
+            };
             let shape = record_literal_shape(
                 artifact,
-                resolved_module.id,
+                declaring_module,
                 prepared_cache,
-                record.as_str(),
+                &record_name,
                 diagnostics,
             )?;
             CodegenExpressionKind::Record {
@@ -3963,6 +4080,32 @@ fn resolve_visible_reference(
                 reference.kind,
             )
         })
+}
+
+/// The module that declares the record `origin` addresses, and the record's name there.
+fn declared_record_name(
+    artifact: &ProgramArtifact,
+    origin: &nx_hir::DeclaringOrigin,
+) -> Option<(RuntimeModuleId, String)> {
+    let module = artifact
+        .resolved_program
+        .module_by_prepared_identity(origin.module_identity())?;
+    let lowered_module = module_artifact_for(artifact, module)?
+        .lowered_module
+        .as_ref()?;
+    match lowered_module.item_by_definition(origin.definition_id())? {
+        Item::Record(record) => Some((module.id, record.name.as_str().to_string())),
+        _ => None,
+    }
+}
+
+/// The record `origin` addresses, as a reference.
+fn resolve_declared_record(
+    artifact: &ProgramArtifact,
+    origin: &nx_hir::DeclaringOrigin,
+) -> Option<CodegenReference> {
+    let (module_id, name) = declared_record_name(artifact, origin)?;
+    resolve_visible_reference(artifact, module_id, &name)
 }
 
 fn qualified_member_reference(

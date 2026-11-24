@@ -4,7 +4,7 @@ import "./brand.nx" as brand
 import "@nx/design"
 import "./ui.nx"
 
-provide brand.theme
+provide env with brand.theme
 
 let root() = {
   <Box fill={env.color.background} radius=0 paddingX=0 paddingY=0>

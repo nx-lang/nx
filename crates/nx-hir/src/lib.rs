@@ -1396,7 +1396,7 @@ pub fn environment_binding_name(visible_name: &str) -> Option<&str> {
 pub enum ProvideDecl {
     /// `provide env.name = value` or `provide env.name.field = value`.
     Override(ast::EnvOverride),
-    /// `provide bundle`, where `bundle` is an `env.Update`.
+    /// `provide env with bundle`, where `bundle` is an `env.Update`, with any `with` steps.
     Bundle {
         /// The bundle expression.
         value: ExprId,

@@ -1,0 +1,36 @@
+// Top-level values that read the environment are computed at each read, in the environment of
+// that read, in every engine.
+import "./shared.nx"
+import "./other.nx" as sh
+
+environment gap: int = 0
+
+let tv: int = { env.space * 3 }
+/// A value that reads one that reads the environment.
+let doubled: int = { tv * 2 }
+/// A record value that reads the environment.
+type Insets = { top:int bottom:int }
+let insets: Insets = <Insets top={env.space} bottom={env.space * 2} />
+let plain: int = { 7 }
+
+/// An override that names the value is a formula; the value is computed under the nearer `space`.
+let named() = { provide env.gap={tv} { provide env.space=1 { env.gap } } }
+/// A read under an override.
+let direct() = { provide env.space=2 { tv + doubled + plain } }
+let record() = { provide env.space=5 { insets } }
+let imported() = { provide env.space=10 { triple } }
+
+/// Qualified through an import alias, as a value and as an override.
+let viaAlias: int = { sh.quadruple }
+let qualified() = { provide env.space=1 { viaAlias } }
+let qualifiedOverride() = { provide env.gap={sh.quadruple} { provide env.space=2 { env.gap } } }
+/// Read through a function.
+let tripled(): int = { tv }
+let throughFunction() = { provide env.space=3 { tripled() } }
+/// A component element whose prop default reads the environment, made at the top level.
+component <Box pad: int = {env.space} /> = { <span pad={pad} /> }
+let box = { <Box /> }
+let element() = { provide env.space=1 { box } }
+/// A lazy value as a parameter default.
+let padded(extra: int = {tv}): int = { extra + 1 }
+let defaulted() = { provide env.space=2 { padded() } }

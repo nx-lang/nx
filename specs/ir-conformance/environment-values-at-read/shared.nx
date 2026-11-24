@@ -1,0 +1,4 @@
+export environment space: int = 4
+
+/// A top-level value that reads the environment, in another module.
+export let triple: int = { env.space * 3 }

@@ -1,0 +1,52 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "radius"
+    },
+    {
+      "module": "main.nx",
+      "function": "gap"
+    },
+    {
+      "module": "main.nx",
+      "function": "space"
+    },
+    {
+      "module": "main.nx",
+      "function": "sectioned"
+    },
+    {
+      "module": "main.nx",
+      "function": "shown"
+    }
+  ],
+  "lifecycles": [
+    {
+      "module": "main.nx",
+      "component": "Section",
+      "batches": []
+    },
+    {
+      "module": "main.nx",
+      "component": "Branded",
+      "props": {
+        "look": {
+          "$type": "env.Update",
+          "$entries": [
+            {
+              "value": "main.nx::accent",
+              "path": [],
+              "to": "green"
+            }
+          ]
+        }
+      },
+      "batches": []
+    }
+  ]
+}

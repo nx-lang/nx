@@ -1,0 +1,42 @@
+{
+  "app/main.nx::applied": [
+    {"path": "", "module": "app/main.nx", "start": 353, "end": 390}
+  ],
+  "app/main.nx::chained": [
+    {"path": "", "module": "app/main.nx", "start": 576, "end": 623}
+  ],
+  "app/main.nx::fallback": [
+    {"path": "", "module": "app/main.nx", "start": 1041, "end": 1062}
+  ],
+  "app/main.nx::merged": [
+    {"path": "", "module": "app/main.nx", "start": 851, "end": 874}
+  ],
+  "app/main.nx::mergedApplied": [
+    {"path": "", "module": "app/main.nx", "start": 901, "end": 920},
+    {"path": "/address", "module": "shared/model.nx", "start": 328, "end": 362},
+    {"path": "/tag", "module": "shared/model.nx", "start": 367, "end": 388}
+  ],
+  "app/main.nx::moved": [
+    {"path": "", "module": "app/main.nx", "start": 270, "end": 291}
+  ],
+  "app/main.nx::optionalCleared": [
+    {"path": "", "module": "app/main.nx", "start": 1136, "end": 1184},
+    {"path": "/address", "module": "shared/model.nx", "start": 328, "end": 362},
+    {"path": "/tag", "module": "shared/model.nx", "start": 367, "end": 388}
+  ],
+  "app/main.nx::relocated": [
+    {"path": "", "module": "app/main.nx", "start": 482, "end": 524},
+    {"path": "/address", "module": "app/main.nx", "start": 495, "end": 515},
+    {"path": "/tag", "module": "shared/model.nx", "start": 367, "end": 388}
+  ],
+  "app/main.nx::renamed": [
+    {"path": "", "module": "app/main.nx", "start": 741, "end": 759},
+    {"path": "/address", "module": "shared/model.nx", "start": 328, "end": 362},
+    {"path": "/tag", "module": "shared/model.nx", "start": 367, "end": 388}
+  ],
+  "app/main.nx::retagged": [
+    {"path": "", "module": "app/main.nx", "start": 1288, "end": 1305},
+    {"path": "/address", "module": "shared/model.nx", "start": 328, "end": 362},
+    {"path": "/tag", "module": "app/main.nx", "start": 1288, "end": 1305}
+  ]
+}

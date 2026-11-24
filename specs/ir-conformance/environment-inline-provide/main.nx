@@ -1,0 +1,38 @@
+// A main-module inline bundle, a bundle passed as a component prop, and a mode set inside a
+// section.
+type ColorMode = light | dark
+
+environment colorMode: ColorMode = light
+environment radius: int = 2
+environment zero: int = 0
+environment space: int = 4
+environment gap: int = 0
+environment accent: string = "gray"
+
+// Each entry is a formula: `space` would divide by zero, but only a read of `space` computes it.
+provide env with { space={10 / env.zero} radius=5 gap={env.radius * 2} }
+
+let radius() = { env.radius }
+/// `gap` reads the `radius` the same bundle sets.
+let gap() = { env.gap }
+/// A `zero` set nearer the reader is the one `space` reads.
+let space() = { provide env.zero=2 { env.space } }
+
+/// A theme whose accent follows the mode wherever it is read.
+let theme: env.Update = <env.Update accent={if env.colorMode is { light => "blue" dark => "navy" }} />
+
+/// A bundle passed as a prop, applied to the component's body; the accent is read twice, and the
+/// second read is in a section set to dark mode.
+component <Section look: env.Update = {theme} /> = {
+  provide env with look {
+    <span accent={env.accent} />
+    <span accent={provide env.colorMode=dark { env.accent }} />
+  }
+}
+
+/// A bundle the host passes as a prop.
+component <Branded look: env.Update /> = { provide env with look { <span accent={env.accent} /> } }
+
+/// The section-mode and prop cases as plain entrypoints, which generated JavaScript also runs.
+let sectioned() = { provide env with theme { provide env.colorMode=dark { env.accent } } }
+let shown() = { <Branded look={theme} /> }

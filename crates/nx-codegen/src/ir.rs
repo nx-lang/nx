@@ -23,10 +23,11 @@ use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1, NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
-    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
@@ -472,6 +473,24 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
     {
         features.push(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1.to_string());
     }
+    // Formulas, bundles in blocks and bundles built on bundles are read by runtimes that know
+    // them; a module with none of them is what it was before them.
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| match &expression.kind {
+            CodegenExpressionKind::Provide { overrides, .. } => overrides
+                .iter()
+                .any(|provided| provided.formula || provided.target.is_none()),
+            CodegenExpressionKind::EnvUpdate { base, overrides } => {
+                base.is_some()
+                    || overrides
+                        .iter()
+                        .any(|provided| provided.formula || provided.target.is_none())
+            }
+            _ => false,
+        })
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2.to_string());
+    }
     features
 }
 
@@ -714,9 +733,214 @@ pub(crate) fn visit_expression(
             }
             visit_expression(body, visit);
         }
-        CodegenExpressionKind::EnvUpdate { overrides } => {
+        CodegenExpressionKind::EnvUpdate { base, overrides } => {
+            if let Some(base) = base {
+                visit_expression(base, visit);
+            }
             for provided in overrides {
                 visit_expression(&provided.value, visit);
+            }
+        }
+    }
+}
+
+/// [`visit_declaration_expressions`], with each expression mutable.
+pub(crate) fn visit_declaration_expressions_mut(
+    declaration: &mut CodegenDeclaration,
+    visit: &mut dyn FnMut(&mut CodegenExpression),
+) {
+    let mut fields = |fields: &mut [CodegenRecordField]| {
+        for field in fields {
+            if let Some(default) = &mut field.default {
+                visit_expression_mut(default, visit);
+            }
+        }
+    };
+    match &mut declaration.kind {
+        CodegenDeclarationKind::Function { params, body, .. } => {
+            for default in params.iter_mut().filter_map(|param| param.default.as_mut()) {
+                visit_expression_mut(default, visit);
+            }
+            visit_expression_mut(body, visit)
+        }
+        CodegenDeclarationKind::Value { value, .. } => visit_expression_mut(value, visit),
+        CodegenDeclarationKind::Environment { default, .. } => visit_expression_mut(default, visit),
+        CodegenDeclarationKind::Record { fields: items, .. } => fields(items),
+        CodegenDeclarationKind::Union { cases, .. } => {
+            for case in cases {
+                fields(&mut case.fields);
+            }
+        }
+        CodegenDeclarationKind::Component(component) => {
+            for field in component.props.iter_mut().chain(component.state.iter_mut()) {
+                if let Some(default) = &mut field.default {
+                    visit_expression_mut(default, visit);
+                }
+            }
+            if let Some(body) = &mut component.body {
+                visit_expression_mut(body, visit);
+            }
+        }
+        CodegenDeclarationKind::TypeAlias { .. } | CodegenDeclarationKind::Unsupported(_) => {}
+    }
+}
+
+fn visit_expressions_mut(
+    items: &mut [CodegenExpression],
+    visit: &mut dyn FnMut(&mut CodegenExpression),
+) {
+    for item in items {
+        visit_expression_mut(item, visit);
+    }
+}
+
+pub(crate) fn visit_expression_mut(
+    expression: &mut CodegenExpression,
+    visit: &mut dyn FnMut(&mut CodegenExpression),
+) {
+    visit(expression);
+    match &mut expression.kind {
+        CodegenExpressionKind::Literal(_)
+        | CodegenExpressionKind::Identifier { .. }
+        | CodegenExpressionKind::Unsupported(_) => {}
+        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
+            visit_expression_mut(lhs, visit);
+            visit_expression_mut(rhs, visit);
+        }
+        CodegenExpressionKind::Unary { expr, .. }
+        | CodegenExpressionKind::ToText { expr, .. }
+        | CodegenExpressionKind::ConstraintCheck { operand: expr, .. } => {
+            visit_expression_mut(expr, visit)
+        }
+        CodegenExpressionKind::IntervalPattern { .. } => {}
+        CodegenExpressionKind::Concat { lhs, rhs } => {
+            visit_expression_mut(lhs, visit);
+            visit_expression_mut(rhs, visit);
+        }
+        CodegenExpressionKind::Call { callee, args } => {
+            visit_expression_mut(callee, visit);
+            for arg in args.iter_mut().flatten() {
+                visit_expression_mut(arg, visit);
+            }
+        }
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            visit_expression_mut(callee, visit);
+            for arg in args {
+                visit_expression_mut(&mut arg.value, visit);
+            }
+        }
+        CodegenExpressionKind::IntrinsicCall { args, .. }
+        | CodegenExpressionKind::StandardColor { args, .. }
+        | CodegenExpressionKind::StandardMath { args, .. } => visit_expressions_mut(args, visit),
+        CodegenExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            visit_expression_mut(condition, visit);
+            visit_expression_mut(then_branch, visit);
+            if let Some(else_branch) = else_branch {
+                visit_expression_mut(else_branch, visit);
+            }
+        }
+        CodegenExpressionKind::Match {
+            scrutinee,
+            arms,
+            else_branch,
+        } => {
+            visit_expression_mut(scrutinee, visit);
+            for arm in arms {
+                visit_expressions_mut(&mut arm.patterns, visit);
+                visit_expression_mut(&mut arm.body, visit);
+            }
+            if let Some(else_branch) = else_branch {
+                visit_expression_mut(else_branch, visit);
+            }
+        }
+        CodegenExpressionKind::Let { value, body, .. } => {
+            visit_expression_mut(value, visit);
+            visit_expression_mut(body, visit);
+        }
+        CodegenExpressionKind::Block {
+            statements,
+            expression,
+        } => {
+            for statement in statements {
+                match statement {
+                    CodegenStatement::Let { init, .. } => visit_expression_mut(init, visit),
+                    CodegenStatement::Expr(expr) => visit_expression_mut(expr, visit),
+                }
+            }
+            if let Some(expression) = expression {
+                visit_expression_mut(expression, visit);
+            }
+        }
+        CodegenExpressionKind::Array(elements) => visit_expressions_mut(elements, visit),
+        CodegenExpressionKind::For { iterable, body, .. } => {
+            visit_expression_mut(iterable, visit);
+            visit_expression_mut(body, visit);
+        }
+        CodegenExpressionKind::Index { base, index } => {
+            visit_expression_mut(base, visit);
+            visit_expression_mut(index, visit);
+        }
+        CodegenExpressionKind::Member { base, .. }
+        | CodegenExpressionKind::OptionalMember { base, .. } => visit_expression_mut(base, visit),
+        CodegenExpressionKind::Exists { operand } => visit_expression_mut(operand, visit),
+        CodegenExpressionKind::Coalesce { lhs, rhs } => {
+            visit_expression_mut(lhs, visit);
+            visit_expression_mut(rhs, visit);
+        }
+        CodegenExpressionKind::UnionCase {
+            properties,
+            content,
+            fields,
+            ..
+        }
+        | CodegenExpressionKind::Record {
+            properties,
+            content,
+            fields,
+            ..
+        } => {
+            for property in properties {
+                visit_expression_mut(&mut property.value, visit);
+            }
+            visit_expressions_mut(content, visit);
+            for field in fields {
+                if let Some(default) = &mut field.default {
+                    visit_expression_mut(default, visit);
+                }
+            }
+        }
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            for property in &mut descriptor.properties {
+                visit_expression_mut(&mut property.value, visit);
+            }
+            visit_expressions_mut(&mut descriptor.content, visit);
+        }
+        CodegenExpressionKind::Element(element) => {
+            for property in &mut element.properties {
+                visit_expression_mut(&mut property.value, visit);
+            }
+            visit_expressions_mut(&mut element.content, visit);
+        }
+        CodegenExpressionKind::ActionHandler(handler) => {
+            visit_expression_mut(&mut handler.body, visit)
+        }
+        CodegenExpressionKind::EnvRead { .. } => {}
+        CodegenExpressionKind::Provide { overrides, body } => {
+            for provided in overrides {
+                visit_expression_mut(&mut provided.value, visit);
+            }
+            visit_expression_mut(body, visit);
+        }
+        CodegenExpressionKind::EnvUpdate { base, overrides } => {
+            if let Some(base) = base {
+                visit_expression_mut(base, visit);
+            }
+            for provided in overrides {
+                visit_expression_mut(&mut provided.value, visit);
             }
         }
     }
@@ -1441,10 +1665,16 @@ impl<'a> ModuleEmitter<'a> {
             overrides
                 .iter()
                 .map(|provided| {
-                    let target = self.reference_item(&provided.target);
+                    let target = self.optional_reference(provided.target.as_ref());
                     let path = self.path(&provided.path);
                     let value = self.expression(&provided.value);
-                    IrItem::list([target, path, IrItem::Int(value)])
+                    // The formula flag is a fourth cell present only on a formula, so a module
+                    // without formulas emits the overrides it emitted before them.
+                    if provided.formula {
+                        IrItem::list([target, path, IrItem::Int(value), IrItem::Int(1)])
+                    } else {
+                        IrItem::list([target, path, IrItem::Int(value)])
+                    }
                 })
                 .collect(),
         )
@@ -1466,9 +1696,19 @@ impl<'a> ModuleEmitter<'a> {
                     IrItem::Int(body),
                 ])
             }
-            CodegenExpressionKind::EnvUpdate { overrides } => {
+            CodegenExpressionKind::EnvUpdate { base, overrides } => {
                 let overrides = self.env_overrides(overrides);
-                IrItem::list([IrItem::Int(kinds::node::ENV_UPDATE), overrides])
+                match base {
+                    Some(base) => {
+                        let base = self.expression(base);
+                        IrItem::list([
+                            IrItem::Int(kinds::node::ENV_UPDATE),
+                            overrides,
+                            IrItem::Int(base),
+                        ])
+                    }
+                    None => IrItem::list([IrItem::Int(kinds::node::ENV_UPDATE), overrides]),
+                }
             }
             CodegenExpressionKind::Literal(literal) => self.literal(literal),
             CodegenExpressionKind::Identifier { name, reference } => match reference {
@@ -1616,16 +1856,17 @@ impl<'a> ModuleEmitter<'a> {
                     IrItem::Int(else_branch),
                 ])
             }
-            CodegenExpressionKind::Let { name, .. } => {
-                self.diagnostics.push(
-                    Diagnostic::error("nx-ir-unsupported-construct")
-                        .with_message(format!(
-                            "a let binding of '{name}' has no NX IR node; NX source cannot write one"
-                        ))
-                        .with_label(Label::primary(module_identity(self.module), span))
-                        .build(),
-                );
-                Self::empty_node()
+            // A binding the `with` rewrite makes for a left side a path reads more than once. NX IR
+            // has no binding node, but a `for` over a value that is not a sequence runs its body
+            // once with the value bound and is the body's value, which is a binding.
+            CodegenExpressionKind::Let { name, value, body } => {
+                let value = self.expression(value);
+                self.frame.push();
+                let slot = self.frame.alloc(name);
+                let item_name = self.string(name);
+                let body = self.expression(body);
+                self.frame.pop();
+                IrItem::ints([kinds::node::FOR, slot, item_name, -1, -1, value, body])
             }
             CodegenExpressionKind::Block {
                 statements,

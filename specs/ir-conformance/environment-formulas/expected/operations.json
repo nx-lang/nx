@@ -1,0 +1,17 @@
+{
+  "counts": {
+    "main.nx::appRadius": 7,
+    "main.nx::card": 15,
+    "main.nx::darkAccent": 16,
+    "main.nx::darkAccent#rootDark": 17,
+    "main.nx::denseGap": 11,
+    "main.nx::inline": 5,
+    "main.nx::nearer": 9,
+    "main.nx::nearer#rootSpace": 10,
+    "main.nx::passed": 19,
+    "main.nx::patched": 13,
+    "main.nx::renamed": 12,
+    "main.nx::scaled": 31,
+    "main.nx::stepped": 13
+  }
+}

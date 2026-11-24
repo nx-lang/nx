@@ -191,6 +191,10 @@
         "required": true,
         "types": [
           {
+            "type": "identifier_expression",
+            "named": true
+          },
+          {
             "type": "value_expression",
             "named": true
           }
@@ -1129,7 +1133,7 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
         {
@@ -1785,13 +1789,17 @@
     }
   },
   {
-    "type": "provide_definition",
+    "type": "provide_bundle",
     "named": true,
     "fields": {
       "bundle": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
           {
             "type": "element",
             "named": true
@@ -1802,6 +1810,100 @@
           },
           {
             "type": "values_braced_expression",
+            "named": true
+          },
+          {
+            "type": "with_field_list",
+            "named": true
+          }
+        ]
+      },
+      "env": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "step": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "element",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "values_braced_expression",
+            "named": true
+          },
+          {
+            "type": "with_field_list",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "provide_definition",
+    "named": true,
+    "fields": {
+      "legacy_bundle": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "element",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "values_braced_expression",
+            "named": true
+          }
+        ]
+      },
+      "legacy_step": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "element",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "values_braced_expression",
+            "named": true
+          },
+          {
+            "type": "with_field_list",
             "named": true
           }
         ]
@@ -1826,6 +1928,16 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "provide_bundle",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1848,6 +1960,10 @@
         "types": [
           {
             "type": "property_value",
+            "named": true
+          },
+          {
+            "type": "provide_bundle",
             "named": true
           }
         ]
@@ -2506,6 +2622,10 @@
         {
           "type": "value_list_item_expression",
           "named": true
+        },
+        {
+          "type": "with_expression",
+          "named": true
         }
       ]
     }
@@ -2915,6 +3035,56 @@
     }
   },
   {
+    "type": "with_expression",
+    "named": true,
+    "fields": {
+      "left": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "value_expression",
+            "named": true
+          }
+        ]
+      },
+      "right": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "value_expression",
+            "named": true
+          },
+          {
+            "type": "values_braced_expression",
+            "named": true
+          },
+          {
+            "type": "with_field_list",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "with_field_list",
+    "named": true,
+    "fields": {
+      "entry": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_value",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "!",
     "named": false
   },
@@ -3248,6 +3418,10 @@
   },
   {
     "type": "where",
+    "named": false
+  },
+  {
+    "type": "with",
     "named": false
   },
   {

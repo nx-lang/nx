@@ -11,13 +11,13 @@
     {"path": "", "module": "design.nx", "start": 428, "end": 468}
   ],
   "main.nx::hosted": [
-    {"path": "", "module": "main.nx", "start": 1087, "end": 1130},
-    {"path": "/Children/0", "module": "main.nx", "start": 1113, "end": 1122}
+    {"path": "", "module": "main.nx", "start": 1096, "end": 1139},
+    {"path": "/Children/0", "module": "main.nx", "start": 1122, "end": 1131}
   ],
   "main.nx::markup": [
-    {"path": "", "module": "main.nx", "start": 893, "end": 961},
-    {"path": "/content/0", "module": "main.nx", "start": 917, "end": 926},
-    {"path": "/content/1", "module": "main.nx", "start": 926, "end": 955}
+    {"path": "", "module": "main.nx", "start": 902, "end": 970},
+    {"path": "/content/0", "module": "main.nx", "start": 926, "end": 935},
+    {"path": "/content/1", "module": "main.nx", "start": 935, "end": 964}
   ],
   "main.nx::mode": [],
   "main.nx::mode#rootDark": [],
@@ -35,6 +35,6 @@
   "main.nx::readProvided#rootSpace": [],
   "main.nx::readsOutside": [],
   "main.nx::stacked": [
-    {"path": "", "module": "main.nx", "start": 1011, "end": 1040}
+    {"path": "", "module": "main.nx", "start": 1020, "end": 1049}
   ]
 }
