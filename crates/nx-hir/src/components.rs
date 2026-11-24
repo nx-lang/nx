@@ -1539,16 +1539,33 @@ fn collect_handler_rewrites_in_expr(
         }
         ast::Expr::EnvRead { .. } => {}
         ast::Expr::Provide {
-            overrides, body, ..
+            overrides,
+            bundle,
+            body,
+            ..
         } => {
             for provided in overrides {
                 collect_handler_rewrites_in_expr(module, provided.value, owner, rewrites);
             }
+            if let Some(bundle) = bundle {
+                collect_handler_rewrites_in_expr(module, *bundle, owner, rewrites);
+            }
             collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
-        ast::Expr::EnvUpdate { overrides, .. } => {
+        ast::Expr::EnvUpdate {
+            bases, overrides, ..
+        } => {
+            for base in bases {
+                collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
+            }
             for provided in overrides {
                 collect_handler_rewrites_in_expr(module, provided.value, owner, rewrites);
+            }
+        }
+        ast::Expr::With { left, right, .. } => {
+            collect_handler_rewrites_in_expr(module, *left, owner, rewrites);
+            for value in right.exprs() {
+                collect_handler_rewrites_in_expr(module, value, owner, rewrites);
             }
         }
         ast::Expr::BinaryOp { lhs, rhs, .. } | ast::Expr::Concat { lhs, rhs, .. } => {

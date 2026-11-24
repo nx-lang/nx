@@ -6,7 +6,7 @@
 use crate::ast::{
     BinOp, CompareOp, EnvOverride, Expr, FunctionParam, Literal, MatchArm, NumericPattern,
     Occurrence, OrderedFloat, PatternBound, PatternTerm, RecordLiteralProperty, Stmt, TypeRef,
-    UnOp, UnsupportedTerm,
+    UnOp, UnsupportedTerm, WithField, WithRight,
 };
 use crate::{
     environment_item_name, property_union_name, props_record_name, state_record_name,
@@ -1947,6 +1947,27 @@ impl LoweringContext {
                 })
             }
 
+            SyntaxKind::WITH_EXPRESSION => {
+                let left = node
+                    .child_by_field("left")
+                    .map(|left| self.lower_expr(left))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+                let right = match node.child_by_field("right") {
+                    Some(right) if right.kind() == SyntaxKind::WITH_FIELD_LIST => {
+                        WithRight::Fields(self.lower_with_fields(right))
+                    }
+                    Some(right) => WithRight::Value(self.lower_expr(right)),
+                    None => WithRight::Value(self.error_expr(node.span())),
+                };
+                let expr = self.alloc_expr(Expr::With {
+                    left,
+                    right,
+                    span: node.span(),
+                });
+                self.module.set_expr_span(expr, node.span());
+                expr
+            }
+
             SyntaxKind::EXISTS_EXPRESSION => {
                 let operand = node
                     .child_by_field("operand")
@@ -1970,22 +1991,32 @@ impl LoweringContext {
             }
 
             SyntaxKind::PROVIDE_EXPRESSION => {
-                let overrides = node
-                    .children()
-                    .filter(|child| child.kind() == SyntaxKind::PROPERTY_VALUE)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|child| {
-                        let property = self.lower_property_value(child, None);
-                        self.env_override_from_property(property)
-                    })
-                    .collect::<Vec<_>>();
+                // A block that mixes a bundle with attribute overrides was reported by validation;
+                // the first bundle is kept so that the rest of the block is still checked.
+                let mut bundle = None;
+                let mut overrides = Vec::new();
+                for child in node.children().collect::<Vec<_>>() {
+                    match child.kind() {
+                        SyntaxKind::PROPERTY_VALUE => {
+                            let property = self.lower_property_value(child, None);
+                            overrides.extend(self.env_override_from_property(property));
+                        }
+                        SyntaxKind::PROVIDE_BUNDLE if bundle.is_none() => {
+                            bundle = Some(self.lower_provide_bundle(child));
+                        }
+                        _ => {}
+                    }
+                }
+                if bundle.is_some() {
+                    overrides.clear();
+                }
                 let body = node
                     .child_by_field("body")
                     .map(|body| self.lower_expr(body))
                     .unwrap_or_else(|| self.error_expr(node.span()));
                 let expr = self.alloc_expr(Expr::Provide {
-                    overrides: overrides.into_iter().flatten().collect(),
+                    overrides,
+                    bundle,
                     body,
                     span: node.span(),
                 });
@@ -2535,11 +2566,16 @@ impl LoweringContext {
                 .env_override_from_property(property)
                 .map(ProvideDecl::Override);
         }
-        let bundle = node.child_by_field("bundle")?;
-        let value = if matches!(bundle.kind(), SyntaxKind::QUALIFIED_NAME) {
-            self.lower_qualified_name_expr(bundle)
+        // `provide brand.theme`, the removed form, was reported by validation; it is still
+        // lowered as the bundle it names so that the rest of the module is checked.
+        let value = if let Some(bundle) = node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::PROVIDE_BUNDLE)
+        {
+            self.lower_provide_bundle(bundle)
         } else {
-            self.lower_expr(bundle)
+            let bundle = node.child_by_field("legacy_bundle")?;
+            self.lower_bundle_operand(bundle)
         };
         Some(ProvideDecl::Bundle {
             value,
@@ -3518,9 +3554,107 @@ impl LoweringContext {
                 ),
             }
         }
-        let expr = self.alloc_expr(Expr::EnvUpdate { overrides, span });
+        let expr = self.alloc_expr(Expr::EnvUpdate {
+            bases: Vec::new(),
+            overrides,
+            span,
+        });
         self.module.set_expr_span(expr, span);
         expr
+    }
+
+    /// The entries of a `with` field list: each name split into the field it sets and the path
+    /// inside it.
+    fn lower_with_fields(&mut self, node: SyntaxNode) -> Vec<WithField> {
+        node.children()
+            .filter(|child| child.kind() == SyntaxKind::PROPERTY_VALUE)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|child| {
+                let property = self.lower_property_value(child, None);
+                WithField {
+                    path: property.key.as_str().split('.').map(Name::new).collect(),
+                    value: property.value,
+                    span: property.span,
+                }
+            })
+            .collect()
+    }
+
+    /// The bundle `env with operand with step …` applies, in a `provide` block or at the top of
+    /// the main module. A field list right after `env with` is an inline bundle, as
+    /// `<env.Update …/>` is, and each `with` step after it is a `with` on the bundle so far.
+    fn lower_provide_bundle(&mut self, node: SyntaxNode) -> ExprId {
+        let mut children = node.children().collect::<Vec<_>>().into_iter();
+        let env = children.next();
+        if let Some(env) = env.filter(|env| env.text() != "env") {
+            self.add_diagnostic(
+                format!(
+                    "environment-path: a bundle is applied as `provide env with bundle`; write `env` \
+                     in place of '{}'",
+                    env.text()
+                ),
+                env.span(),
+            );
+        }
+        let mut operands = children;
+        let Some(first) = operands.next() else {
+            return self.error_expr(node.span());
+        };
+        let mut bundle = self.lower_bundle_operand(first);
+        for step in operands {
+            let span = TextSpan::new(node.span().start(), step.span().end());
+            let right = if step.kind() == SyntaxKind::WITH_FIELD_LIST {
+                WithRight::Fields(self.lower_with_fields(step))
+            } else {
+                WithRight::Value(self.lower_bundle_operand(step))
+            };
+            bundle = self.alloc_expr(Expr::With {
+                left: bundle,
+                right,
+                span,
+            });
+            self.module.set_expr_span(bundle, span);
+        }
+        bundle
+    }
+
+    /// One operand of a `provide env with` chain: a field list is an inline bundle.
+    fn lower_bundle_operand(&mut self, node: SyntaxNode) -> ExprId {
+        match node.kind() {
+            SyntaxKind::WITH_FIELD_LIST => {
+                let span = node.span();
+                let overrides = self
+                    .lower_with_fields(node)
+                    .into_iter()
+                    .map(|field| {
+                        let mut parts = field.path.into_iter();
+                        let first = parts.next().unwrap_or_else(|| Name::new(""));
+                        let name = if first.as_str() == "env" {
+                            parts.next().unwrap_or_else(|| Name::new(""))
+                        } else {
+                            first
+                        };
+                        EnvOverride {
+                            name,
+                            path: parts.collect(),
+                            value: field.value,
+                            binding: None,
+                            span: field.span,
+                        }
+                    })
+                    .collect();
+                let expr = self.alloc_expr(Expr::EnvUpdate {
+                    bases: Vec::new(),
+                    overrides,
+                    span,
+                });
+                self.module.set_expr_span(expr, span);
+                expr
+            }
+            SyntaxKind::QUALIFIED_NAME => self.lower_qualified_name_expr(node),
+            _ => self.lower_expr(node),
+        }
     }
 
     /// `expr` with `overrides` in effect, or `expr` itself when there are none.
@@ -3535,6 +3669,7 @@ impl LoweringContext {
         }
         let provided = self.alloc_expr(Expr::Provide {
             overrides,
+            bundle: None,
             body: expr,
             span,
         });
