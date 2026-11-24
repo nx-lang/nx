@@ -772,7 +772,7 @@ a function. The generated `index.js` exports only functions and components, so t
 alter what a host can import. A value that reads no environment stays a constant (`export const k:
 number = 5`). The generated TypeScript type of a lazy value is `(): T => (…)`.
 
-### 🟡 Fixed - RF38 A value or override that names an imported value through a qualified import doesn't follow the read
+### ✅ Verified - RF38 A value or override that names an imported value through a qualified import doesn't follow the read
 - **Severity:** Medium
 - **Confidence:** High (reproduced)
 - **Evidence:** `direct_reads` (crates/nx-codegen/src/formulas.rs:33-62) records a named
@@ -791,8 +791,9 @@ number = 5`). The generated TypeScript type of a lazy value is `(): T => (…)`.
   }` whose kind is `Function` or `Value`. This fixes both formula marking and lazy values. Add a
   qualified-import value and override to `environment-values-at-read`.
 - **Fix:** `direct_reads` (crates/nx-codegen/src/formulas.rs) now counts a `Member` that carries a reference, as it counts an `Identifier`, so `sh.quadruple` makes a value lazy and an override a formula; the cycle check's two walks (environment_cycles.rs) follow it too. `free_locals` no longer captures the import alias of such a member (`sh` was captured as a local and failed in generated JavaScript). Corpus cases `qualified()` (4) and `qualifiedOverride()` (8) in `environment-values-at-read`, through a new `other.nx` imported `as sh`, agree in all three engines.
+- **Verification:** Reran both repros. `let viaQualified = { sh.triple }` under `provide env.unit=1` now gives `3` in TypeScript IR and generated JavaScript. `provide env.gap={sh.triple} { provide env.unit=1 { env.gap } }` is now a formula and gives `3` in both. The `free_locals` change keeps real locals: a formula that combines a qualified import with a parameter (`{sh.triple + k}`, which gives `13`) or with a `for` item (`[3,6]`) agrees, and so does `<C n={sh.triple} />` held in a top-level value. The corpus cases `qualified()` and `qualifiedOverride()` pass in both IR runtimes and in generated JavaScript.
 
-### 🟡 Fixed - RF39 A top-level component element keeps the environment of load time in generated code
+### ✅ Verified - RF39 A top-level component element keeps the environment of load time in generated code
 - **Severity:** Medium
 - **Confidence:** High (reproduced)
 - **Evidence:** Given `component <C n:int = {env.space} />`, `let el = { <C /> }` and `let e() = {
@@ -806,8 +807,9 @@ number = 5`). The generated TypeScript type of a lazy value is `(): T => (…)`.
 - **Recommendation:** Count a component element, which captures `$env`, as reading the environment
   in `direct_reads`, or as a dedicated `captures_environment` flag, and add the case to the corpus.
 - **Fix:** Making a component element now names the component in `direct_reads`, and a component counts as reading the environment when a prop default does (`reading_declarations`), so `let box = { <Box /> }` with `pad: int = {env.space}` is generated as a function. Corpus case `element()` gives `pad` 1 under `provide env.space=1` in all three engines.
+- **Verification:** The RF39 repro (`let el = { <C /> }`, a prop default that reads `env.space`) now gives `n=1` in both engines. I also checked a component whose *body* reads the environment (`let el2 = { <D /> }`), one that reads it only through a child component (`<Outer />`), and an element nested in a host element (`<div><D /></div>`). All give `n=1` in both. The corpus case `element()` passes.
 
-### 🟡 Fixed - RF40 The spec delta's requirement header was merged into its body text
+### ✅ Verified - RF40 The spec delta's requirement header was merged into its body text
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** The reflow in specs/executable-code-generation/spec.md:3 turned the header into
@@ -820,8 +822,9 @@ number = 5`). The generated TypeScript type of a lazy value is `(): T => (…)`.
 - **Recommendation:** Restore the header line and start the body with "Generated TypeScript and
   JavaScript SHALL …".
 - **Fix:** The requirement header is restored on its own line (`### Requirement: Generated code evaluates environment values`), with the body starting on the next line.
+- **Verification:** The header is back on its own line, matching openspec/specs/executable-code-generation/spec.md:883, and the body starts with "Generated TypeScript and JavaScript SHALL …".
 
-### 🟡 Fixed - RF41 `environment-values-at-read` doesn't cover the reference paths most likely to stay constant
+### ✅ Verified - RF41 `environment-values-at-read` doesn't cover the reference paths most likely to stay constant
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** The program covers a same-module value, a value through a value, a record value, an
@@ -835,6 +838,7 @@ number = 5`). The generated TypeScript type of a lazy value is `(): T => (…)`.
   fixed. Consider a `tsc --noEmit` smoke check of one generated TypeScript program that uses lazy
   values.
 - **Fix:** `environment-values-at-read` gains a qualified import (`qualified`, `qualifiedOverride`), a component element value (`element`), a value read through a function (`throughFunction`, 9) and a lazy value as a parameter default (`defaulted`, 7). New test `generated_typescript_with_values_computed_at_each_read_type_checks` checks the `const tv = (): number => (…)` form, a constant left as is, and the calls, and runs `tsc` on the output. 335 parity tests and the TypeScript suite pass.
+- **Verification:** `environment-values-at-read` now has `qualified`, `qualifiedOverride`, `element`, `throughFunction` and `defaulted`. All pass in the TypeScript `corpus.test` (0 not ok) and in the generated-JavaScript comparison. `generated_typescript_with_values_computed_at_each_read_type_checks` runs `tsc` on the generated output unconditionally and passes. `cargo test -p nx-api --test codegen_parity` passes in full (336). A lazy value in a record field default or an `environment` default isn't in the corpus, but my manual checks of both agree.
 
 ## Summary (2026-11-24 10:30 review)
 
