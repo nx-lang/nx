@@ -494,7 +494,7 @@ are those of `design.md` itself.
 
 ## New Findings Discovered During 2026-11-24 18:34 Verification
 
-### 🟡 Fixed - RF21 Narrowing handler captures changes what `==` on handlers returns, contradicting "Results do not change", and leaves the order of captured slots unspecified
+### ✅ Verified - RF21 Narrowing handler captures changes what `==` on handlers returns, contradicting "Results do not change", and leaves the order of captured slots unspecified
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** Under the component-action-handlers delta ("A handler captures only the slots its
@@ -512,3 +512,4 @@ are those of `design.md` itself.
   any `results.json` diff this causes. Specify the capture order, for example ascending slot index,
   so both runtimes compare in the same order.
 - **Fix:** Stated as a deliberate change of results: two handlers made by one node that differ only in a slot the node does not read are now equal under `==`, and what a handler does when it runs does not change. This is in design.md (Goals, Decision 10, Risks), proposal.md (handler bullet and cost-model bullet, where "No result changes" became "Reuse changes no result", with handler equality named as the one intended change) and the component-action-handlers delta. Captured slots are held and compared in ascending slot index in both runtimes, whatever order `slots_read` finds them in (component-action-handlers delta with a new scenario, the nx-ir-format comparison bullet, tasks 1.6 and 2.2). Task 6.2 now accepts `results.json` diffs from programs that compare such handlers and lists them in the PR description.
+- **Verification:** Verified. The equality change is now stated as deliberate, in design.md (Goals, Decision 10, Risks), proposal.md and the component-action-handlers delta, which also says what a handler does when it runs is unchanged. Captured slots are held and compared in ascending slot index in both runtimes, with a new scenario and matching wording in nx-ir-format and tasks 1.6 and 2.2. Task 6.2 accepts and lists the `results.json` diffs this causes. The main value-equality spec says nothing about handler captures, so no further delta is needed. No new issues.
