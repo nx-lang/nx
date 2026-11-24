@@ -234,3 +234,9 @@
   name: (identifier) @variable)
 (provide_definition "provide" @keyword)
 (provide_expression "provide" @keyword)
+
+;; `with` is a keyword only after an operand, and after `provide env`.
+(with_expression "with" @keyword.operator)
+(provide_bundle "with" @keyword.operator)
+(provide_bundle
+  env: (identifier) @variable.builtin)

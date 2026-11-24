@@ -56,6 +56,9 @@ pub enum SyntaxKind {
     ENVIRONMENT_DEFINITION,
     PROVIDE_DEFINITION,
     PROVIDE_EXPRESSION,
+    PROVIDE_BUNDLE,
+    WITH_EXPRESSION,
+    WITH_FIELD_LIST,
 
     // === Elements ===
     ELEMENT,
@@ -177,6 +180,7 @@ pub enum SyntaxKind {
     VISUALIZER,
     ENVIRONMENT_KW,
     PROVIDE_KW,
+    WITH_KW,
     EMITS,
     STATE,
     TYPE_KW,
@@ -260,6 +264,7 @@ impl SyntaxKind {
                 | SyntaxKind::VISUALIZER
                 | SyntaxKind::ENVIRONMENT_KW
                 | SyntaxKind::PROVIDE_KW
+                | SyntaxKind::WITH_KW
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
@@ -340,6 +345,7 @@ impl SyntaxKind {
                 | SyntaxKind::VISUALIZER
                 | SyntaxKind::ENVIRONMENT_KW
                 | SyntaxKind::PROVIDE_KW
+                | SyntaxKind::WITH_KW
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
@@ -421,6 +427,9 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "environment_definition" => SyntaxKind::ENVIRONMENT_DEFINITION,
         "provide_definition" => SyntaxKind::PROVIDE_DEFINITION,
         "provide_expression" => SyntaxKind::PROVIDE_EXPRESSION,
+        "provide_bundle" => SyntaxKind::PROVIDE_BUNDLE,
+        "with_expression" => SyntaxKind::WITH_EXPRESSION,
+        "with_field_list" => SyntaxKind::WITH_FIELD_LIST,
         "function_signature" => SyntaxKind::FUNCTION_SIGNATURE,
         "markup_signature" => SyntaxKind::MARKUP_SIGNATURE,
         "param" => SyntaxKind::PARAM,
@@ -531,6 +540,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "visualizer" => SyntaxKind::VISUALIZER,
         "environment" => SyntaxKind::ENVIRONMENT_KW,
         "provide" => SyntaxKind::PROVIDE_KW,
+        "with" => SyntaxKind::WITH_KW,
         "emits" => SyntaxKind::EMITS,
         "state" => SyntaxKind::STATE,
         // Note: "type" already matched earlier as TYPE
