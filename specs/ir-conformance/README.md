@@ -38,9 +38,12 @@ are held to their recorded results, counts and input sizes as every program is.
 
 Overwriting a cell of an image links and runs its whole program again, so that sweep grows with
 the square of a program's size. A program with an image above 16,384 bytes is left out of it, and
-the test names the programs it leaves out, the two large ones: another program that grows past the
-limit fails the test until it is added to that list or made smaller. Every image of every program
-is still cut at every four-byte boundary.
+the test names the programs it leaves out: the two large ones, and the three that emit
+`@nx/color`'s `color.nx` image, and in the design programs also `@nx/design`'s `tokens.nx` and
+`palette.nx`, which are above the limit (`color-library`, `design-tokens` and
+`design-tokens-theme`). Another program that grows past the limit fails the test until it is added
+to that list or made smaller. Every image of every program is still cut at every four-byte
+boundary.
 
 Each program is a directory:
 
@@ -137,16 +140,19 @@ fail when a kind is covered by none.
 Generated JavaScript is the third engine held to `results.json`: the emitter's tests generate each
 program as JavaScript and run every entrypoint of its entry module, whose value must equal the
 recorded one. A case is not run there: its result comes from one IR runtime and is checked in the
-other. A program executable source codegen refuses (a match expression, a call of a
-function-typed value, an action handler) is skipped, and so is an entrypoint that reaches such a
-construct at run time. A function value in generated JavaScript is the JavaScript function, which
-knows its name and not its module, so a recorded `Function` record is compared with it by name.
-`occurrences` and `occurrence-lifting` avoid all of them so that the
+other. A program executable source codegen refuses (a match on patterns other than union cases, a
+call of a function-typed value, an action handler) is skipped, and so is an entrypoint that reaches
+such a construct at run time. An entrypoint whose generated result is known to differ, for a
+limitation `specs/future.md` records, is named in the test's `KNOWN_GENERATED_DIVERGENCES` and
+skipped: `design-tokens-theme`'s `darkAccent`, since generated code evaluates top-level values, and
+so the main module's bundle, when it loads. A function value in generated JavaScript is the
+JavaScript function, which knows its name and not its module, so a recorded `Function` record is
+compared with it by name. `occurrences` and `occurrence-lifting` avoid all of them so that the
 occurrence rules are checked in all three engines, which is why the `{}` pattern has a program of
 its own, `occurrence-patterns`. `constraints` holds value constraints' checks that pass and fail at
 inclusive and exclusive ends, `NaN`, a host value outside its interval, nested fields, sequences and
-interval patterns, with their operation counts; its match arms keep it out of generated JavaScript,
-whose checks the emitter's own tests cover.
+interval patterns, with their operation counts; its interval match arms keep it out of generated
+JavaScript, whose checks the emitter's own tests cover.
 
 The size budget lives here too: every image emitted without its debug section is at most six
 times the UTF-8 length of its module's compiler input: source plus canonical typed runtime-function descriptors when present. Math counts its descriptors alongside its source constants; it is not exempt from the size budget. The images are marked binary in `.gitattributes`;

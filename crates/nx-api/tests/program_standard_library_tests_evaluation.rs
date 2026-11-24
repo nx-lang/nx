@@ -246,3 +246,76 @@ fn math_standard_library_signatures_identity_and_imports() {
         ))
         .is_err());
 }
+
+// --- @nx/design ------------------------------------------------------------------------------
+
+const DESIGN_CHECKS: &str = include_str!("../../../specs/ir-conformance/design-tokens/main.nx");
+const DESIGN_UI: &str = include_str!("../../../specs/ir-conformance/design-tokens/ui.nx");
+
+fn design_value(function: &str) -> NxValue {
+    // The corpus program's checks, plus each check again inside a dark section.
+    let main = format!(
+        "{DESIGN_CHECKS}
+let darkContrast() = {{ provide env.colorMode=dark {{ contrast() }} }}
+let darkScalesOrdered() = {{ provide env.colorMode=dark {{ scalesOrdered() }} }}
+"
+    );
+    let artifact = build(
+        &[("main.nx", &main), ("ui.nx", DESIGN_UI)],
+        &ProgramBuildContext::empty(),
+    );
+    assert!(
+        artifact.diagnostics.is_empty(),
+        "{:#?}",
+        artifact.diagnostics
+    );
+    match support::eval_program_artifact_function(&artifact, "main.nx", function) {
+        EvalResult::Ok(value) => value,
+        EvalResult::Err(diagnostics) => panic!("{function}: {diagnostics:#?}"),
+    }
+}
+
+fn all_true(function: &str) {
+    match design_value(function) {
+        NxValue::Array(items) => {
+            assert!(!items.is_empty(), "{function}");
+            for item in items {
+                assert_eq!(item, NxValue::Bool(true), "{function}");
+            }
+        }
+        value => panic!("{function}: expected a list, got {value:?}"),
+    }
+}
+
+#[test]
+fn design_default_theme_meets_every_contrast_target_in_both_modes() {
+    for function in ["contrast", "darkContrast"] {
+        let NxValue::Array(checks) = design_value(function) else {
+            panic!("{function}: expected a list");
+        };
+        assert_eq!(checks.len(), 10, "{function}");
+        for check in checks {
+            let NxValue::Record { properties, .. } = &check else {
+                panic!("{function}: expected a record, got {check:?}");
+            };
+            assert_eq!(
+                properties.get("meets"),
+                Some(&NxValue::Bool(true)),
+                "{function}: {check:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn design_scales_are_nondecreasing_in_both_modes() {
+    all_true("scalesOrdered");
+    all_true("darkScalesOrdered");
+}
+
+#[test]
+fn design_palette_fits_display_p3_and_survives_css() {
+    all_true("paletteInDisplayP3");
+    all_true("graysInSrgb");
+    all_true("paletteSurvivesCss");
+}

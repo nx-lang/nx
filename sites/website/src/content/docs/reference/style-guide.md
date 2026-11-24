@@ -236,6 +236,55 @@ let legal() = {
 }
 ```
 
+## Design tokens
+
+Tokens are environment values whose types come from [`@nx/design`](/reference/libraries/design).
+Name them so a reader can guess one from another:
+
+| Rule | Write | Not |
+| --- | --- | --- |
+| Categories are singular and lowercase | `env.color`, `env.space` | `env.colors`, `env.Spacing` |
+| Role first, then variant | `env.color.text.muted`, `env.color.surfaceMuted` | `env.color.mutedText` |
+| Nest a role once it has three or more variants | `env.color.text.normal` | `env.color.textNormal` |
+| Content drawn on a fill is `on` plus the fill | `onAccent` | `accentForeground`, `accentText` |
+| Scales use t-shirt steps | `sm`, `md`, `lg`, `xxl` | `small`, `2xl`, `size3` |
+| Palette colors are hue then step | `standardPalette.blue600` | `standardPalette.blue.s600` |
+| camelCase in NX; hyphens only in exported CSS | `surfaceMuted` | `surface-muted` |
+
+A UI library extends the core by composition, not by subtyping:
+
+- Declare its component tokens as environment values of its own, named for the component
+  (`env.button`), with defaults that read the core tokens, so a theme that sets a core role reaches
+  the component.
+- Put a role the core lacks in a value of its own (`env.uiColor.selection`), with a default derived
+  from a core role.
+- Don't extend the core's record types to add roles.
+
+Write a theme as an `env.Update` bundle that sets roles through `.Update` records, so it names only
+what it changes. Set a role of the nested `text` group with a path field, such as
+`color.text.muted=…`, since `SemanticColors.Update`'s `text` takes a whole `TextColors`. Set `focus`
+wherever you set `accent`.
+
+```nx
+import "@nx/design"
+
+/// What a button looks like.
+export type ButtonTokens = {
+  fill: Color     /// The background.
+  radius: Radius  /// The corner radius.
+}
+
+/// What a button looks like, derived from the core tokens.
+export environment button: ButtonTokens = <ButtonTokens fill={env.color.accent} radius={env.radius.md} />
+
+/// The brand: green accents.
+export let brand: env.Update = <env.Update
+  color=<SemanticColors.Update accent={standardPalette.green700} focus={standardPalette.green600} />
+  color.text.muted={standardPalette.gray600}
+  button=<ButtonTokens.Update radius=9999 />
+/>
+```
+
 ## Comments and documentation
 
 Use `//` for implementation notes and file overviews, and `///` for API documentation.

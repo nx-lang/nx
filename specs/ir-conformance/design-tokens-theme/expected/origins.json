@@ -1,0 +1,33 @@
+{
+  "main.nx::accent": [],
+  "main.nx::accent#rootDark": [],
+  "main.nx::background": [
+    {"path": "", "module": "@nx/design/tokens.nx", "start": 2444, "end": 2451}
+  ],
+  "main.nx::background#rootDark": [],
+  "main.nx::buttonFill": [],
+  "main.nx::buttonFill#rootDark": [],
+  "main.nx::buttonRadius": [],
+  "main.nx::buttonText": [
+    {"path": "", "module": "@nx/design/tokens.nx", "start": 2806, "end": 2813}
+  ],
+  "main.nx::buttonText#rootDark": [],
+  "main.nx::coreRadius": [],
+  "main.nx::darkAccent": [],
+  "main.nx::focus": [],
+  "main.nx::focus#rootDark": [],
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 190, "end": 418},
+    {"path": "/Children/0", "module": "main.nx", "start": 259, "end": 281},
+    {"path": "/Children/1", "module": "main.nx", "start": 286, "end": 409},
+    {"path": "/Children/1/Children/0", "module": "main.nx", "start": 376, "end": 398},
+    {"path": "/fill", "module": "@nx/design/tokens.nx", "start": 2444, "end": 2451}
+  ],
+  "main.nx::text": [
+    {"path": "", "module": "@nx/design/tokens.nx", "start": 2530, "end": 2674}
+  ],
+  "main.nx::text#rootDark": [
+    {"path": "", "module": "@nx/design/tokens.nx", "start": 3197, "end": 3340}
+  ],
+  "main.nx::themedRadius": []
+}

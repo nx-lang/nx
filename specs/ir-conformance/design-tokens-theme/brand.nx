@@ -1,0 +1,28 @@
+// A brand theme: one bundle of overrides. Setting core roles restyles every library; the optional
+// `button` line tunes the UI library alone.
+
+import "@nx/design"
+import "./ui.nx"
+
+/// The brand: green accents, a lighter green in dark mode, stronger muted text, and rounder corners.
+/// `text` is a nested group, so it is set with a path field and keeps the roles it doesn't name.
+export let theme: env.Update = <env.Update
+  color={
+    if env.colorMode is {
+      light => <SemanticColors.Update accent={standardPalette.green700} focus={standardPalette.green600} />
+      dark => <SemanticColors.Update
+        accent={standardPalette.green500}
+        onAccent={standardPalette.gray950}
+        focus={standardPalette.green400}
+      />
+    }
+  }
+  color.text={
+    if env.colorMode is {
+      light => <TextColors.Update muted={standardPalette.gray600} />
+      dark => <TextColors.Update muted={standardPalette.gray300} />
+    }
+  }
+  radius=<RadiusScale.Update md=8 lg=12 />
+  button=<ButtonTokens.Update radius=9999 />
+/>

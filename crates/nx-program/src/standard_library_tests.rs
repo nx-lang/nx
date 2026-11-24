@@ -133,6 +133,7 @@ fn the_table_holds_the_agent_and_visualizer_libraries() {
         [
             AGENT_ROOT,
             "@nx/color",
+            "@nx/design",
             "@nx/geometry",
             "@nx/graphics",
             "@nx/math",
@@ -1181,4 +1182,116 @@ fn geometry_required_fields_and_implicit_imports_are_checked() {
         &ProgramBuildContext::empty()
     )
     .is_empty());
+}
+
+// --- @nx/design ------------------------------------------------------------------------------
+
+#[test]
+fn design_library_is_free_of_diagnostics_and_linked_only_when_imported() {
+    let library = standard_library("@nx/design").expect("the design library");
+    assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
+    let entry = standard_library_entry("@nx/design").unwrap();
+    assert_eq!(entry.stability, StandardLibraryStability::Unstable);
+    assert_eq!(entry.typescript_package, "@nx-lang/design");
+    assert_eq!(entry.csharp_namespace, "NxLang.Design");
+    assert_eq!(
+        standard_library_for_module("@nx/design/tokens.nx").map(|library| library.root),
+        Some("@nx/design")
+    );
+
+    let without = build(
+        &[("main.nx", "let root() = { 1 }")],
+        &ProgramBuildContext::empty(),
+    );
+    assert!(!library_roots(&without).contains(&"@nx/design".to_string()));
+
+    let with = build(
+        &[(
+            "main.nx",
+            "import \"@nx/design\"\nlet root() = { env.color.accent }",
+        )],
+        &ProgramBuildContext::empty(),
+    );
+    assert!(with.diagnostics.is_empty(), "{:#?}", with.diagnostics);
+    let roots = library_roots(&with);
+    assert!(roots.contains(&"@nx/design".to_string()), "{roots:?}");
+    assert!(roots.contains(&"@nx/color".to_string()), "{roots:?}");
+}
+
+#[test]
+fn design_value_types_check_their_constraints() {
+    for (declaration, valid) in [
+        ("let x: Spacing = 12", true),
+        ("let x: Spacing = 0.5", true),
+        ("let x: Spacing = -1.0", false),
+        ("let x: Radius = -2.0", false),
+        ("let x: BorderWidth = -1.0", false),
+        ("let x: FontSize = 0.0", false),
+        ("let x: LineHeight = 0.0", false),
+        ("let x: FontWeight = 400", true),
+        ("let x: FontWeight = 0", false),
+        ("let x: FontWeight = 1001", false),
+        ("let x: Opacity = 1.0", true),
+        ("let x: Opacity = 1.5", false),
+        ("let x: Duration = -5.0", false),
+        ("let x: Easing = <Easing x1=0.4 y1=0 x2=0.2 y2=1 />", true),
+        ("let x: Easing = <Easing x1=1.4 y1=0 x2=0.2 y2=1 />", false),
+    ] {
+        let source = format!("import \"@nx/design\"\n{declaration}\nlet root() = {{ x }}");
+        let diagnostics = errors(&[("main.nx", &source)], &ProgramBuildContext::empty());
+        assert_eq!(
+            diagnostics.is_empty(),
+            valid,
+            "{declaration}: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
+fn design_value_types_are_transparent_aliases() {
+    let source = r#"import "@nx/design"
+
+let pad(value: Spacing): float64 = { value * 2.0 }
+let plain: float64 = 3.0
+let root() = { pad(plain) + pad(12) }
+"#;
+    let diagnostics = errors(&[("main.nx", source)], &ProgramBuildContext::empty());
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn design_semantic_tokens_are_exported_environment_values() {
+    let library = standard_library_entry("@nx/design").unwrap();
+    let module = |identity: &str| {
+        library
+            .modules
+            .iter()
+            .find(|module| module.identity == identity)
+            .unwrap_or_else(|| panic!("{identity}"))
+    };
+    let tokens = module("tokens.nx");
+    for name in [
+        "colorMode",
+        "color",
+        "space",
+        "radius",
+        "borderWidth",
+        "font",
+        "text",
+        "shadow",
+        "motion",
+    ] {
+        assert!(
+            tokens
+                .source
+                .contains(&format!("export environment {name}: ")),
+            "{name}"
+        );
+    }
+    let palette = module("palette.nx");
+    assert!(palette.source.contains("MIT License"));
+    assert!(palette.source.contains("Copyright (c) Tailwind Labs, Inc."));
+    assert!(palette
+        .source
+        .contains("export let standardPalette: StandardPalette"));
 }

@@ -107,6 +107,8 @@ let assistant = <Agent name="support">Be brief.</Agent>
 | Library | Stability | What it holds |
 | --- | --- | --- |
 | [`@nx/agent`](/reference/libraries/agent) | unstable | Types for declaring an AI agent, its documents and its tools |
+| [`@nx/color`](/reference/libraries/color) | unstable | Colors in sRGB, Display P3, Oklab and OKLCH, with gamut mapping, contrast and CSS |
+| [`@nx/design`](/reference/libraries/design) | unstable | Design tokens: value types, a standard palette, and the semantic tokens UI libraries read |
 | [`@nx/geometry`](/reference/libraries/geometry) | unstable | Shared float64 Point, Size, and Rect values with numeric constraints |
 | [`@nx/graphics`](/reference/libraries/graphics) | unstable | Standalone drawings and ordinary shape helpers for Rust/TypeScript IR runtimes |
 | [`@nx/math`](/reference/libraries/math) | unstable | Float64 mathematics, including trigonometry, distances, rounding and interpolation |

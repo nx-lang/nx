@@ -1,0 +1,175 @@
+{
+  "main.nx::accent": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.15399999916553497,
+    "h": 150.06900024414062,
+    "l": 0.5270000100135803
+  },
+  "main.nx::accent#rootDark": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.21899999678134918,
+    "h": 149.57899475097656,
+    "l": 0.7229999899864197
+  },
+  "main.nx::background": {
+    "$type": "Color.srgb",
+    "alpha": 1.0,
+    "b": 1.0,
+    "g": 1.0,
+    "r": 1.0
+  },
+  "main.nx::background#rootDark": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.004999999888241291,
+    "h": 285.822998046875,
+    "l": 0.14100000262260437
+  },
+  "main.nx::buttonFill": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.15399999916553497,
+    "h": 150.06900024414062,
+    "l": 0.5270000100135803
+  },
+  "main.nx::buttonFill#rootDark": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.21899999678134918,
+    "h": 149.57899475097656,
+    "l": 0.7229999899864197
+  },
+  "main.nx::buttonRadius": 9999.0,
+  "main.nx::buttonText": {
+    "$type": "Color.srgb",
+    "alpha": 1.0,
+    "b": 1.0,
+    "g": 1.0,
+    "r": 1.0
+  },
+  "main.nx::buttonText#rootDark": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.004999999888241291,
+    "h": 285.822998046875,
+    "l": 0.14100000262260437
+  },
+  "main.nx::coreRadius": 2.0,
+  "main.nx::darkAccent": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.21899999678134918,
+    "h": 149.57899475097656,
+    "l": 0.7229999899864197
+  },
+  "main.nx::focus": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.1940000057220459,
+    "h": 149.21400451660156,
+    "l": 0.6269999742507935
+  },
+  "main.nx::focus#rootDark": {
+    "$type": "Color.oklch",
+    "alpha": 1.0,
+    "c": 0.20900000631809235,
+    "h": 151.71099853515625,
+    "l": 0.7919999957084656
+  },
+  "main.nx::root": {
+    "$type": "Box",
+    "Children": [
+      {
+        "$type": "Button",
+        "text": "Save"
+      },
+      {
+        "$type": "Box",
+        "Children": [
+          {
+            "$env": [
+              {
+                "path": [],
+                "to": "dark",
+                "value": "@nx/design/tokens.nx::colorMode"
+              }
+            ],
+            "$type": "Button",
+            "text": "Save"
+          }
+        ],
+        "fill": {
+          "$type": "Color.oklch",
+          "alpha": 1.0,
+          "c": 0.004999999888241291,
+          "h": 285.822998046875,
+          "l": 0.14100000262260437
+        },
+        "paddingX": 0.0,
+        "paddingY": 0.0,
+        "radius": 0.0
+      }
+    ],
+    "fill": {
+      "$type": "Color.srgb",
+      "alpha": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "paddingX": 0.0,
+    "paddingY": 0.0,
+    "radius": 0.0
+  },
+  "main.nx::text": {
+    "$type": "TextColors",
+    "disabled": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.014999999664723873,
+      "h": 286.0669860839844,
+      "l": 0.7049999833106995
+    },
+    "muted": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.017000000923871994,
+      "h": 285.7860107421875,
+      "l": 0.44200000166893005
+    },
+    "normal": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.006000000052154064,
+      "h": 285.885009765625,
+      "l": 0.20999999344348907
+    }
+  },
+  "main.nx::text#rootDark": {
+    "$type": "TextColors",
+    "disabled": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.017000000923871994,
+      "h": 285.7860107421875,
+      "l": 0.44200000166893005
+    },
+    "muted": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.006000000052154064,
+      "h": 286.2860107421875,
+      "l": 0.8709999918937683
+    },
+    "normal": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.0,
+      "h": 0.0,
+      "l": 0.9850000143051147
+    }
+  },
+  "main.nx::themedRadius": 8.0
+}

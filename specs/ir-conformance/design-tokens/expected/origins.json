@@ -1,0 +1,48 @@
+{
+  "main.nx::colors": [
+    {"path": "", "module": "@nx/design/tokens.nx", "start": 2411, "end": 3029},
+    {"path": "/background", "module": "@nx/design/tokens.nx", "start": 2444, "end": 2451},
+    {"path": "/onAccent", "module": "@nx/design/tokens.nx", "start": 2806, "end": 2813},
+    {"path": "/onDanger", "module": "@nx/design/tokens.nx", "start": 2867, "end": 2874},
+    {"path": "/onSuccess", "module": "@nx/design/tokens.nx", "start": 3015, "end": 3022},
+    {"path": "/surface", "module": "@nx/design/tokens.nx", "start": 2466, "end": 2473},
+    {"path": "/text", "module": "@nx/design/tokens.nx", "start": 2530, "end": 2674}
+  ],
+  "main.nx::colors#dark": [
+    {"path": "", "module": "@nx/design/tokens.nx", "start": 3042, "end": 3749},
+    {"path": "/text", "module": "@nx/design/tokens.nx", "start": 3197, "end": 3340}
+  ],
+  "main.nx::componentFollowsCore": [
+    {"path": "", "module": "main.nx", "start": 3954, "end": 3961}
+  ],
+  "main.nx::contrast": [
+    {"path": "/0", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/1", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/2", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/3", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/4", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/5", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/6", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/7", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/8", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/9", "module": "main.nx", "start": 712, "end": 823}
+  ],
+  "main.nx::contrast#dark": [
+    {"path": "/0", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/1", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/2", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/3", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/4", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/5", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/6", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/7", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/8", "module": "main.nx", "start": 712, "end": 823},
+    {"path": "/9", "module": "main.nx", "start": 712, "end": 823}
+  ],
+  "main.nx::graysInSrgb": [],
+  "main.nx::paletteInDisplayP3": [],
+  "main.nx::paletteSurvivesCss": [],
+  "main.nx::scalesOrdered": [],
+  "main.nx::scalesOrdered#dark": [],
+  "main.nx::textFollowsFont": []
+}
