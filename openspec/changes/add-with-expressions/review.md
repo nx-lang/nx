@@ -352,7 +352,7 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
 ## New Findings Discovered During 2026-11-24 05:40 Verification
 
-### 🟡 Fixed - RF21 The generated-formula sentence first replaces `module` and `locals`, then keeps them
+### ✅ Verified - RF21 The generated-formula sentence first replaces `module` and `locals`, then keeps them
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/executable-code-generation/spec.md:12-15.
@@ -362,8 +362,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
 - **Recommendation:** Say "in place of the runtime's `node` and `fingerprint`", and keep the clause that
   says it also holds `module` and `locals`.
 - **Fix:** The sentence now says a generated formula holds the runtime's `module` and `locals` in place of its `node` and `fingerprint`.
+- **Verification:** executable-code-generation spec.md:12-14 now says the formula holds the runtime's `module` and `locals` in place of its `node` and `fingerprint`. That agrees with design decision 8 and with the comparison rule in the same paragraph.
 
-### 🟡 Fixed - RF22 Design decision 5 misstates how an `env.` override through an empty optional field behaves
+### ✅ Verified - RF22 Design decision 5 misstates how an `env.` override through an empty optional field behaves
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** design.md:157-160 ("an `env.` override through an optional field applies only when the
@@ -377,14 +378,16 @@ all of its original scenarios included, and the REMOVED header matches the main 
   drop the reason and keep only "stricter". The current main spec doesn't describe this runtime failure,
   but that predates this change and can be left as it is.
 - **Fix:** Dropped the wrong reason; decision 5 now says only that `with` paths are stricter than the static rule for `env.` paths, which this change leaves as it is.
+- **Verification:** design.md:157-159 now says only that the `with` rule is stricter than the static rule for `env.` paths, which the change leaves as it is; the inaccurate runtime reason is gone. The old wording now appears only in Question 6's earlier follow-up line in this report, which is a historical record and not part of the artifacts.
 
-### 🟡 Fixed - RF23 Three new lines go well past the wrap width
+### ✅ Verified - RF23 Three new lines go well past the wrap width
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/nx-ir-format/spec.md:11 (151 characters), specs/environment-values/spec.md:53
   (132), and specs/rust-ir-runtime/spec.md:13 (108). Each was edited in place without rewrapping.
 - **Recommendation:** Rewrap them to the ~100 characters the rest of the change uses.
 - **Fix:** Rewrapped the edited paragraphs in nx-ir-format, environment-values, rust-ir-runtime and executable-code-generation.
+- **Verification:** No line in design.md or the spec deltas is over 105 characters now. The rewrapped paragraphs in nx-ir-format, environment-values, rust-ir-runtime and executable-code-generation have the same wording as before, except the RF21 change.
 
 ## Questions
 
@@ -427,19 +430,8 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
 ## Summary
 
-`openspec validate add-with-expressions --strict` passes.
-
-| Findings | Status |
-| --- | --- |
-| RF1–RF20 | ✅ Verified |
-| RF21–RF23 | 🔴 Open, all Low |
-
-- **RF16–RF20:** verified in the second round. The fingerprint form, the optional flag cell, the generated
-  formulas' serialization and comparison, the single refusal point and the leftover `darkAccent` notes
-  are all settled.
-- **RF5 and RF10:** both follow-up notes are addressed.
-- **Question 6:** settled. `with` paths are stricter and `env.` paths stay as they are. Only the stated
-  reason needs a fix (RF22).
-- **Still open:** three Low findings, none of which changes behavior. RF21 is a self-contradicting
-  clause in the generated-formula sentence, RF22 is design decision 5's inaccurate description of `env.`
-  paths at run time, and RF23 is three unwrapped lines.
+All 23 findings, RF1–RF23, are ✅ Verified, and no new issues came from the last round of fixes.
+`openspec validate add-with-expressions --strict` passes. Every delta is a full MODIFIED or ADDED
+requirement with SHALL on its first line, and the proposal, design, tasks and specs agree. The questions
+are answered in the artifacts. Question 6 is settled: `with` paths are stricter than `env.` paths, which
+stay as they are.
