@@ -710,7 +710,7 @@ The rest are Low: diagnostic wording, a TextMate edge case and a missing image-e
 
 ## New Findings Discovered During 2026-11-24 09:05 Verification
 
-### 🟡 Fixed - RF36 A top-level `provide` of a call without `env with` gets a generic syntax error
+### ✅ Verified - RF36 A top-level `provide` of a call without `env with` gets a generic syntax error
 - **Severity:** Low
 - **Confidence:** High (reproduced)
 - **Evidence:** With `let m(): env.Update = { marketing }`, both `provide m()` and `provide m() with
@@ -729,10 +729,11 @@ The rest are Low: diagnostic wording, a TextMate edge case and a missing image-e
 - **Status (block forms):** Not changed: inside a block, `provide marketing { … }` and `provide m() with { … } { … }` still give "Invalid function definition". `provide name {` is ambiguous with the start of other forms in the block grammar, and the spec doesn't require it; a dedicated recovery rule could be added later if it proves common.
 - **Verification:** (2) `provide m()` at the top level is fixed: it suggests `provide env with m()`, also when declarations follow. The step form is not. In `provide m() with { radius=1 }` followed by `let root() = { env.radius }`, the error node that validation copies runs to the end of the file. So the suggestion is "write `provide env with m() with { radius=1 }\nlet root() = { env.radius }`", and it takes in every declaration after the provide; with `provide k(3) with marketing` and three lines after it, it quotes all three. A generic "Syntax error" at the `with` is still reported before it, and the declarations swallowed by the recovery are lost to the module. The new parser test passes only because the provide is the last line of its source (parser_tests.rs:409). A name operand with steps (`provide marketing with { … }`) is fine. **Still to do:** let `legacy_bundle` take `with` steps after a call operand in the grammar, as it already does after a name, instead of copying them from the error node. Then drop the extra "Syntax error". Add a parser test with a declaration after the provide. The block forms are left as recorded under Status, which is acceptable since the spec doesn't require them.
 - **Fix (2):** The grammar now gives a call operand its own `provide_definition` branch, `legacy_bundle` (the call) then `with` steps as `legacy_step` fields, so `provide m() with { radius=1 }` parses as one definition with no error node; the suggestion is the definition's own text after `provide` (`provide env with m() with { radius=1 }`), and no generic "Syntax error" is reported. The parser test now has a declaration after the provide and checks the suggestion ends at the steps and that no "Syntax error" appears.
+- **Verification:** (3) The grammar now parses `provide <call> with …` as `legacy_bundle` plus `legacy_step`s, and validation suggests the provide's own text after `provide`. I checked `provide m() with { radius=1 }`, `provide k(3) with marketing` (with a comment and two declarations after it) and `provide k(3) with { radius=1 } with marketing`, plus a trailing `// comment`. Each now gives one diagnostic with exactly the written chain, and the following declarations are untouched. The name form and the valid `provide env with k(1) with { … }` / `provide env.radius = 7` are unchanged. All `nx-syntax` tests pass, including the parser test that now has a declaration after the provide.
 
 ## New Findings Discovered During 2026-11-24 09:40 Verification
 
-### 🟡 Fixed - RF37 The bundle-prop and dark-section cases are not compared in generated JavaScript
+### ✅ Verified - RF37 The bundle-prop and dark-section cases are not compared in generated JavaScript
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** `generated_javascript_agrees_with_the_recorded_results`
@@ -746,3 +747,4 @@ The rest are Low: diagnostic wording, a TextMate edge case and a missing image-e
   takes an `env.Update` argument and applies it. Alternatively, extend the generated-JavaScript
   comparison to lifecycles' initial render.
 - **Fix:** Added plain entrypoints to `environment-inline-provide` that generated JavaScript runs: `sectioned()` applies the mode-dependent theme with `provide env with theme` and reads it in a section set to dark mode (`navy`), and `shown()` returns `<Branded look={theme} />`, a descriptor whose bundle prop carries a formula entry, compared by module and locals. 335 parity tests (including `generated_javascript_agrees_with_the_recorded_results`) and the TypeScript suite pass.
+- **Verification:** `sectioned()` (`navy`: a theme that varies by mode, under a mode set inside the section) and `shown()` (a `Branded` descriptor carrying `theme` as its prop) are now entrypoints. `generated_javascript_agrees_with_the_recorded_results` passes with 167 entrypoints compared, 2 more than before, and `environment-inline-provide` isn't skipped. The corpus tests and the TypeScript `corpus.test` pass. `shown()` compares the descriptor, with the bundle's formula entry, rather than a rendered read of the prop. That covers passing a bundle as a prop, and my manual render already showed the engines agree on applying it.
