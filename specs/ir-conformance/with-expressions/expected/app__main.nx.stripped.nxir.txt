@@ -1,0 +1,58 @@
+module app/main.nx fingerprint 11653604809220759013
+links shared/model.nx version "" fingerprint 6764481331191156784
+links shared/tags.nx version "" fingerprint 5875924029934314738
+requires update-records-v1 update-intrinsics-v1 occurrence-v1
+entrypoints functions [origin moved applied relocated chained patch renamed merged mergedApplied missing fallback optionalCleared retagged] components []
+
+record Point
+  x: int required
+  y: int required
+
+function origin(): Point =
+  <Point x=0 y=0 />
+
+function moved() =
+  apply(origin(), <Point.Update x=3 />)
+
+function applied() =
+  apply(origin(), <Point.Update x=3 />)
+
+function relocated() =
+  apply(
+    for $with0 in shared/model.nx:ada() yield
+      apply($with0, <shared/model.nx:User.Update address=apply($with0.address, <shared/model.nx:Address.Update city="Paris" />) />)
+    <shared/model.nx:User.Update age=37 />
+  )
+
+function chained() =
+  apply(apply(apply(origin(), <Point.Update x=1 />), <Point.Update y=2 />), <Point.Update x=5 />)
+
+function patch(): shared/model.nx:User.Update =
+  <shared/model.nx:User.Update name="Grace" />
+
+function renamed() =
+  apply(shared/model.nx:ada(), patch())
+
+function merged() =
+  merge(patch(), <shared/model.nx:User.Update age=40 />)
+
+function mergedApplied() =
+  apply(shared/model.nx:ada(), merged())
+
+function missing(): Point? (optional result) =
+  if false then
+    origin()
+
+function fallback() =
+  (missing() ?? apply(origin(), <Point.Update y=9 />))
+
+function optionalCleared() =
+  apply(apply(shared/model.nx:ada(), <shared/model.nx:User.Update nickname="A" />), <shared/model.nx:User.Update nickname={} />)
+
+function retagged() =
+  for $with1 in shared/model.nx:ada() yield
+    apply($with1, <shared/model.nx:User.Update tag=apply($with1.tag, <shared/tags.nx:Tag.Update label="owner" />) />)
+
+record Point.Update update of Point
+  x: int
+  y: int

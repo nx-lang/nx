@@ -1,0 +1,29 @@
+module shared/model.nx fingerprint 6764481331191156784
+links shared/tags.nx version "" fingerprint 5875924029934314738
+requires update-records-v1
+entrypoints functions [ada] components []
+
+record Address
+  city: string required
+  zip: string required
+
+record User
+  name: string required
+  age: int required
+  address: Address required
+  nickname: string?
+  tag: shared/tags.nx:Tag required
+
+function ada(): User =
+  <User name="Ada" age=36 address=<Address city="London" zip="N1" /> tag=<shared/tags.nx:Tag label="admin" /> />
+
+record Address.Update update of Address
+  city: string
+  zip: string
+
+record User.Update update of User
+  name: string
+  age: int
+  address: Address
+  nickname: string?
+  tag: shared/tags.nx:Tag

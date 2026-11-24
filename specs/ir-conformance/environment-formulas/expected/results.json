@@ -1,0 +1,32 @@
+{
+  "main.nx::appRadius": 12,
+  "main.nx::card": {
+    "$env": [
+      {
+        "formula": {
+          "declaration": "card",
+          "fingerprint": "6484701942961368350",
+          "locals": {},
+          "module": "main.nx",
+          "node": 69
+        },
+        "path": [],
+        "value": "design.nx::gap"
+      }
+    ],
+    "$type": "Card"
+  },
+  "main.nx::darkAccent": "navy",
+  "main.nx::darkAccent#rootDark": "navy",
+  "main.nx::denseGap": 6,
+  "main.nx::inline": 3,
+  "main.nx::nearer": 2,
+  "main.nx::nearer#rootSpace": 2,
+  "main.nx::passed": 15,
+  "main.nx::patched": 13,
+  "main.nx::scaled": [
+    2,
+    6
+  ],
+  "main.nx::stepped": 15
+}

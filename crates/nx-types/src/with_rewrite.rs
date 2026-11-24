@@ -268,12 +268,7 @@ impl Rewriter<'_> {
         span: TextSpan,
     ) -> ExprId {
         let (record, declared_in) = match update {
-            Type::Named(named) => (
-                named.name.clone(),
-                named
-                    .origin()
-                    .map(|origin| origin.module_identity().to_string()),
-            ),
+            Type::Named(named) => (named.name.clone(), named.origin().cloned()),
             _ => (Name::new("?"), None),
         };
         self.alloc(

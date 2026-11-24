@@ -1,0 +1,103 @@
+module main.nx fingerprint 6484701942961368350
+links design.nx version "" fingerprint 5107991466796297217
+requires environment-v1 environment-v2
+entrypoints functions [appRadius darkAccent patched denseGap inline stepped nearer scales scaled section passed card] components [Card]
+
+value theme: object @5:1-5:113 =
+  <env.Update
+    design.nx:env.radius=12
+    design.nx:env.accent:=if design.nx:env.colorMode is
+      design.nx:ColorMode.light =>
+        "blue"
+      design.nx:ColorMode.dark =>
+        "navy"
+  />
+
+value dense: object @8:1-8:67 =
+  <env.Update
+    design.nx:env.space=2
+    design.nx:env.gap:=(design.nx:env.space mul 3)
+  />
+
+component Card @12:1-12:48
+  body =
+    <span gap=design.nx:env.gap />
+
+function appRadius() @14:1-14:33 =
+  design.nx:env.radius
+
+function darkAccent() @16:1-16:65 =
+  provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+    design.nx:env.accent
+  }
+
+function patched() @18:1-18:80 =
+  provide env with <env.Update
+    design.nx:env.radius:=(design.nx:env.radius add 1)
+  /> {
+    design.nx:env.radius
+  }
+
+function denseGap() @20:1-20:56 =
+  provide env with dense {
+    design.nx:env.gap
+  }
+
+function inline() @22:1-22:62 =
+  provide env with <env.Update
+    design.nx:env.space=3
+  /> {
+    design.nx:env.space
+  }
+
+function stepped() @24:1-24:72 =
+  provide env with (
+    dense
+    with
+    <env.Update
+      design.nx:env.space=5
+    />
+  ) {
+    design.nx:env.gap
+  }
+
+function nearer() @26:1-26:87 =
+  provide design.nx:env.gap:=(design.nx:env.space mul 2) {
+    provide design.nx:env.space=1 {
+      design.nx:env.gap
+    }
+  }
+
+function scales(): int+ @28:1-28:29 =
+  [1, 3]
+
+function scaled() @29:1-29:117 =
+  for scale in scales() yield
+    provide design.nx:env.gap:=(design.nx:env.space mul scale) {
+      provide design.nx:env.space=2 {
+        design.nx:env.gap
+      }
+    }
+
+function section(look: object) @31:1-31:83 =
+  provide env with look {
+    (design.nx:env.radius add design.nx:env.gap)
+  }
+
+function passed() @32:1-32:52 =
+  section(
+    (
+      dense
+      with
+      <env.Update
+        design.nx:env.radius=9
+      />
+    )
+  )
+
+function card() @34:1-34:50 =
+  provide design.nx:env.gap:=(design.nx:env.space mul 2) {
+    <Card />
+  }
+
+provide theme

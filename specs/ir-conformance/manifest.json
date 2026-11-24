@@ -8,6 +8,7 @@
         "constraints",
         "conversions",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -106,6 +107,7 @@
         "constraints",
         "design-tokens",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -158,6 +160,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -175,7 +178,8 @@
         "records",
         "snippet",
         "trailing-element",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ]
     },
     "declarations": {
@@ -186,6 +190,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -201,7 +206,8 @@
       "environment": [
         "design-tokens",
         "design-tokens-theme",
-        "environment"
+        "environment",
+        "environment-formulas"
       ],
       "function": [
         "agent-library",
@@ -216,6 +222,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -236,11 +243,13 @@
         "records",
         "snippet",
         "trailing-element",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "provides": [
         "design-tokens-theme",
-        "environment"
+        "environment",
+        "environment-formulas"
       ],
       "record": [
         "agent-library",
@@ -267,7 +276,8 @@
         "occurrences",
         "question-flow",
         "records",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "typeAlias": [
         "color-library",
@@ -290,6 +300,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "geometry-library",
@@ -309,6 +320,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-values",
@@ -327,7 +339,8 @@
         "evaluation-cost",
         "generic-records",
         "occurrences",
-        "records"
+        "records",
+        "with-expressions"
       ],
       "changed": [
         "records"
@@ -337,7 +350,8 @@
         "records"
       ],
       "merge": [
-        "records"
+        "records",
+        "with-expressions"
       ]
     },
     "mathOperations": {
@@ -449,6 +463,7 @@
         "constraints",
         "conversions",
         "design-tokens",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -460,7 +475,8 @@
         "occurrence-patterns",
         "occurrences",
         "question-flow",
-        "records"
+        "records",
+        "with-expressions"
       ],
       "binary": [
         "agent-library",
@@ -471,6 +487,7 @@
         "conversions",
         "design-tokens",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -500,7 +517,8 @@
         "question-flow",
         "ranges",
         "snippet",
-        "trailing-element"
+        "trailing-element",
+        "with-expressions"
       ],
       "call": [
         "argument-diagnostics",
@@ -511,6 +529,7 @@
         "conversions",
         "design-tokens",
         "design-tokens-theme",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -527,7 +546,8 @@
         "question-flow",
         "ranges",
         "records",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "check": [
         "conditional-properties",
@@ -538,7 +558,8 @@
         "handlers",
         "occurrence-lifting",
         "occurrences",
-        "parameter-defaults"
+        "parameter-defaults",
+        "with-expressions"
       ],
       "component": [
         "components",
@@ -547,6 +568,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -563,6 +585,7 @@
         "conditional-function-values",
         "conditional-properties",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "handlers"
@@ -570,16 +593,19 @@
       "envProvide": [
         "design-tokens",
         "design-tokens-theme",
-        "environment"
+        "environment",
+        "environment-formulas"
       ],
       "envRead": [
         "design-tokens",
         "design-tokens-theme",
-        "environment"
+        "environment",
+        "environment-formulas"
       ],
       "envUpdate": [
         "design-tokens-theme",
-        "environment"
+        "environment",
+        "environment-formulas"
       ],
       "exists": [
         "occurrences",
@@ -589,11 +615,13 @@
         "components",
         "constraints",
         "design-tokens",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "handlers",
         "large-catalog",
-        "occurrence-lifting"
+        "occurrence-lifting",
+        "with-expressions"
       ],
       "forRange": [
         "evaluation-cost",
@@ -607,7 +635,8 @@
         "expressions",
         "large-catalog",
         "occurrence-lifting",
-        "question-flow"
+        "question-flow",
+        "with-expressions"
       ],
       "ifIs": [
         "conditional-properties",
@@ -616,6 +645,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "occurrence-patterns"
@@ -629,7 +659,8 @@
         "generic-records",
         "handlers",
         "occurrences",
-        "records"
+        "records",
+        "with-expressions"
       ],
       "member": [
         "agent-tool-context",
@@ -653,7 +684,8 @@
         "occurrences",
         "question-flow",
         "records",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "namedCall": [
         "argument-diagnostics",
@@ -674,6 +706,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -693,7 +726,8 @@
         "records",
         "snippet",
         "trailing-element",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "optionalMember": [
         "occurrences"
@@ -722,7 +756,8 @@
         "question-flow",
         "ranges",
         "records",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "reference": [
         "agent-library",
@@ -736,6 +771,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -755,7 +791,8 @@
         "ranges",
         "records",
         "snippet",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "slot": [
         "agent-library",
@@ -769,6 +806,7 @@
         "conversions",
         "design-tokens",
         "design-tokens-theme",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -787,7 +825,8 @@
         "question-flow",
         "ranges",
         "records",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "standardColor": [
         "color-library",
@@ -811,6 +850,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -828,7 +868,8 @@
         "records",
         "snippet",
         "trailing-element",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "text": [
         "conversions",
@@ -848,6 +889,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -890,6 +932,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -907,7 +950,8 @@
         "records",
         "snippet",
         "trailing-element",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "primitive": [
         "agent-library",
@@ -922,6 +966,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -942,7 +987,8 @@
         "records",
         "snippet",
         "trailing-element",
-        "two-module"
+        "two-module",
+        "with-expressions"
       ],
       "seq": [
         "agent-library",
@@ -955,6 +1001,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
+        "environment-formulas",
         "evaluation-cost",
         "function-references",
         "function-values",
@@ -971,7 +1018,8 @@
         "question-flow",
         "records",
         "snippet",
-        "trailing-element"
+        "trailing-element",
+        "with-expressions"
       ]
     },
     "unaryOperators": {
@@ -996,6 +1044,7 @@
     "design-tokens",
     "design-tokens-theme",
     "environment",
+    "environment-formulas",
     "evaluation-cost",
     "expressions",
     "function-references",
@@ -1016,6 +1065,7 @@
     "records",
     "snippet",
     "trailing-element",
-    "two-module"
+    "two-module",
+    "with-expressions"
   ]
 }

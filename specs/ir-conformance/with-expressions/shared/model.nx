@@ -1,0 +1,7 @@
+// The records the entry module patches: declared here, so each `with` names an update record of
+// another module.
+import "./tags.nx"
+
+export type Address = { city:string zip:string }
+export type User = { name:string age:int address:Address nickname?:string tag:Tag }
+export let ada(): User = { <User name="Ada" age=36 address=<Address city="London" zip="N1" /> tag=<Tag label="admin" /> /> }

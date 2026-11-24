@@ -1,0 +1,2 @@
+// A record the entry module never imports: a `with` path still reaches its update record.
+export type Tag = { label:string }

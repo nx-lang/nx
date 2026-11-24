@@ -1851,16 +1851,17 @@ impl<'a> ModuleEmitter<'a> {
                     IrItem::Int(else_branch),
                 ])
             }
-            CodegenExpressionKind::Let { name, .. } => {
-                self.diagnostics.push(
-                    Diagnostic::error("nx-ir-unsupported-construct")
-                        .with_message(format!(
-                            "a let binding of '{name}' has no NX IR node; NX source cannot write one"
-                        ))
-                        .with_label(Label::primary(module_identity(self.module), span))
-                        .build(),
-                );
-                Self::empty_node()
+            // A binding the `with` rewrite makes for a left side a path reads more than once. NX IR
+            // has no binding node, but a `for` over a value that is not a sequence runs its body
+            // once with the value bound and is the body's value, which is a binding.
+            CodegenExpressionKind::Let { name, value, body } => {
+                let value = self.expression(value);
+                self.frame.push();
+                let slot = self.frame.alloc(name);
+                let item_name = self.string(name);
+                let body = self.expression(body);
+                self.frame.pop();
+                IrItem::ints([kinds::node::FOR, slot, item_name, -1, -1, value, body])
             }
             CodegenExpressionKind::Block {
                 statements,

@@ -1,0 +1,9 @@
+module shared/tags.nx fingerprint 5875924029934314738
+requires update-records-v1
+entrypoints functions [] components []
+
+record Tag @2:1-2:35
+  label: string required
+
+record Tag.Update update of Tag @2:1-2:35
+  label: string

@@ -1,0 +1,97 @@
+{
+  "app/main.nx::applied": {
+    "$type": "Point",
+    "x": 3,
+    "y": 0
+  },
+  "app/main.nx::chained": {
+    "$type": "Point",
+    "x": 5,
+    "y": 2
+  },
+  "app/main.nx::fallback": {
+    "$type": "Point",
+    "x": 0,
+    "y": 9
+  },
+  "app/main.nx::merged": {
+    "$type": "User.Update",
+    "age": 40,
+    "name": "Grace"
+  },
+  "app/main.nx::mergedApplied": {
+    "$type": "User",
+    "address": {
+      "$type": "Address",
+      "city": "London",
+      "zip": "N1"
+    },
+    "age": 40,
+    "name": "Grace",
+    "tag": {
+      "$type": "Tag",
+      "label": "admin"
+    }
+  },
+  "app/main.nx::moved": {
+    "$type": "Point",
+    "x": 3,
+    "y": 0
+  },
+  "app/main.nx::optionalCleared": {
+    "$type": "User",
+    "address": {
+      "$type": "Address",
+      "city": "London",
+      "zip": "N1"
+    },
+    "age": 36,
+    "name": "Ada",
+    "tag": {
+      "$type": "Tag",
+      "label": "admin"
+    }
+  },
+  "app/main.nx::relocated": {
+    "$type": "User",
+    "address": {
+      "$type": "Address",
+      "city": "Paris",
+      "zip": "N1"
+    },
+    "age": 37,
+    "name": "Ada",
+    "tag": {
+      "$type": "Tag",
+      "label": "admin"
+    }
+  },
+  "app/main.nx::renamed": {
+    "$type": "User",
+    "address": {
+      "$type": "Address",
+      "city": "London",
+      "zip": "N1"
+    },
+    "age": 36,
+    "name": "Grace",
+    "tag": {
+      "$type": "Tag",
+      "label": "admin"
+    }
+  },
+  "app/main.nx::retagged": {
+    "$type": "User",
+    "address": {
+      "$type": "Address",
+      "city": "London",
+      "zip": "N1"
+    },
+    "age": 36,
+    "name": "Ada",
+    "tag": {
+      "$type": "Tag",
+      "label": "owner"
+    }
+  }
+}

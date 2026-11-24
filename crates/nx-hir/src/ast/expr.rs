@@ -555,9 +555,10 @@ pub enum Expr {
         record: Name,
         /// Property assignments
         properties: Vec<RecordLiteralProperty>,
-        /// The module `record` is resolved in, when it is not the module holding the literal: the
-        /// update record a `with` builds is named where its record is declared.
-        declared_in: Option<String>,
+        /// The declaration the literal constructs, when it is named by origin rather than resolved
+        /// by `record` in the module holding the literal: the update record a `with` builds may be
+        /// declared in a module the literal's module does not import.
+        declared_in: Option<crate::DeclaringOrigin>,
         /// Source span
         span: TextSpan,
     },

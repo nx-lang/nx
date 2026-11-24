@@ -141,6 +141,18 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
                 continue;
             }
             match expr {
+                // A `with` names its update record in the module that declares it.
+                ast::Expr::RecordLiteral {
+                    declared_in: Some(declared_in),
+                    ..
+                } => {
+                    if let Some(reference) = resolve_declared_record(artifact, declared_in) {
+                        if is_derived_declaration(artifact, reference.module_id, reference.definition_id)
+                        {
+                            referenced.insert((reference.module_id.as_u32(), reference.definition_id));
+                        }
+                    }
+                }
                 ast::Expr::RecordLiteral { record, .. } => names.push(record.clone()),
                 ast::Expr::Element { element, .. } => {
                     names.push(lowered_module.element(*element).tag.clone())
@@ -2317,7 +2329,10 @@ fn build_expression(
             )?),
         },
         ast::Expr::RecordLiteral {
-            record, properties, ..
+            record,
+            properties,
+            declared_in,
+            ..
         } => {
             let mut mapped_properties = Vec::with_capacity(properties.len());
             for property in properties {
@@ -2337,11 +2352,18 @@ fn build_expression(
                     span: property.span,
                 });
             }
+            let (declaring_module, record_name) = match declared_in
+                .as_ref()
+                .and_then(|origin| declared_record_name(artifact, origin))
+            {
+                Some((module_id, name)) => (module_id, name),
+                None => (resolved_module.id, record.as_str().to_string()),
+            };
             let shape = record_literal_shape(
                 artifact,
-                resolved_module.id,
+                declaring_module,
                 prepared_cache,
-                record.as_str(),
+                &record_name,
                 diagnostics,
             )?;
             CodegenExpressionKind::Record {
@@ -4054,6 +4076,30 @@ fn resolve_visible_reference(
                 reference.kind,
             )
         })
+}
+
+/// The module that declares the record `origin` addresses, and the record's name there.
+fn declared_record_name(
+    artifact: &ProgramArtifact,
+    origin: &nx_hir::DeclaringOrigin,
+) -> Option<(RuntimeModuleId, String)> {
+    let module = artifact
+        .resolved_program
+        .module_by_prepared_identity(origin.module_identity())?;
+    let lowered_module = module_artifact_for(artifact, module)?.lowered_module.as_ref()?;
+    match lowered_module.item_by_definition(origin.definition_id())? {
+        Item::Record(record) => Some((module.id, record.name.as_str().to_string())),
+        _ => None,
+    }
+}
+
+/// The record `origin` addresses, as a reference.
+fn resolve_declared_record(
+    artifact: &ProgramArtifact,
+    origin: &nx_hir::DeclaringOrigin,
+) -> Option<CodegenReference> {
+    let (module_id, name) = declared_record_name(artifact, origin)?;
+    resolve_visible_reference(artifact, module_id, &name)
 }
 
 fn qualified_member_reference(
