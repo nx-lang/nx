@@ -944,6 +944,15 @@
                   {
                     "type": "SYMBOL",
                     "name": "values_braced_expression"
+                  },
+                  {
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "bundle_call_expression"
+                    },
+                    "named": true,
+                    "value": "call_expression"
                   }
                 ]
               }

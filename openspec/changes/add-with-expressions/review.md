@@ -522,7 +522,7 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
 `emitted-ir.test`; all pass. The VS Code grammar tests were not run (no `node_modules` in
 `src/vscode`).
 
-### 🟡 Fixed - RF27 An inline bundle in a main-module `provide env with { … }` evaluates every entry at every read
+### ✅ Verified - RF27 An inline bundle in a main-module `provide env with { … }` evaluates every entry at every read
 - **Severity:** Medium
 - **Confidence:** High (reproduced in all three engines)
 - **Evidence:** `mark_formulas` (crates/nx-codegen/src/formulas.rs:119-135) visits only
@@ -549,8 +549,9 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
   Add a corpus case with an inline top-level bundle whose entries read the environment, and check its
   operation count.
 - **Fix:** `mark_formulas` (crates/nx-codegen/src/formulas.rs) now also walks the values of `module.provides`, so the inline bundle of a main-module `provide env with { … }` (and its `with` steps) gets formula flags. The repro now gives `5` in all engines. New corpus program `specs/ir-conformance/environment-inline-provide` pins it: `provide env with { space={10 / env.zero} radius=5 gap={env.radius * 2} }` with `radius()` = 5, `gap()` = 10 and `space()` under `env.zero=2` = 5, with operation counts.
+- **Verification:** `mark_formulas` now walks `module.provides`. The RF27 repro gives `5` in Rust IR, TypeScript IR and generated JavaScript. So does a step chain, `provide env with t with { space={10 / env.zero} } with { radius=7 }`, which gives `7`. `environment-inline-provide` pins it in both IR runtimes, with operation counts. Generated JavaScript skips that program (see RF29), but the fix itself is in the shared formula marking, and the manual run agrees.
 
-### 🟡 Fixed - RF28 The static `environment-cycle` check misses an inline bundle in a main-module provide
+### ✅ Verified - RF28 The static `environment-cycle` check misses an inline bundle in a main-module provide
 - **Severity:** Medium
 - **Confidence:** High (reproduced)
 - **Evidence:** `environment_cycle_diagnostics` (crates/nx-codegen/src/environment_cycles.rs:73-98)
@@ -572,6 +573,7 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
 - **Recommendation:** Walk the `EnvUpdate` overrides inside `module.provides` values, as is done for
   declarations, and add the inline top-level bundle form to that test.
 - **Fix:** `environment_cycle_diagnostics` now also walks the `Provide`/`EnvUpdate` overrides inside bundle provides of `module.provides`. The repro is now `environment-cycle` at compile time. `an_override_that_reads_a_value_whose_default_reads_it_is_an_environment_cycle` (crates/nx-api/tests/codegen/tests.rs) gains `provide env with { a={env.b} }` and `provide env with theme with { a={env.b} }`.
+- **Verification:** The repro is now `environment-cycle` at compile time, at the entry. An inline bundle with a step inside a block, `provide env with { space=1 } with { a={env.b} } { … }`, is caught too. `an_override_that_reads_a_value_whose_default_reads_it_is_an_environment_cycle` passes with the two new top-level forms.
 
 ### 🟡 Fixed - RF29 The corpus lacks three cases that task 6.1 lists as done, and no test reaches `nx-ir-environment-cycle`
 - **Severity:** Medium
@@ -597,8 +599,10 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
   lifecycle, or a case that renders `Card`, so the per-read charge of a descriptor formula is
   recorded. Otherwise, uncheck the items.
 - **Fix:** New corpus program `environment-inline-provide`: a component `Section` takes a bundle prop (`look: env.Update = {theme}`), applies it with `provide env with look`, and reads the mode-dependent accent twice, the second time in a section set to dark mode (lifecycle result `blue`, `navy`, with its operation count, so a formula's per-read charge is recorded); and a failing case `cycle#throughB`, which passes `readB` as a function value so the static check can't see the loop, recorded in `diagnostics.json` as `nx-ir-environment-cycle`. Rust IR, TypeScript IR and generated JavaScript run it (334 parity tests and the TS suite pass). The README describes the program.
+- **Verification:** Only partly fixed. Both IR runtimes run the new program and record all of its cases: `corpus_results_match_the_rust_ir_runtime`, the operation-count test and the TypeScript `corpus.test` pass, including `cycle#throughB` and the `Section` lifecycle. But the **Fix** note is wrong that generated JavaScript runs it. `cycle` calls a function-typed value (`<read />`), so `nxlang codegen --target javascript` refuses the whole program ("calls of function-typed values are not supported by executable source codegen yet"). `generated_javascript_agrees_with_the_recorded_results` then lists `environment-inline-provide` as skipped. So the inline top-level bundle (RF27), the bundle prop and the dark section are still not compared in generated JavaScript, which is what task 6.4 asks for. Also, the lifecycle mounts `Section` with no props, so `look` is its default `{theme}`: no caller passes a bundle as a prop. **Still to do:** move `cycle`/`readB` to their own program, or to another one that generated code already skips, so this program runs in generated JavaScript. Add a component that renders `<Section look={…} />` with a bundle other than the default.
+- **Fix (2):** `cycle`/`readB` moved to their own program, `specs/ir-conformance/environment-cycle` (with a passing `plain()` entrypoint beside `cycle#throughB`, recorded as `nx-ir-environment-cycle`), so `environment-inline-provide` no longer has a call of a function-typed value and generated JavaScript now generates and runs it (`nxlang codegen --target javascript` accepts it; 335 parity tests pass). `environment-inline-provide` gains a component `Branded look: env.Update` with a required bundle prop, mounted by a lifecycle whose `props` pass a bundle (`accent` = `green`), so a caller passes a bundle other than the default. The README describes both programs and why the cycle case is apart.
 
-### 🟡 Fixed - RF30 `specs/future.md` drops "Generated values are evaluated at load", which is still true
+### ✅ Verified - RF30 `specs/future.md` drops "Generated values are evaluated at load", which is still true
 - **Severity:** Medium
 - **Confidence:** High (reproduced)
 - **Evidence:** The change removes the entry at specs/future.md:~2376. Generated modules still
@@ -610,8 +614,9 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
   value in generated code. Link it from the README sentence. The fix itself could be a formula-like
   thunk for such values, which is later work.
 - **Fix:** Restored "Generated values are evaluated at load" in specs/future.md, narrowed to top-level values that read the environment, including when an override or bundle entry names one, with RF31's example. specs/ir-conformance/README.md now says that limitation remains and that no program names such a value under an override.
+- **Verification:** The restored specs/future.md entry is narrowed as recommended and includes RF31's example. The README sentence links it. Nit: the edited README line ("No other entrypoint is skipped, though …") runs to about 125 characters, past the file's wrap width.
 
-### 🟡 Fixed - RF31 Generated JavaScript gives a different result when an override names a top-level value that reads the environment
+### ✅ Verified - RF31 Generated JavaScript gives a different result when an override names a top-level value that reads the environment
 - **Severity:** Low (the executable-code-generation delta allows it: "an entry that only names a
   top-level value gets that value as it was at load")
 - **Confidence:** High (reproduced)
@@ -630,8 +635,9 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
   corpus entrypoint. Or make generated top-level values that read the environment lazy thunks, so
   all three engines agree.
 - **Fix:** Recorded, as the spec allows: the limitation and its example are in specs/future.md ("Generated values are evaluated at load") and the README points to it. Making generated top-level values that read the environment lazy is left as later work and raised with Bret; not adding a known-divergence entrypoint, so the comparison stays free of a skip list.
+- **Verification:** Rerun: still `3` in the IR runtimes and `12` in generated JavaScript, as recorded. The executable-code-generation delta allows this ("an entry that only names a top-level value gets that value as it was at load"). Recording it in specs/future.md, with the fix as later work, is one of the two options recommended, so it is acceptable for this change. Without a known-divergence entrypoint, nothing would flag the day the engines start to agree, or the day the gap widens. That is a reasonable trade for keeping the comparison free of a skip list.
 
-### 🟡 Fixed - RF32 The `with-target` hint for optional and sequence left sides suggests syntax that doesn't exist
+### ✅ Verified - RF32 The `with-target` hint for optional and sequence left sides suggests syntax that doesn't exist
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** crates/nx-types/src/infer/with.rs:121-122 suggests ``test it with `if x is { some }` ``.
@@ -641,8 +647,9 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
 - **Recommendation:** For `T?`, suggest ``if x? { x with { … } }`` or ``(x ?? fallback) with
   { … }``. For a sequence, suggest patching each item: ``for item in x { item with { … } }``.
 - **Fix:** The hint now depends on the left side: for `T?` it suggests `if x? { x with { … } }` or `(x ?? fallback) with { … }`; for a sequence, `for item in x { item with { … } }`, with no `??`. Both forms compile. Tests in crates/nx-types/tests/with_expressions.rs check each.
+- **Verification:** `u.home with { … }` on `A?` now suggests `if x? { x with { … } }` or `(x ?? fallback) with { … }`. `u.tags with { … }` on `A+` suggests `for item in x { item with { … } }`, with no `??`. Both suggested forms compile and run. `with_on_an_optional_suggests_unwrapping_it` and `with_on_a_sequence_is_with_target` pass. ("but this is a A?" keeps the older article wording; not part of this finding.)
 
-### 🟡 Fixed - RF33 `provide brand with { … }` at the top of a module gets a suggestion that drops the bundle
+### ✅ Verified - RF33 `provide brand with { … }` at the top of a module gets a suggestion that drops the bundle
 - **Severity:** Low
 - **Confidence:** High (reproduced)
 - **Evidence:** For `provide marketing with { radius=1 }`, `lower_provide_bundle`
@@ -655,8 +662,9 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
 - **Recommendation:** Report it as the same syntax error that `provide brand.theme` gets, and suggest
   `provide env with <name> with …`, keeping the written operand and steps.
 - **Fix:** `provide brand with { … }` (top level or in a block) is now the syntax error `provide brand.theme` gets, from validation (`PROVIDE_BUNDLE` whose head is not `env`), suggesting `provide env with brand with { … }` with the written operand and steps. The `environment-path` diagnostic in `lower_provide_bundle` is removed. Test `test_provide_bundle_with_steps_but_no_env_suggests_env_with` (crates/nx-syntax/tests/parser_tests.rs).
+- **Verification:** `provide marketing with { radius=1 }` is now a syntax error that suggests `provide env with marketing with { radius=1 }`. This holds at the top level, with a second step (`… with marketing`), and in a block. The `environment-path` text is gone from lower.rs. `parser_tests` passes (207). A call operand still gets a generic error; see RF36.
 
-### 🟡 Fixed - RF34 The TextMate rule scopes `with` as a keyword in a type's field list after another field
+### ✅ Verified - RF34 The TextMate rule scopes `with` as a keyword in a type's field list after another field
 - **Severity:** Low
 - **Confidence:** Medium (from reading the regex; the grammar tests were not run here)
 - **Evidence:** The rule at src/vscode/syntaxes/nx.tmLanguage.json:403 matches
@@ -669,8 +677,9 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
 - **Recommendation:** Add `:` to the negative lookahead (`(?!\s*[=:])`), and add a grammar test with
   `with` as a second field.
 - **Fix:** The rule's lookahead is now `(?!\s*[=:?])`, so `with:` and `with?:` stay names. New grammar test in src/vscode/test/grammar/with.test.ts covers a later type field, an optional one and a component prop; it fails with the old rule and passes now (314 grammar tests pass).
+- **Verification:** The lookahead is now `(?!\s*[=:?])`. No valid operator `with` is followed by `:` or `?`, so the change has no false negatives. The grammar suite passes: 314 tests, including the new later-field, optional-field and component-prop cases.
 
-### 🟡 Fixed - RF35 No test checks that a `with` program emits the same image as its `apply`/`merge` form
+### ✅ Verified - RF35 No test checks that a `with` program emits the same image as its `apply`/`merge` form
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** Task 3.2 says "Check that a program written with `with` emits the same images as its
@@ -681,6 +690,7 @@ says. Tests run: `cargo test -p nx-types --test with_expressions --test environm
 - **Recommendation:** Add an emitter test that compiles both forms and compares the stripped images'
   node and declaration tables, ignoring spans and fingerprint.
 - **Fix:** New test `a_with_emits_the_image_of_its_apply_or_merge_form` (crates/nx-api/tests/codegen/tests.rs) compiles a field list, an update operand and an update-record field list beside their `apply`/`merge` forms and compares the explained stripped images, without the fingerprint line.
+- **Verification:** `a_with_emits_the_image_of_its_apply_or_merge_form` passes. It compares stripped images, which carry no spans, so only the fingerprint line is dropped. It covers a field list, an update operand and an update-record field list. The path form (`address.city=…`) isn't among the cases, but my earlier manual check found it identical to its nested `apply`.
 
 ## Questions (2026-11-24 08:17 review)
 
@@ -696,3 +706,23 @@ from one gap: the inline bundle of a main-module `provide env with { … }` is s
 marking (RF27) and by the static cycle check (RF28). Beyond that, the corpus is missing cases that
 task 6.1 claims (RF29), and `specs/future.md` drops a limitation that still applies (RF30, RF31).
 The rest are Low: diagnostic wording, a TextMate edge case and a missing image-equivalence test.
+
+## New Findings Discovered During 2026-11-24 09:05 Verification
+
+### 🟡 Fixed - RF36 A top-level `provide` of a call without `env with` gets a generic syntax error
+- **Severity:** Low
+- **Confidence:** High (reproduced)
+- **Evidence:** With `let m(): env.Update = { marketing }`, both `provide m()` and `provide m() with
+  { radius=1 }` at the top of the main module give only "Syntax error / Check the syntax and try
+  again". A name or element operand (`provide marketing`, `provide <env.Update … />`, `provide
+  marketing with { … }`) gets the suggestion for `provide env with …`. The spec says "A top-level
+  `provide bundle` without `env with` SHALL be a syntax error whose message suggests `provide env
+  with bundle`". The docs list a call among the forms a bundle may take. Inside a block,
+  `provide marketing { … }` and `provide m() with { … } { … }` give "Invalid function definition".
+  The spec doesn't require that form, but it is the one a user moving a bundle into a section is
+  likely to write.
+- **Recommendation:** Have the validation that handles `PROVIDE_BUNDLE` also recognize a call (and
+  a braced expression) after `provide`, top level and in a block. Suggest `provide env with
+  <operand> …`, keeping the steps. Add parser tests for the call form.
+- **Fix:** The grammar's `legacy_bundle` now also admits a call operand (`alias($.bundle_call_expression, $.call_expression)`; parser regenerated), so top-level `provide m()` gets the `provide env with m()` suggestion; for `provide m() with { … }` validation carries the `with` steps left in the error node after the definition, suggesting `provide env with m() with { radius=1 }`. A braced expression was already admitted. Parser tests added to `test_provide_bundle_with_steps_but_no_env_suggests_env_with`.
+- **Status (block forms):** Not changed: inside a block, `provide marketing { … }` and `provide m() with { … } { … }` still give "Invalid function definition". `provide name {` is ambiguous with the start of other forms in the block grammar, and the spec doesn't require it; a dedicated recovery rule could be added later if it proves common.

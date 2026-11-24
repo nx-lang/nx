@@ -1865,6 +1865,10 @@
         "required": false,
         "types": [
           {
+            "type": "call_expression",
+            "named": true
+          },
+          {
             "type": "element",
             "named": true
           },

@@ -281,6 +281,7 @@ module.exports = grammar({
           $.qualified_name,
           $.element,
           $.values_braced_expression,
+          alias($.bundle_call_expression, $.call_expression),
         )),
       ),
     ),

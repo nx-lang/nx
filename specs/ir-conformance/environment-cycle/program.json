@@ -1,0 +1,25 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "plain"
+    },
+    {
+      "module": "main.nx",
+      "function": "cycle",
+      "case": "throughB",
+      "arguments": [
+        {
+          "$type": "Function",
+          "module": "main.nx",
+          "name": "readB"
+        }
+      ],
+      "fails": true
+    }
+  ]
+}

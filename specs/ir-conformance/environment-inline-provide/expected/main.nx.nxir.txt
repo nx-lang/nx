@@ -1,6 +1,6 @@
-module main.nx fingerprint 2349932272780751811
-requires function-values-v1 environment-v1 environment-v2
-entrypoints functions [radius gap space readB cycle] components [Section]
+module main.nx fingerprint 9831234649067749080
+requires environment-v1 environment-v2
+entrypoints functions [radius gap space] components [Section Branded]
 
 union ColorMode @3:1-3:30
   case light constant
@@ -24,24 +24,18 @@ environment gap: int @9:1-9:25 =
 environment accent: string @10:1-10:36 =
   "gray"
 
-environment a: int @11:1-11:23 =
-  1
-
-environment b: int @12:1-12:35 =
-  (env.a add 1)
-
-function radius() @17:1-17:30 =
+function radius() @15:1-15:30 =
   env.radius
 
-function gap() @19:1-19:24 =
+function gap() @17:1-17:24 =
   env.gap
 
-function space() @21:1-21:51 =
+function space() @19:1-19:51 =
   provide env.zero=2 {
     env.space
   }
 
-value theme: object @24:1-24:103 =
+value theme: object @22:1-22:103 =
   <env.Update
     env.accent:=if env.colorMode is
       ColorMode.light =>
@@ -50,7 +44,7 @@ value theme: object @24:1-24:103 =
         "navy"
   />
 
-component Section @28:1-33:2
+component Section @26:1-31:2
   props
     look: object = theme
   body =
@@ -66,13 +60,13 @@ component Section @28:1-33:2
       ]
     }
 
-function readB(): int @35:1-35:29 =
-  env.b
-
-function cycle(read: <function />: int): int @38:1-38:81 =
-  provide env.a:=<read /> {
-    env.b
-  }
+component Branded @34:1-34:100
+  props
+    look: object required
+  body =
+    provide env with look {
+      <span accent=env.accent />
+    }
 
 provide <env.Update
   env.space:=(10 idiv env.zero)

@@ -1,5 +1,9 @@
 {
   "counts": {
+    "main.nx::Branded": {
+      "batches": [],
+      "initial": 7
+    },
     "main.nx::Section": {
       "batches": [],
       "initial": 39

@@ -1,9 +1,15 @@
 {
+  "main.nx::Branded": {
+    "batches": [],
+    "initial": [
+      {"path": "", "module": "main.nx", "start": 1315, "end": 1343}
+    ]
+  },
   "main.nx::Section": {
     "batches": [],
     "initial": [
-      {"path": "/0", "module": "main.nx", "start": 1191, "end": 1219},
-      {"path": "/1", "module": "main.nx", "start": 1224, "end": 1283}
+      {"path": "/0", "module": "main.nx", "start": 1108, "end": 1136},
+      {"path": "/1", "module": "main.nx", "start": 1141, "end": 1200}
     ]
   },
   "main.nx::gap": [],

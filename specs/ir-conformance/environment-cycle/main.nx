@@ -1,0 +1,10 @@
+// The runtime cycle error: `b`'s default reads `a`, whose override calls back into `b` through a
+// function passed in, which the static check can't follow.
+environment a: int = 1
+environment b: int = { env.a + 1 }
+
+let readB(): int = { env.b }
+let cycle(read: <function />: int): int = { provide env.a={<read />} { env.b } }
+
+/// Without the override, `b` reads `a`'s default.
+let plain(): int = { env.b }

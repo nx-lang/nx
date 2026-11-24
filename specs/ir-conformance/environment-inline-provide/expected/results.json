@@ -1,4 +1,11 @@
 {
+  "main.nx::Branded": {
+    "batches": [],
+    "initial": {
+      "$type": "span",
+      "accent": "green"
+    }
+  },
   "main.nx::Section": {
     "batches": [],
     "initial": [
