@@ -389,6 +389,67 @@ all of its original scenarios included, and the REMOVED header matches the main 
 - **Fix:** Rewrapped the edited paragraphs in nx-ir-format, environment-values, rust-ir-runtime and executable-code-generation.
 - **Verification:** No line in design.md or the spec deltas is over 105 characters now. The rewrapped paragraphs in nx-ir-format, environment-values, rust-ir-runtime and executable-code-generation have the same wording as before, except the RF21 change.
 
+## New Findings Discovered During 2026-11-24 06:27 Review of the "bundle or attributes, not both" change
+
+The combined form is gone from every change file. The proposal, design (decisions 2, 3 and 4), tasks
+1.2, 6.1 and 6.2, and the environment-values and nx-ir-format deltas all describe a block as holding
+attribute-form overrides or one `env with` chain. No combined-form example or "the block's other
+overrides" wording is left. The remaining "in the order written" sentence in "Values take precedence"
+still holds for attribute-form overrides. The IR rule ("either attribute overrides or a single bundle
+override, never both"), the lookup and the `$env` shape are unaffected, since a descriptor can still
+receive attribute and bundle entries from different nesting levels.
+
+The "section theme follows a mode set inside the section" scenario is still correct under the where-read
+rule:
+
+- **Main form:** `Banner`'s read of `color` reaches marketing's `color` formula. The formula reads
+  `colorMode`, and the nearest source of that is `<Section env.colorMode=dark>`, so the result is `b`.
+- **`with { colorMode=dark }` variant:** the formula's read of `colorMode` is a read of another value.
+  It sees every source, the bundle's later `with` step included, so it also gives `b`.
+
+"A `with` step after a bundle wins" follows from bundle entries being looked up last first.
+
+### 🟡 Fixed - RF24 It isn't settled whether a field list may come right after `provide env with`
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** specs/environment-values/spec.md:5-11. `bundle` is "an operand of the kind a `with`
+  takes on its right", which is not a field list. But the next clause says "after `with`, a brace whose
+  first entry is `name=` SHALL be a field list". design.md:72 ("`env with` takes the same operand").
+- **Details:** `provide env with { colorMode=dark } { … }` matches the field-list sentence, because it
+  comes after `with`. It does not match the operand rule. If it is accepted, it is a second spelling of
+  `provide env.colorMode=dark { … }`, as a bundle. That changes which IR it emits (a bundle override,
+  requiring `environment-v2`, versus a plain override at v1). If it is rejected, users need a
+  diagnostic that points to the attribute form.
+- **Recommendation:** Say which it is: "the first operand after `env with` SHALL NOT be a field list"
+  (with a message suggesting `provide env.name=value`), or "a field list is allowed and means an inline
+  bundle". Add a grammar test to task 1.2.
+- **Fix:** A field list right after `env with` is an inline bundle: `provide env with { colorMode=dark } { … }` means `env with <env.Update colorMode=dark />` (environment-values requirement and a new scenario; design decision 2 notes it equals the `env.` form, which the style guide prefers for single values; task 1.2 grammar test; task 7.3 style rule).
+
+### 🟡 Fixed - RF25 The suggested fix for a mixed block changes the meaning when the attributes come first
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** specs/environment-values/spec.md:10-11 ("suggests a `with { name=value }` step in place
+  of the attribute-form overrides"); spec.md:46-49 (the only scenario puts the attributes after the
+  bundle); tasks.md 1.2.
+- **Details:** In the earlier draft of this change, a combined block applied its overrides in the order written. So in
+  `provide env.radius=0 env with marketing { … }`, `marketing`'s `radius` won. The suggested rewrite,
+  `env with marketing with { radius=0 }`, makes `radius=0` win instead.
+- **Recommendation:** Say that the suggestion keeps the order. Attribute overrides written before the
+  bundle become a leading inline bundle, such as `env with <env.Update radius=0 /> with marketing`;
+  those written after become a trailing `with { … }` step. Alternatively, have the message say only
+  "use one `env with` chain". Add a scenario or test for the attributes-first order.
+- **Fix:** The suggestion keeps the written order: overrides after the bundle become a `with { … }` step after it, ones before it a field list before it (`provide env.radius=0 env with marketing` suggests `provide env with { radius=0 } with marketing`). New scenario; task 1.2 tests both orders.
+
+### 🟡 Fixed - RF26 The environment docs task doesn't mention the "not both" rule
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** tasks.md 7.2 ("`provide env with` for bundles, bundles in blocks, …").
+- **Details:** `reference/syntax/environment.md` is where users will meet the rule, and the mixed form is
+  the one they are most likely to try.
+- **Recommendation:** Add the rule to task 7.2: a block holds `env.` overrides or one `env with` chain,
+  and a bundle is patched further with `with { … }`. Include an example of the rewrite.
+- **Fix:** Task 7.2 now covers the rule and how to rewrite a mixed block as a chain.
+
 ## Questions
 
 1. A formula names "the module identity and node". Node indices are only stable within one image. Can a
@@ -430,8 +491,17 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
 ## Summary
 
-All 23 findings, RF1–RF23, are ✅ Verified, and no new issues came from the last round of fixes.
-`openspec validate add-with-expressions --strict` passes. Every delta is a full MODIFIED or ADDED
-requirement with SHALL on its first line, and the proposal, design, tasks and specs agree. The questions
-are answered in the artifacts. Question 6 is settled: `with` paths are stricter than `env.` paths, which
-stay as they are.
+`openspec validate add-with-expressions --strict` passes.
+
+| Findings | Status |
+| --- | --- |
+| RF1–RF23 | ✅ Verified |
+| RF24–RF26 | 🔴 Open, all Low |
+
+The "bundle or attributes, not both" change is consistent across the proposal, design, tasks and specs,
+with no leftover combined-form examples. The IR rule, the lookup and the section-theme scenario still
+hold under the where-read rule. Three Low findings remain:
+
+- **RF24:** whether a field list may come right after `provide env with`.
+- **RF25:** the suggested fix for a mixed block reverses the order when the attributes come first.
+- **RF26:** the docs task doesn't mention the new rule.

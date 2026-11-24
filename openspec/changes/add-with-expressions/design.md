@@ -72,12 +72,15 @@ attribute and after `.`.
 In a `provide` block, `env with` takes the same operand, optionally followed by more `with` steps,
 and then the body: `provide env with brand with { radius=4 colorMode=dark } { … }`. A block holds
 either attribute-form overrides (`provide env.a=… env.b=… { … }`, written as on an element) or one
-`env with` chain, never both; mixing them is a syntax error that suggests a `with { … }` step. The
-chain already gives an order, left to right, so the block needs no rule of its own for where a
-bundle sits among other overrides, and no question arises about a bundle after an `env.` override or
-two bundles in one block (Bret, thread, 2026-11-24). `env with` anywhere else is `reserved-name`,
-with a message saying it is written only after `provide`; the main module's old `provide
-brand.theme` is a syntax error that suggests `provide env with brand.theme`.
+`env with` chain, never both; mixing them is a syntax error that suggests one chain in the written
+order. A field list right after `env with` is an inline bundle, so `provide env with {
+colorMode=dark } { … }` works too; it means the same as `provide env.colorMode=dark { … }`, and the
+style guide prefers the `env.` form for single values, which matches element attributes. The chain
+already gives an order, left to right, so the block needs no rule of its own for where a bundle sits
+among other overrides, and no question arises about a bundle after an `env.` override or two bundles
+in one block (Bret, thread, 2026-11-24). `env with` anywhere else is `reserved-name`, with a message
+saying it is written only after `provide`; the main module's old `provide brand.theme` is a syntax
+error that suggests `provide env with brand.theme`.
 
 Each field value is typed by the field it sets, so a bare union case works:
 `settings with { mode=dark }`. A present empty value clears an optional field: `user with {

@@ -1,20 +1,24 @@
 ## MODIFIED Requirements
 
 ### Requirement: A `provide` block overrides values for an expression
-The language SHALL accept `provide overrides { body }` wherever an expression or markup content
-is, where `overrides` is either one or more overrides in the attribute form (`env.name=value` or
+The language SHALL accept `provide overrides { body }` wherever an expression or markup content is,
+where `overrides` is either one or more overrides in the attribute form (`env.name=value` or
 `env.name.field=value`), or one bundle, `env with bundle`, but not both. `bundle` SHALL be an
 operand of the kind a `with` takes on its right (a name, member access, call, element or braced
-expression), optionally followed by more `with` steps (`env with brand with { radius=4 }`); after
-`with`, a brace whose first entry is `name=` SHALL be a field list, and the body SHALL follow the
-last override or `with` step. A block that mixes the two forms SHALL be a syntax error whose message
-suggests a `with { name=value }` step in place of the attribute-form overrides. Its value and
-type SHALL be its body's. Attribute-form overrides SHALL be checked as an element's `env.`
-attributes are, `bundle` SHALL be of type `env.Update`, and a block without an override SHALL be a
-syntax error. `env with` anywhere else SHALL be rejected with `reserved-name`, whose message says
-that `env with` is written only after `provide`. Since `provide` at the start of an expression always
-begins a block, a declaration, parameter or binding named `provide` SHALL be rejected with
-`reserved-name`; a record field named `provide`, read as `x.provide`, SHALL keep working.
+expression) or a field list, which is an inline bundle (`env with { colorMode=dark }` means `env
+with <env.Update colorMode=dark />`), optionally followed by more `with` steps (`env with brand with
+{ radius=4 }`); after `with`, a brace whose first entry is `name=` SHALL be a field list, and the
+body SHALL follow the last override or `with` step. A block that mixes the two forms SHALL be a
+syntax error whose message suggests one `env with` chain that keeps the written order:
+attribute-form overrides written after the bundle become a `with { … }` step after it, and ones
+written before it become a field list before it (`provide env.radius=0 env with marketing` suggests
+`provide env with { radius=0 } with marketing`). Its value and type SHALL be its body's.
+Attribute-form overrides SHALL be checked as an element's `env.` attributes are, `bundle` SHALL be
+of type `env.Update`, and a block without an override SHALL be a syntax error. `env with` anywhere
+else SHALL be rejected with `reserved-name`, whose message says that `env with` is written only
+after `provide`. Since `provide` at the start of an expression always begins a block, a declaration,
+parameter or binding named `provide` SHALL be rejected with `reserved-name`; a record field named
+`provide`, read as `x.provide`, SHALL keep working.
 
 #### Scenario: A provide in an expression
 - **WHEN** a module declares `environment locale: string = "en-US"` and
@@ -47,6 +51,14 @@ begins a block, a declaration, parameter or binding named `provide` SHALL be rej
 - **WHEN** a body renders `{ provide env with marketing env.colorMode=dark { <Banner /> } }`
 - **THEN** the module SHALL fail with a syntax error whose message suggests
   `provide env with marketing with { colorMode=dark }`
+
+#### Scenario: The suggestion keeps the order
+- **WHEN** a body renders `{ provide env.radius=0 env with marketing { <Banner /> } }`
+- **THEN** the syntax error's message SHALL suggest `provide env with { radius=0 } with marketing`
+
+#### Scenario: A field list after `provide env with`
+- **WHEN** a body renders `{ provide env with { colorMode=dark } { <Banner /> } }`
+- **THEN** `Banner` SHALL read `colorMode` `dark`, as with `provide env.colorMode=dark`
 
 #### Scenario: `env with` outside a provide is rejected
 - **WHEN** a module contains `let saved = { env with marketing }`
