@@ -162,7 +162,7 @@ reused instead of evaluated.
 
 ### 9. Next: state reads and reuse across passes
 
-Two steps follow from the model, and are the next change.
+These steps follow from the model, and are the next change.
 
 - **State fields are sources.** A render records the state fields it read. A dispatch patches some
   fields. The dispatched node renders again only when its render read a patched field. Its children
@@ -176,7 +176,18 @@ Two steps follow from the model, and are the next change.
   a dispatch reuses the palette and the `color` default instead of rebuilding them. The count stays a
   function of the images, the input and the tree's held state, which is already true of a pass.
 
-The TypeScript runtime has no instance tree yet, so both steps are Rust first. When the TypeScript
+- **Changes are pushed, not polled.** Every source keeps an index of the tracked computations whose
+  records hold it, as the tree's `readers` index already does for root values. A change to a source,
+  whether a root value from `set_environment` or a state field a dispatch patched, notifies exactly
+  those computations, which become stale. Nothing else is checked. Within one call, records are
+  checked when a result is asked for instead, because the check is free there and a call's
+  overrides last only for the call.
+- **The host gets a change set.** After a dispatch or a root change, the tree tells the host which
+  nodes rendered again, which were added and which were removed, so a host updates what it derived
+  from those nodes without walking the tree or comparing output. This is the "tree the runtime
+  maintains, with a change set" in `specs/future.md`, and `is_settled` remains for hosts that walk.
+
+The TypeScript runtime has no instance tree yet, so these steps are Rust first. When the TypeScript
 tree arrives, it follows the same model.
 
 ## Risks / Trade-offs
