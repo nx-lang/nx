@@ -689,7 +689,8 @@ impl<'p> Machine<'p> {
                     if !is_own && matches!(source, Source::Formula(_)) {
                         evaluated = true;
                     }
-                    let value = self.source_value(cx, node, key, Below::Layer(position), &source)?;
+                    let value =
+                        self.source_value(cx, node, key, Below::Layer(position), &source)?;
                     let patch = bundle && is_update_record(&value);
                     if path.is_empty() && !patch {
                         if is_own {
@@ -706,7 +707,10 @@ impl<'p> Machine<'p> {
                         beneath.push(pending);
                     }
                 }
-                Some(Layer::Cap { key: capped_key, below }) if capped_key == key => {
+                Some(Layer::Cap {
+                    key: capped_key,
+                    below,
+                }) if capped_key == key => {
                     capped = true;
                     match below {
                         Below::Layer(at) => position = at,
@@ -960,10 +964,7 @@ impl<'p> Machine<'p> {
             return Ok(formula);
         };
         formula.declaration = declaration;
-        if !self
-            .environment_index()
-            .is_formula(module, node)
-        {
+        if !self.environment_index().is_formula(module, node) {
             formula.refused = Some(format!(
                 "node {node} of '{identity}' is not the value of a formula override"
             ));
@@ -1207,7 +1208,8 @@ impl<'p> Machine<'p> {
                 self.entries_of(cx, node, nested, out)?;
                 continue;
             }
-            let (Some(Value::Str(name)), Some(path)) = (field(entry, "value"), field(entry, "path"))
+            let (Some(Value::Str(name)), Some(path)) =
+                (field(entry, "value"), field(entry, "path"))
             else {
                 return Err(malformed());
             };
@@ -1275,7 +1277,12 @@ impl<'p> Machine<'p> {
                 ));
             }
             let source = if entry.formula {
-                Source::Formula(Arc::new(self.capture_formula(cx, frame, node, entry.value)?))
+                Source::Formula(Arc::new(self.capture_formula(
+                    cx,
+                    frame,
+                    node,
+                    entry.value,
+                )?))
             } else {
                 Source::Value(self.eval(cx, frame, entry.value)?)
             };
@@ -1445,7 +1452,9 @@ impl<'p> Machine<'p> {
 
 /// A qualified name, `identity::name`, without its module.
 fn short_name(qualified: &str) -> &str {
-    qualified.rsplit_once("::").map_or(qualified, |(_, name)| name)
+    qualified
+        .rsplit_once("::")
+        .map_or(qualified, |(_, name)| name)
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {

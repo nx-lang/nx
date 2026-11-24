@@ -147,9 +147,13 @@ fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<Upda
                     ..
                 } => {
                     if let Some(reference) = resolve_declared_record(artifact, declared_in) {
-                        if is_derived_declaration(artifact, reference.module_id, reference.definition_id)
-                        {
-                            referenced.insert((reference.module_id.as_u32(), reference.definition_id));
+                        if is_derived_declaration(
+                            artifact,
+                            reference.module_id,
+                            reference.definition_id,
+                        ) {
+                            referenced
+                                .insert((reference.module_id.as_u32(), reference.definition_id));
                         }
                     }
                 }
@@ -4086,7 +4090,9 @@ fn declared_record_name(
     let module = artifact
         .resolved_program
         .module_by_prepared_identity(origin.module_identity())?;
-    let lowered_module = module_artifact_for(artifact, module)?.lowered_module.as_ref()?;
+    let lowered_module = module_artifact_for(artifact, module)?
+        .lowered_module
+        .as_ref()?;
     match lowered_module.item_by_definition(origin.definition_id())? {
         Item::Record(record) => Some((module.id, record.name.as_str().to_string())),
         _ => None,

@@ -79,7 +79,9 @@ pub(crate) fn environment_cycle_diagnostics(modules: &[CodegenModule]) -> Vec<Di
             .collect();
         for declaration in &module.declarations {
             visit_declaration_expressions(declaration, &mut |expression| {
-                if let CodegenExpressionKind::Provide { overrides: list, .. }
+                if let CodegenExpressionKind::Provide {
+                    overrides: list, ..
+                }
                 | CodegenExpressionKind::EnvUpdate {
                     overrides: list, ..
                 } = &expression.kind

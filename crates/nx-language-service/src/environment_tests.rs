@@ -172,7 +172,7 @@ fn hover_on_a_top_level_provide_lists_what_it_sets() {
 fn hover_on_a_bundle_provide_lists_what_the_bundle_sets() {
     let brand = "import \"./design.nx\"\nexport let theme: env.Update = <env.Update space=12 color=<Palette.Update accent=\"red\" /> />\n";
     let (app, position) = position_for(
-        "import \"./design.nx\"\nimport \"./brand.nx\" as brand\nprovide brand.the⟨cursor⟩me\n",
+        "import \"./design.nx\"\nimport \"./brand.nx\" as brand\nprovide env with brand.the⟨cursor⟩me\n",
     );
     let hover = snapshot(&[
         (DESIGN_URI, DESIGN),
@@ -187,4 +187,67 @@ fn hover_on_a_bundle_provide_lists_what_the_bundle_sets() {
         hover.contains("Sets `env.space`, `env.color.accent`."),
         "{hover}"
     );
+}
+
+/// The hover on a bundle `provide` that has `with` steps lists the bundle's entries, then the steps'.
+#[test]
+fn hover_on_a_bundle_provide_follows_with_steps() {
+    let hover = hover_in_app(
+        "import \"./design.nx\"\nlet theme: env.Update = <env.Update space=12 />\nprovide env with theme with { lo⟨cursor⟩cale=\"fr-FR\" size.width=3 }\n",
+    )
+    .expect("hover");
+    assert!(
+        hover.contains("Sets `env.space`, `env.locale`, `env.size.width`."),
+        "{hover}"
+    );
+}
+
+/// Spec: "Hover on a top-level `provide` or on a `provide` block's `env with`".
+#[test]
+fn hover_on_a_block_env_with_lists_what_the_bundle_sets() {
+    let hover = hover_in_app(
+        "import \"./design.nx\"\nlet theme: env.Update = <env.Update space=12 />\nlet page() = { provide env wi⟨cursor⟩th theme { env.space } }\n",
+    )
+    .expect("hover");
+    assert!(hover.contains("Sets `env.space`."), "{hover}");
+}
+
+/// Spec: "Field completion in a field list".
+#[test]
+fn completion_in_a_with_field_list_offers_the_fields_of_the_left_side() {
+    let items = completions_in_app(
+        "type User = { name: string email?: string }\nlet bo() = { <User name=\"Ada\" /> with { ⟨cursor⟩ } }\n",
+    );
+    assert_eq!(labels(&items), vec!["name", "email"]);
+    assert_eq!(items[0].detail.as_deref(), Some("string"));
+}
+
+#[test]
+fn completion_after_a_field_name_in_a_with_offers_that_fields_record() {
+    let items = completions_in_app(
+        "type Address = { city: string zip: string }\ntype User = { name: string address: Address }\nlet u(user: User) = { user with { name=\"Bo\" address.⟨cursor⟩ } }\n",
+    );
+    assert_eq!(labels(&items), vec!["city", "zip"]);
+}
+
+#[test]
+fn completion_in_a_bundle_field_list_offers_environment_values() {
+    let items = completions_in_app(
+        "import \"./design.nx\"\nlet page() = { provide env with { ⟨cursor⟩ } { env.space } }\n",
+    );
+    assert_eq!(labels(&items), vec!["color", "locale", "size", "space"]);
+    let items = completions_in_app(
+        "import \"./design.nx\"\nlet theme: env.Update = <env.Update space=12 />\nlet dense() = { theme with { size.⟨cursor⟩ } }\n",
+    );
+    assert_eq!(labels(&items), vec!["width", "height"]);
+}
+
+/// Spec: "Hover on `with`".
+#[test]
+fn hover_on_with_shows_the_type_being_patched() {
+    let hover = hover_in_app(
+        "type User = { name: string }\nlet bo() = { <User name=\"Ada\" /> wi⟨cursor⟩th { name=\"Bo\" } }\n",
+    )
+    .expect("hover");
+    assert!(hover.contains("User"), "{hover}");
 }

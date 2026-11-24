@@ -12,6 +12,7 @@ mod source_tree;
 #[cfg(test)]
 mod source_tree_tests;
 mod visualizers;
+mod with;
 
 pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
@@ -515,6 +516,7 @@ impl WorkspaceSnapshot {
         let answer = match self
             .doc_link_hover(&resolved)
             .or_else(|| self.environment_hover(&resolved))
+            .or_else(|| self.with_hover(&resolved))
         {
             Some(answer) => Some(answer),
             None => self
@@ -1070,7 +1072,10 @@ impl WorkspaceSnapshot {
     ) -> Result<CompletionList, SnapshotError> {
         let resolved = self.resolve_position(uri, position)?;
         let scope = &resolved.scope;
-        if let Some(items) = self.environment_completions(&resolved) {
+        if let Some(items) = self
+            .environment_completions(&resolved)
+            .or_else(|| self.with_completions(&resolved))
+        {
             return Ok(CompletionList {
                 uri: resolved.document.uri.clone(),
                 identity: resolved.document.identity.clone(),

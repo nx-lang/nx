@@ -164,7 +164,10 @@ fn validate_provide_forms(node: &SyntaxNode, file_name: &str, diagnostics: &mut 
                     Diagnostic::error("syntax-error")
                         .with_message(format!("{}: write `{}`", message, suggestion))
                         .with_label(Label::primary(file_name, range).with_message(label))
-                        .with_note(format!("Write `{}`, which applies them in the same order.", suggestion))
+                        .with_note(format!(
+                            "Write `{}`, which applies them in the same order.",
+                            suggestion
+                        ))
                         .build(),
                 );
             }

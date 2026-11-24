@@ -542,7 +542,10 @@ fn write_op<'a>(op: Op, items: &'a [IrItem], pool: &mut Vec<u32>) -> Result<&'a 
                 if flagged {
                     let flag = flag.unwrap_or(0);
                     if flag == 0 && items.len() > shape.len() {
-                        return Err("a list element's flag is 0, which is written by leaving it out".to_string());
+                        return Err(
+                            "a list element's flag is 0, which is written by leaving it out"
+                                .to_string(),
+                        );
                     }
                     pool.push(cell(flag)?);
                 }

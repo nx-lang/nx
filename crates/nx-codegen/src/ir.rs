@@ -23,11 +23,11 @@ use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1, NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
-    NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
-    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
@@ -785,7 +785,10 @@ pub(crate) fn visit_declaration_expressions_mut(
     }
 }
 
-fn visit_expressions_mut(items: &mut [CodegenExpression], visit: &mut dyn FnMut(&mut CodegenExpression)) {
+fn visit_expressions_mut(
+    items: &mut [CodegenExpression],
+    visit: &mut dyn FnMut(&mut CodegenExpression),
+) {
     for item in items {
         visit_expression_mut(item, visit);
     }
@@ -922,7 +925,9 @@ pub(crate) fn visit_expression_mut(
             }
             visit_expressions_mut(&mut element.content, visit);
         }
-        CodegenExpressionKind::ActionHandler(handler) => visit_expression_mut(&mut handler.body, visit),
+        CodegenExpressionKind::ActionHandler(handler) => {
+            visit_expression_mut(&mut handler.body, visit)
+        }
         CodegenExpressionKind::EnvRead { .. } => {}
         CodegenExpressionKind::Provide { overrides, body } => {
             for provided in overrides {

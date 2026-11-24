@@ -84,7 +84,9 @@ impl InferenceContext<'_> {
         };
 
         let paths = match right {
-            ast::WithRight::Fields(fields) => self.check_with_fields(kind, &record, &update, fields),
+            ast::WithRight::Fields(fields) => {
+                self.check_with_fields(kind, &record, &update, fields)
+            }
             ast::WithRight::Value(value) => {
                 let actual = self.infer_expr(*value);
                 self.check_with_update_value(kind, &record, &update, &actual, span);
@@ -113,7 +115,8 @@ impl InferenceContext<'_> {
         let occurrence = left_ty.occurrence();
         if occurrence != Occurrence::ONE {
             let (item, _) = left_ty.split();
-            let patchable = matches!(item, Type::Named(named) if self.record_definition_for(named).is_some());
+            let patchable =
+                matches!(item, Type::Named(named) if self.record_definition_for(named).is_some());
             let hint = if patchable {
                 format!(
                     "; a `with` patches one value, so unwrap it first: `(x ?? fallback) with {{ … }}`, \
@@ -135,8 +138,7 @@ impl InferenceContext<'_> {
                     return Some((WithKind::Update, named.clone(), named.clone()));
                 }
                 if !Self::is_derived_record_name(named) {
-                    let update =
-                        self.derived_type_of(named, nx_hir::update_record_name);
+                    let update = self.derived_type_of(named, nx_hir::update_record_name);
                     if let Type::Named(update) = Self::carry_type_arguments(named, update) {
                         return Some((WithKind::Record, named.clone(), update));
                     }
@@ -270,7 +272,11 @@ impl InferenceContext<'_> {
         let mut walked = Vec::with_capacity(steps.len());
         for step in steps {
             let field = match self.record_shape_of(&current) {
-                Ok(Some(shape)) => shape.fields.iter().find(|field| field.name == *step).cloned(),
+                Ok(Some(shape)) => shape
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *step)
+                    .cloned(),
                 _ => None,
             };
             let Some(field) = field else {
@@ -329,7 +335,11 @@ impl InferenceContext<'_> {
         span: TextSpan,
     ) {
         let field = match self.record_shape_of(update) {
-            Ok(Some(shape)) => shape.fields.iter().find(|field| field.name == *name).cloned(),
+            Ok(Some(shape)) => shape
+                .fields
+                .iter()
+                .find(|field| field.name == *name)
+                .cloned(),
             _ => None,
         };
         let Some(field) = field else {

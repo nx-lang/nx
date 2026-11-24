@@ -355,7 +355,11 @@ fn test_parse_with_expressions() {
     "#;
     let result = parse_str(source, "with.nx");
 
-    assert!(result.is_ok(), "with forms should parse: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "with forms should parse: {:?}",
+        result.errors
+    );
     let root = result.root().expect("Should have root node");
     assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_BUNDLE), 5);
     assert_eq!(count_kind(&root, SyntaxKind::WITH_EXPRESSION), 8);
