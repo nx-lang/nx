@@ -58,13 +58,13 @@ otherwise. How "the same thing" is checked depends on how long the result is kep
 | Kept | A read compares by | Why |
 | --- | --- | --- |
 | Within one call | The identity of what supplied it | Free, and needs no value comparison |
-| Across calls, in the instance tree | The value found | The overrides of one call are gone by the next |
+| Across calls, in the instance tree | Revisions of root values and of other kept results, with equality cutoff; the value found for a read an override supplied | Revisions are free to compare, and an equal result stops a change from spreading |
 
 The tree already follows the second row for environment reads: a node records what its render read
 and renders again on a root change only when a read now differs (`set_environment`), and a child
 whose descriptor is equal keeps its render. Decisions 1 to 8 implement the first row. Decisions 9
-to 13 extend the second row to state fields, props and derived values, and add notifications and the
-change set.
+to 13 extend the second row to state fields, props and derived values, with revisions and equality
+cutoff, and add notifications and the change set.
 
 ## Decisions
 
@@ -192,35 +192,58 @@ over the recorded props only.
 A content parameter counts as one prop. Handler props bound for emits are rebound as today and are
 not reads.
 
-### 11. The tree keeps derived results across renders
+### 11. The tree keeps derived results across renders, checked by revision
 
-The tree keeps the derived results its renders evaluated, each with its record of values found
-(Decision 8 gives a reused result's record to the render that reused it). It offers them to every
-later render, whichever node it is for. A kept result is reused at a use when each read in its
-record, looked up in the environment of the use, finds an equal value. The lookup is the read the
-skip check makes and is charged the same way; the comparison is charged as a comparison. A kept
-result that fails the check is replaced by the new evaluation.
+The tree keeps the derived results its renders evaluated and offers them to later renders of any
+node. Checking a kept result by looking up and comparing every value it read, at every use, would
+cost a lookup and a comparison per read. Instead the tree follows the revision scheme of incremental
+engines such as Salsa:
 
-Kept results live as long as the tree. A root change marks stale the results that read a changed
-value (Decision 12), so they are evaluated afresh at their next use. Within a call, a result found in
-the tree enters the call's own cache, and Decisions 1 to 4 apply from there.
+- **A revision counter.** The tree has one counter. Each root value that `set_environment` changes,
+  and each kept result whose value changes when it is evaluated again, takes the next revision.
+- **Two revisions per kept result.** `changed` is the revision at which its value last changed, and
+  `verified` the revision at which it was last found valid.
+- **Direct inputs.** A kept result's record holds its direct inputs, not the leaves under them:
+  the root values it read (by name), the other kept results it used (by edge), and the values that
+  an override supplied (by value, see below).
+- **Validity.** A kept result is valid at the current revision when every root value and every kept
+  result it used has `changed` no later than its `verified`, and every override-supplied read
+  finds an equal value at the use. Checking a used result first validates that result, recursively,
+  so a change is found from the inputs up. Comparing revisions costs nothing and is bounded by the
+  program's declarations.
+- **Equality cutoff.** A kept result that is not valid is evaluated again. Its new value is then
+  compared with the old one, charged as a comparison of values. When they are equal, the tree keeps
+  the old value and leaves `changed` alone, so nothing that used it is evaluated or rendered again.
+  So when `locale` changes and a `direction` result evaluates again to the same `ltr`, the results
+  and renders that read only `direction` stay valid.
+- **Override-supplied reads compare by value.** A value that a `$env` entry or an `envProvide` above
+  the node supplies is not a tree-wide source, since it differs from place to place. Such a read is
+  compared by value at the use, charged as the skip check's reads and comparisons are. Those values
+  are usually small, such as `dark`.
+- **Variants.** A result used at places whose override-supplied reads differ, such as a light and a
+  dark section, keeps one variant for each, chosen by those reads. A variant no render used during a
+  pass is dropped when the pass finishes, so variants are bounded by the output.
 
-The count of a render now depends on what the tree holds, which a pass's count already does, and a
-host that wants a count independent of history evaluates outside the tree.
+Within a render, a result taken from the tree enters the call's own cache, and Decisions 1 to 4
+apply from there. A render's count now depends on what the tree holds, which a pass's count already
+does, and a host that wants a count independent of history evaluates outside the tree.
 
-### 12. Changes are pushed, not polled
+### 12. Changes are pushed, then pulled
 
-Every source keeps an index of the tracked computations whose records hold it:
+Every source keeps an index of the tracked computations that read it directly: the tree's `readers`
+index for root values, extended to kept results; reverse edges from each kept result to the kept
+results and nodes that used it; the instance's own record for state fields; and the node's own
+record for props.
 
-- environment values: the nodes and the kept results that read each one, extending the tree's
-  `readers` index;
-- state fields: the instance's own record, since only the owner's body reads its state;
-- props: the node's own record.
+`set_environment` gives each changed root value a new revision and follows the indexes to mark the
+nodes that could be affected as possibly stale, transitively. That walk visits only what the indexes
+name and evaluates nothing. Then, in depth order, the tree pulls: for each possibly stale node it
+validates the kept results the node used, evaluating again only those that are not valid, with
+equality cutoff. It renders the node again only when one of its direct inputs changed. A node whose
+inputs all came back equal is left alone and stays settled.
 
-`set_environment` finds the changed root values, marks stale exactly the nodes and kept results the
-index names, and renders the stale nodes as today. A dispatch consults the instance's state record.
-Nothing that the index does not name is checked. Within one call there are no notifications: a
-call's records are checked when a result is asked for, because that check is free.
+A dispatch decides from the instance's own state record (Decision 9). Within one call there are no
+notifications: a call's records are checked when a result is asked for, because that check is free.
 
 ### 13. The host gets a change set
 

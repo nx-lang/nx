@@ -47,18 +47,28 @@ design can be judged as a whole rather than one phase at a time.
 - **Props are sources too.** A node handed a new descriptor renders again only when a prop its last
   render read, or a prop one of the handlers it bound reads, differs. Otherwise it takes the new
   props and keeps its render, as it already does for a change that touches only `$env`.
-- **The instance tree keeps derived results across renders.** Results that renders evaluated are
-  held in the tree, each with the values its reads found, and are offered to later renders of any
-  node. One is reused when every recorded read finds an equal value at the asking read, a check
-  charged as the skip check is charged today. So the render after a click reuses the palette.
-- **Changes are pushed.** Every source keeps an index of the tracked computations that read it, as
-  the tree's `readers` index does for root values today. A root change from `set_environment` or a
-  state patch from a dispatch marks exactly those computations stale. Nothing else is checked.
+- **The instance tree keeps derived results across renders, checked by revision.** Results that
+  renders evaluated are held in the tree and offered to later renders of any node, so the render
+  after a click reuses the palette. As in incremental engines such as Salsa, each root change and
+  each changed result takes a new revision, and a kept result records its direct inputs. Checking
+  one compares revision numbers, which is free. A read that an override above the node supplied,
+  such as `env.colorMode=dark` on a section, is compared by value. A light and a dark section keep a
+  variant each.
+- **Equal results stop a change from spreading.** A result evaluated again is compared once with
+  its old value. When they are equal, it keeps its old revision, and nothing that used it is
+  evaluated or rendered again. So when `locale` changes and `direction` is still `ltr`, the nodes
+  that read only `direction` are left alone.
+- **Changes are pushed, then pulled.** Every source keeps an index of what read it directly, as the
+  tree's `readers` index does for root values today. A root change marks possibly stale exactly what
+  the indexes reach, evaluating nothing. The tree then validates those nodes from the root down,
+  evaluating again only the results that are not valid, and renders a node only when one of its
+  direct inputs changed. A dispatch decides from the instance's own state record.
 - **The host gets a change set.** The tree reports which nodes rendered again, which were added and
   which were removed since the host last asked. A host updates what it derived from those nodes
   without walking the tree or comparing output. `is_settled` remains for hosts that walk.
 - **The cost model changes.** Within a call, a reused result costs only the asking node's one
-  operation. In the tree, the check of a kept result is charged like the skip check. Counts stay a
+  operation. In the tree, revision checks are free, an override-supplied read is charged like the skip check,
+  and the cutoff comparison is charged as a comparison. Counts stay a
   function of the images, the input and, for the tree, the state it holds. No result changes, and
   `docs/nx-ir-format.md`, the corpus's recorded counts and the tree's tests change to match.
 - **A corpus program for reuse.** `environment-reuse` pins the within-call cases with their

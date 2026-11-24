@@ -42,10 +42,13 @@
 
 - [ ] 5.1 Prop-read skip in `visit`: compare only recorded props, keep the render and take the new
   descriptor when they are equal.
-- [ ] 5.2 Kept derived results in the tree, offered to each render's `Machine`, checked by value at
-  the use, charged as the skip check's reads and comparisons.
-- [ ] 5.3 Reverse indexes for kept results beside `readers`; `set_environment` marks stale only what
-  they name; keep them current as nodes and results change.
+- [ ] 5.2 Kept derived results in the tree: a revision counter, `changed` and `verified` revisions,
+  direct inputs (root values, kept results, override-supplied values), variants by
+  override-supplied reads dropped at `finish` when unused, offered to each render's `Machine`.
+- [ ] 5.3 Validation with equality cutoff: validate used results first, re-evaluate only what is not
+  valid, compare the new value with the old (charged as a comparison) and keep the old revision when
+  equal; reverse edges and the extended `readers` index; `set_environment` marks possibly stale
+  through the indexes, then pulls in depth order and renders only nodes whose direct inputs changed.
 - [ ] 5.4 The change set and `take_changes`, consistent with `is_settled`; a dispatch that renders
   nothing leaves the node settled.
 - [ ] 5.5 Tests for every `component-instance-tree` scenario.

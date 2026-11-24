@@ -10,7 +10,9 @@ at run time, at any depth, and what it found, and a read of another tracked comp
 or reused, SHALL add that computation's reads to its record. A tracked computation SHALL be reused
 only while every recorded read would find the same thing, and SHALL be computed again otherwise.
 Within one call a read SHALL compare by the identity of what supplied it. In the instance tree,
-across calls, a read SHALL compare by the value found. The language SHALL have no syntax for
+across calls, a read of a root value or of another kept computation SHALL compare by revision, a
+read an override supplied SHALL compare by the value found, and a computation evaluated again to an
+equal value SHALL count as unchanged for everything that used it. The language SHALL have no syntax for
 reactivity: authors write plain values and components.
 
 #### Scenario: A branch not taken is not a dependency
@@ -114,3 +116,9 @@ when they run.
 - **WHEN** both IR runtimes run the same dispatch that patches only an unread field
 - **THEN** both SHALL return the same instance state and output and count the same operations
 
+
+#### Scenario: An equal result stops a change from spreading
+- **WHEN** a kept `direction` result reads `env.locale`, a node's render reads only `env.direction`
+  through it, and a host changes `locale` from `en-US` to `en-GB`
+- **THEN** `direction` SHALL be evaluated again and give `ltr` as before
+- **AND** the node SHALL NOT render again
