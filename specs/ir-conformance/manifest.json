@@ -21,6 +21,7 @@
         "two-module"
       ],
       "and": [
+        "design-tokens",
         "expressions",
         "question-flow"
       ],
@@ -41,11 +42,13 @@
       "div": [
         "argument-diagnostics",
         "conversions",
+        "design-tokens",
         "expressions"
       ],
       "eq": [
         "constraints",
         "conversions",
+        "design-tokens",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -69,6 +72,7 @@
         "conversions"
       ],
       "ge": [
+        "design-tokens",
         "expressions",
         "question-flow"
       ],
@@ -87,6 +91,7 @@
         "expressions"
       ],
       "le": [
+        "design-tokens",
         "expressions",
         "question-flow"
       ],
@@ -99,6 +104,7 @@
       ],
       "mul": [
         "constraints",
+        "design-tokens",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -132,6 +138,8 @@
         "color-library",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "expressions",
         "geometry-library",
         "large-catalog",
@@ -147,6 +155,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -173,6 +183,8 @@
         "components",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "function-values",
@@ -187,6 +199,8 @@
         "two-module"
       ],
       "environment": [
+        "design-tokens",
+        "design-tokens-theme",
         "environment"
       ],
       "function": [
@@ -199,6 +213,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -223,6 +239,7 @@
         "two-module"
       ],
       "provides": [
+        "design-tokens-theme",
         "environment"
       ],
       "record": [
@@ -233,6 +250,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "function-references",
@@ -254,6 +273,8 @@
         "color-library",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "function-references",
         "function-values",
         "held-records",
@@ -266,6 +287,8 @@
         "color-library",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -283,6 +306,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -317,69 +342,91 @@
     },
     "mathOperations": {
       "abs": [
+        "design-tokens",
         "math-library"
       ],
       "acos": [
+        "design-tokens",
         "math-library"
       ],
       "asin": [
+        "design-tokens",
         "math-library"
       ],
       "atan": [
+        "design-tokens",
         "math-library"
       ],
       "atan2": [
+        "design-tokens",
         "math-library"
       ],
       "ceil": [
+        "design-tokens",
         "math-library"
       ],
       "clamp": [
+        "design-tokens",
         "math-library"
       ],
       "cos": [
+        "design-tokens",
         "math-library"
       ],
       "degreesToRadians": [
+        "design-tokens",
         "math-library"
       ],
       "floor": [
+        "design-tokens",
         "math-library"
       ],
       "hypot": [
+        "design-tokens",
         "math-library"
       ],
       "lerp": [
+        "design-tokens",
         "math-library"
       ],
       "max": [
+        "design-tokens",
         "math-library"
       ],
       "min": [
+        "design-tokens",
         "math-library"
       ],
       "radiansToDegrees": [
+        "design-tokens",
         "math-library"
       ],
       "round": [
+        "design-tokens",
         "math-library"
       ],
       "roundTiesToEven": [
+        "design-tokens",
         "math-library"
       ],
       "sign": [
+        "design-tokens",
         "math-library"
       ],
       "sin": [
+        "design-tokens",
         "math-library"
       ],
       "sqrt": [
+        "design-tokens",
         "math-library"
       ],
       "tan": [
+        "design-tokens",
         "math-library"
       ],
       "trunc": [
+        "design-tokens",
         "math-library"
       ]
     },
@@ -401,6 +448,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -421,6 +469,7 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -460,6 +509,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -493,6 +544,8 @@
         "components",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "function-values",
@@ -515,12 +568,17 @@
         "handlers"
       ],
       "envProvide": [
+        "design-tokens",
+        "design-tokens-theme",
         "environment"
       ],
       "envRead": [
+        "design-tokens",
+        "design-tokens-theme",
         "environment"
       ],
       "envUpdate": [
+        "design-tokens-theme",
         "environment"
       ],
       "exists": [
@@ -530,6 +588,7 @@
       "for": [
         "components",
         "constraints",
+        "design-tokens",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -554,6 +613,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -576,6 +637,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -608,6 +671,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -639,6 +704,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "function-references",
@@ -666,6 +733,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -698,6 +767,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -719,9 +790,12 @@
         "two-module"
       ],
       "standardColor": [
-        "color-library"
+        "color-library",
+        "design-tokens",
+        "design-tokens-theme"
       ],
       "standardMath": [
+        "design-tokens",
         "math-library"
       ],
       "string": [
@@ -734,6 +808,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -769,6 +845,8 @@
         "color-library",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -789,6 +867,8 @@
         "color-library",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "geometry-library"
       ],
       "function": [
@@ -807,6 +887,8 @@
         "components",
         "conditional-properties",
         "constraints",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -837,6 +919,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "expressions",
@@ -868,6 +952,8 @@
         "conditional-properties",
         "constraints",
         "conversions",
+        "design-tokens",
+        "design-tokens-theme",
         "environment",
         "evaluation-cost",
         "function-references",
@@ -907,6 +993,8 @@
     "conditional-properties",
     "constraints",
     "conversions",
+    "design-tokens",
+    "design-tokens-theme",
     "environment",
     "evaluation-cost",
     "expressions",

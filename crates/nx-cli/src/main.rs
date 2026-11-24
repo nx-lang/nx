@@ -2976,6 +2976,29 @@ export type AssistantConfig = { agent?:Agent }
     }
 
     #[test]
+    fn test_cli_typegen_design_library_links_its_peer_modules_without_warnings() {
+        let dir = TempDir::new().unwrap();
+        let ts_path = dir.path().join("generated-ts");
+        let output = run_cli(&[
+            "typegen",
+            "@nx/design",
+            "--language",
+            "typescript",
+            "--output",
+            ts_path.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("Warning:"), "{stderr}");
+        let tokens = fs::read_to_string(ts_path.join("tokens.ts")).unwrap();
+        assert!(tokens.contains("from \"./types\""), "{tokens}");
+        assert!(
+            tokens.contains("export interface SemanticColors "),
+            "{tokens}"
+        );
+    }
+
+    #[test]
     fn test_cli_typegen_visualizer_library_spells_target_property_names() {
         let dir = TempDir::new().unwrap();
         let ts_path = dir.path().join("generated-ts");

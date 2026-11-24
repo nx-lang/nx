@@ -1,0 +1,535 @@
+{
+  "main.nx::colors": {
+    "$type": "SemanticColors",
+    "accent": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.24500000476837158,
+      "h": 262.8810119628906,
+      "l": 0.5460000038146973
+    },
+    "background": {
+      "$type": "Color.srgb",
+      "alpha": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "border": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004000000189989805,
+      "h": 286.32000732421875,
+      "l": 0.9200000166893005
+    },
+    "danger": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.24500000476837158,
+      "h": 27.325000762939453,
+      "l": 0.5770000219345093
+    },
+    "focus": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.21400000154972076,
+      "h": 259.81500244140625,
+      "l": 0.6230000257492065
+    },
+    "onAccent": {
+      "$type": "Color.srgb",
+      "alpha": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "onDanger": {
+      "$type": "Color.srgb",
+      "alpha": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "onSuccess": {
+      "$type": "Color.srgb",
+      "alpha": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "onWarning": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004999999888241291,
+      "h": 285.822998046875,
+      "l": 0.14100000262260437
+    },
+    "success": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.15399999916553497,
+      "h": 150.06900024414062,
+      "l": 0.5270000100135803
+    },
+    "surface": {
+      "$type": "Color.srgb",
+      "alpha": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "surfaceMuted": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.0010000000474974513,
+      "h": 286.375,
+      "l": 0.9670000076293945
+    },
+    "text": {
+      "$type": "TextColors",
+      "disabled": {
+        "$type": "Color.oklch",
+        "alpha": 1.0,
+        "c": 0.014999999664723873,
+        "h": 286.0669860839844,
+        "l": 0.7049999833106995
+      },
+      "muted": {
+        "$type": "Color.oklch",
+        "alpha": 1.0,
+        "c": 0.01600000075995922,
+        "h": 285.93798828125,
+        "l": 0.5519999861717224
+      },
+      "normal": {
+        "$type": "Color.oklch",
+        "alpha": 1.0,
+        "c": 0.006000000052154064,
+        "h": 285.885009765625,
+        "l": 0.20999999344348907
+      }
+    },
+    "warning": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.18799999356269836,
+      "h": 70.08000183105469,
+      "l": 0.7689999938011169
+    }
+  },
+  "main.nx::colors#dark": {
+    "$type": "SemanticColors",
+    "accent": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.16500000655651093,
+      "h": 254.62399291992188,
+      "l": 0.7070000171661377
+    },
+    "background": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004999999888241291,
+      "h": 285.822998046875,
+      "l": 0.14100000262260437
+    },
+    "border": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.006000000052154064,
+      "h": 286.0329895019531,
+      "l": 0.27399998903274536
+    },
+    "danger": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.2370000034570694,
+      "h": 25.33099937438965,
+      "l": 0.6370000243186951
+    },
+    "focus": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.16500000655651093,
+      "h": 254.62399291992188,
+      "l": 0.7070000171661377
+    },
+    "onAccent": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004999999888241291,
+      "h": 285.822998046875,
+      "l": 0.14100000262260437
+    },
+    "onDanger": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004999999888241291,
+      "h": 285.822998046875,
+      "l": 0.14100000262260437
+    },
+    "onSuccess": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004999999888241291,
+      "h": 285.822998046875,
+      "l": 0.14100000262260437
+    },
+    "onWarning": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.004999999888241291,
+      "h": 285.822998046875,
+      "l": 0.14100000262260437
+    },
+    "success": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.21899999678134918,
+      "h": 149.57899475097656,
+      "l": 0.7229999899864197
+    },
+    "surface": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.006000000052154064,
+      "h": 285.885009765625,
+      "l": 0.20999999344348907
+    },
+    "surfaceMuted": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.006000000052154064,
+      "h": 286.0329895019531,
+      "l": 0.27399998903274536
+    },
+    "text": {
+      "$type": "TextColors",
+      "disabled": {
+        "$type": "Color.oklch",
+        "alpha": 1.0,
+        "c": 0.017000000923871994,
+        "h": 285.7860107421875,
+        "l": 0.44200000166893005
+      },
+      "muted": {
+        "$type": "Color.oklch",
+        "alpha": 1.0,
+        "c": 0.014999999664723873,
+        "h": 286.0669860839844,
+        "l": 0.7049999833106995
+      },
+      "normal": {
+        "$type": "Color.oklch",
+        "alpha": 1.0,
+        "c": 0.0,
+        "h": 0.0,
+        "l": 0.9850000143051147
+      }
+    },
+    "warning": {
+      "$type": "Color.oklch",
+      "alpha": 1.0,
+      "c": 0.1889999955892563,
+      "h": 84.42900085449219,
+      "l": 0.828000009059906
+    }
+  },
+  "main.nx::componentFollowsCore": {
+    "$type": "Color.srgb",
+    "alpha": 1.0,
+    "b": 0.239215686917305,
+    "g": 0.501960813999176,
+    "r": 0.08235294371843338
+  },
+  "main.nx::contrast": [
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onAccent on accent",
+      "ratio": 5.26,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onDanger on danger",
+      "ratio": 4.76,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onWarning on warning",
+      "ratio": 9.27,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onSuccess on success",
+      "ratio": 4.94,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.normal on background",
+      "ratio": 17.73,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.normal on surface",
+      "ratio": 17.73,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.muted on background",
+      "ratio": 4.83,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.muted on surface",
+      "ratio": 4.83,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "focus on background",
+      "ratio": 3.76,
+      "target": 3.0
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "focus on surface",
+      "ratio": 3.76,
+      "target": 3.0
+    }
+  ],
+  "main.nx::contrast#dark": [
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onAccent on accent",
+      "ratio": 7.54,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onDanger on danger",
+      "ratio": 5.21,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onWarning on warning",
+      "ratio": 11.59,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "onSuccess on success",
+      "ratio": 8.95,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.normal on background",
+      "ratio": 19.05,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.normal on surface",
+      "ratio": 16.98,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.muted on background",
+      "ratio": 7.56,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "text.muted on surface",
+      "ratio": 6.74,
+      "target": 4.5
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "focus on background",
+      "ratio": 7.54,
+      "target": 3.0
+    },
+    {
+      "$type": "ContrastCheck",
+      "meets": true,
+      "pair": "focus on surface",
+      "ratio": 6.72,
+      "target": 3.0
+    }
+  ],
+  "main.nx::graysInSrgb": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "main.nx::paletteInDisplayP3": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "main.nx::paletteSurvivesCss": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "main.nx::scalesOrdered": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "main.nx::scalesOrdered#dark": [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "main.nx::textFollowsFont": 20.0
+}

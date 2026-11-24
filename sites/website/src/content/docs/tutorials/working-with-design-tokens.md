@@ -1,96 +1,143 @@
 ---
 title: 'Working with Design Tokens'
-description: 'Incorporate design tokens into NX workflows.'
+description: 'Read the standard design tokens, build a component on them, and write a light and dark brand theme.'
 ---
 
-Design tokens in NX are just typed data. This tutorial shows how to declare tokens, pass them through components, and enforce usage with the type system. It builds on the [Language Tour](/language-tour/elements) and the [Building Your First Component](/tutorials/building-your-first-component) tutorial.
+Design tokens in NX are [environment values](/reference/syntax/environment) from the standard
+library [`@nx/design`](/reference/libraries/design). A component reads `env.color.accent` or
+`env.space.md` instead of a raw color or number, and a theme changes what those names hold. This
+tutorial builds a button that reads the tokens, gives it tokens of its own, writes a brand theme
+with a light and a dark mode, and applies it to a whole app with one section in dark mode. It builds
+on the [Language Tour](/language-tour/elements) and the [Building Your First
+Component](/tutorials/building-your-first-component) tutorial.
 
-## 1) Define token types
-Start a file named `tokens.nx`, or work in the [playground](/play):
+## 1) Read the tokens
+
+Start a file named `app.nx`, or work in the [playground](/play). Import the library, and read a
+token with `env.` and its name:
 
 ```nx
-import "@nx/color" as c
+import "@nx/design"
 
-type ColorToken = { name:string value:c.Color }
-type SpaceScale = { xs:int sm:int md:int lg:int }
-type FontToken = { family:string size:int weight:int }
-type FontScale = { body:FontToken heading:FontToken }
+external component <Box fill: Color radius: Radius padding: Spacing content Children?: Element+ />
+external component <Text value: string color: Color style: TextStyle />
 
-type Theme = {
-  primary:ColorToken
-  surface:ColorToken
-  text:ColorToken
-  space:SpaceScale
-  fonts:FontScale
+let greeting() = {
+  <Box fill={env.color.surface} radius={env.radius.lg} padding={env.space.md}>
+    <Text value="Hello" color={env.color.text.normal} style={env.text.body} />
+  </Box>
 }
 ```
 
-- Tokens are strongly typed; you can constrain units (`int` for spacing) and required fields.
-- A scale is a record with one field per step, so each token has a name the compiler knows.
-- Group tokens into a `Theme` to pass around as a single object.
+- `Box` and `Text` stand for your host's drawing primitives. Their properties use the library's
+  value types, `Color`, `Radius`, `Spacing` and `TextStyle`, which tell tools what kind of value
+  each one takes.
+- Every token has a default, so this already renders as a neutral light theme.
+- A misspelled token is a compile error: `env.space.huge` lists the steps `SpaceScale` has.
 
-## 2) Create a base theme
-Each block from here on continues the same file:
+## 2) Give a component tokens of its own
 
-```nx fragment
-let baseTheme: Theme =
-  <Theme
-    primary=<ColorToken name="primary" value=#5B6EF5/>
-    surface=<ColorToken name="surface" value=#0B0C10/>
-    text=<ColorToken name="text" value=#F2F4F8/>
-    space=<SpaceScale xs=4 sm=8 md=12 lg=16/>
-    fonts=<FontScale
-      body=<FontToken family="Inter" size=16 weight=400/>
-      heading=<FontToken family="Inter" size=24 weight=700/>
-    />/>
-```
-
-## 3) Consume tokens in components
-Wire tokens into layout and styling instead of raw strings:
+A UI library declares its components' tokens as environment values of its own, whose defaults read
+the core tokens. Each block from here on continues the same file:
 
 ```nx fragment
-type Style = { backgroundColor:string color:string padding:string fontFamily:string }
+/// What a button looks like.
+export type ButtonTokens = {
+  fill: Color       /// The background.
+  text: Color       /// The label color.
+  radius: Radius    /// The corner radius.
+  padding: Spacing  /// The space around the label.
+  label: TextStyle  /// The label's text style.
+}
 
-let <Panel theme:Theme title:string  content body:Element /> =
-  <section
-    style=<Style
-      backgroundColor={c.toCss(theme.surface.value)}
-      color={c.toCss(theme.text.value)}
-      padding={theme.space.md + "px"}
-      fontFamily={theme.fonts.body.family}
-    />>
-    <h2>{title}</h2>
-    <div>{body}</div>
-  </section>
+/// What a button looks like, derived from the core tokens.
+export environment button: ButtonTokens = <ButtonTokens
+  fill={env.color.accent}
+  text={env.color.onAccent}
+  radius={env.radius.md}
+  padding={env.space.sm}
+  label={env.text.label}
+/>
+
+/// A button, styled entirely from `env.button`.
+export component <Button text: string /> = {
+  <Box fill={env.button.fill} radius={env.button.radius} padding={env.button.padding}>
+    <Text value={text} color={env.button.text} style={env.button.label} />
+  </Box>
+}
 ```
 
-- Because the theme is typed, you can’t accidentally use an unknown token name:
-  `theme.space.xxl` is a compile error that lists the fields `SpaceScale` has.
-- `Style` is a record too, so a misspelled style property is an error rather than a string that
-  silently does nothing.
-- Attribute values are ordinary expressions: `theme.space.md + "px"` joins the number and the unit
-  into `"12px"`.
+- A default is evaluated where it is read, so anything that changes `env.color.accent` changes the
+  button's fill too, with no extra wiring.
+- A theme can still set `env.button.radius` to change this library's buttons and nothing else.
+- Don't add roles by extending `SemanticColors`. A role the core lacks goes in a value of the
+  library's own, such as `env.uiColor.selection`, with a default that reads a core role.
 
-## 4) Swap themes without changing components
+## 3) Write a brand theme
+
+A theme is an `env.Update` bundle. It sets roles through their `.Update` records, so it names only
+what it changes. To differ by mode, match on `env.colorMode`:
 
 ```nx fragment
-let <App theme:Theme/> =
-  <Panel theme={theme} title="Design Tokens">
-    <p>Tokens flow through the component tree.</p>
-  </Panel>
-
-<App theme={baseTheme}/>
+/// The brand: green accents, a lighter green in dark mode, and pill-shaped buttons.
+export let brand: env.Update = <env.Update
+  color={
+    if env.colorMode is {
+      light => <SemanticColors.Update accent={standardPalette.green700} focus={standardPalette.green600} />
+      dark => <SemanticColors.Update
+        accent={standardPalette.green500}
+        onAccent={standardPalette.gray950}
+        focus={standardPalette.green400}
+      />
+    }
+  }
+  radius=<RadiusScale.Update md=8 lg=12 />
+  button=<ButtonTokens.Update radius=9999 />
+/>
 ```
 
-Drop in an alternate `Theme` instance to re-skin the UI without touching component code.
+- `standardPalette` is the library's palette, Tailwind CSS v4's colors. A brand can use its own
+  colors instead: any `Color` works.
+- Set `focus` wherever you set `accent`, or the focus ring stays the default blue.
+- The core roles `accent` and `radius` restyle every library that reads them; the `button` line
+  tunes this one library.
 
-## 5) Validate usage
-- Paste the whole file into the [playground](/play): it runs as you type, shows what `root`
-  returns, and reports errors against your source.
-- When you pass tokens through props, the type checker flags missing or mistyped fields—no separate JSON/YAML schema required.
+## 4) Apply it app-wide, with one dark section
 
-## 6) Extend the pattern
-- Add semantic tokens (e.g., `info`, `warning`, `error`) that map to base colors.
-- Create a `Button` component that derives its `tone` from `Theme.primary`.
-- Move the tokens into a library directory, mark the themes `export`, and import them across apps
-  with `import "./tokens"`.
+`provide` at the top of the main module applies the theme to the whole program. An `env.`
+attribute changes a single value for one element and everything inside it; a bundle can't be
+applied to one section yet:
+
+```nx fragment
+provide brand
+
+let root() = {
+  <Box fill={env.color.background} radius=0 padding=0>
+    <Button text="Save" />
+    <Box env.colorMode=dark fill={env.color.background} radius=0 padding={env.space.lg}>
+      <Button text="Save" />
+    </Box>
+  </Box>
+}
+```
+
+The first button is green 700. The second sits in a dark section, so the theme's dark case applies
+and it is green 500 with dark text, on the dark theme's background. The theme follows the mode
+because it is evaluated where it is read. A host usually sets the mode for the whole program from
+the system setting, as a root value of `env.colorMode`.
+
+## 5) Check it
+
+- Paste the whole file into the [playground](/play): it runs as you type and shows what `root`
+  returns.
+- The type checker flags a role that doesn't exist, a value of the wrong type, and a value outside
+  its type's range, such as a negative `Spacing`.
+- The default theme's text and `on…` colors meet WCAG contrast targets in both modes. A theme that
+  changes them can check its own with `@nx/color`'s `contrastRatio`.
+
+## Next steps
+
+- Read the [`@nx/design` reference](/reference/libraries/design) for every token and its default.
+- Follow the [style guide's token rules](/reference/style-guide#design-tokens) when naming your
+  own.
+- Move the button and its tokens into a library directory and import them across apps.

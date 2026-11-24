@@ -1333,7 +1333,7 @@ impl StandardLibrary {
 }
 
 /// The standard libraries the compiler carries.
-static STANDARD_LIBRARIES: [StandardLibrary; 6] = [
+static STANDARD_LIBRARIES: [StandardLibrary; 7] = [
     StandardLibrary::new(
         "@nx/agent",
         StandardLibraryStability::Unstable,
@@ -1362,6 +1362,29 @@ static STANDARD_LIBRARIES: [StandardLibrary; 6] = [
         ],
         "@nx-lang/color",
         "NxLang.Color",
+    ),
+    StandardLibrary::new(
+        "@nx/design",
+        StandardLibraryStability::Unstable,
+        &[
+            StandardLibraryModule {
+                identity: "palette.nx",
+                source: include_str!("std/design/palette.nx"),
+                runtime_functions: &[],
+            },
+            StandardLibraryModule {
+                identity: "tokens.nx",
+                source: include_str!("std/design/tokens.nx"),
+                runtime_functions: &[],
+            },
+            StandardLibraryModule {
+                identity: "types.nx",
+                source: include_str!("std/design/types.nx"),
+                runtime_functions: &[],
+            },
+        ],
+        "@nx-lang/design",
+        "NxLang.Design",
     ),
     StandardLibrary::new(
         "@nx/geometry",
