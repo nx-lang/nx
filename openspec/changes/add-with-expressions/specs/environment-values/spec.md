@@ -2,11 +2,13 @@
 
 ### Requirement: A `provide` block overrides values for an expression
 The language SHALL accept `provide overrides { body }` wherever an expression or markup content
-is, where `overrides` is one or more overrides, each either in the attribute form (`env.name=value`
-or `env.name.field=value`) or a bundle, `env with bundle`. `bundle` SHALL be an operand of the kind
-a `with` takes on its right (a name, member access, call, element or braced expression), optionally
-followed by more `with` steps (`env with brand with { radius=4 }`); after `with`, a brace whose first
-entry is `name=` SHALL be a field list, and the body SHALL follow the last override. Its value and
+is, where `overrides` is either one or more overrides in the attribute form (`env.name=value` or
+`env.name.field=value`), or one bundle, `env with bundle`, but not both. `bundle` SHALL be an
+operand of the kind a `with` takes on its right (a name, member access, call, element or braced
+expression), optionally followed by more `with` steps (`env with brand with { radius=4 }`); after
+`with`, a brace whose first entry is `name=` SHALL be a field list, and the body SHALL follow the
+last override or `with` step. A block that mixes the two forms SHALL be a syntax error whose message
+suggests a `with { name=value }` step in place of the attribute-form overrides. Its value and
 type SHALL be its body's. Attribute-form overrides SHALL be checked as an element's `env.`
 attributes are, `bundle` SHALL be of type `env.Update`, and a block without an override SHALL be a
 syntax error. `env with` anywhere else SHALL be rejected with `reserved-name`, whose message says
@@ -36,10 +38,15 @@ begins a block, a declaration, parameter or binding named `provide` SHALL be rej
 - **WHEN** a body renders `{ provide env with <env.Update radius=12 /> { <Banner /> } }`
 - **THEN** `Banner` SHALL read `radius` `12`, as it does with the bundle named `marketing` above
 
-#### Scenario: A bundle with a `with` chain, then attribute overrides
-- **WHEN** a body renders `{ provide env with marketing with { radius=4 } env.colorMode=dark {
-  <Banner /> } }`
+#### Scenario: A bundle with a `with` chain
+- **WHEN** a body renders
+  `{ provide env with marketing with { radius=4 colorMode=dark } { <Banner /> } }`
 - **THEN** `Banner` SHALL read `radius` `4` and `colorMode` `dark`, and `marketing`'s other values
+
+#### Scenario: Mixing a bundle and attribute-form overrides is rejected
+- **WHEN** a body renders `{ provide env with marketing env.colorMode=dark { <Banner /> } }`
+- **THEN** the module SHALL fail with a syntax error whose message suggests
+  `provide env with marketing with { colorMode=dark }`
 
 #### Scenario: `env with` outside a provide is rejected
 - **WHEN** a module contains `let saved = { env with marketing }`
@@ -101,9 +108,10 @@ written, each on the result of the one before.
   root value for it
 - **THEN** a read with no override around it SHALL be `8`
 
-#### Scenario: A single override after a bundle in one block wins
+#### Scenario: A `with` step after a bundle wins
 - **WHEN** `marketing` sets `radius=12` and a body renders
-  `{ provide env with marketing env.radius=0 { <Banner /> } }`, where `Banner` reads `env.radius`
+  `{ provide env with marketing with { radius=0 } { <Banner /> } }`, where `Banner` reads
+  `env.radius`
 - **THEN** `Banner` SHALL read `0`
 
 #### Scenario: A section bundle patches the app theme
@@ -224,9 +232,11 @@ set is empty, since it gives the same value at every read.
 #### Scenario: A section theme follows a mode set inside the section
 - **WHEN** `marketing` is `<env.Update color={ if env.colorMode is { light => a dark => b } } />`,
   the host sets no `colorMode`, whose default is `light`, and a body renders
-  `{ provide env with marketing env.colorMode=dark { <Banner /> } }`, where `Banner` reads
-  `env.color`
+  `{ provide env with marketing { <Section env.colorMode=dark><Banner /></Section> } }`, where
+  `Banner` reads `env.color`
 - **THEN** `Banner` SHALL read `b`
+- **AND** with `provide env with marketing with { colorMode=dark }` in place of the inner
+  attribute, `Banner` SHALL read `b` as well
 
 ## REMOVED Requirements
 

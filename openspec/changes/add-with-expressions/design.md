@@ -70,10 +70,14 @@ if they are needed. A field named `with` still works as an entry (`x with { with
 attribute and after `.`.
 
 In a `provide` block, `env with` takes the same operand, optionally followed by more `with` steps,
-and then the block's other overrides and its body: `provide env with brand with { radius=4 }
-env.colorMode=dark { … }`. `env with` anywhere else is `reserved-name`, with a message saying it is
-written only after `provide`; the main module's old `provide brand.theme` is a syntax error that
-suggests `provide env with brand.theme`.
+and then the body: `provide env with brand with { radius=4 colorMode=dark } { … }`. A block holds
+either attribute-form overrides (`provide env.a=… env.b=… { … }`, written as on an element) or one
+`env with` chain, never both; mixing them is a syntax error that suggests a `with { … }` step. The
+chain already gives an order, left to right, so the block needs no rule of its own for where a
+bundle sits among other overrides, and no question arises about a bundle after an `env.` override or
+two bundles in one block (Bret, thread, 2026-11-24). `env with` anywhere else is `reserved-name`,
+with a message saying it is written only after `provide`; the main module's old `provide
+brand.theme` is a syntax error that suggests `provide env with brand.theme`.
 
 Each field value is typed by the field it sets, so a bare union case works:
 `settings with { mode=dark }`. A present empty value clears an optional field: `user with {
@@ -85,8 +89,8 @@ Bret asked for one rule that can be explained without exceptions (thread, 2026-1
 there were two: defaults and main-module provides were evaluated where a value is read, local
 overrides where they are written. A bundle applied to a section exposed the cost of that split: a
 theme that varies by mode would be fixed to the mode at the section's edge, so `provide env with
-marketing env.colorMode=dark { … }` would apply marketing's light colors in a dark section, unless
-bundles got a third rule of their own.
+marketing { <Section env.colorMode=dark> … }` would apply marketing's light colors in a dark
+section, unless bundles got a third rule of their own.
 
 The rule now is: **an environment value is always computed where it is read.** Every default,
 provide, `env.` attribute and bundle is a formula that runs at the read, and inside it a read of the
@@ -145,9 +149,9 @@ Alternatives considered:
 ### 4. Where a bundle in a block sits in the lookup
 
 A bundle in a `provide` block is a local override: it counts among "the nearest override around the
-read". Its entries apply in the order written with the block's other overrides, each on the result
-of the one before. A value or field the bundle doesn't set falls through to the sources after it, so
-the bundle patches the place around it rather than resetting to defaults. This is how nested
+read". Its entries apply in order, those of later `with` steps after earlier ones, each on the
+result of the one before. A value or field the bundle doesn't set falls through to the sources after
+it, so the bundle patches the place around it rather than resetting to defaults. This is how nested
 `ThemeProvider`s in MUI and `FluentProvider`s in Fluent UI behave.
 
 ### 5. Paths go through required record fields

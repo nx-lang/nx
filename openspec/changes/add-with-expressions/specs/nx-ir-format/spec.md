@@ -5,7 +5,8 @@ NX IR SHALL encode an environment value as a declaration of kind `environment` h
 its default node, and exported as other declarations are. A read SHALL be an `envRead` node, kind
 `30`, holding a reference to the declaration, with any field read after it encoded as ordinary
 `member` nodes. A `provide` block, and an element with `env.` attributes, SHALL be an `envProvide`
-node, kind `31`, holding a list of overrides and a body. Each override SHALL hold a reference to the
+node, kind `31`, holding a list of overrides and a body; the list SHALL hold either attribute
+overrides or a single bundle override, never both. Each override SHALL hold a reference to the
 declaration, a list of field names that may be empty, a value node, and, only when the value is a
 formula, a fourth cell holding the formula flag; an override that is not a formula SHALL have no
 fourth cell, so its encoding is unchanged. A value is a formula when its static read set, following

@@ -23,8 +23,9 @@ these changes on top", so this change adds one word for both: `with`.
 - **`with` on update records and bundles.** `first with second` on two `T.Update` values is
   `merge(first, second)`. On an `env.Update` bundle it is a bundle with the second's overrides
   applied after the first's, so `brand with { radius.md=4 }` derives a theme from a theme.
-- **Bundles for one section.** `provide env with brand { … }` applies a bundle to its body. It mixes
-  with single overrides, in the order written: `provide env with marketing env.colorMode=dark { … }`.
+- **Bundles for one section.** `provide env with brand { … }` applies a bundle to its body. A block
+  holds either single overrides or one bundle, never both; a bundle is patched further with a `with`
+  chain: `provide env with marketing with { colorMode=dark } { … }`.
   The bundle can be named, written inline, or passed in a prop or local: an `env.Update` value keeps
   its entries as formulas, so it means the same wherever it is applied. It patches what is already
   there: values it doesn't set keep what the place around it has.
@@ -42,7 +43,8 @@ these changes on top", so this change adds one word for both: `with`.
 - **Diagnostics:** `with-target` (the left side is not a record, update record or bundle) and
   `with-path` (a path step that is not a required record field). `environment-cycle` also covers an
   override of `V` that reads a value whose default reads `V`, and a runtime
-  `nx-ir-environment-cycle` covers the case only placement reveals. A wrong-typed field gets the
+  `nx-ir-environment-cycle` covers the case only placement reveals. A block that mixes a bundle with
+  `env.` overrides is a syntax error that suggests a `with { … }` step. A wrong-typed field gets the
   usual mismatch.
 - **NX IR:** record `with` lowers to the existing `apply` intrinsic, so it needs nothing new. Bundle
   `with` adds a base operand to `envUpdate`; `envProvide` gains bundle overrides and formulas, and
