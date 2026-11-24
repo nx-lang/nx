@@ -89,3 +89,28 @@ the skip check see the same reads whether a derived result was evaluated or reus
   `colorMode`
 - **THEN** the `Footer` node SHALL render again and read the colors of the new mode
 
+### Requirement: A dispatch renders again only when a state field the render read changed
+A component render SHALL record, on the instance it produces, the state fields its body read. After
+a dispatch's handlers run, the Rust and TypeScript IR runtimes SHALL compare the state the dispatch
+ends with against the state it began with, field by field, charged as `diff` compares fields, and
+SHALL render the body again only when a field the last render read differs. Otherwise the
+dispatch SHALL return an instance holding the new state with the previous rendered output and
+handlers, and SHALL report that it did not render. A stored instance SHALL carry its record, and an
+instance restored without one SHALL render on every dispatch. Handlers SHALL keep reading state live
+when they run.
+
+#### Scenario: A field only handlers read causes no render
+- **WHEN** a `Toggle` component's body reads `on` and not `pressedAt`, and a dispatch's handler
+  patches only `pressedAt`
+- **THEN** the dispatch SHALL NOT render the body, SHALL return the previous rendered output, and
+  SHALL hold the new `pressedAt`
+- **AND** a later handler that reads `pressedAt` SHALL see the new value
+
+#### Scenario: A field the body read causes a render
+- **WHEN** a dispatch's handler patches `on`
+- **THEN** the dispatch SHALL render the body again with the new `on`
+
+#### Scenario: Both runtimes skip alike
+- **WHEN** both IR runtimes run the same dispatch that patches only an unread field
+- **THEN** both SHALL return the same instance state and output and count the same operations
+

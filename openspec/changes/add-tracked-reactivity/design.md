@@ -23,19 +23,21 @@ node must render again.
 
 **Goals:**
 
-- One model for what is computed again when data changes, used by component renders and by derived
-  values alike.
-- Implement the part that removes the token cost now: each derived result is evaluated at most once
-  for each environment it depends on, within one call.
-- Keep the operation count a function of the images, the input and the tree's held state, identical
-  in the Rust and TypeScript IR runtimes.
-- Change no result. NX evaluation is pure, so a reused result equals a fresh one.
-- Track the reads that actually happened, rather than a set the compiler predicts.
+- One model for what is computed again when data changes, and how the host learns of it, used by
+  component renders and by derived values alike.
+- Each derived result evaluated at most once for each environment it depends on, within a call and,
+  in the tree, across renders.
+- A dispatch or a new descriptor renders a body again only when something it read changed.
+- Changes pushed to exactly the computations that read them, and reported to the host as a change
+  set.
+- The operation count a function of the images, the input and the tree's held state, identical in
+  the Rust and TypeScript IR runtimes.
+- No result changes. NX evaluation is pure, so a reused result equals a fresh one.
 
 **Non-Goals:**
 
-- Implementing state-read tracking or reuse across passes in this change (Decision 9 designs them).
-- Lazy record fields.
+- A tree that walks rendered output itself; an instance tree in the TypeScript runtime; lazy record
+  fields; anything finer than a component body.
 
 ## The model
 
@@ -60,8 +62,9 @@ otherwise. How "the same thing" is checked depends on how long the result is kep
 
 The tree already follows the second row for environment reads: a node records what its render read
 and renders again on a root change only when a read now differs (`set_environment`), and a child
-whose descriptor is equal keeps its render. Decisions 1 to 8 implement the first row. Decision 9
-extends the second row to state fields and to derived values.
+whose descriptor is equal keeps its render. Decisions 1 to 8 implement the first row. Decisions 9
+to 13 extend the second row to state fields, props and derived values, and add notifications and the
+change set.
 
 ## Decisions
 
@@ -73,7 +76,7 @@ input. A cache hidden on the linked program would make a call cheaper because of
 made before it.
 
 Keeping results across calls is still the goal, and the model says where they belong: in state the
-host holds and passes back, which the instance tree already is (Decision 9). There, a count that
+host holds and passes back, which the instance tree already is (Decision 11). There, a count that
 depends on earlier calls depends on the tree's held state, as a pass already does.
 
 ### 2. Which results are cached, and what identifies them
@@ -160,43 +163,88 @@ record, with the values found and with the same "found under the call's own over
 `take_environment_reads` uses today. So the tree's behavior does not change when a derived result is
 reused instead of evaluated.
 
-### 9. Next: state reads and reuse across passes
+### 9. State fields are sources, and a dispatch follows them
 
-These steps follow from the model, and are the next change.
+A render records the state fields it read, by name, on the instance. A dispatch runs its handlers
+as today, with live state, and then compares the state it ends with against the state it began with,
+field by field, charged as `diff` compares fields. The body renders again only when a field it read
+differs. Otherwise the instance takes the new state and keeps its rendered output and handlers. The
+dispatch result says whether it rendered, so the tree leaves a node that did not render settled.
 
-- **State fields are sources.** A render records the state fields it read. A dispatch patches some
-  fields. The dispatched node renders again only when its render read a patched field. Its children
-  are then skipped by descriptor equality, as today. A handler reads state live when it runs, so a
-  field read only by handlers never causes a render. A node's render that read no patched field
-  keeps its output, and the host's pass finds it settled.
-- **Derived results are kept across passes.** The tree keeps the derived results its renders
-  evaluated, each with its record of values found, and offers them to the next render of any node.
-  A result is reused when every read in its record, looked up at the asking read, finds an equal
-  value. That lookup and comparison is charged as the skip check is charged today. So a render after
-  a dispatch reuses the palette and the `color` default instead of rebuilding them. The count stays a
-  function of the images, the input and the tree's held state, which is already true of a pass.
+Both IR runtimes have the component lifecycle, so both do this, with equal counts. A stored
+instance carries its state read record, and a restored one without a record renders on every
+dispatch, which is what happens today.
 
-- **Changes are pushed, not polled.** Every source keeps an index of the tracked computations whose
-  records hold it, as the tree's `readers` index already does for root values. A change to a source,
-  whether a root value from `set_environment` or a state field a dispatch patched, notifies exactly
-  those computations, which become stale. Nothing else is checked. Within one call, records are
-  checked when a result is asked for instead, because the check is free there and a call's
-  overrides last only for the call.
-- **The host gets a change set.** After a dispatch or a root change, the tree tells the host which
-  nodes rendered again, which were added and which were removed, so a host updates what it derived
-  from those nodes without walking the tree or comparing output. This is the "tree the runtime
-  maintains, with a change set" in `specs/future.md`, and `is_settled` remains for hosts that walk.
+A handler bound by the body always runs against the instance that made it, and reads that
+instance's state live when it runs (`component-action-handlers`), even when a child emits the action
+that triggers it. So the state a handler captured is never read, and keeping the old handlers is
+sound: a field read only by handlers never needs a render.
 
-The TypeScript runtime has no instance tree yet, so these steps are Rust first. When the TypeScript
-tree arrives, it follows the same model.
+### 10. Props are sources, and a new descriptor follows them
+
+A render records the props it read. When the tree visits a node with a descriptor that differs, it
+renders again only when a recorded prop, or a prop read by a handler the body bound, differs, by
+value. The runtime finds the slots a handler node reads as it finds a formula's locals
+(`slots_read`). Otherwise the node takes the new descriptor and keeps its render, as it already does
+for a change that touches only `$env`. The comparison is charged as `same_descriptor` is charged today,
+over the recorded props only.
+
+A content parameter counts as one prop. Handler props bound for emits are rebound as today and are
+not reads.
+
+### 11. The tree keeps derived results across renders
+
+The tree keeps the derived results its renders evaluated, each with its record of values found
+(Decision 8 gives a reused result's record to the render that reused it). It offers them to every
+later render, whichever node it is for. A kept result is reused at a use when each read in its
+record, looked up in the environment of the use, finds an equal value. The lookup is the read the
+skip check makes and is charged the same way; the comparison is charged as a comparison. A kept
+result that fails the check is replaced by the new evaluation.
+
+Kept results live as long as the tree. A root change marks stale the results that read a changed
+value (Decision 12), so they are evaluated afresh at their next use. Within a call, a result found in
+the tree enters the call's own cache, and Decisions 1 to 4 apply from there.
+
+The count of a render now depends on what the tree holds, which a pass's count already does, and a
+host that wants a count independent of history evaluates outside the tree.
+
+### 12. Changes are pushed, not polled
+
+Every source keeps an index of the tracked computations whose records hold it:
+
+- environment values: the nodes and the kept results that read each one, extending the tree's
+  `readers` index;
+- state fields: the instance's own record, since only the owner's body reads its state;
+- props: the node's own record.
+
+`set_environment` finds the changed root values, marks stale exactly the nodes and kept results the
+index names, and renders the stale nodes as today. A dispatch consults the instance's state record.
+Nothing that the index does not name is checked. Within one call there are no notifications: a
+call's records are checked when a result is asked for, because that check is free.
+
+### 13. The host gets a change set
+
+The tree keeps a change set: the keys of the nodes that rendered again, that were added and that
+were removed since the host last took it. `take_changes` returns it and clears it. A node that was
+added and then removed before the host took the set appears in neither list. A node that rendered
+several times appears once. A host that derives something from nodes, such as native controls or an
+index, updates exactly those and needs no walk. `is_settled` stays for hosts that walk, and the two
+agree: a node is unsettled exactly when it or a node under it is in the rendered or added lists of
+changes not yet walked.
 
 ## Risks / Trade-offs
 
 - **Every recorded count changes.** Every corpus program that reads a value or a default more than
   once gets smaller counts. The regeneration is mechanical. The PR's corpus diff shows each change,
   and `design-tokens-theme`'s drop is the measurement this change exists for.
-- **Reuse is per call.** A host that renders many components still builds the palette once per
-  render. Decision 9 is the next step.
+- **Counts depend on the tree's history.** A render's count includes the checks of kept results
+  and excludes what they save, so the same render costs less in a warm tree. This is already true of
+  a pass, and is stated in the cost rules.
+- **Recording props and state reads touches every render.** The records are small (bounded by the
+  component's declared props and state fields) and replace work the dispatch and visit skip.
+- **Handler reads must be exact.** A handler whose slots are recorded wrongly could keep stale
+  captures. The compiler's handler slot analysis is the source, and the corpus's handler programs
+  run with the skip on.
 - **One entry per derived result.** A call that alternates between environments evaluates again at
   each switch. That is at most what it costs today.
 - **The rule must be exact in both runtimes.** A difference in when a token is taken would show as a
