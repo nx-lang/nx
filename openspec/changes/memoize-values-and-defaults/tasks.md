@@ -12,7 +12,8 @@
   nothing beyond the asking node on reuse.
 - [ ] 1.5 Replay a reused result's reads into the instance tree's read list, keeping the
   "found under the call's own overrides" flag, so the skip check sees the same reads.
-- [ ] 1.6 Unit tests for each scenario in the `nx-ir-format` delta.
+- [ ] 1.6 Unit tests for each scenario in the `reactivity` and `nx-ir-format` deltas, the tree's
+  reader-through-a-reused-default case included.
 
 ## 2. TypeScript IR runtime
 
@@ -42,4 +43,6 @@
   cost paragraphs, and a section on reusing derived results.
 - [ ] 5.2 `specs/ir-conformance/README.md`: describe `environment-reuse`.
 - [ ] 5.3 `specs/future.md`: remove "Memoizing defaults", "A bundle's values are computed at every
-  read" and most of "Reading a token is expensive", and add reuse across calls as later work.
+  read" and most of "Reading a token is expensive". Rewrite the reactivity direction's steps in
+  terms of the tracked-computation model, with state-read tracking and reuse across passes in the
+  tree (design Decision 9) as the next change.

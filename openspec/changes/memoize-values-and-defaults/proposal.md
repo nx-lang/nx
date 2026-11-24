@@ -1,100 +1,89 @@
 ## Why
 
-Reading a design token is slow. In `specs/ir-conformance/design-tokens-theme`, one
-`env.color.accent` read costs 28,440 operations and one `env.button.radius` read costs 231,969,
-even though the brand sets the radius outright. Three things multiply:
+NX needs one answer to the question every reactive UI system answers: when data changes, what has
+to be computed again? Today it has two partial answers. The instance tree records which environment
+values each component render read, so that a change to a root value renders again only the nodes
+that read it, and it skips a child whose props are unchanged. Everything else is computed again
+every time it is asked for. A top-level value is evaluated at every `reference`. An environment
+value's default, an entry-module provide and a formula are evaluated at every read that reaches
+them.
 
-- an environment value's default, an entry-module provide and a formula are evaluated again at
-  every read that reaches them;
-- reading one field of a record default evaluates the whole record, so `env.button.radius` also
-  evaluates `env.color` twice and all of `env.text`;
-- a top-level value is evaluated again at every `reference`, so each of the dozen
-  `standardPalette.…` reads in `env.color`'s default builds all 55 colors.
+That second gap is what makes design tokens slow. In `specs/ir-conformance/design-tokens-theme`,
+one `env.color.accent` read costs 28,440 operations and one `env.button.radius` read costs 231,969,
+mostly rebuilding `standardPalette` and the `color` and `text` defaults again and again.
 
-NX evaluation is pure, so evaluating one of these again where nothing it depends on has changed
-gives the same value. Most of this work can be skipped without changing any result. Doing it before
-UI libraries depend on `@nx/design` keeps token reads cheap from the start, and makes the tokens
-cheap to read without asking authors to restructure them.
-
-The reactivity design agreed with `skip-unchanged-children` and `add-environment-values` already
-tracks, at run time, which environment values a component body read, so that a node renders again
-only when one of them changed. This change applies the same idea one level down: a derived value is
-evaluated again only when an environment value it actually read is found from different overrides.
+Fixing the token cost with a cache of its own would give NX a third mechanism. This change instead
+defines one general model, *tracked computations*, that the tree's renders and these derived values
+both follow. It implements the part that removes the token cost now, and lays out how state reads
+and reuse across passes follow from the same model.
 
 ## What Changes
 
-- **Results are reused within one evaluation.** Within one call of an evaluation API, a runtime
-  keeps the result of each evaluation of four kinds of *derived result*:
-  - a top-level value declaration's value, checked against its declared type;
-  - an environment value's default, checked against its type;
-  - an entry-module provide's value, a bundle provide's bundle included;
-  - a captured formula's value.
-
-  With each result it records the environment values the evaluation read, at any depth, and where
-  each read found its value. A later use of the same derived result reuses the result when every
-  recorded read would still find its value from the same overrides. Otherwise the result is
-  evaluated again, and the new result replaces the old one.
-- **Reads are tracked, not predicted.** The record is the reads the evaluation made, not a static
-  read set the compiler works out. A default that reads `env.colorMode` in only one branch depends
-  on `colorMode` only when it takes that branch. Both runtimes make the same reads in the same
-  order, so they make the same reuse decisions and count the same operations.
-- **An override counts as a change whatever its value.** A read whose nearest override is a
-  different `envProvide`, `env.` attribute, `$env` entry or bundle entry counts as changed, even
-  when the override sets an equal value. Comparing values would cost operations, and an identity
-  check costs none.
-- **Values that read no environment are evaluated once per call.** A top-level value with no
-  environment reads, such as `standardPalette`, records none, so its first result is reused for the
-  rest of the call.
-- **The cost model changes.** A reused result costs nothing beyond the node that asked for it: the
-  `reference` or `envRead` node's one operation. The first evaluation, and each evaluation again,
-  is charged as today. `docs/nx-ir-format.md`'s cost rules and the conformance corpus's recorded
-  operation counts change to match. No result changes.
-- **Generated code reuses results the same way.** Generated JavaScript and TypeScript keep the
-  same derived results for one call of a generated entry function or one component evaluation,
-  under the same rule, so all three engines give the same values with similar costs. Generated code
-  counts no operations, so only its speed changes.
-- **A corpus program for reuse.** `environment-reuse` pins the rule's cases with their operation
-  counts: a value read twice, a default read twice, a default evaluated again after an override of
-  a value it reads, a default reused across an override of a value it doesn't read, a branch that
-  reads a value only sometimes, an override with an equal value, a formula read twice, and reads
-  inside nested provides.
+- **One model for reactivity.** A *source* is a piece of data that can change: an environment value
+  as an override, the host's root values or a default supply it, a component's state field, or a
+  prop. A *tracked computation* is a component render, a top-level value, an environment value's
+  default, an entry-module provide or a captured formula. Each tracked computation records the
+  sources it actually read, at any depth, and what it found. A computation is reused while every
+  recorded read would find the same thing, and is computed again otherwise. Reads are tracked at
+  run time, not predicted by the compiler, so a branch that reads a value only sometimes depends on
+  it only when taken. The language gets no new syntax: authors write plain values and components.
+- **Within one call, reads compare by identity.** Every override the call pushes has an identity of
+  its own. A read records the identity of the override that supplied it, so checking a record is
+  free and never depends on the size of a value. A new override counts as a change even when it
+  sets an equal value.
+- **Across calls, reads compare by value.** The instance tree already holds each render's
+  environment reads with the values found, and renders a node again only when one of them differs.
+  That is the same model, with values compared because the overrides of one call are gone by the
+  next.
+- **Derived values are reused within one call.** This change's implementation: the Rust and
+  TypeScript IR runtimes and generated code keep the last result of each top-level value, default,
+  entry-module provide and formula for the rest of the call, under the rule above. A value that
+  reads no environment, such as `standardPalette`, is evaluated once per call.
+- **The tree's read records become the model's records.** The records the tree already keeps for
+  its renders are built from the same reads, including reads inside reused results, so the tree
+  sees the same dependencies whether a derived result was evaluated or reused.
+- **The cost model changes.** A reused result costs only the asking node's one operation.
+  `docs/nx-ir-format.md`'s cost rules and every recorded corpus count that reads a value or default
+  more than once change. No result changes. Counts stay a function of the images, the input and,
+  for the tree, the state it holds.
+- **A corpus program for reuse.** `environment-reuse` pins each case of the rule with its
+  operation counts.
+- **The next steps are recorded.** Tracking reads of state fields, so that a dispatch renders a
+  body again only when it read a patched field, and keeping derived results in the tree across
+  passes, so that a render after a dispatch reuses the palette, follow from the same model.
+  `design.md` lays them out, and `specs/future.md` records them as the next change.
 
 ## Capabilities
 
 ### New Capabilities
 
-None.
+- `reactivity`: the tracked-computation model, the reads a computation records, and reuse within
+  one call.
 
 ### Modified Capabilities
 
-- `nx-ir-format`: the cost rules charge a reused derived result nothing beyond the node that asked
-  for it, and environment lookups reuse defaults, provides and formulas under the rule above.
+- `nx-ir-format`: the cost rules charge a reused result nothing beyond the asking node, and
+  environment lookups reuse defaults, provides and formulas.
 - `executable-code-generation`: generated code reuses derived results within one call under the
   same rule.
 
 ## Impact
 
-- `crates/nx-ir-runtime`: a per-call cache in `Machine`, layer identities on the environment stack,
-  read recording during derived evaluations, and reuse in `eval_reference`,
-  `provided_or_default` and `source_value`.
-- `runtime/typescript`: the same cache in the TypeScript IR runtime, and `dist` rebuilt.
-- `crates/nx-codegen`: the generated environment helpers (`nxEnvironment`, `nxWithEnvironment`,
-  `nxFormula`) and the code emitted for top-level values that read the environment.
-- `docs/nx-ir-format.md`, `specs/ir-conformance/README.md` and `specs/future.md`: cost rules,
-  the new corpus program, and the entries this change resolves.
-- `specs/ir-conformance`: every program's recorded operation counts that read a value or a default
-  more than once go down, and `environment-reuse` is new.
+- `crates/nx-ir-runtime`: layer identities on the environment stack, a per-call record of tracked
+  computations in `Machine`, reuse in `eval_reference`, `provided_or_default` and `source_value`,
+  and the tree's read records built from the same reads.
+- `runtime/typescript`: the same in the TypeScript IR runtime, and `dist` rebuilt.
+- `crates/nx-codegen`: the generated environment helpers and the thunks of top-level values that
+  read the environment.
+- `docs/nx-ir-format.md`, `specs/ir-conformance/README.md` and `specs/future.md`.
+- `specs/ir-conformance`: recorded operation counts go down, and `environment-reuse` is new.
 - Hosts see no API change. A host that sets a budget sees smaller counts.
 
 ## Non-goals
 
-- **Reuse across calls.** The cache lives for one call, so the operation count stays a property of
-  the images and the input alone. A result kept across calls would make a call's count depend on
-  the calls before it. Each component render is one call, so a palette is still built once per
-  render. Keeping results across calls, for example by charging a reused result the operations its
-  first evaluation cost, is left for later.
+- **State-read tracking and reuse across passes, in this change.** Both are designed here and are
+  the next change, so each step can be measured on its own.
+- **Fine-grained reactivity.** No signals or subscriptions in the language, and nothing finer than a
+  component body, as the reactivity direction in `specs/future.md` already decided.
 - **Lazy record fields.** Reading `env.button.radius` still evaluates the whole `button` default
-  once. Once that result is reused, its other fields cost nothing more, and evaluating fields lazily
-  would change when errors appear.
-- **Tracking reads of component state.** Re-rendering only the bodies that read a patched state
-  field is step 2 of the reactivity plan in `specs/future.md`, and is a change of its own.
+  once. Evaluating fields lazily would change when errors appear.

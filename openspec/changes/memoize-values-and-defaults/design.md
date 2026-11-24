@@ -23,33 +23,58 @@ node must render again.
 
 **Goals:**
 
-- Evaluate each derived result at most once for each distinct environment it depends on, within
-  one call.
-- Keep the operation count a function of the images and the input alone, identical in the Rust
-  and TypeScript IR runtimes.
+- One model for what is computed again when data changes, used by component renders and by derived
+  values alike.
+- Implement the part that removes the token cost now: each derived result is evaluated at most once
+  for each environment it depends on, within one call.
+- Keep the operation count a function of the images, the input and the tree's held state, identical
+  in the Rust and TypeScript IR runtimes.
 - Change no result. NX evaluation is pure, so a reused result equals a fresh one.
-- Track the reads that actually happened, as the instance tree does, rather than a set the compiler
-  predicts.
+- Track the reads that actually happened, rather than a set the compiler predicts.
 
 **Non-Goals:**
 
-- Reuse across calls (see Decision 1).
-- Lazy record fields, and reads of component state (see the proposal).
+- Implementing state-read tracking or reuse across passes in this change (Decision 9 designs them).
+- Lazy record fields.
+
+## The model
+
+Two kinds of thing take part.
+
+A **source** is data that can change: an environment value, which an override, a host root value,
+an entry-module provide or a default supplies; a component's state field; and a prop.
+
+A **tracked computation** is something whose result depends only on the sources it reads, because
+NX evaluation is pure: a component render, a top-level value, an environment value's default, an
+entry-module provide and a captured formula.
+
+Each tracked computation records the sources it read, at any depth, and what it found. Reading
+another tracked computation, evaluated or reused, adds that computation's reads to its own record.
+A computation is reused while every recorded read would find the same thing, and is computed again
+otherwise. How "the same thing" is checked depends on how long the result is kept:
+
+| Kept | A read compares by | Why |
+| --- | --- | --- |
+| Within one call | The identity of what supplied it | Free, and needs no value comparison |
+| Across calls, in the instance tree | The value found | The overrides of one call are gone by the next |
+
+The tree already follows the second row for environment reads: a node records what its render read
+and renders again on a root change only when a read now differs (`set_environment`), and a child
+whose descriptor is equal keeps its render. Decisions 1 to 8 implement the first row. Decision 9
+extends the second row to state fields and to derived values.
 
 ## Decisions
 
-### 1. The cache lives for one call
+### 1. Within one call, results live in the call's state
 
 A runtime keeps derived results in its per-call state (`Machine` in Rust, the evaluation context in
-TypeScript) and drops them when the call returns. A call's count then still depends only on its
-images and input. A cache kept on the linked program would make a call cheaper because of calls
-made before it, and two hosts that make the same call would be charged differently.
+TypeScript) and drops them when the call returns. A call's count then depends only on its images and
+input. A cache hidden on the linked program would make a call cheaper because of unrelated calls
+made before it.
 
-*Alternative:* keep results on the program and charge each call, at its first use, the operations
-the first evaluation cost. That keeps counts deterministic and saves time across calls, but a budget
-failure would then fall at a different place than a real evaluation's failure, and a recorded cost
-has to be stored with each result. It is the natural next step if per-render palette builds show up
-in profiles. It is recorded in `specs/future.md`.
+Keeping results across calls is still the goal, and the model says where they belong: in state the
+host holds and passes back, which the instance tree already is (Decision 9). There, a count that
+depends on earlier calls depends on the tree's held state, as a pass already does.
 
 ### 2. Which results are cached, and what identifies them
 
@@ -127,13 +152,40 @@ sequence number and the cache lives in that state. Component evaluation gets its
 way. Values that read no environment are already constants evaluated at load. That is reuse across
 calls, and it changes no count anyone can see.
 
+### 8. The tree's records are the model's records
+
+A node's read list, which `set_environment` and the skip check use, is the record of its render.
+Reads made inside a derived result that the render reused are added to it from the reused result's
+record, with the values found and with the same "found under the call's own overrides" flag that
+`take_environment_reads` uses today. So the tree's behavior does not change when a derived result is
+reused instead of evaluated.
+
+### 9. Next: state reads and reuse across passes
+
+Two steps follow from the model, and are the next change.
+
+- **State fields are sources.** A render records the state fields it read. A dispatch patches some
+  fields. The dispatched node renders again only when its render read a patched field. Its children
+  are then skipped by descriptor equality, as today. A handler reads state live when it runs, so a
+  field read only by handlers never causes a render. A node's render that read no patched field
+  keeps its output, and the host's pass finds it settled.
+- **Derived results are kept across passes.** The tree keeps the derived results its renders
+  evaluated, each with its record of values found, and offers them to the next render of any node.
+  A result is reused when every read in its record, looked up at the asking read, finds an equal
+  value. That lookup and comparison is charged as the skip check is charged today. So a render after
+  a dispatch reuses the palette and the `color` default instead of rebuilding them. The count stays a
+  function of the images, the input and the tree's held state, which is already true of a pass.
+
+The TypeScript runtime has no instance tree yet, so both steps are Rust first. When the TypeScript
+tree arrives, it follows the same model.
+
 ## Risks / Trade-offs
 
 - **Every recorded count changes.** Every corpus program that reads a value or a default more than
   once gets smaller counts. The regeneration is mechanical. The PR's corpus diff shows each change,
   and `design-tokens-theme`'s drop is the measurement this change exists for.
 - **Reuse is per call.** A host that renders many components still builds the palette once per
-  render. Decision 1 records the next step.
+  render. Decision 9 is the next step.
 - **One entry per derived result.** A call that alternates between environments evaluates again at
   each switch. That is at most what it costs today.
 - **The rule must be exact in both runtimes.** A difference in when a token is taken would show as a
