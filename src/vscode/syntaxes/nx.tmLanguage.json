@@ -401,7 +401,7 @@
         {
           "comment": "`with` after an operand: `light with { accent=… }`, `a with b`. A `with` after `.` or before `=` is a name: `x.with`, `<T with=3 />`, `{ with=3 }`.",
           "name": "keyword.operator.with.nx",
-          "match": "(?<=[A-Za-z0-9_)\\]}\"'>])\\s+\\K\\bwith\\b(?!\\s*=)"
+          "match": "(?<=[A-Za-z0-9_)\\]}\"'>])\\s+\\K\\bwith\\b(?!\\s*[=:?])"
         },
         {
           "name": "keyword.operator.arrow.nx",

@@ -64,20 +64,19 @@ fn with_on_an_optional_suggests_unwrapping_it() {
         &format!("{TYPES}let h(u: User) = {{ u.home with {{ city=\"Rome\" }} }}"),
         "with-target",
     );
-    assert!(
-        message.contains('?') || message.contains("optional"),
-        "{message}"
-    );
+    assert!(message.contains("if x? {"), "{message}");
 }
 
 #[test]
 fn with_on_a_sequence_is_with_target() {
-    message_of(
+    let message = message_of(
         &format!(
             "{TYPES}let all(): User+ = {{ ada() ada() }}\nlet s() = {{ all() with {{ age=1 }} }}"
         ),
         "with-target",
     );
+    assert!(message.contains("for item in x"), "{message}");
+    assert!(!message.contains("??"), "{message}");
 }
 
 #[test]

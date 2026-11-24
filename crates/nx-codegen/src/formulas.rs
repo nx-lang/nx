@@ -8,7 +8,7 @@
 //! functions and values it names and of the defaults of the values it reads. A call whose callee is
 //! known only at run time may read anything, so it makes the value a formula too.</para>
 
-use crate::ir::{visit_declaration_expressions_mut, visit_expression};
+use crate::ir::{visit_declaration_expressions_mut, visit_expression, visit_expression_mut};
 use crate::model::{
     CodegenDeclarationKind, CodegenExpression, CodegenExpressionKind, CodegenModule,
     CodegenReference, CodegenStatement,
@@ -118,19 +118,24 @@ fn reads_environment(expression: &CodegenExpression, reading: &FxHashSet<Key>) -
 /// `env.Update`, whose value reads the environment.
 pub(crate) fn mark_formulas(modules: &mut [CodegenModule]) {
     let reading = reading_declarations(modules);
+    let mut mark = |expression: &mut CodegenExpression| {
+        let overrides = match &mut expression.kind {
+            CodegenExpressionKind::Provide { overrides, .. }
+            | CodegenExpressionKind::EnvUpdate { overrides, .. } => overrides,
+            _ => return,
+        };
+        for provided in overrides.iter_mut() {
+            provided.formula =
+                provided.target.is_some() && reads_environment(&provided.value, &reading);
+        }
+    };
     for module in modules.iter_mut() {
         for declaration in module.declarations.iter_mut() {
-            visit_declaration_expressions_mut(declaration, &mut |expression| {
-                let overrides = match &mut expression.kind {
-                    CodegenExpressionKind::Provide { overrides, .. }
-                    | CodegenExpressionKind::EnvUpdate { overrides, .. } => overrides,
-                    _ => return,
-                };
-                for provided in overrides.iter_mut() {
-                    provided.formula =
-                        provided.target.is_some() && reads_environment(&provided.value, &reading);
-                }
-            });
+            visit_declaration_expressions_mut(declaration, &mut mark);
+        }
+        // A main-module `provide env with { … }` holds its inline bundle here, not in a declaration.
+        for provide in module.provides.iter_mut() {
+            visit_expression_mut(&mut provide.value, &mut mark);
         }
     }
 }

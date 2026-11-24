@@ -117,12 +117,15 @@ impl InferenceContext<'_> {
             let (item, _) = left_ty.split();
             let patchable =
                 matches!(item, Type::Named(named) if self.record_definition_for(named).is_some());
-            let hint = if patchable {
-                "; a `with` patches one value, so unwrap it first: `(x ?? fallback) with { … }`, \
-                 or test it with `if x is { some }`"
-                    .to_string()
-            } else {
-                String::new()
+            let hint = match (patchable, occurrence == Occurrence::OPTIONAL) {
+                (true, true) => {
+                    "; a `with` patches one value, so unwrap it first: `if x? { x with { … } }` or \
+                     `(x ?? fallback) with { … }`"
+                }
+                (true, false) => {
+                    "; a `with` patches one value, so patch each item: `for item in x { item with { … } }`"
+                }
+                (false, _) => "",
             };
             self.error(
                 "with-target",

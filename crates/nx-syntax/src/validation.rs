@@ -172,6 +172,26 @@ fn validate_provide_forms(node: &SyntaxNode, file_name: &str, diagnostics: &mut 
                 );
             }
         }
+        SyntaxKind::PROVIDE_BUNDLE => {
+            // `provide marketing with { … }` reads as a bundle applied by `marketing`: the bundle
+            // is the first operand of an `env with` chain, so keep it and its steps.
+            if let Some(head) = node.children().next().filter(|head| head.text() != "env") {
+                let suggestion = format!("provide env with {}", node.text());
+                diagnostics.push(
+                    Diagnostic::error("syntax-error")
+                        .with_message(format!(
+                            "A bundle is applied with `provide env with`: write `{}`",
+                            suggestion
+                        ))
+                        .with_label(
+                            Label::primary(file_name, head.span())
+                                .with_message("`provide` needs `env with` before a bundle"),
+                        )
+                        .with_note(format!("Write `{}`.", suggestion))
+                        .build(),
+                );
+            }
+        }
         _ => {}
     }
     for child in node.children() {

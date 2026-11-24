@@ -1,0 +1,38 @@
+// A main-module inline bundle, a bundle passed as a component prop, a mode set inside a section,
+// and the runtime cycle error.
+type ColorMode = light | dark
+
+environment colorMode: ColorMode = light
+environment radius: int = 2
+environment zero: int = 0
+environment space: int = 4
+environment gap: int = 0
+environment accent: string = "gray"
+environment a: int = 1
+environment b: int = { env.a + 1 }
+
+// Each entry is a formula: `space` would divide by zero, but only a read of `space` computes it.
+provide env with { space={10 / env.zero} radius=5 gap={env.radius * 2} }
+
+let radius() = { env.radius }
+/// `gap` reads the `radius` the same bundle sets.
+let gap() = { env.gap }
+/// A `zero` set nearer the reader is the one `space` reads.
+let space() = { provide env.zero=2 { env.space } }
+
+/// A theme whose accent follows the mode wherever it is read.
+let theme: env.Update = <env.Update accent={if env.colorMode is { light => "blue" dark => "navy" }} />
+
+/// A bundle passed as a prop, applied to the component's body; the accent is read twice, and the
+/// second read is in a section set to dark mode.
+component <Section look: env.Update = {theme} /> = {
+  provide env with look {
+    <span accent={env.accent} />
+    <span accent={provide env.colorMode=dark { env.accent }} />
+  }
+}
+
+let readB(): int = { env.b }
+/// `b`'s default reads `a`, whose override calls back into `b`: a cycle the check can't see,
+/// because the function is passed in.
+let cycle(read: <function />: int): int = { provide env.a={<read />} { env.b } }

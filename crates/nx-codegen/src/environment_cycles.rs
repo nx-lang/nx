@@ -77,22 +77,31 @@ pub(crate) fn environment_cycle_diagnostics(modules: &[CodegenModule]) -> Vec<Di
             .iter()
             .filter_map(|provide| Some((provide.target.clone()?, provide.value.clone())))
             .collect();
-        for declaration in &module.declarations {
-            visit_declaration_expressions(declaration, &mut |expression| {
-                if let CodegenExpressionKind::Provide {
-                    overrides: list, ..
-                }
-                | CodegenExpressionKind::EnvUpdate {
-                    overrides: list, ..
-                } = &expression.kind
-                {
-                    for provided in list {
-                        if let Some(target) = &provided.target {
-                            overrides.push((target.clone(), provided.value.clone()));
-                        }
+        let mut collect = |expression: &CodegenExpression| {
+            if let CodegenExpressionKind::Provide {
+                overrides: list, ..
+            }
+            | CodegenExpressionKind::EnvUpdate {
+                overrides: list, ..
+            } = &expression.kind
+            {
+                for provided in list {
+                    if let Some(target) = &provided.target {
+                        overrides.push((target.clone(), provided.value.clone()));
                     }
                 }
-            });
+            }
+        };
+        for declaration in &module.declarations {
+            visit_declaration_expressions(declaration, &mut collect);
+        }
+        // A main-module bundle provide, `provide env with { … }`, holds its entries here.
+        for provide in module
+            .provides
+            .iter()
+            .filter(|provide| provide.target.is_none())
+        {
+            visit_expression(&provide.value, &mut collect);
         }
         for (target, value) in overrides {
             if let Some(diagnostic) = override_cycle(module, &declarations, &target, &value) {

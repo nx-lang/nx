@@ -1,0 +1,81 @@
+module main.nx fingerprint 2349932272780751811
+requires function-values-v1 environment-v1 environment-v2
+entrypoints functions [radius gap space readB cycle] components [Section]
+
+union ColorMode
+  case light constant
+  case dark constant
+
+environment colorMode: ColorMode =
+  ColorMode.light
+
+environment radius: int =
+  2
+
+environment zero: int =
+  0
+
+environment space: int =
+  4
+
+environment gap: int =
+  0
+
+environment accent: string =
+  "gray"
+
+environment a: int =
+  1
+
+environment b: int =
+  (env.a add 1)
+
+function radius() =
+  env.radius
+
+function gap() =
+  env.gap
+
+function space() =
+  provide env.zero=2 {
+    env.space
+  }
+
+value theme: object =
+  <env.Update
+    env.accent:=if env.colorMode is
+      ColorMode.light =>
+        "blue"
+      ColorMode.dark =>
+        "navy"
+  />
+
+component Section
+  props
+    look: object = theme
+  body =
+    provide env with look {
+      [
+        <span accent=env.accent />
+        <span
+          accent=provide env.colorMode=ColorMode.dark {
+            env.accent
+          }
+        >
+        </span>
+      ]
+    }
+
+function readB(): int =
+  env.b
+
+function cycle(read: <function />: int): int =
+  provide env.a:=<read /> {
+    env.b
+  }
+
+provide <env.Update
+  env.space:=(10 idiv env.zero)
+  env.radius=5
+  env.gap:=(env.radius mul 2)
+/>

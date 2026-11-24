@@ -31,6 +31,18 @@ describe('NX with expressions', function () {
     expectScopes(scopesAt(result, 'let c', 'with', 2), 'with').toNotInclude('keyword.operator.with.nx');
   });
 
+  it('keeps with a name as a later field of a type or a component', function () {
+    const result = tokenizeLines(grammar, [
+      'type Opts = { a:int with:int }',
+      'type Maybe = { a:int with?:int }',
+      'component <C a:int with:int />'
+    ]);
+
+    expectScopes(scopesAt(result, 'type Opts', 'with'), 'with').toNotInclude('keyword.operator.with.nx');
+    expectScopes(scopesAt(result, 'type Maybe', 'with'), 'with').toNotInclude('keyword.operator.with.nx');
+    expectScopes(scopesAt(result, 'component <C', 'with'), 'with').toNotInclude('keyword.operator.with.nx');
+  });
+
   it('leaves with in markup text alone', function () {
     const result = tokenizeLines(grammar, ['<p>Text with words</p>']);
 

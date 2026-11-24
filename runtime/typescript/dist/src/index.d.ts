@@ -403,7 +403,7 @@ export type PreparedDeclarationKind = {
 };
 /**
  * One top-level provide of a module: `provide env.name.path = value` with a target, and
- * `provide bundle` without one.
+ * `provide env with bundle` without one.
  */
 export interface PreparedProvide {
     readonly target: NxIrReference | undefined;

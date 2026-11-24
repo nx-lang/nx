@@ -1,0 +1,12 @@
+{
+  "main.nx::Section": {
+    "batches": [],
+    "initial": [
+      {"path": "/0", "module": "main.nx", "start": 1191, "end": 1219},
+      {"path": "/1", "module": "main.nx", "start": 1224, "end": 1283}
+    ]
+  },
+  "main.nx::gap": [],
+  "main.nx::radius": [],
+  "main.nx::space": []
+}

@@ -9,6 +9,7 @@
         "conversions",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -86,6 +87,7 @@
         "argument-diagnostics",
         "conditional-properties",
         "conversions",
+        "environment-inline-provide",
         "expressions"
       ],
       "imod": [
@@ -108,6 +110,7 @@
         "design-tokens",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -161,6 +164,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -191,6 +195,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "function-values",
         "handlers",
@@ -207,7 +212,8 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
-        "environment-formulas"
+        "environment-formulas",
+        "environment-inline-provide"
       ],
       "function": [
         "agent-library",
@@ -223,6 +229,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -249,7 +256,8 @@
       "provides": [
         "design-tokens-theme",
         "environment",
-        "environment-formulas"
+        "environment-formulas",
+        "environment-inline-provide"
       ],
       "record": [
         "agent-library",
@@ -301,6 +309,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "geometry-library",
@@ -321,6 +330,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-values",
@@ -464,6 +474,7 @@
         "conversions",
         "design-tokens",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -488,6 +499,7 @@
         "design-tokens",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -586,6 +598,7 @@
         "conditional-properties",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "handlers"
@@ -594,18 +607,21 @@
         "design-tokens",
         "design-tokens-theme",
         "environment",
-        "environment-formulas"
+        "environment-formulas",
+        "environment-inline-provide"
       ],
       "envRead": [
         "design-tokens",
         "design-tokens-theme",
         "environment",
-        "environment-formulas"
+        "environment-formulas",
+        "environment-inline-provide"
       ],
       "envUpdate": [
         "design-tokens-theme",
         "environment",
-        "environment-formulas"
+        "environment-formulas",
+        "environment-inline-provide"
       ],
       "exists": [
         "occurrences",
@@ -646,6 +662,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "occurrence-patterns"
@@ -691,6 +708,7 @@
         "argument-diagnostics",
         "conditional-function-values",
         "conditional-properties",
+        "environment-inline-provide",
         "evaluation-cost",
         "function-values",
         "held-records"
@@ -707,6 +725,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -772,6 +791,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -807,6 +827,7 @@
         "design-tokens",
         "design-tokens-theme",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -851,6 +872,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -890,6 +912,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "handlers",
@@ -916,6 +939,7 @@
       "function": [
         "argument-diagnostics",
         "conditional-function-values",
+        "environment-inline-provide",
         "evaluation-cost",
         "function-references",
         "function-values",
@@ -933,6 +957,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -967,6 +992,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-inline-provide",
         "evaluation-cost",
         "expressions",
         "function-references",
@@ -1045,6 +1071,7 @@
     "design-tokens-theme",
     "environment",
     "environment-formulas",
+    "environment-inline-provide",
     "evaluation-cost",
     "expressions",
     "function-references",

@@ -1,0 +1,18 @@
+{
+  "main.nx::Section": {
+    "batches": [],
+    "initial": [
+      {
+        "$type": "span",
+        "accent": "blue"
+      },
+      {
+        "$type": "span",
+        "accent": "navy"
+      }
+    ]
+  },
+  "main.nx::gap": 10,
+  "main.nx::radius": 5,
+  "main.nx::space": 5
+}

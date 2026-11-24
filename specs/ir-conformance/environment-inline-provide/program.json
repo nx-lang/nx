@@ -1,0 +1,13 @@
+{
+  "entry": "main.nx",
+  "emit": ["main.nx"],
+  "entrypoints": [
+    { "module": "main.nx", "function": "radius" },
+    { "module": "main.nx", "function": "gap" },
+    { "module": "main.nx", "function": "space" },
+    { "module": "main.nx", "function": "cycle", "case": "throughB", "arguments": [{"$type": "Function", "module": "main.nx", "name": "readB"}], "fails": true }
+  ],
+  "lifecycles": [
+    { "module": "main.nx", "component": "Section", "batches": [] }
+  ]
+}

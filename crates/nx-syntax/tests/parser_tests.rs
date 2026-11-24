@@ -394,6 +394,29 @@ fn test_removed_provide_bundle_suggests_env_with() {
 }
 
 #[test]
+fn test_provide_bundle_with_steps_but_no_env_suggests_env_with() {
+    for (source, suggestion) in [
+        (
+            "provide marketing with { radius=1 }\n",
+            "provide env with marketing with { radius=1 }",
+        ),
+        (
+            "let a = { provide marketing with { radius=4 } { env.radius } }\n",
+            "provide env with marketing with { radius=4 }",
+        ),
+    ] {
+        let result = parse_str(source, "steps.nx");
+        let message = result
+            .errors
+            .iter()
+            .map(|error| error.message().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(message.contains(suggestion), "{source}: {message}");
+    }
+}
+
+#[test]
 fn test_provide_block_that_mixes_a_bundle_and_overrides_suggests_a_chain() {
     let after = parse_str(
         "let a = { provide env with marketing env.colorMode=dark { <Banner /> } }",

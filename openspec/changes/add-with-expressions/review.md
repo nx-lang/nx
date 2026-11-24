@@ -499,3 +499,200 @@ All 26 findings, RF1–RF26, are ✅ Verified, and the latest fixes introduced n
 or one `env with` chain is consistent across the proposal, design, tasks and specs. It now includes a
 field list right after `env with` as an inline bundle, and a mixed-block suggestion that keeps the
 written order.
+
+## New Findings Discovered During 2026-11-24 08:17 Implementation Review
+
+**Scope:** the implementation on `claude/add-with-expressions` against `origin/main` (`git diff
+origin/main...HEAD`, through 75ba2ff9): grammar and validation (`crates/nx-syntax`,
+`src/vscode`), lowering and checking (`crates/nx-hir`, `crates/nx-types`, `with_rewrite.rs`),
+formula marking and the cycle check (`crates/nx-codegen/src/formulas.rs`,
+`environment_cycles.rs`), NX IR (`crates/nx-ir`), the Rust and TypeScript runtimes, generated code
+and its `runtime/environment.ts`/`.js`, the language service, the `with-expressions` and
+`environment-formulas` corpus programs, tests and docs.
+
+**How it was checked:** besides reading the code, about 20 small programs were compiled with
+`nxlang codegen --target nx-ir` and `--target javascript` and run in all three engines: `nxlang run`
+and a scratch host over `nx-ir-runtime` that renders component descriptors through
+`Environment::enter`, the TypeScript runtime (`dist`, which matches a fresh `tsc` build), and the
+generated JavaScript. Engines agreed on everything tried (section bundles, a bundle passed as a
+prop, a mode set inside the section, captured locals in loops and component props, bundle path
+entries with update-record patches, nested caps, `with` chains and precedence) except where RF31
+says. Tests run: `cargo test -p nx-types --test with_expressions --test environment_values`,
+`cargo test -p nx-language-service`, and the TypeScript `runtime.test`, `corpus.test` and
+`emitted-ir.test`; all pass. The VS Code grammar tests were not run (no `node_modules` in
+`src/vscode`).
+
+### 🟡 Fixed - RF27 An inline bundle in a main-module `provide env with { … }` evaluates every entry at every read
+- **Severity:** Medium
+- **Confidence:** High (reproduced in all three engines)
+- **Evidence:** `mark_formulas` (crates/nx-codegen/src/formulas.rs:119-135) visits only
+  `module.declarations`, never `module.provides`. So the `envUpdate` that `provide env with
+  { … }` or `provide env with { … } with { … }` builds at the top of the main module gets no formula
+  flags. Its entries are plain values, computed as soon as the bundle is built, and the bundle is
+  built at every read that reaches the provide. As a result, a read of one value evaluates the
+  entries for every other value. Repro:
+  ```nx
+  environment radius: int = 2
+  environment zero: int = 0
+  environment space: int = 4
+  provide env with { space={10 / env.zero} radius=5 }
+  let root() = { env.radius }
+  ```
+  All three engines fail with `nx-ir-division-by-zero`. The same entries in a named bundle (`let b:
+  env.Update = <env.Update …/>` then `provide env with b`) give `5`. This breaks "a read of a value
+  `V` SHALL evaluate only the entries that set `V`" (environment-values) and "a read doesn't evaluate
+  a bundle's entries for other values" (nx-ir-format, cost). It also breaks design decision 3's "Inline
+  and named bundles behave the same". `nxlang ir explain` shows `env.space=(…)` with no `:=` in the
+  `$provides` bundle.
+- **Recommendation:** Also run `mark_formulas` over the values of `module.provides`, for example
+  through a visitor that covers provides as `visit_declaration_expressions_mut` covers declarations.
+  Add a corpus case with an inline top-level bundle whose entries read the environment, and check its
+  operation count.
+- **Fix:** `mark_formulas` (crates/nx-codegen/src/formulas.rs) now also walks the values of `module.provides`, so the inline bundle of a main-module `provide env with { … }` (and its `with` steps) gets formula flags. The repro now gives `5` in all engines. New corpus program `specs/ir-conformance/environment-inline-provide` pins it: `provide env with { space={10 / env.zero} radius=5 gap={env.radius * 2} }` with `radius()` = 5, `gap()` = 10 and `space()` under `env.zero=2` = 5, with operation counts.
+
+### 🟡 Fixed - RF28 The static `environment-cycle` check misses an inline bundle in a main-module provide
+- **Severity:** Medium
+- **Confidence:** High (reproduced)
+- **Evidence:** `environment_cycle_diagnostics` (crates/nx-codegen/src/environment_cycles.rs:73-98)
+  collects override targets from `module.provides` only where `provide.target` is set, and from
+  `Provide`/`EnvUpdate` nodes inside declarations. A top-level `provide env with { a={env.b} }` has
+  no target, and its `envUpdate` sits in `module.provides`, so the check never sees it:
+  ```nx
+  environment a: int = 1
+  environment b: int = { env.a + 1 }
+  provide env with { a={env.b} }
+  let root() = { env.b }
+  ```
+  This compiles, then fails at run time in every engine with `nx-ir-environment-cycle` ('b' → 'a' →
+  'b'). The same entry in a named bundle is rejected at compile time with `environment-cycle`, which
+  is what the spec requires for "a bundle entry or a main-module provide of a value `V` that reads a
+  `W` whose default reads `V`". The test
+  `an_override_that_reads_a_value_whose_default_reads_it_is_an_environment_cycle`
+  (crates/nx-api/tests/codegen/tests.rs:3854) covers only `provide env.a = …` at the top level.
+- **Recommendation:** Walk the `EnvUpdate` overrides inside `module.provides` values, as is done for
+  declarations, and add the inline top-level bundle form to that test.
+- **Fix:** `environment_cycle_diagnostics` now also walks the `Provide`/`EnvUpdate` overrides inside bundle provides of `module.provides`. The repro is now `environment-cycle` at compile time. `an_override_that_reads_a_value_whose_default_reads_it_is_an_environment_cycle` (crates/nx-api/tests/codegen/tests.rs) gains `provide env with { a={env.b} }` and `provide env with theme with { a={env.b} }`.
+
+### 🟡 Fixed - RF29 The corpus lacks three cases that task 6.1 lists as done, and no test reaches `nx-ir-environment-cycle`
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:** Task 6.1 (tasks.md:33) lists "a mode set inside the section", "passed as a prop" and
+  "the runtime cycle error" for `environment-formulas`. The program (specs/ir-conformance/
+  environment-formulas/main.nx) has none of them:
+  - `darkAccent` sets the mode under the main-module theme, not inside a section bundle.
+  - `passed` passes a bundle as a function argument, not as a component prop.
+  - No entrypoint fails with `nx-ir-environment-cycle`.
+
+  A search of every Rust, TypeScript and JavaScript test finds no test of `nx-ir-environment-cycle`
+  in any engine. The error paths in crates/nx-ir-runtime/src/environment.rs:752,
+  runtime/typescript/src/index.ts:5061 and crates/nx-codegen/src/runtime/environment.js:294 are
+  never run. Task 6.4's "a theme that varies by mode in a section" isn't in the
+  generated-JavaScript comparison either. The spec's cost scenario "A formula is charged at each
+  read", where a component reads `env.gap` twice through a descriptor formula, has no case: `card()`
+  only returns the descriptor. RF28's repro is a ready-made runtime cycle case, and it gives the
+  same message in all three engines today.
+- **Recommendation:** Add the missing cases to `environment-formulas`, with a `diagnostics.json`
+  entry for the cycle case. For the section-mode and prop cases, use a component that applies `provide env
+  with theme` to a body that sets `env.colorMode=dark` and reads a mode-dependent entry. Add a
+  lifecycle, or a case that renders `Card`, so the per-read charge of a descriptor formula is
+  recorded. Otherwise, uncheck the items.
+- **Fix:** New corpus program `environment-inline-provide`: a component `Section` takes a bundle prop (`look: env.Update = {theme}`), applies it with `provide env with look`, and reads the mode-dependent accent twice, the second time in a section set to dark mode (lifecycle result `blue`, `navy`, with its operation count, so a formula's per-read charge is recorded); and a failing case `cycle#throughB`, which passes `readB` as a function value so the static check can't see the loop, recorded in `diagnostics.json` as `nx-ir-environment-cycle`. Rust IR, TypeScript IR and generated JavaScript run it (334 parity tests and the TS suite pass). The README describes the program.
+
+### 🟡 Fixed - RF30 `specs/future.md` drops "Generated values are evaluated at load", which is still true
+- **Severity:** Medium
+- **Confidence:** High (reproduced)
+- **Evidence:** The change removes the entry at specs/future.md:~2376. Generated modules still
+  evaluate top-level values once at load, and RF31 shows the result.
+  specs/ir-conformance/README.md:152 now says no entrypoint is skipped. That holds only because no
+  corpus program reads a top-level value that reads the environment under an override.
+- **Recommendation:** Restore the limitation, narrowed: a top-level value that reads the
+  environment, whether read directly or named by an override or bundle entry, keeps its load-time
+  value in generated code. Link it from the README sentence. The fix itself could be a formula-like
+  thunk for such values, which is later work.
+- **Fix:** Restored "Generated values are evaluated at load" in specs/future.md, narrowed to top-level values that read the environment, including when an override or bundle entry names one, with RF31's example. specs/ir-conformance/README.md now says that limitation remains and that no program names such a value under an override.
+
+### 🟡 Fixed - RF31 Generated JavaScript gives a different result when an override names a top-level value that reads the environment
+- **Severity:** Low (the executable-code-generation delta allows it: "an entry that only names a
+  top-level value gets that value as it was at load")
+- **Confidence:** High (reproduced)
+- **Evidence:**
+  ```nx
+  environment space: int = 4
+  environment gap: int = 0
+  let tv: int = { env.space * 3 }
+  let b() = { provide env.gap={tv} { provide env.space=1 { env.gap } } }
+  ```
+  Rust IR and TypeScript IR give `3` and generated JavaScript gives `12`. `env.gap:=tv` is flagged
+  as a formula, so the IR runtimes evaluate `tv` again at the read, while the generated closure
+  returns the module-load value. The spec allows the divergence, but nothing records it (RF30), and
+  the corpus doesn't pin it as a known divergence.
+- **Recommendation:** Record it as in RF30, and add the case to `KNOWN_GENERATED_DIVERGENCES` with a
+  corpus entrypoint. Or make generated top-level values that read the environment lazy thunks, so
+  all three engines agree.
+- **Fix:** Recorded, as the spec allows: the limitation and its example are in specs/future.md ("Generated values are evaluated at load") and the README points to it. Making generated top-level values that read the environment lazy is left as later work and raised with Bret; not adding a known-divergence entrypoint, so the comparison stays free of a skip list.
+
+### 🟡 Fixed - RF32 The `with-target` hint for optional and sequence left sides suggests syntax that doesn't exist
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** crates/nx-types/src/infer/with.rs:121-122 suggests ``test it with `if x is { some }` ``.
+  NX has no `some` pattern; the docs use `if x? { … }` (expressions.md:365, if.md:245). The same hint
+  is given for a sequence (`User+`), where `(x ?? fallback) with { … }` doesn't help: `??` doesn't
+  turn a sequence into one record.
+- **Recommendation:** For `T?`, suggest ``if x? { x with { … } }`` or ``(x ?? fallback) with
+  { … }``. For a sequence, suggest patching each item: ``for item in x { item with { … } }``.
+- **Fix:** The hint now depends on the left side: for `T?` it suggests `if x? { x with { … } }` or `(x ?? fallback) with { … }`; for a sequence, `for item in x { item with { … } }`, with no `??`. Both forms compile. Tests in crates/nx-types/tests/with_expressions.rs check each.
+
+### 🟡 Fixed - RF33 `provide brand with { … }` at the top of a module gets a suggestion that drops the bundle
+- **Severity:** Low
+- **Confidence:** High (reproduced)
+- **Evidence:** For `provide marketing with { radius=1 }`, `lower_provide_bundle`
+  (crates/nx-hir/src/lower.rs:3589-3598) reports "`environment-path`: … write `env` in place of
+  'marketing'". Following that advice gives `provide env with { radius=1 }`, which loses
+  `marketing`. The spec asks for a syntax error that suggests `provide env with bundle`, which here
+  is `provide env with marketing with { radius=1 }`. The code `environment-path` is also the wrong
+  one for this. A plain `provide marketing` gets the right syntax error and suggestion from
+  validation.
+- **Recommendation:** Report it as the same syntax error that `provide brand.theme` gets, and suggest
+  `provide env with <name> with …`, keeping the written operand and steps.
+- **Fix:** `provide brand with { … }` (top level or in a block) is now the syntax error `provide brand.theme` gets, from validation (`PROVIDE_BUNDLE` whose head is not `env`), suggesting `provide env with brand with { … }` with the written operand and steps. The `environment-path` diagnostic in `lower_provide_bundle` is removed. Test `test_provide_bundle_with_steps_but_no_env_suggests_env_with` (crates/nx-syntax/tests/parser_tests.rs).
+
+### 🟡 Fixed - RF34 The TextMate rule scopes `with` as a keyword in a type's field list after another field
+- **Severity:** Low
+- **Confidence:** Medium (from reading the regex; the grammar tests were not run here)
+- **Evidence:** The rule at src/vscode/syntaxes/nx.tmLanguage.json:403 matches
+  `(?<=[A-Za-z0-9_)\]}"'>])\s+\K\bwith\b(?!\s*=)`. `record-body` and `record-property` include
+  `#operators`. In `type Opts = { a:int with:int }`, `with` follows `int` and a space and is
+  followed by `:`, so it matches as `keyword.operator.with.nx`. The match starts at the space,
+  before any property-name match at `with`. The same applies to `component <C a:int with:int />`.
+  with.test.ts covers only `{ with: int }` as the first field. The editor-syntax-highlighting spec
+  says `with` as a property name keeps the name scope.
+- **Recommendation:** Add `:` to the negative lookahead (`(?!\s*[=:])`), and add a grammar test with
+  `with` as a second field.
+- **Fix:** The rule's lookahead is now `(?!\s*[=:?])`, so `with:` and `with?:` stay names. New grammar test in src/vscode/test/grammar/with.test.ts covers a later type field, an optional one and a component prop; it fails with the old rule and passes now (314 grammar tests pass).
+
+### 🟡 Fixed - RF35 No test checks that a `with` program emits the same image as its `apply`/`merge` form
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** Task 3.2 says "Check that a program written with `with` emits the same images as its
+  `apply`/`merge` form", and design decision 7 promises it. No test compares images. The corpus pair
+  `moved`/`applied` compares only results. A manual check here, with field lists, a path through a
+  name, and update-record `merge`, gave explain output identical except for spans and the
+  fingerprint. So the behavior holds today but isn't pinned.
+- **Recommendation:** Add an emitter test that compiles both forms and compares the stripped images'
+  node and declaration tables, ignoring spans and fingerprint.
+- **Fix:** New test `a_with_emits_the_image_of_its_apply_or_merge_form` (crates/nx-api/tests/codegen/tests.rs) compiles a field list, an update operand and an update-record field list beside their `apply`/`merge` forms and compares the explained stripped images, without the fingerprint line.
+
+## Questions (2026-11-24 08:17 review)
+
+- Should the generated-code divergence in RF31 be fixed in this change, by making top-level values
+  that read the environment lazy, or only recorded? The spec allows it, but it is the same kind of
+  divergence the change set out to remove for `darkAccent`.
+
+## Summary (2026-11-24 08:17 review)
+
+The implementation matches the spec closely, and the three engines agree on every formula, bundle
+and `with` case tried, including several scenarios the corpus doesn't hold. The real defects come
+from one gap: the inline bundle of a main-module `provide env with { … }` is skipped by formula
+marking (RF27) and by the static cycle check (RF28). Beyond that, the corpus is missing cases that
+task 6.1 claims (RF29), and `specs/future.md` drops a limitation that still applies (RF30, RF31).
+The rest are Low: diagnostic wording, a TextMate edge case and a missing image-equivalence test.

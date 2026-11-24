@@ -2376,6 +2376,12 @@ then pass a few hundred times in a row.
 - **A bundle's values are computed at every read.** Each value a `provide env with brand` sets is
   computed each time a read reaches it, as a default is. Hoisting it, like memoizing defaults
   below, changes operation counts and so the cost model.
+- **Generated values are evaluated at load.** A generated module evaluates its top-level values
+  once, when it loads, in the environment of that moment. A top-level value that reads the
+  environment keeps that value, also when an override or bundle entry names it: with
+  `let tv: int = { env.space * 3 }`, `provide env.gap={tv} { provide env.space=1 { env.gap } }`
+  gives `3` in the IR runtimes and `12` in generated JavaScript. Generating such values as
+  functions computed at each read, as formulas are, would make the engines agree.
 - **Generated path overrides are not checked.** Generated code applies `env.size.width=…` without
   checking that the field exists in the value it patches, where the IR runtimes refuse a path that
   does not.

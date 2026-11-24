@@ -3587,17 +3587,8 @@ impl LoweringContext {
     /// `<env.Update …/>` is, and each `with` step after it is a `with` on the bundle so far.
     fn lower_provide_bundle(&mut self, node: SyntaxNode) -> ExprId {
         let mut children = node.children().collect::<Vec<_>>().into_iter();
-        let env = children.next();
-        if let Some(env) = env.filter(|env| env.text() != "env") {
-            self.add_diagnostic(
-                format!(
-                    "environment-path: a bundle is applied as `provide env with bundle`; write `env` \
-                     in place of '{}'",
-                    env.text()
-                ),
-                env.span(),
-            );
-        }
+        // A head other than `env`, `provide brand with { … }`, is a syntax error validation reports.
+        children.next();
         let mut operands = children;
         let Some(first) = operands.next() else {
             return self.error_expr(node.span());

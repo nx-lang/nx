@@ -1,0 +1,11 @@
+{
+  "counts": {
+    "main.nx::Section": {
+      "batches": [],
+      "initial": 39
+    },
+    "main.nx::gap": 13,
+    "main.nx::radius": 6,
+    "main.nx::space": 11
+  }
+}
