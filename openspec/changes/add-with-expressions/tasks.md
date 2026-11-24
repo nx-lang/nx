@@ -1,39 +1,42 @@
 ## 1. Syntax
 
-- [ ] 1.1 Add `with_expression` to `crates/nx-syntax/grammar.js`: left-associative at precedence 125, with a right side that is a `with_field_list` (`{` attribute-form entries `}`) or an operand (name, member access, call, element, braced expression). Make `with` a keyword after an operand.
-- [ ] 1.2 Add `env with bundle` as an override of `provide_expression`, and replace `provide_definition`'s bundle form with `provide env with bundle`. Grammar tests for every form, for `with` as a record field name, and for the removed `provide bundle`.
+- [ ] 1.1 Add `with_expression` to `crates/nx-syntax/grammar.js`: left-associative at precedence 127 (above `??` at 125, below prefix unary at 130), with a right side that is a `with_field_list` (`{` plain attribute-form entries `}`) or an operand (name, member access, call, element, braced expression). Make `with` a keyword after an operand only.
+- [ ] 1.2 Add `env with bundle` (the same operand, then optional `with` steps) as an override of `provide_expression`, and replace `provide_definition`'s bundle form with `provide env with bundle`, with an error node or message that suggests the new form for `provide brand.theme`. Grammar tests for every form: a named bundle then attribute overrides, an inline element, a `with` chain then the body, an empty field list before the body, `with` beside `??`, `with` as a record field, attribute and field-list entry name, and the removed `provide bundle`.
 - [ ] 1.3 Regenerate the parser and update the tree-sitter highlight queries.
+- [ ] 1.4 Update the VS Code TextMate grammar (`src/vscode/syntaxes/nx.tmLanguage.json`): `with` after an operand and after `provide env`, `provide-definition`'s new form, and `with` kept as a name and in markup text. Extend `src/vscode/test/grammar/environment.test.ts` and add a `with` grammar test.
 
 ## 2. Lowering and checking
 
 - [ ] 2.1 Lower record and update-record `with` in `crates/nx-hir` to `apply` and `merge`, building the update from a field list and expanding paths with one evaluation of the left side.
-- [ ] 2.2 Type-check `with`: field lists as the left type's `T.Update` (contextual typing of entries, duplicates, unknown fields), operands as `T.Update`, `with-path` for a step that is not a required record field (and for any path on an update record), and `with-target` for other left types.
-- [ ] 2.3 Type-check bundle `with` (field lists read as `<env.Update … />` fields, paths allowed) and bundles in `provide` blocks (any `env.Update` expression). Count them in the static read sets and `environment-cycle`, and mark each override that reads the environment, from the read sets, so it is lowered as a formula.
-- [ ] 2.4 Reject `with` as a declaration, parameter, `for` item or binding name with `reserved-name`. Search the repository's examples, tests and docs for `with` used as a name and rename them.
+- [ ] 2.2 Type-check `with`: update types (`env.Update` included) before records; field lists as the left type's `T.Update` (contextual typing of entries, duplicates, unknown fields); operands as `T.Update`; `with-path` for a step that is not a required record field (and for any path on a non-bundle update record); `with-target` for other left types, with an unwrap hint for optional and sequence types.
+- [ ] 2.3 Type-check bundle `with` (field lists read as `<env.Update … />` fields, paths allowed) and bundles in `provide` blocks. Report `env with` outside `provide` as `reserved-name` with the "only after `provide`" message.
+- [ ] 2.4 Mark each override and bundle entry whose static read set is not empty as a formula. Extend `environment-cycle` to an override, bundle entry or main-module provide of `V` that reads a `W` whose default reads `V`.
+- [ ] 2.5 Reject `with` as a declaration, parameter, `for` item or binding name with `reserved-name`. Search the repository's examples, tests and docs for `with` used as a name and rename them.
 
 ## 3. NX IR
 
-- [ ] 3.1 Add the optional `base` operand of `envUpdate`, bundle overrides and formulas in `envProvide`, `formula` and `bundle` entries in `$env`, and the `environment-v2` feature to `crates/nx-ir` (model, emitter, reader validation, `explain`). Programs whose overrides read no environment value, and that use no bundle in a block, keep declaring only `environment-v1`.
-- [ ] 3.2 Document the additions in `docs/nx-ir-format.md`. Check that a program written with `with` emits the same images as its `apply`/`merge` form.
+- [ ] 3.1 Add the formula flag on `envProvide` and `envUpdate` overrides, bundle overrides in `envProvide`, the optional `base` of `envUpdate`, `formula` and `bundle` entries in `$env` and `$entries`, the fingerprint check, `nx-ir-environment-cycle`, and the `environment-v2` feature to `crates/nx-ir` (model, emitter, reader validation, `explain`). Programs that use none of these keep declaring only `environment-v1`.
+- [ ] 3.2 Document the additions and their cost in `docs/nx-ir-format.md`. Check that a program written with `with` emits the same images as its `apply`/`merge` form.
 
 ## 4. Runtimes
 
-- [ ] 4.1 Rust IR runtime: evaluate bundle `with`; capture formulas and bundles in `envProvide` and evaluate them at the read (with the "sources after it" rule) and their cost; carry them in `$env`; record the reads for the instance tree, including those a formula makes.
-- [ ] 4.2 TypeScript runtime: the same, matching the Rust runtime on the corpus.
-- [ ] 4.3 Generated code: emit record `with` through the existing `apply`/`merge` helpers, bundle `with`, bundles in blocks and formulas (as closures), and emit a top-level value of type `env.Update` as a function evaluated at each read.
+- [ ] 4.1 Rust IR runtime: accept `environment-v2`; capture formulas in `envProvide` and `envUpdate` and evaluate them at the read with the prepared program, with the "sources after it" rule at any depth and the runtime cycle error; evaluate only a bundle's entries for the value read; carry formulas and bundles in `$env` and validate them in `enter`; record the reads they make for the instance tree, so `set_environment` reaches readers through them.
+- [ ] 4.2 TypeScript runtime: the same, matching the Rust runtime's results and operation counts on the corpus.
+- [ ] 4.3 Generated code: emit record `with` through the existing `apply`/`merge` helpers, bundle `with`, bundles in blocks, and formulas as functions of no arguments that close over their locals, in the generated environment helpers and `enter`.
 
 ## 5. Editor
 
-- [ ] 5.1 Completion of fields and paths inside `with { … }`, and hover on `with` showing the patched type, in `crates/nx-language-service`.
+- [ ] 5.1 In `crates/nx-language-service`: completion of fields and paths inside `with { … }` (environment values for bundles), hover on `with` showing the patched type, and the bundle hover on `provide env with …` following `with` steps.
 
 ## 6. Corpus and tests
 
-- [ ] 6.1 Add conformance programs: `with-expressions` (field lists, paths, chains, update records, the `apply` equivalence) and `environment-formulas` (a bundle in a block, inline and named; patching the app theme; a mode set inside the section; a single override after a bundle; an override following a value overridden nearer the reader; captured locals; descriptors with formulas; operation counts). Move the `environment` programs to `provide env with`, and check whether any recorded result changes under the new rule.
-- [ ] 6.2 Unit tests for each diagnostic: `with-target`, `with-path`, `reserved-name`, and the syntax errors for `env with` outside `provide` and for `provide bundle`.
-- [ ] 6.3 Check generated JavaScript agrees on the new programs, including a theme that varies by mode in a section. If #75 has merged, remove `design-tokens-theme`'s `darkAccent` from `KNOWN_GENERATED_DIVERGENCES`.
+- [ ] 6.1 Add conformance programs: `with-expressions` (field lists, paths, chains, `with` beside `??`, update records, the `apply` equivalence) and `environment-formulas` (a bundle in a block, inline, named and passed as a prop; patching the app theme; a mode set inside the section; a single override after a bundle; an override following a value overridden nearer the reader; captured locals in a formula; one bundle entry reading another value it sets; descriptors with formulas; the runtime cycle error; operation counts). Move the `environment` and `design-tokens-theme` programs to `provide env with`, and check whether any recorded result changes under the new rule.
+- [ ] 6.2 Unit tests for each diagnostic: `with-target`, `with-path`, `environment-cycle` on an override, `reserved-name` (for `with` and for `env with` outside `provide`), the syntax error for `provide bundle`, and a stale formula fingerprint.
+- [ ] 6.3 Migrate the tests that use `provide bundle`: `crates/nx-language-service/src/environment_tests.rs`, `crates/nx-syntax/tests/parser_tests.rs`, `crates/nx-types/tests/environment_values.rs`, and the TextMate test; and the comments in `runtime/typescript/src/index.ts`.
+- [ ] 6.4 Check generated JavaScript agrees on the new programs, including a theme that varies by mode in a section, and remove `design-tokens-theme`'s `darkAccent` from `KNOWN_GENERATED_DIVERGENCES`.
 
 ## 7. Docs
 
 - [ ] 7.1 Add a `with` section to `reference/syntax/expressions.md`, and point from `apply` in `reference/syntax/functions.md` to it.
 - [ ] 7.2 Update `reference/syntax/environment.md`: `provide env with` for bundles, bundles in blocks, and the single rule "computed where it is read" with the `gap`/`space` example; remove the "evaluated where it is written" text.
-- [ ] 7.3 If #75 has merged, update the `@nx/design` reference, the style guide and the design-tokens tutorial (step 4 can apply a theme to one section), and remove the "a bundle for one section" entry from `specs/future.md`. Record the open questions (an element form, `with` on union cases) in `specs/future.md`.
+- [ ] 7.3 Update the `@nx/design` reference, the style guide and the design-tokens tutorial (step 4 can apply a theme to one section; `provide env with brand`), remove the "a bundle for one section" entry and the generated-code divergence note from `specs/future.md`, and record the open questions (an element form, `with` on union cases, conditional entries in field lists) there.

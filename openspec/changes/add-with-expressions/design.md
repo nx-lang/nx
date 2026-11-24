@@ -51,10 +51,11 @@ wanted), and an `env={marketing}` attribute (deferred with the element form).
 
 ### 2. `with` grammar and precedence
 
-`with` is a left-associative infix operator at precedence 125: below prefix unary (130), member
-access and calls (140), and above `*` (120). So `saved with brand.theme` patches with `brand.theme`,
-`a with b with c` is `(a with b) with c`, and `base with { size=2 } == other` compares the patched
-value.
+`with` is a left-associative infix operator at precedence 127: below prefix unary (130), member
+access and calls (140), and above `??` (125, right-associative) and `*` (120). So `saved with
+brand.theme` patches with `brand.theme`, `a with b with c` is `(a with b) with c`, `a ?? b with c` is
+`a ?? (b with c)`, `x with y ?? z` is `(x with y) ?? z`, and `base with { size=2 } == other` compares
+the patched value.
 
 The right side is either:
 
@@ -62,8 +63,17 @@ The right side is either:
   form, then `}`. A brace after `with` whose first entry is `name=` or `name.path=` is a field list;
   `=` is not an expression operator, so this is unambiguous. `with {}` is an empty field list and
   changes nothing.
-- an **operand** at precedence above 125: a name, member access, call, element, or braced
-  expression, of an update type.
+- an **operand**: a name, member access, call, element, or braced expression, of an update type.
+
+A field list holds plain entries only: no conditional entries and no spreads, which can come later
+if they are needed. A field named `with` still works as an entry (`x with { with=3 }`), as an
+attribute and after `.`.
+
+In a `provide` block, `env with` takes the same operand, optionally followed by more `with` steps,
+and then the block's other overrides and its body: `provide env with brand with { radius=4 }
+env.colorMode=dark { … }`. `env with` anywhere else is `reserved-name`, with a message saying it is
+written only after `provide`; the main module's old `provide brand.theme` is a syntax error that
+suggests `provide env with brand.theme`.
 
 Each field value is typed by the field it sets, so a bare union case works:
 `settings with { mode=dark }`. A present empty value clears an optional field: `user with {
@@ -98,11 +108,29 @@ of use. CSS custom properties resolve where declared, and the familiar complaint
 An override still sees the locals where it is written, with their values there, as any closure does:
 `for item in items { <Row env.accent={item.color} /> }` gives each row its own color.
 
-**Descriptors carry formulas.** A component descriptor's `$env` must stay data a host can store and
-compare. An override that reads no environment value gives the same value at every read, so a runtime
-evaluates it once and carries the value as before (`env.colorMode=dark` is unchanged). Any other
-override, and any bundle, is carried as a formula: the value's node plus the locals it captured,
-which are data. Inline and named bundles therefore behave the same, and no bundle needs to be named.
+**Descriptors and bundles carry formulas.** A component descriptor's `$env` must stay data a host can
+store and compare. An override that reads no environment value gives the same value at every read,
+so a runtime evaluates it once and carries the value as before (`env.colorMode=dark` is unchanged).
+Any other override is carried as a formula: the module, the value's node, the module's fingerprint
+and the locals it captured, which are data. Whether a value reads the environment is decided from its
+static read set, so a value that reads one only on some branches is a formula.
+
+An `env.Update` value holds its entries the same way. So a bundle built anywhere, passed through a
+prop, a local or a `for` item, and applied anywhere, still computes each entry where a value is read:
+`component <Banner theme: env.Update /> = { provide env with theme { … } }` follows a mode set inside
+the banner. Inline and named bundles behave the same, and no bundle needs to be named. A read of a
+value evaluates only the entries for that value of the bundles on its way.
+
+A formula is valid only with the build of the module that made it: its fingerprint must match, or it
+is refused with `nx-ir-boundary-type`, as a stale handler token is refused. A host that keeps
+descriptors across a rebuild renders again.
+
+**Cycles.** While a source of `V` is evaluated, a read of `V` at any depth sees only the sources
+after it, so an override of a value by itself can't loop. One shape can: an override of `V` that
+reads `W`, where `W`'s default reads `V`. A read of `W` under it evaluates the default, then the
+override, then `W` again, with nothing left after the default. The static `environment-cycle` check
+is extended to overrides, bundles and main-module provides for that shape. Overrides placed by
+another body can still close it at run time, so such a read fails with `nx-ir-environment-cycle`.
 
 Alternatives considered:
 
@@ -124,8 +152,8 @@ the bundle patches the place around it rather than resetting to defaults. This i
 
 `r with { a.b=1 }` means `r with { a=(r.a with { b=1 }) }`, with `r` evaluated once. Each step but
 the last must name a required field of a record type; an optional field, a union, or anything else
-is `with-path`, since there may be nothing to patch. Setting the whole field works instead. The same
-rule already holds for `env.` paths (`environment-path`).
+is `with-path`, since there may be nothing to patch. Setting the whole field works instead. It
+matches the record-field rule for `env.` paths (`environment-path`).
 
 ### 6. `with` on update records and bundles
 
@@ -141,28 +169,38 @@ rule already holds for `env.` paths (`environment-path`).
 - Record and update-record `with` lower to `apply` and `merge` calls, with a local binding for the
   left side when a path needs it more than once. Images for programs that use only these are what an
   equivalent `apply` program produces.
-- Bundle `with` adds an optional `base` operand to `envUpdate`: the bundle's entries are the base's
-  followed by its own.
-- `envProvide` gains bundle overrides, and an override that reads the environment is captured as a
-  formula (its node and captured locals) instead of being evaluated. `$env` entries gain `formula`
-  beside `to`, and `bundle` entries. A formula is charged node by node at each read, as a default is.
-- These are behind a new required feature, `environment-v2`. A program whose overrides read no
-  environment value, and that uses no bundle in a block, still declares only `environment-v1` and
-  emits the same IR.
+- `envUpdate` gains an optional `base` node: the bundle's entries are the base's followed by its own.
+- Each `envProvide` and `envUpdate` override gains a formula flag, set from the static read set, and
+  `envProvide` gains bundle overrides (no reference, empty path, an `env.Update` node).
+- `$env` and `$entries` entries hold `to` or `formula` (`module`, `node`, `fingerprint`, `locals`),
+  and a bundle in `$env` is an entry holding `bundle`.
+- A module that uses a formula, a bundle in a block or a `base` lists `environment-v2` beside
+  `environment-v1`. A program that uses none of them still declares only `environment-v1` and emits
+  the same IR.
+- Cost: a formula is charged node by node at each read, as a default is; capturing one costs one
+  operation; a read doesn't evaluate a bundle's entries for other values.
 
-### 8. Generated code
+### 8. Runtimes and generated code
 
-Generated modules evaluate top-level values once at load, so a bundle in a generated program would
-keep the mode of that moment, in sections and app-wide alike (the `darkAccent` divergence in #75). A
-top-level value of type `env.Update` is therefore emitted as a function evaluated at each read,
-like a default. That fixes the app-wide case too. Other top-level values keep being evaluated at
-load.
+An environment holds formulas as data, and a runtime evaluates them with the prepared program of the
+evaluation that reads them, as it evaluates defaults, so `enter(descriptor)` needs no program. Both
+runtimes accept `environment-v2`. The instance tree records the reads a formula or bundle entry
+makes, so `set_environment` reaches a node that reads through one.
+
+Generated code carries a formula as a function of no arguments that closes over its locals and reads
+the environment through the generated helpers; `$env` entries otherwise have the runtime's shape.
+Since a bundle's entries are formulas, a top-level bundle evaluated when a generated module loads
+still computes its entries at each read, which fixes the `darkAccent` divergence from #75 without
+treating `env.Update` values specially.
 
 ## Risks / Trade-offs
 
-- **Cost.** An override that reads the environment, and every bundle in a block, is evaluated at
-  every read, as defaults and the main-module bundle are. Theme reads are already expensive (`specs/future.md`, "Reading a token is expensive"); this
-  adds no new kind of cost, and `add-derived-value-caching` is meant to remove it.
+- **Cost.** An override that reads the environment, and every bundle entry, is evaluated at every
+  read, as defaults and the main-module bundle are. Theme reads are already expensive
+  (`specs/future.md`, "Reading a token is expensive"); this adds no new kind of cost, and
+  `add-derived-value-caching` is meant to remove it.
+- **A cycle can appear at run time.** Overrides placed by another body can close the one cycle shape
+  the static check can't see; it fails with `nx-ir-environment-cycle` naming the path.
 - **`with` becomes reserved.** Code that names something `with` must rename it. The repository is
   searched and updated as part of this change.
 - **A behavior change for existing overrides.** An override that reads a value overridden again
@@ -170,8 +208,8 @@ load.
   that relied on the old rule; reading the outer value into a local first keeps it.
 - **Descriptors are less readable when they carry formulas.** Only overrides that read the
   environment become formulas; plain values stay as they were.
-- **#75 ordering.** Whichever of #75 and this change merges second updates the other's uses of
-  `provide brand.theme`.
+- **#75 merged first.** This change updates #75's uses of `provide brand.theme`, its "a bundle can't
+  be applied to one section" notes, and `design-tokens-theme`'s `darkAccent` divergence.
 
 ## Open Questions
 
