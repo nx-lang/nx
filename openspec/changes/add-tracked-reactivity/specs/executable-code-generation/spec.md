@@ -8,8 +8,11 @@ formula SHALL be evaluated again only when an environment value the last evaluat
 be found from a different override, an entry-module bundle being kept for each value read. The
 generated helpers SHALL carry an evaluation counter, off unless a test turns it on, that counts each
 evaluation of a default, provide, formula or top-level value. The generated environment state SHALL
-give each layer it pushes an identity of its own, and the kept results SHALL belong to that state,
-so no result is kept from one call to the next. A top-level value that reads no environment SHALL
+give each layer it pushes an identity of its own, and the kept results SHALL belong to that state.
+`nxWithEnvironment` SHALL make a new state for each call, so no result is kept from one such call
+to the next. A call made outside `nxWithEnvironment` runs in the module's own state, whose roots
+never change and whose layers are numbered for its whole life, so a result kept there SHALL stay
+valid for later calls in it, and a result kept for a layer SHALL be dropped with the layer. A top-level value that reads no environment SHALL
 remain a constant evaluated when the module loads. Reuse SHALL change no result.
 
 #### Scenario: A generated default is evaluated once in one environment

@@ -1,46 +1,46 @@
 ## 1. Rust IR runtime
 
-- [ ] 1.1 Give each environment layer a per-call sequence number (`EnvState`), the host's layers
+- [x] 1.1 Give each environment layer a per-call sequence number (`EnvState`), the host's layers
   and caps included, and a helper that returns a value's token over the layers below a given
   position.
-- [ ] 1.2 Add a per-call derived-result cache to `Machine`: entries keyed by derived result (value
+- [x] 1.2 Add a per-call derived-result cache to `Machine`: entries keyed by derived result (value
   declaration, environment default, targeted entry-module provide, bundle entry-module provide with
   the value read, formula layer), each holding the value and its recorded reads with their tokens
   and the values found for the instance tree's read list.
-- [ ] 1.3 Record reads during a derived evaluation, nested evaluations and reuses included, against
+- [x] 1.3 Record reads during a derived evaluation, nested evaluations and reuses included, against
   every derived result being evaluated around them, with tokens taken over the layers below where
   each evaluation began (before its own cap) and computed again, not copied, when a reused result's
   reads are added to an enclosing record.
-- [ ] 1.4 Reuse in `eval_reference` (value declarations), `provided_or_default` (defaults and
+- [x] 1.4 Reuse in `eval_reference` (value declarations), `provided_or_default` (defaults and
   entry-module provides, the bundle arm keyed by provide and value read) and `source_value`
   (formulas) when every recorded token matches; charge nothing beyond the asking node on reuse.
-- [ ] 1.5 Replay a reused result's reads into the instance tree's read list, keeping the
+- [x] 1.5 Replay a reused result's reads into the instance tree's read list, keeping the
   "found under the call's own overrides" flag, so the skip check sees the same reads.
-- [ ] 1.6 Narrow what a handler captures to the slots its node reads (`slots_read` of the handler
+- [x] 1.6 Narrow what a handler captures to the slots its node reads (`slots_read` of the handler
   node, computed from the image at no charge and cached per node), held and compared in ascending
   slot index, so handler comparisons and the written and stored forms cover only those slots; live
   state reads unchanged.
-- [ ] 1.7 Unit tests for each scenario in the `reactivity` and `nx-ir-format` deltas, the tree's
+- [x] 1.7 Unit tests for each scenario in the `reactivity` and `nx-ir-format` deltas, the tree's
   reader-through-a-reused-default case and the bundle that reads a value it sets included, and a
   test that a reused shallow default lets a deep read succeed alike in both runtimes.
 
 ## 2. TypeScript IR runtime
 
-- [ ] 2.1 The same layer identities, cache, read recording and reuse in
+- [x] 2.1 The same layer identities, cache, read recording and reuse in
   `runtime/typescript/src/index.ts`, following the Rust rule exactly. Its dispatch is unchanged.
-- [ ] 2.2 The same narrowed handler capture as task 1.6, slot for slot, in ascending slot index.
-- [ ] 2.3 Tests for the same scenarios, the `component-action-handlers` ones included, and rebuild
+- [x] 2.2 The same narrowed handler capture as task 1.6, slot for slot, in ascending slot index.
+- [x] 2.3 Tests for the same scenarios, the `component-action-handlers` ones included, and rebuild
   `runtime/typescript/dist`.
 
 ## 3. Generated code
 
-- [ ] 3.1 Layer identities and a per-call cache in the generated environment state
+- [x] 3.1 Layer identities and a per-call cache in the generated environment state
   (`crates/nx-codegen/src/runtime/environment.js`), used by `nxEnvRead`, `nxProvidedOrDefault`,
   formulas and the thunks of top-level values that read the environment, a bundle provide keyed by
   the value read.
-- [ ] 3.2 A test-only evaluation counter in the generated helpers, off unless the test harness turns
+- [x] 3.2 A test-only evaluation counter in the generated helpers, off unless the test harness turns
   it on, counting each evaluation of a default, provide, formula or top-level value thunk.
-- [ ] 3.3 Tests for the `executable-code-generation` scenarios, reading the counter to show that a
+- [x] 3.3 Tests for the `executable-code-generation` scenarios, reading the counter to show that a
   default is evaluated once.
 
 ## 4. Component lifecycle (Rust, for the tree)
@@ -103,22 +103,22 @@
 
 ## 6. Corpus and cost model
 
-- [ ] 6.1 Add the `environment-reuse` corpus program with entrypoints for each `nx-ir-format`
+- [x] 6.1 Add the `environment-reuse` corpus program with entrypoints for each `nx-ir-format`
   scenario, the bundle that reads a value it sets read for two values included, and run it in
   generated JavaScript too.
-- [ ] 6.2 Regenerate every program's `operations.json`, which also takes the smaller handler
+- [x] 6.2 Regenerate every program's `operations.json`, which also takes the smaller handler
   comparisons of the narrowed capture, and check that all three engines agree. `results.json` stays
   unchanged except where a program compares handlers that differ only in a slot they do not read;
   accept those diffs and list them in the PR description.
-- [ ] 6.3 Record `design-tokens-theme`'s counts before and after in the PR description.
-- [ ] 6.4 Run the cost differential and allocation tests.
+- [x] 6.3 Record `design-tokens-theme`'s counts before and after in the PR description.
+- [x] 6.4 Run the cost differential and allocation tests.
 
 ## 7. Documentation
 
-- [ ] 7.1 `docs/nx-ir-format.md`: the cost requirement's first sentence (the tree's held state),
+- [x] 7.1 `docs/nx-ir-format.md`: the cost requirement's first sentence (the tree's held state),
   the cost table's node row, the environment section's lookup and cost paragraphs, and a section on
   reusing derived results, with where an evaluation begins, the bundle key and the note on limits.
-- [ ] 7.2 `specs/ir-conformance/README.md`: describe `environment-reuse`.
+- [x] 7.2 `specs/ir-conformance/README.md`: describe `environment-reuse`.
 - [ ] 7.3 `specs/future.md`: remove "Memoizing defaults", "A bundle's values are computed at every
   read" and most of "Reading a token is expensive". Rewrite the reactivity direction and the
   instance-tree sections in terms of the tracked-computation model, marking state reads in the tree,

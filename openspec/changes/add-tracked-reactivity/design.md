@@ -105,7 +105,9 @@ bundle expression is evaluated under `Cap{gap}` for a read of `gap` and under `C
 of `scale`, and when it reads a value it sets, the two give different bundles. Keying the bundle by
 the provide's index and the value read makes each entry's own cap part of its identity
 (Decision 3). A targeted provide is evaluated only for its target, a default only for its value and
-a formula only for its layer's value, so their caps are already fixed by their identity.
+a formula only for its layer's value, so their caps are already fixed by their identity. A formula
+among an entry-module bundle's entries is held by no layer, so it is not a derived result of its
+own: it is evaluated at each read, from the bundle that is reused.
 
 What is cached is the result of the source, not of the read. A read of `env.color` with
 `env.color.accent=red` on top still applies that field override to the cached default each time.
@@ -190,7 +192,11 @@ Generated JavaScript and TypeScript have no operation counts. Their environment 
 read the environment (`const tv = () => …`) cache by the same rule, a bundle provide keyed by its
 index and the value read. The generated environment state is the same stack of layers, made by
 `nxWithEnvironment` for one call, so each layer gets a sequence number and the cache lives in that
-state. Component evaluation gets its state the same way. Values that read no environment are already
+state. A generated function called outside `nxWithEnvironment` runs in the module's own state,
+which has no roots and whose layers are numbered for its whole life. Its kept results stay valid
+from one such call to the next, since every token they hold still means what it meant, and a
+formula's result is held weakly by its layer, so it goes when the layer does. This is reuse across
+calls that changes no result, as the constants evaluated at load already are. Component evaluation gets its state the same way. Values that read no environment are already
 constants evaluated at load. That is reuse across calls, and it changes no count anyone can see.
 
 Since generated code counts nothing, a test cannot see from a result that a default was evaluated
