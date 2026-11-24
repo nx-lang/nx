@@ -1,0 +1,61 @@
+{
+  "main.nx::branchNotTaken": [
+    "soft",
+    "soft"
+  ],
+  "main.nx::branchNotTaken#highContrast": [
+    "ink",
+    "chalk"
+  ],
+  "main.nx::bundleReads": [
+    20,
+    2,
+    20,
+    2
+  ],
+  "main.nx::defaultTwice": [
+    "blue",
+    "white"
+  ],
+  "main.nx::defaultTwice#rootDark": [
+    "navy",
+    "black"
+  ],
+  "main.nx::equalOverride": [
+    "blue",
+    "blue"
+  ],
+  "main.nx::fieldOverride": [
+    "blue",
+    "red"
+  ],
+  "main.nx::formulaOverride": [
+    8,
+    2
+  ],
+  "main.nx::formulaTwice": [
+    8,
+    8
+  ],
+  "main.nx::modeOverride": [
+    "blue",
+    "navy"
+  ],
+  "main.nx::unrelatedOverride": [
+    "blue",
+    "blue"
+  ],
+  "main.nx::valueOverride": [
+    12,
+    12,
+    3
+  ],
+  "main.nx::valueTwice": [
+    "red",
+    "green",
+    "blue",
+    "red",
+    "green",
+    "blue"
+  ]
+}
