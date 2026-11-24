@@ -108,8 +108,8 @@ at a field path, SHALL be an override-supplied read, holding the value found. Re
 kept result SHALL NOT be direct inputs of the records that use it: the edge stands for them, and
 checking an edge SHALL validate the used result first, evaluating it again with the equality cutoff
 when it is not valid, the edge holding when that result has not changed since the record was last
-found valid. A kept result SHALL also hold the flattened set of its leaf reads with their supplier
-class, used only to take it into a call. A read where a source was evaluated under the render's own
+found valid. A kept result SHALL also have the flattened set of the environment values its leaf reads
+read, found from its inputs and edges, used only to take it into a call. A read where a source was evaluated under the render's own
 overrides of other values SHALL hold the value found beneath those overrides, or none, and SHALL
 compare by value. A node's record SHALL also hold the props and state fields its render read, and
 the node SHALL hold the revision at which its record was last found valid. `set_environment`, the
@@ -138,7 +138,8 @@ evaluated, and a state field captured by a formula the body wrote. A handler's s
 NOT count as reads, since the tree runs every handler against the node whose body created it, with
 that node's state live. After a dispatch's handlers run against a node, the instance tree SHALL
 compare, for each state field the handlers patched that the render read, its value at the end with
-its value at the start, charged as `diff` compares a field, and SHALL render the body again only
+its value at the start by the written identity the tree's equality cutoff uses, charged as `diff`
+compares a field, and SHALL render the body again only
 when one of them differs or the node's other records do not hold. Otherwise the node SHALL take the
 new state and SHALL keep its rendered output, its tokens and its handler generation, with no output
 written and no origins reported for it, and its instance SHALL count as the same render for every

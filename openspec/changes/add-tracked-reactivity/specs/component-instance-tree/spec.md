@@ -54,16 +54,16 @@ The tree SHALL keep the top-level values, defaults and entry-module provides its
 when no read they recorded, at any depth, was supplied or capped by a layer the render pushed, and
 SHALL offer them to later renders of any node. Formulas, and the bundles of a render's own
 `envProvide` nodes, SHALL be reused within one call only. The tree SHALL pass its kept results to a
-render through an internal option, not a public API. Each variant SHALL hold, beside its direct
-inputs, the flattened set of the leaf environment reads it made at any depth, through its edges
-included, each with its supplier class. A render SHALL take a variant from the tree only when no
+render through an internal option, not a public API. Each variant SHALL have, beside its direct
+inputs, the flattened set of the environment values its leaf reads read at any depth, through its
+edges included, found from its direct inputs and edges when it is needed. A render SHALL take a variant from the tree only when no
 layer the render pushed touches a value in that set, and the variant SHALL enter the call's own
 reuse as if evaluated at the call's start, with that set's reads and their tokens taken at the use.
 Validation SHALL use the direct inputs only.
 
-The tree SHALL keep one revision counter, and each root value that `set_environment` sets, changes
-or clears, and each kept result whose value changes when it is evaluated again, SHALL take the next
-revision. Each variant of a kept result SHALL hold the revision at which its value last changed, the
+The tree SHALL keep one revision counter, which each `set_environment` advances once. Each root
+value it sets, changes or clears SHALL take the new revision, and each kept result whose value
+changes when it is evaluated again SHALL take the current revision. Each variant of a kept result SHALL hold the revision at which its value last changed, the
 revision at which it was last found valid, and its record of direct inputs. A variant SHALL be valid
 at a use when its inputs, checked in the order they were read, all hold there: each read classified
 at the use as it was recorded, a root read whose root value has not changed since the variant was
@@ -74,10 +74,14 @@ equal. The lookup SHALL evaluate any formula there and SHALL be charged as the s
 and comparisons are. An evaluation of the used result that gives another variant than the edge names
 SHALL count as a change. The check SHALL stop at the first input that does not hold, and the result
 SHALL then be evaluated again without checking the rest, so that the check never evaluates what a
-fresh evaluation would not. Classifying a read and comparing revisions SHALL cost no operations.
+fresh evaluation would not. A lookup or an evaluation that fails during the check, for any reason
+but a resource limit, SHALL count as an input that does not hold, so that the evaluation that
+follows raises the failure where a fresh evaluation would; a resource limit SHALL end the
+operation. Classifying a read and comparing revisions SHALL cost no operations.
 
-A result evaluated again SHALL be compared with the variant it replaces, charged as a comparison of
-values. When the two are the same value as a host would see it written, of the same number kind,
+A result evaluated again SHALL be compared with the variant it replaces, the first variant of the
+result whose reads are classified at the place as they were recorded and that was found not valid
+there, charged as a comparison of values. When the two are the same value as a host would see it written, of the same number kind,
 with `-0.0` distinct from `0.0`, a NaN the same as nothing, and, when the host collects origins,
 with equal origins, the tree SHALL keep the old value and its revision. A result whose reads are
 classified differently, or whose override-supplied values differ, at two places SHALL keep one

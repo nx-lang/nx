@@ -45,59 +45,59 @@
 
 ## 4. Component lifecycle (Rust, for the tree)
 
-- [ ] 4.1 Record on `ComponentInstance`, in memory only, the state fields and props a render read:
+- [x] 4.1 Record on `ComponentInstance`, in memory only, the state fields and props a render read:
   slots the body evaluated, slots `capture_formula` captured, and the prop slots of each handler
   node the body binds (`slots_read`). The stored form is unchanged.
-- [ ] 4.2 Split `ComponentInstance` so that its render part (handlers, generation and tokens) is
+- [x] 4.2 Split `ComponentInstance` so that its render part (handlers, generation and tokens) is
   shared by an instance whose dispatch or prop skip kept its render, and make
   `ComponentInstance::is` compare that part. Props, handler props, state and records stay outside
   it.
-- [ ] 4.3 An internal dispatch entry for the tree: one call that applies the handlers as
+- [x] 4.3 An internal dispatch entry for the tree: one call that applies the handlers as
   `dispatch_component_actions` does, compares each patched field the render read (charged as `diff`
   charges a field), and renders only when one differs or the tree says the node's other records do
   not hold; otherwise it returns the new state and effects with no output written.
-- [ ] 4.4 An internal entry that normalizes a descriptor's props without rendering, charged as
+- [x] 4.4 An internal entry that normalizes a descriptor's props without rendering, charged as
   initialization charges normalizing them, and an internal initialization from props already
   normalized, so a node whose recorded prop differs is charged for normalization once.
-- [ ] 4.5 Leave `dispatch_component_actions` and the TypeScript dispatch rendering on every batch;
+- [x] 4.5 Leave `dispatch_component_actions` and the TypeScript dispatch rendering on every batch;
   check that the corpus's lifecycle results and the `rust-ir-runtime` and `typescript-ir-runtime`
   tests are unchanged.
 
 ## 5. Instance tree (Rust)
 
-- [ ] 5.1 Node records of direct inputs in read order (root reads with revisions and edges, kept
+- [x] 5.1 Node records of direct inputs in read order (root reads with revisions and edges, kept
   results used, override-supplied reads with values, reads under the render's own overrides as
   today) and a per-node `verified` revision; replace the leaf-read check of
   `environment_reads_hold` in `visit`, `set_environment` and dispatch with the record check.
-- [ ] 5.2 Prop-read skip in `visit`: normalize the new props, compare the recorded ones with
+- [x] 5.2 Prop-read skip in `visit`: normalize the new props, compare the recorded ones with
   `Across` semantics under `Program::metered`, rebind through `rebinding`/`rebind` when the parent's
   instance or a handler changed, and give the instance the new props without rendering.
-- [ ] 5.3 Dispatch skip in `dispatch_chain` through the entry of 4.3: keep the rendered output,
+- [x] 5.3 Dispatch skip in `dispatch_chain` through the entry of 4.3: keep the rendered output,
   tokens and generation, take the new state, leave the node settled and its children's `through`
   matching.
-- [ ] 5.4 Kept derived results: which results are kept (none of their reads under a layer the
+- [x] 5.4 Kept derived results: which results are kept (none of their reads under a layer the
   render pushed; no formulas or in-render bundles), the internal runtime option that passes them to
   a render's `Machine`, entry into the call's cache with tokens over the host layers, a revision
   counter, `changed` and `verified` per variant, and variants told apart by read classes and
   override-supplied values, tried in the order kept. Each variant also keeps the flattened set of
   its leaf reads with their supplier class, used for the "no layer the render pushed touches it"
   check and the tokens it enters the call with, not for validation.
-- [ ] 5.5 Validation: classify each read at the use, check inputs in read order and stop at the
+- [x] 5.5 Validation: classify each read at the use, check inputs in read order and stop at the
   first that changed, then evaluate again; check an edge by deep verify (validate the used result
   first, evaluate it again with the cutoff when not valid, then compare its `changed` with the
   user's `verified`); look up override-supplied values as the skip check does,
   formulas included; equality cutoff by written identity (number kind, `-0.0`, NaN, origins when
   collected), charged as a comparison.
-- [ ] 5.6 Reference counts or reverse edges for variants, dropping a variant no record references
+- [x] 5.6 Reference counts or reverse edges for variants, dropping a variant no record references
   when the tree operation ends; the extended `readers` index, override-supplied reads indexed under
   the root values their lookup read; `set_environment` marks possibly stale through the indexes,
   then pulls in depth order.
-- [ ] 5.7 Add the kept results, revision counter, reverse indexes and change set to `atomically`'s
+- [x] 5.7 Add the kept results, revision counter, reverse indexes and change set to `atomically`'s
   snapshot.
-- [ ] 5.8 The change set and `take_changes` as a diff by key (replacement as removed and added,
+- [x] 5.8 The change set and `take_changes` as a diff by key (replacement as removed and added,
   every dropped node listed, rebinding as rendered, a new descriptor or state alone not listed),
   consistent with `is_settled`.
-- [ ] 5.9 Tests for every `component-instance-tree` and `reactivity` tree scenario, including the
+- [x] 5.9 Tests for every `component-instance-tree` and `reactivity` tree scenario, including the
   modified scenarios of the existing requirements, a `set_environment` whose render fails after a
   kept result was evaluated again, and a dispatch skip followed by a tap on the old output.
 
@@ -119,12 +119,12 @@
   the cost table's node row, the environment section's lookup and cost paragraphs, and a section on
   reusing derived results, with where an evaluation begins, the bundle key and the note on limits.
 - [x] 7.2 `specs/ir-conformance/README.md`: describe `environment-reuse`.
-- [ ] 7.3 `specs/future.md`: remove "Memoizing defaults", "A bundle's values are computed at every
+- [x] 7.3 `specs/future.md`: remove "Memoizing defaults", "A bundle's values are computed at every
   read" and most of "Reading a token is expensive". Rewrite the reactivity direction and the
   instance-tree sections in terms of the tracked-computation model, marking state reads in the tree,
   prop reads, kept results, the change set and the narrowed handler capture ("What a handler
   captures") done, and keep reuse finer than a body, a dispatch skip in the bare APIs and a
   self-walking tree as later work.
-- [ ] 7.4 Document the change set, the new skips, kept results and their cost in the instance
+- [x] 7.4 Document the change set, the new skips, kept results and their cost in the instance
   tree's module docs and `docs/` where the tree is described, with an example of a host that
   updates from the change set.

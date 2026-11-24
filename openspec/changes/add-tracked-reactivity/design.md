@@ -361,9 +361,13 @@ overrides is not kept, matching the "found under the call's own overrides" flag.
 `$env` or in an `envProvide`, and bundles a render's `envProvide` holds are kept within the call
 only: they are identified by a layer, and layers are numbered per call.
 
-**Revisions.** The tree has one counter. Each root value that `set_environment` changes, set or
-cleared, and each kept result whose value changes when it is evaluated again, takes the next
-revision. A kept result's variant holds `changed`, the revision at which its value last changed, and
+**Revisions.** The tree has one counter, which each `set_environment` advances once. Each root
+value it changes, set or cleared, takes the new revision, and each kept result whose value changes
+when it is evaluated again takes the current revision, as Salsa's derived queries do: a result is
+only evaluated again because something changed after its users were last verified, so the current
+revision is already later than their `verified`. (The proposal said "the next revision"; with one
+advance per `set_environment` the current one is the same rule without a counter that moves during
+a pull.) A kept result's variant holds `changed`, the revision at which its value last changed, and
 `verified`, the revision at which it was last found valid.
 
 **Records.** A variant's record holds its direct inputs in the order it read them (Decision 8).
@@ -400,8 +404,9 @@ read only a kept `direction` result, a change of `locale` evaluates `direction` 
 the node's edge; when it gives `ltr` again, its `changed` stays, the edge holds and the node does not
 render. A variant or node found valid takes the current revision as its `verified`. Comparing revisions costs no operations.
 
-**Equality cutoff.** A result evaluated again is compared with the variant it replaces, the one with
-the same reads classified alike and equal override-supplied values. It is the same value when a host
+**Equality cutoff.** A result evaluated again is compared with the variant it replaces: the first
+variant whose reads are classified at the place as they were recorded and that was found not valid
+there, because a root value or an override-supplied value it read changed. It is the same value when a host
 could not tell the two apart in written output: the same number kind (`1` and `1.0` differ), `-0.0`
 and `0.0` distinct, a NaN never the same as anything, so it never cuts off, and, when the host
 collects origins, equal origins. `values_equal` alone is not enough: it equates `Int(1)` with
@@ -445,7 +450,9 @@ node's record uses it, however many passes render nothing in between.
 **Into a call.** The tree passes its kept results to each render's `Machine` through an internal
 runtime option, not a public API. At a use in the render, the runtime takes a result from the tree
 when no layer the render pushed touches a value in the variant's flattened set of leaf reads, which
-the tokens show for free. Checking only the direct inputs would not do: `button`'s direct inputs are
+the tokens show for free. The set is the environment values the variant's direct inputs and, through
+its edges, the inputs of the results it used read; it is found from the records when it is needed
+rather than held, and holds no supplier class, since validation, not this check, classifies reads. Checking only the direct inputs would not do: `button`'s direct inputs are
 an edge to `color`, and a render inside its own `provide env.colorMode=dark` must not take the light
 `button`. A result taken from the tree enters the call's own cache as if it had been evaluated at
 the call's start, its flattened reads with the tokens they have over the call's host layers, taken at
@@ -458,10 +465,11 @@ and a host that wants a count independent of history evaluates outside the tree.
 shared by several nodes is paid for by whichever render evaluates it first, so which node's budget
 pays depends on the order of the host's calls, as the tree's held state already does.
 
-**All or nothing.** `atomically` snapshots and restores, with the nodes, `visited`, `inert`, `roots`
-and `readers`, the kept results, the revision counter, the reverse indexes and the change set. A
-`set_environment` or dispatch that fails, and a pass run as one change that fails, leave all of them
-as they were.
+**All or nothing.** `atomically` snapshots and restores, with the nodes, `visited`, `inert` and
+`roots`, the kept results, the revision counter, the reverse indexes and the change set, which one
+store holds. A tree operation that evaluates works on a copy of the store and puts it back only
+when it succeeds. A `set_environment` or dispatch that fails, and a pass run as one change that
+fails, leave all of them as they were.
 
 ### 12. Changes are pushed, then pulled
 
@@ -504,6 +512,31 @@ the tree when the host last took the set and the tree now:
 A host that derives something from nodes, such as native controls or an index, updates exactly
 those and needs no walk. `is_settled` stays for hosts that walk, and the two agree: a node is
 unsettled exactly when it or a node under it rendered or was added since a pass last walked it.
+
+### 14. What the implementation settled
+
+Points the decisions above left open, settled while implementing them in
+`crates/nx-ir-runtime/src/kept.rs` and `tree.rs`:
+
+- **Marking moves the rest up.** After `set_environment` marks what a changed value reaches, every
+  node and variant it did not mark that was verified at the previous revision takes the new one as
+  its `verified`, at no cost. Without it, a node verified before the change would find a kept
+  result evaluated again during the pull "changed after it was verified" though nothing it read
+  changed.
+- **Failures during a check.** A lookup or an evaluation that fails while a record is checked makes
+  that input not hold, and the evaluation that follows raises the failure where a fresh one would.
+  A resource limit is not swallowed: it ends the operation, as it would have ended a fresh render.
+- **Reads under the render's own overrides** are indexed under the value they read. A body that
+  overrides `mode` and reads `loud`, whose default reads `mode`, is not reached by a change of the
+  root `mode`, which is what the existing cascade scenario asks.
+- **State fields compare by written identity.** A dispatch compares a patched field the render read
+  with `same_written`, the equality cutoff's rule, charged as `diff` charges a field, so a field
+  patched from `1` to `1.0` renders, as the host would see it written otherwise.
+- **Dropping variants.** Each variant knows its users, nodes and other variants; every tree
+  operation sweeps the variants with none at its end, releasing their edges in turn.
+- **Testing what is not checked.** That an unrelated kept result is not validated has no outcome a
+  host can see, since validating it would evaluate nothing; the tests hold the nodes that use it to
+  their output and settledness instead.
 
 ## Risks / Trade-offs
 
