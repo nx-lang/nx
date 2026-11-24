@@ -2,9 +2,9 @@
 
 ### Requirement: NX IR evaluation cost is counted in operations
 The cost of evaluating NX IR SHALL be counted in operations, and the count SHALL be a function of
-the linked images and the values the host supplies alone: two runtimes that evaluate the same
-images with the same input and produce the same result SHALL count the same number of operations,
-in the same order. The format's documentation SHALL state the rules, which are:
+the linked images, the values the host supplies and, for a call the instance tree makes, the state
+the tree holds: two runtimes that evaluate the same images with the same input and produce the same
+result SHALL count the same number of operations, in the same order. The format's documentation SHALL state the rules, which are:
 
 - Evaluating a node costs one operation, charged before any of the node's children is evaluated.
   A node is charged every time it is evaluated: a loop body once per iteration, a parameter's
@@ -309,7 +309,8 @@ count it alike:
 The conformance corpus SHALL hold cases for reads, defaults, field paths, `provide` around
 expressions and markup, entry-module provides and bundles, bundles in `provide` blocks, `with`
 steps, formulas, a bundle entry that reads another value the bundle sets, root values, and
-reused results, with their results and operation counts.
+reused results, an entry-module bundle that reads a value it sets read for two values among them,
+with their results and operation counts.
 
 #### Scenario: Both runtimes count a read of a default alike
 - **WHEN** both runtimes evaluate a corpus case that reads an environment value whose default is

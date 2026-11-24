@@ -27,17 +27,20 @@ node must render again.
   component renders and by derived values alike.
 - Each derived result evaluated at most once for each environment it depends on, within a call and,
   in the tree, across renders.
-- A dispatch or a new descriptor renders a body again only when something it read changed.
+- A dispatch in the tree or a new descriptor renders a body again only when something it read
+  changed.
 - Changes pushed to exactly the computations that read them, and reported to the host as a change
   set.
 - The operation count a function of the images, the input and the tree's held state, identical in
   the Rust and TypeScript IR runtimes.
-- No result changes. NX evaluation is pure, so a reused result equals a fresh one.
+- No result changes. NX evaluation is pure, so a reused result equals a fresh one. The one
+  difference is in limits: reuse does less work, so a call may stay under a depth or operation
+  limit that a fresh evaluation would reach (Decision 4).
 
 **Non-Goals:**
 
 - A tree that walks rendered output itself; an instance tree in the TypeScript runtime; lazy record
-  fields; anything finer than a component body.
+  fields; anything finer than a component body; a dispatch skip in the bare lifecycle APIs.
 
 ## The model
 
@@ -58,11 +61,11 @@ otherwise. How "the same thing" is checked depends on how long the result is kep
 | Kept | A read compares by | Why |
 | --- | --- | --- |
 | Within one call | The identity of what supplied it | Free, and needs no value comparison |
-| Across calls, in the instance tree | Revisions of root values and of other kept results, with equality cutoff; the value found for a read an override supplied | Revisions are free to compare, and an equal result stops a change from spreading |
+| Across calls, in the instance tree | Whether an override supplies it at the use; then the revision of the root value or kept result behind it, with equality cutoff, or the value an override supplies | Revisions are free to compare, and an equal result stops a change from spreading |
 
 The tree already follows the second row for environment reads: a node records what its render read
 and renders again on a root change only when a read now differs (`set_environment`), and a child
-whose descriptor is equal keeps its render. Decisions 1 to 8 implement the first row. Decisions 9
+whose descriptor is equal keeps its render. Decisions 1 to 7 implement the first row. Decisions 8
 to 13 extend the second row to state fields, props and derived values, with revisions and equality
 cutoff, and add notifications and the change set.
 
@@ -85,13 +88,22 @@ depends on earlier calls depends on the tree's held state, as a pass already doe
 | --- | --- |
 | A top-level value's value, checked against its declared type | The declaration (module and index) |
 | An environment value's default, checked against its type | The environment declaration |
-| An entry-module provide's value, a bundle provide's bundle included | The provide's index |
-| A captured formula's value | The layer that holds it |
+| A targeted entry-module provide's value | The provide's index |
+| A bundle entry-module provide's bundle | The provide's index and the value being read |
+| A captured formula's value | The layer that holds it, within the call only |
 
 None of them depends on local slots: values, defaults and provides are evaluated with an empty
 frame, and a formula's captured locals are fixed when it is captured. So the only input that can
 differ between two uses is the environment. Parameter defaults and field defaults are not cached:
 they can read parameters and are cheap in practice.
+
+A bundle provide (`target: None`) is evaluated inside a cap for the value being read
+(`provided_or_default`, the bundle arm: `self.capped(key, Below::Provide(index), …)`). So the one
+bundle expression is evaluated under `Cap{gap}` for a read of `gap` and under `Cap{scale}` for a read
+of `scale`, and when it reads a value it sets, the two give different bundles. Keying the bundle by
+the provide's index and the value read makes each entry's own cap part of its identity
+(Decision 3). A targeted provide is evaluated only for its target, a default only for its value and
+a formula only for its layer's value, so their caps are already fixed by their identity.
 
 What is cached is the result of the source, not of the read. A read of `env.color` with
 `env.color.accent=red` on top still applies that field override to the cached default each time.
@@ -107,13 +119,29 @@ layers beneath it as when it was pushed. So two reads of `V` with the same token
 exactly the same sources, and with none both times they find it from the same root, provides and
 default. Comparing tokens costs nothing and does not depend on the size of any value.
 
-While a derived result `S` is evaluated, each read of an environment value, at any depth (inside
-other derived results it evaluates or reuses), is added to `S`'s record with its token. For a read
-made inside `S`, the token is computed over the layers that existed when `S` began, ignoring the
-layers and caps `S`'s own evaluation pushed. Those are the same every time `S` is evaluated in the
-same outer environment. Ignoring caps can only make a token change more often than the value it
-guards, so it can cause an extra evaluation but never a wrong reuse. Both runtimes follow the same
-rule, so they make the same decisions.
+**Where an evaluation begins.** A derived result `S` begins at the stack as it stands when `S` is
+asked for, before `S`'s own cap is pushed. While `S` is evaluated, each read of an environment value,
+at any depth (inside other derived results it evaluates or reuses), is added to `S`'s record with
+its token computed over the layers below that position only. The layers above it are the ones `S`'s
+own evaluation pushed: first its own cap, which its identity fixes (a default's
+`Cap{V, exhausted}`, a targeted provide's `Cap{V, provide i}`, a bundle's `Cap{V, provide i}` for the
+value `V` it is keyed by, a formula's `Cap{V, layer}`), then the layers its nested evaluations push
+and pop. Those are a function of `S`'s identity and of what the layers below give, so they are the
+same at every evaluation of `S` whose tokens below match. A cap below the start, pushed by an
+enclosing evaluation, is a layer like any other: it has its own sequence number, and a read it caps
+records that number. Both runtimes take tokens at the same position, so they make the same
+decisions.
+
+A bundle that reads a value it sets shows the rule at work. With
+`provide env with makeTheme(env.scale)` in the entry module, setting both `scale` and `gap`, a read
+of `gap` evaluates the bundle keyed by `gap` under `Cap{gap}`. Inside, `env.scale` finds no layer,
+so it reaches the provides, which evaluate the bundle keyed by `scale` under `Cap{scale}`. Inside
+that, `env.scale` meets its own cap and falls through to the default. The `scale` entry gives
+`scale`, and the `gap` bundle is built from it. Both entries record `scale` with token none, because
+their own caps are above their start. A later read of `scale` reuses the `scale` entry, which was
+built from the default, and a later read of `gap` the `gap` entry, which was built from the
+provided `scale`. Each gives what a fresh evaluation gives. Had the bundle been keyed by index alone,
+the read of `scale` would reuse the bundle built for `gap`.
 
 ### 4. Reuse when every token still matches
 
@@ -125,10 +153,18 @@ in one call, at the cost of memory that grows with the program's output. One ent
 already removes the repeated reads inside one section.
 
 A reused result's recorded reads are also added to the record of any derived result being
-evaluated around the use, and to the instance tree's read list when the call records one. So the
-skip check sees the same reads whether a result was evaluated or reused.
+evaluated around the use, and to the instance tree's read list when the call records one. Their
+tokens are computed again against the start of each record they are added to, never copied, since a
+token depends on where the record's evaluation began. Computing them walks the stack and is free.
+So the skip check sees the same reads whether a result was evaluated or reused.
 
 A failure ends the call, so no failure is ever cached.
+
+Reuse means less work, so a call may stay under a limit a fresh evaluation reaches. A default is
+evaluated at the depth of the read that first needed it (`depth: cx.depth`), and a deeper read that
+reuses it does not evaluate it again, so it can succeed where evaluating there would exceed the
+depth or native-stack limit. The same holds for the operation budget. Both runtimes reuse alike, so
+they reach the same limits, and the corpus pins counts, not limits of fresh evaluation.
 
 ### 5. An override counts as a change whatever its value
 
@@ -149,135 +185,293 @@ default, provide or formula is charged "each time it is evaluated".
 
 Generated JavaScript and TypeScript have no operation counts. Their environment helpers
 (`nxEnvRead`, `nxProvidedOrDefault`, `nxFormula`) and the emitted thunks for top-level values that
-read the environment (`const tv = () => …`) cache by the same rule. The generated environment
-state is the same stack of layers, made by `nxWithEnvironment` for one call, so each layer gets a
-sequence number and the cache lives in that state. Component evaluation gets its state the same
-way. Values that read no environment are already constants evaluated at load. That is reuse across
-calls, and it changes no count anyone can see.
+read the environment (`const tv = () => …`) cache by the same rule, a bundle provide keyed by its
+index and the value read. The generated environment state is the same stack of layers, made by
+`nxWithEnvironment` for one call, so each layer gets a sequence number and the cache lives in that
+state. Component evaluation gets its state the same way. Values that read no environment are already
+constants evaluated at load. That is reuse across calls, and it changes no count anyone can see.
 
-### 8. The tree's records are the model's records
+Since generated code counts nothing, a test cannot see from a result that a default was evaluated
+once. The generated helpers carry a test-only evaluation counter, off unless the test harness turns
+it on, that counts each evaluation of a default, provide, formula or top-level value thunk. The
+`executable-code-generation` tests read it.
 
-A node's read list, which `set_environment` and the skip check use, is the record of its render.
-Reads made inside a derived result that the render reused are added to it from the reused result's
-record, with the values found and with the same "found under the call's own overrides" flag that
-`take_environment_reads` uses today. So the tree's behavior does not change when a derived result is
-reused instead of evaluated.
+### 8. The tree's records hold direct inputs
 
-### 9. State fields are sources, and a dispatch follows them
+A node's record and a kept result's record (Decision 11) have one form, so `set_environment`, the
+skip check in `visit` and a dispatch validate them by one rule. A record holds the evaluation's
+direct inputs, in the order it first read them:
 
-A render records the state fields it read, by name, on the instance. A dispatch runs its handlers
-as today, with live state, and then compares the state it ends with against the state it began with,
-field by field, charged as `diff` compares fields. The body renders again only when a field it read
-differs. Otherwise the instance takes the new state and keeps its rendered output and handlers. The
-dispatch result says whether it rendered, so the tree leaves a node that did not render settled.
+- **A root read** of value `V`: a read that no layer of the place sets or caps. It holds the
+  revision of `V`'s root value, and, when no root value was set and a provide or the default
+  supplied `V`, an edge to that kept result.
+- **A kept result used**: an edge to the variant of a top-level value, default or entry-module
+  provide that the evaluation used, not through a root read.
+- **An override-supplied read** of `V`: a read that a layer of the place sets, wholly or at a field
+  path. It holds the value found.
 
-Both IR runtimes have the component lifecycle, so both do this, with equal counts. A stored
-instance carries its state read record, and a restored one without a record renders on every
-dispatch, which is what happens today.
+The *place* of a node is its environment: the layers above it and its descriptor's `$env`, which
+are the host layers of its calls. The place of a kept result is the place where it was used, since
+the tree keeps only results whose reads were all found beneath the render's own overrides
+(Decision 11).
 
-A handler bound by the body always runs against the instance that made it, and reads that
-instance's state live when it runs (`component-action-handlers`), even when a child emits the action
-that triggers it. So the state a handler captured is never read, and keeping the old handlers is
-sound: a field read only by handlers never needs a render.
+Reads made inside a kept result the evaluation used are not copied into the record: the edge stands
+for them. So when `locale` changes and `direction` evaluates again to `ltr`, a node that read only
+`direction` sees an unchanged edge and does not render (the cutoff, Decision 11). With the leaf
+reads that `environment_reads_hold` checks by value today, the node would be a `locale` reader and
+render. Within one call, a reused result's reads are still added to the call's records with tokens
+(Decision 4), since that is how the call decides reuse. The tree builds its record from the direct
+inputs.
+
+A read where a source was evaluated under the render's own overrides of other values keeps today's
+handling (`take_environment_reads`): it holds the value found beneath those overrides, or none,
+which counts as changed, and is compared by value like an override-supplied read.
+
+A node's record also holds the props and state fields its render read (Decisions 9 and 10), and
+the node holds its own `verified` revision, the revision at which its record was last found valid.
+A record is checked as Decision 11 defines: each input classified at the place, then validated in
+order, stopping at the first that changed. A node whose record was verified at the current revision
+in the environment it holds is valid without a check.
+
+### 9. State fields are sources, and a dispatch in the tree follows them
+
+A render records, by name, the state fields its body read: a state field's `slot` node evaluated,
+and a state field a formula captured when the body wrote an override (Decision 10 lists the reads).
+The record is kept on the instance in memory only; the stored form of an instance is unchanged.
+
+The bare lifecycle APIs, `dispatch_component_actions` in Rust and the TypeScript runtime's
+dispatch, are unchanged. They render the body after every batch with fresh tokens, as
+`rust-ir-runtime` and `typescript-ir-runtime` require, and the corpus's lifecycle results are
+unchanged. Their instances (`InstanceData`, `NxComponentInstance`, the stored `Stored`) hold no
+rendered output, so there would be nothing to return, and a host of the bare API holds the output
+itself. A bare-API host can also run a parent-bound handler for an emit, or a handler handed down,
+on what it captured rather than live state (`invoke_handler(handler, action, None)`), which a skip
+would leave stale.
+
+The instance tree holds each node's rendered output, so the skip belongs there. The tree runs a
+batch through an internal Rust lifecycle entry, a single call with one budget, that applies the
+handlers as `dispatch_component_actions` does and returns the new state and the effects without
+rendering, unless the render is needed. It is needed when a state field the render read differs
+between the start and the end of the batch, or when the node's other records do not hold: its
+environment record, checked as Decision 8 says, and its props, which a dispatch does not change.
+The comparison covers each state field the handlers patched that the render read, compared once,
+its value at the end against its value at the start, charged as `diff` charges a field
+(`patch_state` knows the patched fields). When the render is needed, the entry renders the body with
+the new state as `dispatch_component_actions` does, with the next generation's tokens, so the count
+is today's count plus the comparisons. When it is not, the node keeps its rendered output, its
+tokens and its handler generation, and takes only the new state. Nothing is rendered or written for
+the output then, and no origins are reported for it: the node's output keeps the origins its render
+reported. The effects and the state are written as today.
+
+A dispatch that keeps its render keeps the instance's identity for everything the tree means by
+"the same render": the handlers, the generation and the tokens. The tree compares instances with
+`ComponentInstance::is` in `through`, `visited`, `read_from_current`, `walked_anew`, `rebinding` and
+`creator`. A kept render gives an instance whose render part is shared with the one before, and
+`is` compares that part, so the children's `through` and the pass's record of what it visited still
+match, and no rebinding follows. Only the node's state changes. The node is not marked unwalked and
+stays settled.
+
+In the tree, every handler runs against the node whose body created it (`creator`), and an emit is
+routed to the parent's handler by token and run against that handler's creator too. So every
+handler the tree runs reads its owner's state live, and the state slots it captured are never read.
+A field read only by handlers needs no render, and handlers' state slots are not reads.
 
 ### 10. Props are sources, and a new descriptor follows them
 
-A render records the props it read. When the tree visits a node with a descriptor that differs, it
-renders again only when a recorded prop, or a prop read by a handler the body bound, differs, by
-value. The runtime finds the slots a handler node reads as it finds a formula's locals
-(`slots_read`). Otherwise the node takes the new descriptor and keeps its render, as it already does
-for a change that touches only `$env`. The comparison is charged as `same_descriptor` is charged today,
-over the recorded props only.
+A render records the props it read. A prop is read:
 
-A content parameter counts as one prop. Handler props bound for emits are rebound as today and are
-not reads.
+- when the body evaluates its `slot` node;
+- when the body writes an override formula that captures it. `capture_formula` reads
+  `frame.get(slot)` for the formula's locals without evaluating their nodes, so with
+  `<Row env.gap={env.space * scale}>`, a prop or state field `scale` is a read of the enclosing
+  render;
+- when the body binds a handler that reads it. A handler captures the frame (`Handler.captured`)
+  and reads its props from the capture, so the prop slots of each handler node the body binds,
+  found as a formula's locals are (`slots_read`), are reads. Its state slots are not (Decision 9).
+
+A content parameter counts as one prop. Handler props bound for emits are not reads; they are
+compared as the existing descriptor comparison compares them.
+
+Props are compared after defaults resolve. A prop's default can read other props
+(`normalize_fields` binds the frame as it goes), so with `title: string = label`, a body that reads
+only `title` depends on `label` too, and comparing the normalized `title` sees it. The instance needs
+the new normalized props anyway, since a later dispatch builds the body's frame from
+`instance.props`.
+
+When a visit hands a node a descriptor that differs from the one it holds, and its environment
+record holds at its new place, the tree normalizes the new descriptor's props through an internal
+Rust lifecycle entry, charged as initialization charges normalizing them (each check, each
+default's nodes). It then compares the recorded props of the old and new normalized props with the
+semantics of `Across`, which the rebinding path uses today: a handler the body can see is resolved
+through the instance each descriptor was read from, compared as the language's `==` compares it, and
+recorded in a `Rebinding`; a handler bound for an emit must be bound in both or in neither; the text
+of a token does not count. The comparison is metered as the existing rebinding comparison is
+(`Program::metered`), not unmetered as `same_descriptor` is.
+
+When a recorded prop differs, the node is initialized again, as today. Otherwise the node keeps its
+render. When the parent's instance changed, or the comparison mapped a handler to another, the kept
+output, the node's own handlers and the nodes initialized through it are rebound as a kept child is
+(`rebinding` and `rebind`), with the rebinding's cost. The instance takes the new normalized props
+and handler props without rendering, and keeps its generation and tokens. The node takes the new
+descriptor and environment and stays settled. An equal descriptor still takes today's free path.
 
 ### 11. The tree keeps derived results across renders, checked by revision
 
-The tree keeps the derived results its renders evaluated and offers them to later renders of any
-node. Checking a kept result by looking up and comparing every value it read, at every use, would
-cost a lookup and a comparison per read. Instead the tree follows the revision scheme of incremental
-engines such as Salsa:
+The tree keeps derived results its renders evaluated and offers them to later renders of any node.
+Checking a kept result by looking up and comparing every value it read, at every use, would cost a
+lookup and a comparison per read. Instead the tree follows the revision scheme of incremental
+engines such as Salsa.
 
-- **A revision counter.** The tree has one counter. Each root value that `set_environment` changes,
-  and each kept result whose value changes when it is evaluated again, takes the next revision.
-- **Two revisions per kept result.** `changed` is the revision at which its value last changed, and
-  `verified` the revision at which it was last found valid.
-- **Direct inputs.** A kept result's record holds its direct inputs, not the leaves under them:
-  the root values it read (by name), the other kept results it used (by edge), and the values that
-  an override supplied (by value, see below).
-- **Validity.** A kept result is valid at the current revision when every root value and every kept
-  result it used has `changed` no later than its `verified`, and every override-supplied read
-  finds an equal value at the use. Checking a used result first validates that result, recursively,
-  so a change is found from the inputs up. Comparing revisions costs nothing and is bounded by the
-  program's declarations.
-- **Equality cutoff.** A kept result that is not valid is evaluated again. Its new value is then
-  compared with the old one, charged as a comparison of values. When they are equal, the tree keeps
-  the old value and leaves `changed` alone, so nothing that used it is evaluated or rendered again.
-  So when `locale` changes and a `direction` result evaluates again to the same `ltr`, the results
-  and renders that read only `direction` stay valid.
-- **Override-supplied reads compare by value.** A value that a `$env` entry or an `envProvide` above
-  the node supplies is not a tree-wide source, since it differs from place to place. Such a read is
-  compared by value at the use, charged as the skip check's reads and comparisons are. Those values
-  are usually small, such as `dark`.
-- **Variants.** A result used at places whose override-supplied reads differ, such as a light and a
-  dark section, keeps one variant for each, chosen by those reads. A variant no render used during a
-  pass is dropped when the pass finishes, so variants are bounded by the output.
+**What is kept.** Top-level values, defaults and entry-module provides (a bundle keyed as in
+Decision 2) evaluated in renders the tree makes, when none of the reads they recorded has a token
+that names a layer the render pushed. A result evaluated under the render's own `envProvide`
+overrides is not kept, matching the "found under the call's own overrides" flag. Formulas, in
+`$env` or in an `envProvide`, and bundles a render's `envProvide` holds are kept within the call
+only: they are identified by a layer, and layers are numbered per call.
 
-Within a render, a result taken from the tree enters the call's own cache, and Decisions 1 to 4
-apply from there. A render's count now depends on what the tree holds, which a pass's count already
-does, and a host that wants a count independent of history evaluates outside the tree.
+**Revisions.** The tree has one counter. Each root value that `set_environment` changes, set or
+cleared, and each kept result whose value changes when it is evaluated again, takes the next
+revision. A kept result's variant holds `changed`, the revision at which its value last changed, and
+`verified`, the revision at which it was last found valid.
+
+**Records.** A variant's record holds its direct inputs in the order it read them (Decision 8).
+
+**Validity at a use.** Whether a read is a root read or an override-supplied read depends on the
+use, since each node's environment is its own stack of `$env` layers. So a variant is valid at a use
+only when its inputs, checked in the order they were read, all hold there:
+
+- each read is first classified at the use: whether a layer there sets or caps the value, which
+  the walk that gives tokens finds for free. A read recorded as a root read where a layer now sets
+  the value, or recorded as override-supplied where none does, does not hold;
+- a root read holds when its root value has not changed since `verified`, and, when it has an edge,
+  when the edge holds;
+- an edge holds when the variant it names is valid at the use, by this rule, and its `changed` is
+  no later than this variant's `verified`;
+- an override-supplied read holds when the value the environment lookup gives at the use equals the
+  recorded one. Getting the value evaluates any formula there, and a derived result the lookup needs
+  is taken from the tree by this same rule. It cannot need the variant being validated, which would
+  have been a cycle when that variant was evaluated. The lookup is charged as the skip check's reads
+  and comparisons are.
+
+The check stops at the first input that does not hold, and the result is then evaluated again,
+without checking the rest. Each input checked was read by the last evaluation after inputs that all
+still hold, so a fresh evaluation would reach that same read, and the check never evaluates a
+branch the fresh run would not take, nor raises an error it would not raise. The order also fixes
+the operation count. So with a result `K` that reads `flag` and, only when `flag` is true, a result
+`K3`, a change of `flag` to false evaluates `K` again without validating `K3`. A variant found
+valid takes the current revision as its `verified`. Comparing revisions costs no operations.
+
+**Equality cutoff.** A result evaluated again is compared with the variant it replaces, the one with
+the same reads classified alike and equal override-supplied values. It is the same value when a host
+could not tell the two apart in written output: the same number kind (`1` and `1.0` differ), `-0.0`
+and `0.0` distinct, a NaN never the same as anything, so it never cuts off, and, when the host
+collects origins, equal origins. `values_equal` alone is not enough: it equates `Int(1)` with
+`Float(1.0)` and `0.0` with `-0.0`, and origins take no part in it. The comparison is charged as a
+comparison of values. When the values are the same, the tree keeps the old value and leaves
+`changed` alone, so nothing that used it is evaluated or rendered again. When they differ, the new
+value takes the next revision.
+
+**Variants.** A result used at places whose reads are classified differently, or whose
+override-supplied values differ, such as a light and a dark section, keeps one variant for each.
+Variants are told apart by those classes and values. A use checks the variants in the order they
+were kept, each by the rule above, and uses the first valid one; with none, it evaluates the result
+and keeps a variant, replacing the one it is compared with for the cutoff or adding one.
+
+**Lifetime.** A variant is referenced by the node records and kept-result records that hold an edge
+to it. When a node renders again, is replaced, removed or dropped, or a variant is replaced or
+dropped, its edges are released. A variant that no record references is dropped when the tree
+operation ends, releasing its own edges in turn. So a palette the first click used stays while a
+node's record uses it, however many passes render nothing in between.
+
+**Into a call.** The tree passes its kept results to each render's `Machine` through an internal
+runtime option, not a public API. At a use in the render, the runtime takes a result from the tree
+when no layer the render pushed touches a value the result read, which the tokens show for free. A
+result taken from the tree enters the call's own cache as if it had been evaluated at the call's
+start, its reads with the tokens they have over the call's host layers, taken at the use, and
+Decisions 1 to 4 apply from there. A result the render evaluates and the tree may keep is kept when
+the render succeeds.
+
+**Cost.** A render's count now depends on what the tree holds, which a pass's count already does,
+and a host that wants a count independent of history evaluates outside the tree. A kept result
+shared by several nodes is paid for by whichever render evaluates it first, so which node's budget
+pays depends on the order of the host's calls, as the tree's held state already does.
+
+**All or nothing.** `atomically` snapshots and restores, with the nodes, `visited`, `inert`, `roots`
+and `readers`, the kept results, the revision counter, the reverse indexes and the change set. A
+`set_environment` or dispatch that fails, and a pass run as one change that fails, leave all of them
+as they were.
 
 ### 12. Changes are pushed, then pulled
 
 Every source keeps an index of the tracked computations that read it directly: the tree's `readers`
 index for root values, extended to kept results; reverse edges from each kept result to the kept
 results and nodes that used it; the instance's own record for state fields; and the node's own
-record for props.
+record for props. The `readers` index lists, for each environment value, the nodes and kept results
+with a root read of it, and those with an override-supplied read whose lookup read its root value,
+such as a read of `gap` under `<Row env.gap={env.space * 2}>` for `space`.
 
 `set_environment` gives each changed root value a new revision and follows the indexes to mark the
 nodes that could be affected as possibly stale, transitively. That walk visits only what the indexes
 name and evaluates nothing. Then, in depth order, the tree pulls: for each possibly stale node it
-validates the kept results the node used, evaluating again only those that are not valid, with
-equality cutoff. It renders the node again only when one of its direct inputs changed. A node whose
-inputs all came back equal is left alone and stays settled.
+checks the node's record at its environment by the rule of Decision 11, validating the kept results
+the node used and evaluating again only those that are not valid, with equality cutoff. It renders
+the node again, with the state it holds, at the first direct input that changed. A node whose inputs
+all hold is left alone, takes the current revision as its `verified`, and stays settled.
 
-A dispatch decides from the instance's own state record (Decision 9). Within one call there are no
+A visit's skip check validates the node's record at its new place by the same rule. A dispatch
+decides from the instance's own state record (Decision 9). Within one call there are no
 notifications: a call's records are checked when a result is asked for, because that check is free.
 
 ### 13. The host gets a change set
 
-The tree keeps a change set: the keys of the nodes that rendered again, that were added and that
-were removed since the host last took it. `take_changes` returns it and clears it. A node that was
-added and then removed before the host took the set appears in neither list. A node that rendered
-several times appears once. A host that derives something from nodes, such as native controls or an
-index, updates exactly those and needs no walk. `is_settled` stays for hosts that walk, and the two
-agree: a node is unsettled exactly when it or a node under it is in the rendered or added lists of
-changes not yet walked.
+The tree keeps a change set, which `take_changes` returns and clears. It is a diff by key between
+the tree when the host last took the set and the tree now:
+
+- a key with no node then and a node now is *added*;
+- a key with a node then and none now is *removed*. Every node dropped with a removed or replaced
+  subtree, by `drop_under`, by `finish` or by `remove`, is listed under its own key;
+- a key whose node was replaced in between, by a visit with another component or under another
+  parent, or removed and then visited again, is listed as removed and added;
+- a key whose node is the same node then and now is *rendered* when its rendered output changed in
+  any way since, a render or a rebinding that changed what its tokens name included. A node that
+  only took a new descriptor or new state with no change to its output is not listed;
+- a node added and then removed before the host took the set appears in no list, a node added and
+  rendered appears as added only, and a node rendered several times appears once.
+
+A host that derives something from nodes, such as native controls or an index, updates exactly
+those and needs no walk. `is_settled` stays for hosts that walk, and the two agree: a node is
+unsettled exactly when it or a node under it rendered or was added since a pass last walked it.
 
 ## Risks / Trade-offs
 
 - **Every recorded count changes.** Every corpus program that reads a value or a default more than
   once gets smaller counts. The regeneration is mechanical. The PR's corpus diff shows each change,
-  and `design-tokens-theme`'s drop is the measurement this change exists for.
+  and `design-tokens-theme`'s drop is the measurement this change exists for. Results do not change.
 - **Counts depend on the tree's history.** A render's count includes the checks of kept results
-  and excludes what they save, so the same render costs less in a warm tree. This is already true of
-  a pass, and is stated in the cost rules.
+  and excludes what they save, so the same render costs less in a warm tree, and a shared result is
+  paid for by the render that evaluates it first. This is already true of a pass, and is stated in
+  the cost rules.
+- **Reuse can turn a limit failure into a success.** A read deep in a call that reuses a default
+  evaluated shallowly does not reach the depth limit a fresh evaluation would. Both runtimes do the
+  same, and the change accepts it.
 - **Recording props and state reads touches every render.** The records are small (bounded by the
   component's declared props and state fields) and replace work the dispatch and visit skip.
-- **Handler reads must be exact.** A handler whose slots are recorded wrongly could keep stale
-  captures. The compiler's handler slot analysis is the source, and the corpus's handler programs
-  run with the skip on.
-- **One entry per derived result.** A call that alternates between environments evaluates again at
-  each switch. That is at most what it costs today.
-- **The rule must be exact in both runtimes.** A difference in when a token is taken would show as a
-  count difference in the corpus and in the cost differential tests, which both run on every PR.
+- **Captured reads must be exact.** A handler or formula whose slots are recorded wrongly could keep
+  stale captures. The compiler's slot analysis (`slots_read`) is the source, and the tree's tests
+  run the handler programs with the skips on.
+- **One entry per derived result within a call.** A call that alternates between environments
+  evaluates again at each switch. That is at most what it costs today.
+- **The rule must be exact in both runtimes.** A difference in where a token is taken would show as
+  a count difference in the corpus and in the cost differential tests, which both run on every PR.
 - **Read records cost memory.** A record holds one entry per distinct value read, bounded by the
-  number of environment declarations in the program.
+  number of environment declarations in the program, and a kept result lives only while a record
+  uses it.
 
 ## Migration Plan
 
-None. Hosts see no API change. A host that sets an operation budget sees smaller counts.
+None. Hosts see no API change beyond `take_changes`. A host that sets an operation budget sees
+smaller counts. A tree host that relied on a dispatch always giving new tokens sees the old tokens
+kept when nothing the render read changed, and they stay valid.
 
 ## Open Questions
 
