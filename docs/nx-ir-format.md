@@ -819,7 +819,8 @@ a provide did; a read a layer sets is an override-supplied read holding the valu
 kept result used otherwise is an edge. What no kept result stands for is a direct input of what
 encloses it: a formula's reads, the reads of a formula entry of an entry-module bundle, and the
 reads of a result evaluated under the render's own overrides, and, after an override-supplied
-read, the formulas of the render's own field overrides on top of it. A read inside the source of
+read, the sources of the render's own field overrides on top of it; the place's own formulas are
+not, since the value found stands for them. A read inside the source of
 an override the render pushed itself, as `env.x` in `provide env.x={env.x + 1}`, is a read of what
 is beneath it. A read a layer of the place sets, when a source of it was evaluated under an
 override the render pushed itself, counts as changed at every check, since the value found there

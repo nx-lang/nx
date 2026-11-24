@@ -250,9 +250,11 @@ render itself recorded, so a root read of `locale` there still holds when `local
 is unchanged.
 
 An override-supplied read holds the value found beneath the render's own layers, which a lookup
-at the place gives, and is followed by the direct inputs of what it evaluated, so that the
-formulas of the render's own field overrides on top of it, as in
-`provide env.colors.accent={env.locale}` under a place that sets `colors.tone`, are recorded. A
+at the place gives and which stands for the place's own formulas, and is followed by the direct
+inputs and edges of the sources of the render's own field overrides on top of it alone, as in
+`provide env.colors.accent={env.locale}` under a place that sets `colors.tone`. So under
+`<Stack env.gap={if env.space > 0 { 1 } else { 0 }}>`, a change of `space` from `1` to `5` leaves
+`gap` at `1` and renders nothing. A
 read inside the source of a layer the render pushed itself, as `env.x` in `provide env.x={env.x +
 1}`, goes on beneath that layer and is recorded as a read of its own, root or override-supplied.
 

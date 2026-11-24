@@ -114,8 +114,8 @@ kept result, a formula, a formula entry of an entry-module bundle and a result e
 render's own overrides, SHALL give its direct inputs to the record that encloses it, so that a
 record holds every read, at any depth, that no kept result stands for, and a read the render's own
 override supplies wholly SHALL NOT be one. An override-supplied read SHALL be followed by the
-direct inputs of what it evaluated, the formulas of the render's own field overrides on top of it
-included, and a read inside the source of a layer the render pushed itself SHALL be a read of what
+direct inputs of the sources of the render's own field overrides on top of it, and not by those of
+the place's sources, which its value stands for; and a read inside the source of a layer the render pushed itself SHALL be a read of what
 is beneath that layer. A read that a layer of the place sets, when a source of it was evaluated
 under a layer the render pushed itself, SHALL count as changed at every check, since what it found
 is not what a lookup at the place gives, and the direct inputs of what it evaluated SHALL follow
@@ -159,6 +159,11 @@ whether a derived result was evaluated or reused.
   its body renders `env.loud`, whose default reads `env.locale`, inside its own
   `provide env.mode="dark"`, and a host changes the root value of `region`
 - **THEN** the node SHALL render again and show what a fresh render shows
+
+#### Scenario: A place's formula that gives the same value stops a change
+- **WHEN** a node renders `env.gap` under `<Stack env.gap={if env.space > 0 { 1 } else { 0 }}>`, and
+  a host changes the root value of `space` from `1` to `5`
+- **THEN** the node SHALL NOT render again
 
 #### Scenario: A formula the body provides that reads its own value follows what is beneath it
 - **WHEN** a body renders `env.x` inside its own `provide env.x={env.x + 1}`, and a host changes the
