@@ -1,7 +1,7 @@
 {
   "counts": {
     "main.nx::andSkipsRight": 6,
-    "main.nx::andTakesRight": 10,
+    "main.nx::andTakesRight": 9,
     "main.nx::arithmetic": 14,
     "main.nx::bareFailed": 15,
     "main.nx::classified": 14,
@@ -16,7 +16,7 @@
     "main.nx::maybe": 6,
     "main.nx::negation": 4,
     "main.nx::orSkipsRight": 6,
-    "main.nx::orTakesRight": 11,
+    "main.nx::orTakesRight": 10,
     "main.nx::ordered": 30,
     "main.nx::realDivision": 4,
     "main.nx::realRemainder": 4,

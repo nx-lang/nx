@@ -1,15 +1,15 @@
 {
   "counts": {
-    "input.nx::root": 2263
+    "input.nx::root": 2244
   },
   "failures": {
     "input.nx::root": [
       {
-        "budget": 1131,
+        "budget": 1122,
         "declaration": "catalog.nx::Button"
       },
       {
-        "budget": 2262,
+        "budget": 2243,
         "declaration": "input.nx::root"
       }
     ]

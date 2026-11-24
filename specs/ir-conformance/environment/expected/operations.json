@@ -2,7 +2,7 @@
   "counts": {
     "main.nx::bundle": 18,
     "main.nx::cascade": 26,
-    "main.nx::colors": 32,
+    "main.nx::colors": 26,
     "main.nx::colors#rootDark": 26,
     "main.nx::hosted": 15,
     "main.nx::markup": 19,

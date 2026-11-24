@@ -37,6 +37,7 @@ mod module;
 mod normalize;
 mod origins;
 mod program;
+mod reuse;
 mod stored;
 mod text;
 mod tree;

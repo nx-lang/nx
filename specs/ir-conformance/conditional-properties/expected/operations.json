@@ -8,7 +8,7 @@
     "main.nx::omitted#true": 9,
     "main.nx::patch#false": 6,
     "main.nx::patch#true": 8,
-    "main.nx::root": 79,
+    "main.nx::root": 74,
     "main.nx::sequenceComponent": 9
   }
 }

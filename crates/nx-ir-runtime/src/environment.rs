@@ -13,6 +13,7 @@ use crate::eval::{Cx, Machine, Quoted};
 use crate::module::{DeclarationKind, Override, Type};
 use crate::normalize::Path;
 use crate::program::ProgramData;
+use crate::reuse::Derived;
 use crate::update;
 use crate::value::{from_host, set_field, values_equal, Record, Value};
 use nx_value::NxValue;
@@ -376,6 +377,10 @@ struct Pending {
 #[derive(Debug, Default)]
 pub(crate) struct EnvState {
     pub layers: Vec<Layer>,
+    /// The identity of each layer, by position: a number no other layer of the call has.
+    pub(crate) ids: Vec<u64>,
+    /// The identity the next layer pushed gets.
+    pub(crate) next_id: u64,
     /// How many of `layers` came from the host's environment, below any `envProvide`.
     pub base: usize,
     pub roots: HashMap<EnvKey, Value>,
@@ -385,6 +390,10 @@ pub(crate) struct EnvState {
     /// overrides the evaluation pushed were in effect has no value here: what it found depends
     /// on those overrides, so its value beneath them is read again once the evaluation is done.
     pub reads: Option<Vec<(EnvKey, Option<Value>)>>,
+    /// The last result of each derived result the call evaluated, with what it read.
+    pub(crate) derived: HashMap<crate::reuse::Derived, crate::reuse::Kept>,
+    /// The derived results being evaluated, outermost first, with what each has read so far.
+    pub(crate) evaluating: Vec<crate::reuse::Recording>,
 }
 
 impl<'p> Machine<'p> {
@@ -415,7 +424,9 @@ impl<'p> Machine<'p> {
         }
         let mut state = self.env.borrow_mut();
         state.base = layers.len();
-        state.layers = layers;
+        for layer in layers {
+            state.push(layer);
+        }
         state.roots = roots;
         Ok(())
     }
@@ -654,7 +665,8 @@ impl<'p> Machine<'p> {
         key: EnvKey,
     ) -> Result<Value> {
         let (record, pushed, base_len, top) = {
-            let state = self.env.borrow();
+            let mut state = self.env.borrow_mut();
+            state.note_read(key);
             (
                 state.reads.is_some(),
                 state
@@ -677,7 +689,10 @@ impl<'p> Machine<'p> {
         let mut position = top;
         while let Some(below) = position.checked_sub(1) {
             position = below;
-            let layer = self.env.borrow().layers.get(position).cloned();
+            let (layer, id) = {
+                let state = self.env.borrow();
+                (state.layers.get(position).cloned(), state.id(position))
+            };
             match layer {
                 Some(Layer::Set {
                     key: set,
@@ -690,7 +705,7 @@ impl<'p> Machine<'p> {
                         evaluated = true;
                     }
                     let value =
-                        self.source_value(cx, node, key, Below::Layer(position), &source)?;
+                        self.source_value(cx, node, key, Below::Layer(position), id, &source)?;
                     let patch = bundle && is_update_record(&value);
                     if path.is_empty() && !patch {
                         if is_own {
@@ -735,12 +750,18 @@ impl<'p> Machine<'p> {
             }
         };
         let value = self.apply_pending(cx, node, base, beneath)?;
-        if record && !capped {
-            // A source evaluated under the evaluation's own overrides of other values found
-            // what those overrides made it; beneath them it may differ.
-            let found = (!(evaluated && pushed)).then(|| value.clone());
-            if let Some(reads) = self.env.borrow_mut().reads.as_mut() {
-                reads.push((key, found));
+        if !capped {
+            let mut state = self.env.borrow_mut();
+            // A derived result being evaluated keeps the read, so a use that reuses it adds
+            // the read to the call's record as evaluating it would.
+            state.note_tree_read(key, &value, evaluated);
+            if record {
+                // A source evaluated under the evaluation's own overrides of other values found
+                // what those overrides made it; beneath them it may differ.
+                let found = (!(evaluated && pushed)).then(|| value.clone());
+                if let Some(reads) = state.reads.as_mut() {
+                    reads.push((key, found));
+                }
             }
         }
         self.apply_pending(cx, node, value, own)
@@ -786,19 +807,26 @@ impl<'p> Machine<'p> {
     }
 
     /// What a source gives: its value, or a formula evaluated with reads of `key` capped below
-    /// `below`.
+    /// `below`. A formula a layer holds is a derived result, identified by the layer's identity
+    /// `layer`, and is reused while what it read is unchanged; one of an entry-module bundle is
+    /// evaluated at each read.
     fn source_value(
         &self,
         cx: Cx,
         node: Option<u32>,
         key: EnvKey,
         below: Below,
+        layer: Option<u64>,
         source: &Source,
     ) -> Result<Value> {
         match source {
             Source::Value(value) => Ok(value.clone()),
             Source::Formula(formula) => {
-                self.capped(key, below, || self.eval_formula(cx, node, formula))
+                let evaluate = || self.capped(key, below, || self.eval_formula(cx, node, formula));
+                match layer {
+                    Some(layer) => self.derived(Derived::Formula(layer), evaluate),
+                    None => evaluate(),
+                }
             }
         }
     }
@@ -830,7 +858,7 @@ impl<'p> Machine<'p> {
     }
 
     /// The slots node `root` of `module` and the nodes beneath it read, with their names.
-    fn slots_read(&self, module: u32, root: u32) -> Vec<(u32, Arc<str>)> {
+    pub(crate) fn slots_read(&self, module: u32, root: u32) -> Vec<(u32, Arc<str>)> {
         let Some(linked) = self.program.linked(module) else {
             return Vec::new();
         };
@@ -1074,8 +1102,10 @@ impl<'p> Machine<'p> {
                         if (module, found) != key {
                             continue;
                         }
-                        let value = self.capped(key, Below::Provide(index), || {
-                            self.eval(provides_cx, &mut Vec::new(), provide.value)
+                        let value = self.derived(Derived::Provide(index), || {
+                            self.capped(key, Below::Provide(index), || {
+                                self.eval(provides_cx, &mut Vec::new(), provide.value)
+                            })
                         })?;
                         let path: Arc<[Arc<str>]> = provide.path.iter().cloned().collect();
                         if path.is_empty() {
@@ -1088,16 +1118,24 @@ impl<'p> Machine<'p> {
                         });
                     }
                     None => {
-                        let bundle = self.capped(key, Below::Provide(index), || {
-                            self.eval(provides_cx, &mut Vec::new(), provide.value)
+                        let bundle = self.derived(Derived::Bundle(index, key), || {
+                            self.capped(key, Below::Provide(index), || {
+                                self.eval(provides_cx, &mut Vec::new(), provide.value)
+                            })
                         })?;
                         let entries = self.bundle_entries(provides_cx, provide.value, &bundle)?;
                         for (set, path, source) in entries.into_iter().rev() {
                             if set != key {
                                 continue;
                             }
-                            let value =
-                                self.source_value(cx, node, key, Below::Provide(index), &source)?;
+                            let value = self.source_value(
+                                cx,
+                                node,
+                                key,
+                                Below::Provide(index),
+                                None,
+                                &source,
+                            )?;
                             let patch = is_update_record(&value);
                             if path.is_empty() && !patch {
                                 return self.apply_pending(cx, node, value, pending);
@@ -1114,16 +1152,18 @@ impl<'p> Machine<'p> {
             declaration: key.1,
             depth: cx.depth,
         };
-        let value = self.capped(key, Below::Exhausted, || {
-            self.eval(declared, &mut Vec::new(), default)
+        let value = self.derived(Derived::Default(key), || {
+            let value = self.capped(key, Below::Exhausted, || {
+                self.eval(declared, &mut Vec::new(), default)
+            })?;
+            let name = self.environment_index().qualified(key);
+            self.normalize(
+                declared,
+                ty,
+                value,
+                &Path::Root(&Quoted("environment value '", &name, "'")),
+            )
         })?;
-        let name = self.environment_index().qualified(key);
-        let value = self.normalize(
-            declared,
-            ty,
-            value,
-            &Path::Root(&Quoted("environment value '", &name, "'")),
-        )?;
         self.apply_pending(cx, node, value, pending)
     }
 
@@ -1147,11 +1187,11 @@ impl<'p> Machine<'p> {
         let depth = {
             let mut state = self.env.borrow_mut();
             let depth = state.layers.len();
-            state.layers.push(Layer::Cap { key, below });
+            state.push(Layer::Cap { key, below });
             depth
         };
         let result = work();
-        self.env.borrow_mut().layers.truncate(depth);
+        self.env.borrow_mut().truncate(depth);
         result
     }
 
@@ -1312,7 +1352,7 @@ impl<'p> Machine<'p> {
             let depth = state.layers.len();
             for entry in &evaluated {
                 match entry {
-                    Evaluated::Set((key, path, source)) => state.layers.push(Layer::Set {
+                    Evaluated::Set((key, path, source)) => state.push(Layer::Set {
                         key: *key,
                         path: Arc::clone(path),
                         source: source.clone(),
@@ -1320,7 +1360,7 @@ impl<'p> Machine<'p> {
                     }),
                     Evaluated::Bundle(entries, _) => {
                         for (key, path, source) in entries {
-                            state.layers.push(Layer::Set {
+                            state.push(Layer::Set {
                                 key: *key,
                                 path: Arc::clone(path),
                                 source: source.clone(),
@@ -1333,7 +1373,7 @@ impl<'p> Machine<'p> {
             depth
         };
         let result = self.eval(cx, frame, body);
-        self.env.borrow_mut().layers.truncate(depth);
+        self.env.borrow_mut().truncate(depth);
         let result = result?;
         let entries = self.entry_values(&evaluated, true);
         self.stamp(cx, node, result, &entries)

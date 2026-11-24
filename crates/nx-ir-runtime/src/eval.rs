@@ -246,6 +246,9 @@ fn is_about_argument(code: &str) -> bool {
         || code.starts_with("nx-ir-boundary-")
 }
 
+/// The slots of each handler node a call made a handler from, by module and node.
+type HandlerSlots = std::collections::HashMap<(u32, u32), Arc<[u32]>>;
+
 /// One evaluation against one program under one set of limits.
 pub(crate) struct Machine<'p> {
     pub program: &'p ProgramData,
@@ -264,6 +267,9 @@ pub(crate) struct Machine<'p> {
     collected: RefCell<Option<Collected>>,
     /// The environment stack and what the call has read from it.
     pub(crate) env: RefCell<crate::environment::EnvState>,
+    /// The slots each handler node reads, in ascending order, by module and node: found from
+    /// the image once, at no charge.
+    handler_slots: RefCell<HandlerSlots>,
 }
 
 impl<'p> Machine<'p> {
@@ -277,6 +283,7 @@ impl<'p> Machine<'p> {
             default_failed: Cell::new(false),
             collected: RefCell::new(options.origins.as_ref().map(|_| Collected::default())),
             env: RefCell::new(crate::environment::EnvState::default()),
+            handler_slots: RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -992,16 +999,19 @@ impl<'p> Machine<'p> {
                     declaration: index,
                     depth: cx.depth,
                 };
-                let result = self.eval(declared, &mut Vec::new(), *value)?;
-                match ty {
-                    None => Ok(result),
-                    Some(ty) => self.normalize(
-                        declared,
-                        ty,
-                        result,
-                        &Path::Root(&Quoted("value '", &declaration.name, "'")),
-                    ),
-                }
+                // The value reads no local, so it is reused while what it read is unchanged.
+                self.derived(crate::reuse::Derived::Value(module, index), || {
+                    let result = self.eval(declared, &mut Vec::new(), *value)?;
+                    match ty {
+                        None => Ok(result),
+                        Some(ty) => self.normalize(
+                            declared,
+                            ty,
+                            result,
+                            &Path::Root(&Quoted("value '", &declaration.name, "'")),
+                        ),
+                    }
+                })
             }
             _ => self.fail(
                 cx,
@@ -1713,8 +1723,8 @@ impl<'p> Machine<'p> {
     }
 
     /// A handler node: the component and emit the handler answers, the action record it accepts
-    /// and its owner. Nothing is evaluated beyond copying the frame, which is the by-value
-    /// capture.
+    /// and its owner. Nothing is evaluated beyond copying the slots the node reads, which is the
+    /// by-value capture: the captured frame holds those slots, in ascending order, and no other.
     #[inline(never)]
     fn eval_handler(
         &self,
@@ -1723,8 +1733,44 @@ impl<'p> Machine<'p> {
         node: u32,
         handler: &HandlerNode,
     ) -> Result<Value> {
-        self.handler(cx, node, handler, frame.clone())
+        let slots = self.handler_slots(cx.module, node);
+        let mut captured: Frame = Vec::new();
+        for slot in slots.iter() {
+            let slot = *slot as usize;
+            if let Some(Some(value)) = frame.get(slot) {
+                bind(&mut captured, slot, value.clone())?;
+            }
+        }
+        // The capture is as long as the node's highest slot whether or not that slot is bound, so
+        // two handlers made by one node capture as many slots.
+        if let Some(last) = slots.last() {
+            let length = (*last as usize).saturating_add(1);
+            if captured.len() < length && length <= MAX_SLOTS {
+                captured.resize(length, None);
+            }
+        }
+        self.handler(cx, node, handler, captured)
             .map(|handler| Value::Handler(Arc::new(handler)))
+    }
+
+    /// The slots handler node `node` of `module` and the nodes beneath it read, in ascending
+    /// order, each once.
+    fn handler_slots(&self, module: u32, node: u32) -> Arc<[u32]> {
+        if let Some(slots) = self.handler_slots.borrow().get(&(module, node)) {
+            return Arc::clone(slots);
+        }
+        let mut slots: Vec<u32> = self
+            .slots_read(module, node)
+            .into_iter()
+            .map(|(slot, _)| slot)
+            .collect();
+        slots.sort_unstable();
+        slots.dedup();
+        let slots: Arc<[u32]> = Arc::from(slots);
+        self.handler_slots
+            .borrow_mut()
+            .insert((module, node), Arc::clone(&slots));
+        slots
     }
 
     /// The handler value of handler node `node` of the declaration `cx` names, over `captured`.

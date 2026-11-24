@@ -12,8 +12,8 @@
     "main.nx::compared": 15,
     "main.nx::comparedHandlers": 21,
     "main.nx::comparedLists": 20,
-    "main.nx::comparedText": 16,
-    "main.nx::concat": 8,
+    "main.nx::comparedText": 13,
+    "main.nx::concat": 7,
     "main.nx::content": 35,
     "main.nx::defaults": 8,
     "main.nx::directCall": 4,
@@ -25,7 +25,7 @@
     "main.nx::spliced": 28,
     "main.nx::updated": 22,
     "main.nx::valueCall": 14,
-    "main.nx::valueReference": 10,
+    "main.nx::valueReference": 7,
     "main.nx::written": 22
   },
   "failures": {
@@ -101,31 +101,31 @@
     ],
     "main.nx::comparedText": [
       {
-        "budget": 8,
+        "budget": 6,
         "declaration": "main.nx::comparedText",
         "source": {
-          "end": 3419,
+          "end": 3429,
           "identity": "main.nx",
           "start": 3412
         }
       },
       {
-        "budget": 15,
+        "budget": 12,
         "declaration": "main.nx::comparedText"
       }
     ],
     "main.nx::concat": [
       {
-        "budget": 4,
-        "declaration": "main.nx::accents",
+        "budget": 3,
+        "declaration": "main.nx::concat",
         "source": {
-          "end": 748,
+          "end": 2218,
           "identity": "main.nx",
-          "start": 662
+          "start": 2211
         }
       },
       {
-        "budget": 7,
+        "budget": 6,
         "declaration": "main.nx::concat"
       }
     ],
@@ -286,16 +286,16 @@
     ],
     "main.nx::valueReference": [
       {
-        "budget": 5,
-        "declaration": "main.nx::valueReference",
+        "budget": 3,
+        "declaration": "main.nx::answer",
         "source": {
-          "end": 2452,
+          "end": 465,
           "identity": "main.nx",
-          "start": 2446
+          "start": 464
         }
       },
       {
-        "budget": 9,
+        "budget": 6,
         "declaration": "main.nx::valueReference"
       }
     ],

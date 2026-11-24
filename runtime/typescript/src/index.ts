@@ -3031,7 +3031,7 @@ function evaluate<T>(options: NxRuntimeOptions, input: (measure: InputMeasure) =
     entries: [],
     callSites: origins?.includeCallSites === true ? [] : undefined,
     environment: options.environment ?? rootEnvironment,
-    env: { layers: [], base: 0, roots: new Map() },
+    env: newEnvironmentState(),
   };
   if (!(evaluation.environment instanceof NxEnvironment)) {
     fail("nx-ir-options", "The environment option must be an environment made with environment(values).");
@@ -4228,7 +4228,7 @@ function evalNodeKind(index: number, context: EvalContext): NxCanonicalValue {
     case nodeKinds.component:
       return evalComponentDescriptor(context, index, entry);
     case nodeKinds.actionHandler:
-      return evalActionHandler(context, entry);
+      return evalActionHandler(context, index, entry);
     case nodeKinds.envRead:
       return evalEnvironmentRead(context, index, entry);
     case nodeKinds.envProvide:
@@ -4267,12 +4267,46 @@ function fieldReadsAsEmpty(program: NxPreparedProgram, discriminator: string, me
   });
 }
 
+/** The slots each handler node reads, in ascending order, by module: found from the image once, at no charge. */
+const handlerSlotsCache = new WeakMap<LinkedModule, Map<number, readonly number[]>>();
+
+/** The slots handler node `nodeIndex` of `linked` and the nodes beneath it read, in ascending order, each once. */
+function handlerSlots(linked: LinkedModule, nodeIndex: number): readonly number[] {
+  let byNode = handlerSlotsCache.get(linked);
+  if (byNode === undefined) {
+    byNode = new Map();
+    handlerSlotsCache.set(linked, byNode);
+  }
+  let slots = byNode.get(nodeIndex);
+  if (slots === undefined) {
+    slots = [...new Set(slotsRead(linked, nodeIndex).map(([slot]) => slot))].sort((left, right) => left - right);
+    byNode.set(nodeIndex, slots);
+  }
+  return slots;
+}
+
+/**
+ * What a handler made by node `nodeIndex` captures: the slots the node reads, as the frame holds
+ * them now, and no other. The capture is as long as the node's highest slot, bound or not, so two
+ * handlers made by one node capture as many slots, held in ascending slot index as Rust holds them.
+ */
+function capturedSlots(context: EvalContext, nodeIndex: number): NxCanonicalValue[] {
+  const slots = handlerSlots(context.linked, nodeIndex);
+  const captured: NxCanonicalValue[] = new Array(slots.length === 0 ? 0 : slots[slots.length - 1]! + 1);
+  for (const slot of slots) {
+    if (slot < context.frame.length) {
+      captured[slot] = context.frame[slot]!;
+    }
+  }
+  return captured;
+}
+
 /**
  * `[19, ref, str, ref, slot, ref?, node]`: the component and emit the handler answers, the action
  * record it accepts, the slot of its `action` binding, its owner, and its body. Nothing is
  * evaluated here beyond copying the frame, which is the by-value capture the interpreter takes.
  */
-function evalActionHandler(context: EvalContext, entry: Uint32Array): NxCanonicalValue {
+function evalActionHandler(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
   const image = context.linked.module.artifact;
   const component = resolveReference(context.linked, entry[1]!, image.string(entry[2]!));
   const action = resolveReference(context.linked, entry[4]!, image.string(entry[5]!));
@@ -4289,7 +4323,7 @@ function evalActionHandler(context: EvalContext, entry: Uint32Array): NxCanonica
     actionSlot: entry[6]!,
     owner: owner === undefined ? undefined : `${owner.linked.module.identity}::${owner.declaration.name}`,
     body: entry[9]!,
-    captured: context.frame.slice(),
+    captured: capturedSlots(context, nodeIndex),
   };
   madeHandlers.add(handler);
   return internal(handler);
@@ -4336,11 +4370,13 @@ function evalReference(context: EvalContext, slot: number, name: string, nodeInd
     return internal(new FunctionReferenceValue(linked, declaration));
   }
   if (declaration.kind.tag === "value") {
-    const valueContext = { ...context, linked, declaration, frame: [] };
-    const value = evalNode(declaration.kind.value, valueContext);
-    return declaration.kind.ty === undefined
-      ? value
-      : normalizeValue(valueContext, declaration.kind.ty, value, `value '${declaration.name}'`);
+    const kind = declaration.kind;
+    // The value reads no local, so it is reused while what it read is unchanged.
+    return derivedResult(context.evaluation, declaration, () => {
+      const valueContext = { ...context, linked, declaration, frame: [] };
+      const value = evalNode(kind.value, valueContext);
+      return kind.ty === undefined ? value : normalizeValue(valueContext, kind.ty, value, `value '${declaration.name}'`);
+    });
   }
   fail("nx-ir-reference", `Declaration '${name}' cannot be used as a value.`, context, nodeIndex);
 }
@@ -4816,7 +4852,13 @@ interface EnvironmentFormula {
 type EnvironmentSource = { readonly value: NxCanonicalValue } | { readonly formula: EnvironmentFormula };
 
 /** One layer of the environment stack: an override, or a cap while a source of `key` is evaluated. */
-type EnvironmentLayer =
+type EnvironmentLayer = EnvironmentLayerContent & {
+  /** The layer's identity: a number no other layer of the call has, given when it is pushed. */
+  readonly id: number;
+};
+
+/** What a layer is, before it is pushed. */
+type EnvironmentLayerContent =
   | {
       readonly set: true;
       readonly key: string;
@@ -4834,6 +4876,100 @@ interface EnvironmentState {
   /** How many of `layers` came from the host's environment, below any `envProvide`. */
   base: number;
   readonly roots: Map<string, NxCanonicalValue>;
+  /** The identity the next layer pushed gets. */
+  nextId: number;
+  /**
+   * The last result of each derived result the call evaluated, with what it read: keyed by the
+   * value declaration, the environment declaration of a default, `p<index>` for a targeted
+   * entry-module provide, `b<index>:<key>` for a bundle provide read for a value, and the layer
+   * that holds a formula.
+   */
+  readonly derived: Map<unknown, KeptResult>;
+  /** The derived results being evaluated, outermost first, with what each has read so far. */
+  readonly evaluating: DerivedRecording[];
+}
+
+/** The last result of a derived result, with each value its evaluation read and that value's token. */
+interface KeptResult {
+  readonly value: NxCanonicalValue;
+  readonly reads: Map<string, number | undefined>;
+}
+
+/** A derived result being evaluated: the stack's height where it began, and what it has read. */
+interface DerivedRecording {
+  readonly start: number;
+  readonly reads: Map<string, number | undefined>;
+}
+
+/** A new environment state, with no layers, roots or kept results. */
+function newEnvironmentState(): EnvironmentState {
+  return { layers: [], base: 0, roots: new Map(), nextId: 0, derived: new Map(), evaluating: [] };
+}
+
+/** Pushes `layer`, giving it the next identity of the call. */
+function pushEnvironmentLayer(state: EnvironmentState, layer: EnvironmentLayerContent): void {
+  state.layers.push({ ...layer, id: state.nextId });
+  state.nextId += 1;
+}
+
+/**
+ * The token of `key` over the layers below `start`: the identity of the topmost of them that sets
+ * or caps `key`, or `undefined` when none does.
+ */
+function environmentToken(state: EnvironmentState, key: string, start: number): number | undefined {
+  for (let position = Math.min(start, state.layers.length) - 1; position >= 0; position -= 1) {
+    const layer = state.layers[position]!;
+    if (layer.key === key) {
+      return layer.id;
+    }
+  }
+  return undefined;
+}
+
+/** Notes a read of `key` in every derived evaluation under way, with its token over the layers below where each began. */
+function noteEnvironmentRead(state: EnvironmentState, key: string): void {
+  for (const recording of state.evaluating) {
+    if (!recording.reads.has(key)) {
+      recording.reads.set(key, environmentToken(state, key, recording.start));
+    }
+  }
+}
+
+/**
+ * `key`'s kept result when every value it read has the same token here, or else `work` evaluated,
+ * kept and returned. A reused result's reads are added to every derived evaluation under way, with
+ * their tokens computed again over the layers below where each began. A failure ends the call, so
+ * it is never kept. This is the rule the Rust runtime follows, so both make the same decisions.
+ */
+function derivedResult(evaluation: Evaluation, key: unknown, work: () => NxCanonicalValue): NxCanonicalValue {
+  const state = evaluation.env;
+  const start = state.layers.length;
+  const kept = state.derived.get(key);
+  if (kept !== undefined) {
+    let holds = true;
+    for (const [read, token] of kept.reads) {
+      if (environmentToken(state, read, start) !== token) {
+        holds = false;
+        break;
+      }
+    }
+    if (holds) {
+      for (const read of kept.reads.keys()) {
+        noteEnvironmentRead(state, read);
+      }
+      return kept.value;
+    }
+  }
+  const recording: DerivedRecording = { start, reads: new Map() };
+  state.evaluating.push(recording);
+  let value: NxCanonicalValue;
+  try {
+    value = work();
+  } finally {
+    state.evaluating.pop();
+  }
+  state.derived.set(key, { value, reads: recording.reads });
+  return value;
 }
 
 /** One pending field override on the way to a base value. */
@@ -4873,8 +5009,12 @@ function beginEnvironment(program: NxPreparedProgram, evaluation: Evaluation): v
     const target = environmentByHostName(index, name);
     state.roots.set(target.key, hostEnvironmentValue(program, evaluation, target, [], value, name));
   }
+  const layers: EnvironmentLayerContent[] = [];
   for (const entry of given.entries) {
-    hostEnvironmentLayers(program, evaluation, index, entry, false, state.layers);
+    hostEnvironmentLayers(program, evaluation, index, entry, false, layers);
+  }
+  for (const layer of layers) {
+    pushEnvironmentLayer(state, layer);
   }
   state.base = state.layers.length;
 }
@@ -4886,7 +5026,7 @@ function hostEnvironmentLayers(
   index: EnvironmentIndex,
   entry: NxEnvironmentEntry,
   bundle: boolean,
-  layers: EnvironmentLayer[],
+  layers: EnvironmentLayerContent[],
 ): void {
   if ("bundle" in entry) {
     for (const inner of entry.bundle) {
@@ -4984,6 +5124,7 @@ function evalEnvironmentRead(context: EvalContext, nodeIndex: number, entry: Uin
  */
 function environmentValue(context: EvalContext, nodeIndex: number | undefined, target: EnvironmentDeclaration): NxCanonicalValue {
   const state = context.evaluation.env;
+  noteEnvironmentRead(state, target.key);
   const own: PendingOverride[] = [];
   const beneath: PendingOverride[] = [];
   let found: NxCanonicalValue | undefined;
@@ -5008,7 +5149,7 @@ function environmentValue(context: EvalContext, nodeIndex: number | undefined, t
       environmentCycle(context, nodeIndex, target);
     }
     const isOwn = position >= state.base;
-    const value = environmentSourceValue(context, nodeIndex, target, { layer: position }, layer.source);
+    const value = environmentSourceValue(context, nodeIndex, target, { layer: position }, layer.source, layer);
     const patch = layer.bundle && isUpdateRecordValue(value);
     if (layer.path.length === 0 && !patch) {
       if (isOwn) {
@@ -5065,18 +5206,25 @@ function environmentCycle(context: EvalContext, nodeIndex: number | undefined, t
   );
 }
 
-/** What a source gives: its value, or a formula evaluated with reads of `target` capped at `below`. */
+/**
+ * What a source gives: its value, or a formula evaluated with reads of `target` capped at `below`.
+ * A formula a layer holds is a derived result identified by that `layer`, reused while what it read
+ * is unchanged; one of an entry-module bundle is evaluated at each read.
+ */
 function environmentSourceValue(
   context: EvalContext,
   nodeIndex: number | undefined,
   target: EnvironmentDeclaration,
   below: EnvironmentBelow,
   source: EnvironmentSource,
+  layer?: EnvironmentLayer,
 ): NxCanonicalValue {
   if ("value" in source) {
     return source.value;
   }
-  return cappedEnvironment(context.evaluation, target.key, below, () => evalEnvironmentFormula(context, nodeIndex, source.formula));
+  const evaluate = (): NxCanonicalValue =>
+    cappedEnvironment(context.evaluation, target.key, below, () => evalEnvironmentFormula(context, nodeIndex, source.formula));
+  return layer === undefined ? evaluate() : derivedResult(context.evaluation, layer, evaluate);
 }
 
 /** Evaluates a formula in the environment of the read, with its captured locals bound. */
@@ -5312,13 +5460,17 @@ function providedOrDefault(context: EvalContext, nodeIndex: number | undefined, 
         if (declaration.kind.tag !== "environment" || environmentKey(linked, declaration) !== target.key) {
           continue;
         }
-        const value = cappedEnvironment(evaluation, target.key, { provide: position }, () => evalNode(provide.value, providesContext));
+        const value = derivedResult(evaluation, `p${position}`, () =>
+          cappedEnvironment(evaluation, target.key, { provide: position }, () => evalNode(provide.value, providesContext)),
+        );
         if (provide.path.length === 0) {
           return applyPendingOverrides(context, nodeIndex, value, pending);
         }
         pending.push({ path: provide.path, value, patch: false });
       } else {
-        const bundle = cappedEnvironment(evaluation, target.key, { provide: position }, () => evalNode(provide.value, providesContext));
+        const bundle = derivedResult(evaluation, `b${position}:${target.key}`, () =>
+          cappedEnvironment(evaluation, target.key, { provide: position }, () => evalNode(provide.value, providesContext)),
+        );
         const entries = bundleEntries(providesContext, provide.value, bundle, index);
         for (let entry = entries.length - 1; entry >= 0; entry -= 1) {
           const { target: set, path, source } = entries[entry]!;
@@ -5339,8 +5491,10 @@ function providedOrDefault(context: EvalContext, nodeIndex: number | undefined, 
     ...declarationContext(context.program, target.linked, target.declaration, evaluation),
     depth: context.depth,
   };
-  const evaluated = cappedEnvironment(evaluation, target.key, { exhausted: true }, () => evalNode(target.default, declared));
-  const value = normalizeValue(declared, target.ty, evaluated, `environment value '${target.key}'`);
+  const value = derivedResult(evaluation, target, () => {
+    const evaluated = cappedEnvironment(evaluation, target.key, { exhausted: true }, () => evalNode(target.default, declared));
+    return normalizeValue(declared, target.ty, evaluated, `environment value '${target.key}'`);
+  });
   return applyPendingOverrides(context, nodeIndex, value, pending);
 }
 
@@ -5348,7 +5502,7 @@ function providedOrDefault(context: EvalContext, nodeIndex: number | undefined, 
 function cappedEnvironment(evaluation: Evaluation, key: string, below: EnvironmentBelow, work: () => NxCanonicalValue): NxCanonicalValue {
   const layers = evaluation.env.layers;
   const depth = layers.length;
-  layers.push({ set: false, key, below });
+  pushEnvironmentLayer(evaluation.env, { set: false, key, below });
   try {
     return work();
   } finally {
@@ -5477,14 +5631,15 @@ function evalEnvironmentOverrides(
  */
 function evalEnvironmentProvide(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
   const { evaluated, next } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
-  const layers = context.evaluation.env.layers;
+  const state = context.evaluation.env;
+  const layers = state.layers;
   const depth = layers.length;
   for (const item of evaluated) {
     if ("set" in item) {
-      layers.push({ set: true, key: item.set.target.key, path: item.set.path, source: item.set.source, bundle: false });
+      pushEnvironmentLayer(state, { set: true, key: item.set.target.key, path: item.set.path, source: item.set.source, bundle: false });
     } else {
       for (const { target, path, source } of item.bundle) {
-        layers.push({ set: true, key: target.key, path, source, bundle: true });
+        pushEnvironmentLayer(state, { set: true, key: target.key, path, source, bundle: true });
       }
     }
   }
