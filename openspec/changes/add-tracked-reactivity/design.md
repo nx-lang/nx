@@ -33,9 +33,11 @@ node must render again.
   set.
 - The operation count a function of the images, the input and the tree's held state, identical in
   the Rust and TypeScript IR runtimes.
-- No result changes. NX evaluation is pure, so a reused result equals a fresh one. The one
+- Reuse changes no result. NX evaluation is pure, so a reused result equals a fresh one. The one
   difference is in limits: reuse does less work, so a call may stay under a depth or operation
-  limit that a fresh evaluation would reach (Decision 4).
+  limit that a fresh evaluation would reach (Decision 4). The narrowed handler capture
+  (Decision 10) is a deliberate change of results: two handlers that differ only in a slot they do
+  not read are now equal under `==`.
 
 **Non-Goals:**
 
@@ -298,11 +300,16 @@ the frame every handler the body binds is unequal to the one before, whether or 
 changed (`specs/future.md`, "What a handler captures"). This change narrows the capture: when a
 runtime makes a handler, it captures only the slots its node reads, `slots_read` of the handler
 node, computed by the runtime from the image (no image format change), at no charge, and cacheable
-per node. Both IR runtimes do this. Equal handlers then compare equal when only a slot they do not
-read changed, which is what lets a kept child's content keep its render. It changes handler
-comparisons, which compare captures slot by slot, and so operation counts; the corpus regeneration
-covers it. Results do not change, since a slot a handler does not read cannot change what it
-does.
+per node. Both IR runtimes do this, and both hold and compare the captured slots in ascending slot
+index, whatever order `slots_read` finds them in (Rust's walk pops depth first), so a comparison
+that stops at the first slot that differs costs the same in each. Two handlers made by one node
+then compare equal when only a slot they do not read changed, which is what lets a kept child's
+content keep its render. This is a deliberate change of results: `==` on handlers is part of the
+language, and today it finds such handlers unequal (`handlers_equal` compares the whole captured
+frame), so a program that compares handlers, or keeps the result of a comparison, can give another
+result. What a handler does when it runs does not change, since a slot it does not read cannot
+change that. The change also moves operation counts, since comparisons compare fewer slots; the
+corpus regeneration covers both (task 6.2).
 
 A content parameter counts as one prop. Handler props bound for emits are not reads; they are
 compared as the existing descriptor comparison compares them.
@@ -476,7 +483,8 @@ unsettled exactly when it or a node under it rendered or was added since a pass 
 
 - **Every recorded count changes.** Every corpus program that reads a value or a default more than
   once gets smaller counts. The regeneration is mechanical. The PR's corpus diff shows each change,
-  and `design-tokens-theme`'s drop is the measurement this change exists for. Results do not change.
+  and `design-tokens-theme`'s drop is the measurement this change exists for. Reuse changes no
+  result; only a comparison of handlers that differ in an unread slot does (Decision 10).
 - **Counts depend on the tree's history.** A render's count includes the checks of kept results
   and excludes what they save, so the same render costs less in a warm tree, and a shared result is
   paid for by the render that evaluates it first. This is already true of a pass, and is stated in

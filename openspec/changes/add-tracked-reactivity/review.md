@@ -412,7 +412,7 @@ are those of `design.md` itself.
 
 ## New Findings Discovered During 2026-11-24 18:29 Verification
 
-### 🟡 Fixed - RF17 The edge rule treats an invalid used result as a changed input, so the equality cutoff never takes effect
+### ✅ Verified - RF17 The edge rule treats an invalid used result as a changed input, so the equality cutoff never takes effect
 - **Severity:** High
 - **Confidence:** High
 - **Evidence:** design.md:348-349 and specs/component-instance-tree/spec.md:62-63 say an edge holds
@@ -433,8 +433,9 @@ are those of `design.md` itself.
   later than this record's `verified`. Use the same wording in Decision 11, the kept-results
   requirement and Decision 12.
 - **Fix:** The edge rule is now Salsa's deep verify: the used variant is validated first at the use and, when not valid, evaluated again there with the equality cutoff; the edge holds when its `changed` is then no later than the user's `verified` (an evaluation that gives another variant counts as changed). Same wording in design.md Decisions 11 and 12, the kept-results and notification requirements of component-instance-tree, and the reactivity "direct inputs" requirement; added the scenario "A used result is evaluated again before its edge is judged", and the `direction` walk-through in Decision 11. Task 5.5.
+- **Verification:** Verified. Decision 11 now checks an edge the way Salsa's deep verify checks an input query: the used variant is validated at the use, evaluated again there with the cutoff when it is not valid, and the edge holds when its `changed` is no later than the user's `verified`. An evaluation that gives another variant counts as changed. Decision 12, the kept-results and notification requirements and the reactivity requirement use the same wording. The `direction` walk-through and the scenario "A used result is evaluated again before its edge is judged" match. Evaluating the used result is safe because the edge was read after inputs that all still hold.
 
-### 🟡 Fixed - RF18 Taking a kept result into a render needs its transitive reads, but the record holds only direct inputs
+### ✅ Verified - RF18 Taking a kept result into a render needs its transitive reads, but the record holds only direct inputs
 - **Severity:** Medium
 - **Confidence:** Medium
 - **Evidence:** design.md:386-391 takes a tree result into a render "when no layer the render
@@ -452,8 +453,9 @@ are those of `design.md` itself.
   render that overrides `colorMode` itself and reads `env.button` evaluates `button` and `color`
   again.
 - **Fix:** Each variant keeps, beside its direct inputs, a flattened set of its leaf environment reads at any depth (through edges) with their supplier class. It is used only for the "no layer the render pushed touches its reads" check and for the tokens a taken result enters the call with (and so the replay into enclosing records); validation still uses direct inputs. design.md Decisions 8 and 11, the kept-results and reactivity requirements, the scenario "A render that overrides a value a kept result read below an edge evaluates it again", task 5.4.
+- **Verification:** Verified. Each variant keeps a flattened set of its leaf reads (through edges, with supplier class), used only for the check against layers the render pushed and for the tokens a taken result enters the call with. Validation still uses direct inputs. The `button` → `color` → `colorMode` case is in Decision 11 and has a scenario.
 
-### 🟡 Fixed - RF19 The scenario "A kept render under a new parent instance is rebound" cannot hold while handlers capture the whole frame
+### ✅ Verified - RF19 The scenario "A kept render under a new parent instance is rebound" cannot hold while handlers capture the whole frame
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** In specs/component-instance-tree/spec.md:43-48, `Page` renders
@@ -470,8 +472,9 @@ are those of `design.md` itself.
   its own parent through a field of a record. Or narrow captures to `slots_read` in this change,
   which future.md says touches the image format and both runtimes.
 - **Fix:** Handlers now capture only the slots their node reads (`slots_read` of the handler node, computed by the runtime from the image at no charge, cacheable per node), in both IR runtimes, with no image format change. New ADDED requirement in a component-action-handlers delta ("A handler captures only the slots its body reads", with scenarios); the nx-ir-format cost bullet ("A handler captures the slots its node reads") and its handler-comparison scenario are edited in the already-MODIFIED requirement. No main requirement says a handler captures the whole frame, so no other MODIFIED delta was needed. design.md Decision 10 notes that this changes handler comparisons and so operation counts, which the corpus regeneration covers (task 6.2). The `Stack` scenario is kept and now holds. Tasks 1.6, 2.2 and 7.3 (future.md's "What a handler captures" is now marked done, replacing the earlier "keep the whole-frame premise").
+- **Verification:** Verified. Handlers now capture only the slots their node reads (component-action-handlers delta, and the nx-ir-format comparison bullet and scenario), so the `Stack` scenario holds: the content handler reads only `taps`. One consequence of the narrowing is recorded as RF21.
 
-### 🟡 Fixed - RF20 A prop skip changes the part of an instance that `is` compares, so the children's `through` stops matching again
+### ✅ Verified - RF20 A prop skip changes the part of an instance that `is` compares, so the children's `through` stops matching again
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** Task 4.2 puts "handlers, generation, tokens, props and records" in the shared
@@ -487,4 +490,25 @@ are those of `design.md` itself.
   rebinding update the children's `through`. State whether initialization after a failed prop
   comparison reuses the normalized props, or charges normalization again.
 - **Fix:** Props, handler props, state and records are outside the render part that `ComponentInstance::is` compares; the identity is the render (its generation's handlers and tokens), so a prop skip that rebinds nothing keeps children's `through` and the pass's record matching (design.md Decision 10, prop requirement, task 4.2). A node whose recorded prop differs is initialized from the props already normalized for the comparison through an internal entry, so normalization is charged once (design.md Decision 10, prop requirement, task 4.4).
+- **Verification:** Verified. Props, handler props, state and records are outside the part `is` compares, so a prop skip that rebinds nothing keeps children's `through` matching, while a rebinding still changes the handlers and so the identity. A node whose recorded prop differs is initialized from the props already normalized for the comparison, so normalization is charged once (Decision 10, task 4.4).
 
+## New Findings Discovered During 2026-11-24 18:34 Verification
+
+### 🟡 Fixed - RF21 Narrowing handler captures changes what `==` on handlers returns, contradicting "Results do not change", and leaves the order of captured slots unspecified
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** Under the component-action-handlers delta ("A handler captures only the slots its
+  body reads"), two handlers from one node that differ only in a slot the handler does not read now
+  compare equal. Today `==` finds them unequal (`handlers_equal` compares the whole captured frame,
+  value.rs:361-381). `==` on handlers is part of the language (the nx-ir-format comparison rules),
+  so a program that compares handlers, or stores a comparison's result, can give a different
+  result. design.md Decision 10 nonetheless says "Results do not change", and task 6.2 expects
+  `results.json` to be unchanged. The comparison also stops "at the first slot that differs", so
+  its operation count depends on the order of the captured slots. The delta requires the runtimes
+  to "capture alike" but does not fix that order. Rust's `slots_read` returns them in the order a
+  depth-first pop visits them (environment.rs `slots_read`).
+- **Recommendation:** State in design.md and the component-action-handlers delta that handler
+  equality now ignores unread slots, as a deliberate change of results, and let task 6.2 accept
+  any `results.json` diff this causes. Specify the capture order, for example ascending slot index,
+  so both runtimes compare in the same order.
+- **Fix:** Stated as a deliberate change of results: two handlers made by one node that differ only in a slot the node does not read are now equal under `==`, and what a handler does when it runs does not change. This is in design.md (Goals, Decision 10, Risks), proposal.md (handler bullet and cost-model bullet, where "No result changes" became "Reuse changes no result", with handler equality named as the one intended change) and the component-action-handlers delta. Captured slots are held and compared in ascending slot index in both runtimes, whatever order `slots_read` finds them in (component-action-handlers delta with a new scenario, the nx-ir-format comparison bullet, tasks 1.6 and 2.2). Task 6.2 now accepts `results.json` diffs from programs that compare such handlers and lists them in the PR description.

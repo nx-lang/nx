@@ -55,8 +55,10 @@ design can be judged as a whole rather than one phase at a time.
   as a kept child is today.
 - **A handler captures what it reads.** A handler made by a body captures only the slots its node
   reads, not the whole frame, in both IR runtimes. Two handlers then compare equal when only a slot
-  they do not read changed, so a kept child's content keeps its render. Handler comparisons cost
-  less, which the corpus regeneration shows.
+  they do not read changed, so a kept child's content keeps its render. This is a deliberate change
+  of results: `==` on two such handlers was `false` and is now `true`. Captured slots are held and
+  compared in ascending slot index in both runtimes. Handler comparisons cost less, which the corpus
+  regeneration shows.
 - **The instance tree keeps derived results across renders, checked by revision.** Results that
   renders evaluated are held in the tree and offered to later renders of any node, so the render
   after a click reuses the palette. As in incremental engines such as Salsa, each root change and
@@ -84,9 +86,10 @@ design can be judged as a whole rather than one phase at a time.
 - **The cost model changes.** Within a call, a reused result costs only the asking node's one
   operation. In the tree, revision checks are free, an override-supplied read is charged like the
   skip check, and the cutoff comparison is charged as a comparison. Counts stay a function of the
-  images, the input and, for the tree, the state it holds. No result changes, except that a call
-  that reuses work may stay under a depth or operation limit a fresh evaluation would reach, alike in
-  both runtimes. `docs/nx-ir-format.md`, the corpus's recorded counts and the tree's tests change to
+  images, the input and, for the tree, the state it holds. Reuse changes no result, except that a
+  call that reuses work may stay under a depth or operation limit a fresh evaluation would reach,
+  alike in both runtimes. The one intended change of results is handler equality, which now ignores
+  slots a handler does not read. `docs/nx-ir-format.md`, the corpus's recorded counts and the tree's tests change to
   match.
 - **A corpus program for reuse.** `environment-reuse` pins the within-call cases with their
   operation counts. The tree's cases are pinned by Rust tests, since the corpus has no tree.

@@ -63,8 +63,9 @@ result SHALL count the same number of operations, in the same order. The format'
     field an update record clears is;
   - two action handlers made by one node that captured as many slots compare their captured
     values slot by slot, in order, up to and including the first slot that differs. A handler
-    captures the slots its node reads, as they stood when it was made, and a slot that was not bound
-    then compares only with another that was not;
+    captures the slots its node reads, as they stood when it was made, held in ascending slot
+    index, which is the order they are compared in, and a slot that was not bound then compares only
+    with another that was not;
   - two strings cost one more for every 64 UTF-16 code units of the shorter, rounded down.
 
   The items of a sequence and the slots of a frame are in one order in every runtime, so a

@@ -17,8 +17,9 @@
 - [ ] 1.5 Replay a reused result's reads into the instance tree's read list, keeping the
   "found under the call's own overrides" flag, so the skip check sees the same reads.
 - [ ] 1.6 Narrow what a handler captures to the slots its node reads (`slots_read` of the handler
-  node, computed from the image at no charge and cached per node), so handler comparisons and the
-  written and stored forms cover only those slots; live state reads unchanged.
+  node, computed from the image at no charge and cached per node), held and compared in ascending
+  slot index, so handler comparisons and the written and stored forms cover only those slots; live
+  state reads unchanged.
 - [ ] 1.7 Unit tests for each scenario in the `reactivity` and `nx-ir-format` deltas, the tree's
   reader-through-a-reused-default case and the bundle that reads a value it sets included, and a
   test that a reused shallow default lets a deep read succeed alike in both runtimes.
@@ -27,7 +28,7 @@
 
 - [ ] 2.1 The same layer identities, cache, read recording and reuse in
   `runtime/typescript/src/index.ts`, following the Rust rule exactly. Its dispatch is unchanged.
-- [ ] 2.2 The same narrowed handler capture as task 1.6, slot for slot.
+- [ ] 2.2 The same narrowed handler capture as task 1.6, slot for slot, in ascending slot index.
 - [ ] 2.3 Tests for the same scenarios, the `component-action-handlers` ones included, and rebuild
   `runtime/typescript/dist`.
 
@@ -106,8 +107,9 @@
   scenario, the bundle that reads a value it sets read for two values included, and run it in
   generated JavaScript too.
 - [ ] 6.2 Regenerate every program's `operations.json`, which also takes the smaller handler
-  comparisons of the narrowed capture, check that `results.json` is unchanged and that all three
-  engines agree.
+  comparisons of the narrowed capture, and check that all three engines agree. `results.json` stays
+  unchanged except where a program compares handlers that differ only in a slot they do not read;
+  accept those diffs and list them in the PR description.
 - [ ] 6.3 Record `design-tokens-theme`'s counts before and after in the PR description.
 - [ ] 6.4 Run the cost differential and allocation tests.
 
