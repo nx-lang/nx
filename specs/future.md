@@ -962,33 +962,80 @@ Fixing it touches two crates, since the syntax check does not know it is in a pr
 type checker does not know the `*` was written `[]`. So it waits. No workaround is needed: the
 second message already says what to write, and a migrated source compiles.
 
-## The Instance Tree: What `support-rust-hosts` Left For Later
+## The Instance Tree: What `support-rust-hosts` And `add-tracked-reactivity` Left For Later
 
 The Rust IR runtime has an instance tree (`InstanceTree` in `crates/nx-ir-runtime/src/tree.rs`,
 specified by `component-instance-tree`): one instance for each use of an authored component in a
 program's output, props flowing down, state staying with its place, handlers dispatched where
-they were bound and emits carried to the parent. The host drives it. It walks rendered output,
-visits each authored descriptor it finds under a key of its own choosing, and after a dispatch
-runs a pass, asking `is_settled` at each node so that it walks only from the root to what rendered
-and under it. The items below were deliberately left out. They are two halves of one question,
-what kind of reactive system this is to be: who keeps the tree current, and how finely a change is
-followed.
+they were bound and emits carried to the parent. The host drives it. It walks rendered output and
+visits each authored descriptor it finds under a key of its own choosing. After a dispatch or a
+`set_environment` it either takes the change set (`take_changes`), which lists by key the nodes
+that rendered, were added and were removed since it last asked, or runs a pass, asking
+`is_settled` at each node so that it walks only from the root to what rendered and under it.
 
-### A tree the runtime maintains, with a change set
+### The reactive model: tracked computations
 
-The fuller model is the one most reactive frameworks have: the runtime creates the tree, keeps it
-current as state and props change, and tells the host what changed; the host visits those
-instances and does what it likes with them, which may be drawing and may be updating some other
-structure derived from the tree. Today the runtime never looks into rendered output for
-descriptors, a dispatch updates only the nodes it ran against, everything under them waits for the
-host's next pass, and an event that arrives before that pass is refused with
-`nx-ir-handler-token`.
+*(Done in `add-tracked-reactivity`.)* The tree follows a change the way Salsa, Adapton and the
+signal libraries do, and the way Jetpack Compose and SwiftUI's Observation framework decide which
+scopes run again: every render and every derived result the tree keeps is a tracked computation
+with a record of the sources it read, and a change reaches exactly the computations that read it.
+A component's body is still the unit that runs again to produce output; tracking decides which
+bodies need to.
 
-It would be an operation that walks rendered output itself, instantiates what it finds and drops
-what is gone, and a dispatch that does the same before it returns, handing back the effects and
-the nodes that were added, that rendered and that were removed. The rule "run a pass after every
-dispatch" would then be the tree's own business, and the refused event would go away. `visit` and
-`is_settled` are what it would be built on, and `visit` would stay for a host that needs it.
+- **Sources** are root environment values, state fields and props. A render records the state
+  fields and props its body read (slots it evaluated, slots an override formula captured, and the
+  prop slots of the handlers it bound) and the environment values it read, as direct inputs in read
+  order.
+- **Kept results.** Top-level values, environment defaults and entry-module provides that a render
+  evaluated, when none of their reads was supplied by a layer the render pushed, are kept by the
+  tree across renders, one variant per situation (a light and a dark palette, say), and reused by
+  later renders of any node. A render's record holds an edge to each kept result it used in place
+  of the reads made inside it.
+- **Push, then pull.** `set_environment` bumps one revision counter, marks possibly stale through
+  reverse indexes only the nodes and kept results that read a changed root value, and then checks
+  the marked nodes from the root down: each edge is validated first, the result evaluated again
+  where it is stale, and an equality cutoff by written identity stops a result that comes back the
+  same (`1` and `1.0` differ, as the host sees them written) from spreading.
+- **Skips.** A dispatch renders a body again only when a field it patched that the render read
+  changed. A visit with a new descriptor renders again only when a prop the render read changed;
+  otherwise the instance takes the new props and keeps its render, rebound when its parent's
+  instance changed. A handler captures only the slots its node reads, so two handlers made by one
+  node are equal when only a slot they do not read changed.
+- **The change set.** The tree reports a diff by key since the host last took it, so a host that
+  derives native controls or an index from the tree updates exactly what changed without a walk.
+
+Why this point between fine-grained reactivity and rendering again, as discussed when the tree was
+built: a body is pure by the language's guarantee, so skipping a computation whose inputs are equal
+is always sound with no rules of hooks or annotations; the runtime is the evaluator, so it sees
+every read as it happens and needs no proxies or compiler pass; and an instance is an immutable
+value that serializes, restores and behaves the same in the Rust and the TypeScript runtime, with
+the same tokens and operation counts, which a live graph of subscriptions would give up. Two
+`object` results that the cutoff tells apart by written identity, a NaN never the same as itself,
+and the cost of a skip counted against the visit's budget all follow from that last point.
+
+### Reuse finer than a body
+
+A body that runs again runs all of it. Compose skips a child scope inside a body whose inputs are
+unchanged; NX could do the same for an element or a `for` item whose captured slots are unchanged.
+Nobody has measured a program where it matters: the DrawnUI fiddle measured about 10 µs a control
+for one component rendering its whole body (see below), under a millisecond for its largest
+template.
+
+### A dispatch skip in the bare lifecycle APIs
+
+`dispatch_component_actions` and the TypeScript runtime's dispatch still render the body after
+every batch, so a host that drives the lifecycle without the tree keeps today's behavior and the
+corpus's lifecycle results stay what they were. Skipping there needs the instance to carry what
+its render read, which today lives only in memory in the Rust tree and not in the stored form.
+
+### A tree that walks its own output
+
+The change set tells a host what changed, but the host still finds descriptors in rendered output
+and visits them; a dispatch updates only the nodes it ran against, everything under them waits for
+the host's next pass, and an event that arrives before that pass is refused with
+`nx-ir-handler-token`. The fuller model would walk rendered output itself, instantiate what it
+finds, drop what is gone, and do the same before a dispatch returns. `visit` and `is_settled` are
+what it would be built on, and `visit` would stay for a host that needs it.
 
 What has to be decided first:
 
@@ -1006,109 +1053,12 @@ What has to be decided first:
   which this one was ported from. Whatever model is chosen should be specified once and
   implemented in both, which is also the follow-up `support-rust-hosts` named for the tree it has.
 
-### Which reactive model: tracked reads that decide what renders again
+### Looking up a kept result by the variant last used
 
-Today the unit of change is the component and nothing is skipped under one that changed. A
-dispatch renders the whole body of each component it runs against, and a node that renders reaches
-everything under it: each node there is handed a descriptor read from another instance of its
-parent and is initialized again, with the state it held, whether or not its props changed. Nothing
-tracks which state a body read.
-
-There are two models to move toward, and where NX should end up was discussed when the tree was
-built. This records the conclusion and the reasons, not a design.
-
-**Fine-grained reactivity** (MobX, and the signal systems of Solid, Svelte 5 and Leptos): a
-component runs once and sets up a graph of subscriptions, and a change of state updates exactly
-the pieces that read it. Updates are as cheap as they can be and nothing has to be memoized. The
-price is a different programming model: control flow needs constructs of its own, since a body
-does not run again to take the other branch, and the graph is live mutable state with rules for
-ownership and disposal, hard to snapshot or serialize.
-
-**Render again and reconcile** (React): the output is a plain function of state, run again when
-state changes and compared with what was there. It is the simplest model and the one a pure
-function fits, and it does work it need not unless something memoizes, which by hand is where the
-mistakes are made.
-
-The frameworks of the last several years have converged between the two, and mostly on the same
-point: reads are tracked to decide *what is out of date*, and a unit the size of a component is
-run again to produce the new output. Signals became the common state primitive (Solid, Svelte 5's
-runes, Vue 3, Angular, Preact, Qwik, and a proposal to standardize them in JavaScript), but
-Jetpack Compose and SwiftUI's Observation framework, the two large systems designed most recently,
-track which state a scope read and then run those scopes again, skipping a child whose inputs are
-unchanged. React kept rendering again and added a compiler that memoizes for the author, which
-arrives at much the same place. (As understood in 2026; check the current state of each before
-leaning on a detail.)
-
-**The direction for NX is that hybrid**: keep rendering a component's body again as the way output
-is produced, and add tracking to decide which bodies need it. Three things about NX make it the
-natural fit and make the fine-grained extreme a poor one:
-
-- A body is pure by the language's guarantee, not by a convention authors are asked to keep. So
-  skipping a render whose inputs are equal is always sound, with no rules of hooks and no
-  annotation of what is stable.
-- The runtime is the evaluator. It sees every read of a state field and of a prop as it happens,
-  so knowing what a body depended on takes no proxy objects and no compiler pass.
-- An instance is an immutable value that serializes, restores, and behaves the same in the Rust
-  and the TypeScript runtime, with the same tokens and the same operation counts. A live graph of
-  subscriptions would give that up.
-
-The steps, in the order they pay off:
-
-1. **Skip a child whose props are unchanged.** A node under one that rendered is left alone when
-   the descriptor it is handed equals the one it holds. This is what stops a render from reaching
-   everything below it, and it is most of the gain. Done in `skip-unchanged-children` (see the
-   status below).
-2. **Track what a body read.** A dispatch that patches a field no body under the component read
-   renders nothing below; one that patches a field only a grandchild's props carry renders the
-   path to it. This needs the evaluator to record reads against the instance.
-3. Only if measurement asks for it, anything finer than a body.
-
-Step 1 runs into handlers, which is why it was not simply done. A handler is a closure made anew
-by each render of the body that binds it, so a descriptor that carries one never equals the last
-one: the same thing an inline callback does to memoization in React and a lambda does to skipping
-in Compose. Both answer it the same way, by treating a closure with equal captures as the same
-closure (React's compiler and `useCallback`; Compose remembering a lambda on what it captures).
-NX has the comparison already, `handlers_equal`: the same handler node with an equal capture. Two
-things stand between that and using it:
-
-- **What a handler captures.** *(Done in `add-tracked-reactivity`.)* It captured the whole frame of
-  the body, every prop and every state field, so after any change of state every handler the body
-  bound was unequal to the one before, whether or not it read what changed. A handler now captures
-  only the slots its node reads, which both runtimes find from the image as they find a formula's
-  locals, with no change to the image format, held and compared in ascending slot index. Two
-  handlers made by one node are equal when only a slot they do not read changed.
-- **Identity.** The tree finds the node a handler belongs to by the handler's identity, the one
-  allocation, and it must: comparing by value is what let a component nested under itself patch
-  its ancestor (`support-rust-hosts`, review finding RF1). A child that is left alone keeps the
-  handler of an instance its parent no longer holds, and its emits must still reach the parent.
-  So either the child is handed the parent's new, equal handler without rendering, which the
-  lifecycle has no operation for, or the parent's new instance keeps the old handler where the new
-  one is equal to it, which is the cheaper of the two and is what "remembering" a closure means.
-
-**Status (2026-11-21).** Change `skip-unchanged-children` (PR #73) does step 1 and takes the first
-way out. Read tracking (step 2) is planned with environment values (`add-environment-values`),
-which record the environment slots each body read and need the skip to check them too.
-A child whose descriptor is equal keeps its instance and output and is rebound to the parent's new
-handlers. Handlers bound for its emits only need to be present on both sides, since the body never
-sees them. That leaves the capture problem open for handlers the child's body can see, such as a
-button handler inside a `Stack`'s content. Those still compare unequal after any change to the
-owner's state, so such a child renders again. **Narrowing captures** to the frame slots a handler
-actually reads lets those skip too, and `add-tracked-reactivity` does it in both runtimes, from the
-image and without a format change.
-
-**Looking up a kept result by the variant last used.** When the instance tree keeps several
-variants of one derived result, one per situation it was used in (the light and the dark palette,
-say), a lookup tries them in the order they were kept. A lookup could try first the variant the
-same node's last render used, which is the one it most often needs again. This is left out for
-simplicity: a result has few variants, and a miss costs only the free revision checks of the
-variant tried.
-
-Nobody has measured a program where any of this matters. The cost before step 1 was one render
-for each component under the one that changed, which for a view of a few hundred components is
-small beside drawing them. The reason to do step 1 before it is measured to matter is not speed but
-the model:
-a host that follows changes (see above) is told that everything under a changed node changed, and
-has to compare output itself to find out that most of it did not.
+When the tree keeps several variants of one derived result, a lookup tries them in the order they
+were kept. A lookup could try first the variant the same node's last render used, which is the one
+it most often needs again. This is left out for simplicity: a result has few variants, and a miss
+costs only the free revision checks of the variant tried.
 
 ### What the first Rust host measured
 
@@ -1125,7 +1075,8 @@ templates:
 | UI | 23 | 219 µs | 15 µs |
 | Controls | 65 | 709 µs | 35 µs |
 
-What that says about the two items above:
+What that said, before `add-tracked-reactivity`, about a tree that keeps itself current and
+about tracked reads:
 
 - **The walk is not what an event costs.** Comparing the whole render with the last one and
   setting what changed is a twentieth of the time. The rest is the dispatch and the pass, which in
@@ -1146,9 +1097,10 @@ What that says about the two items above:
   runtime-owned tree would have made that mistake impossible, which is the strongest argument the
   fiddle produced for it, and it is about correctness, not speed.
 
-So neither item is pressing on the evidence of this host. The case that would change that is a
-program of many components with large bodies where a small part changes often, which none of the
-fiddle's templates is.
+So neither was pressing on the evidence of this host; `add-tracked-reactivity` added tracked
+reads and the change set for the model, and the self-walking tree is still open. The case that
+would make reuse finer than a body pressing is a program of many components with large bodies
+where a small part changes often, which none of the fiddle's templates is.
 
 ## Integers past 2^53: the Rust IR runtime computes, the TypeScript one refuses or rounds
 

@@ -217,13 +217,18 @@ fn main() -> nx_ir_runtime::Result<()> {
 ```
 
 The instance tree does this for a host. `InstanceTree::with_environment(program, roots)` starts a
-tree from root values; each node renders in the environment its place gives it, and records each
-environment value its render read, with the value it found. `set_environment(roots, options)`
-replaces the root values, all or nothing, and renders again, with the state each holds, only the
-nodes whose recorded reads now give a different value at their place. They are found through an
-index from each value to the nodes that read it, not by walking the tree. A visit skips a child
-whose descriptor is equal apart from `$env` and whose recorded reads give the same values in its
-new environment. `environment_value(key, name, options)` answers what a node reads for `env.name`.
+tree from root values; each node renders in the environment its place gives it, and records the
+direct inputs of its render: each root value it read, each override-supplied value with the value
+found, and an edge to each derived result the tree kept for it. The tree keeps top-level values,
+defaults and entry-module provides across renders (see *Kept results* below), so a palette is
+evaluated once for the whole tree, not once a render. `set_environment(roots, options)` replaces
+the root values, all or nothing. It marks possibly stale, through indexes from each value to the
+nodes and kept results that read it, only what a changed value reaches, then checks those nodes
+from the root down, evaluating a kept result again only where its own inputs changed, and renders
+again, with the state each holds, only the nodes whose inputs changed. A kept result that comes
+back the same value stops the change there. A visit skips a child whose descriptor is equal apart
+from `$env` and whose record holds in its new environment. `environment_value(key, name, options)`
+answers what a node reads for `env.name`.
 
 ## Instance tree
 
@@ -231,8 +236,9 @@ A component's rendered output can hold descriptors of other components the entry
 a `Page` renders a `<Card />`, and what the host is handed is a record whose type is `Card`. Each
 needs an instance of its own, initialized through the instance whose output held it, so that a
 handler the parent bound reaches the child. The lifecycle above renders one instance at a time and
-composes nothing. `InstanceTree` is the composition, made only of `initialize_component` and
-`dispatch_component_actions`, so that a host with nested components does not write it.
+composes nothing. `InstanceTree` is the composition, made only of the lifecycle's operations (an
+initialization, a dispatch that renders only when the tree needs it, and normalizing props
+without rendering), so that a host with nested components does not write it.
 
 The tree does not know what the host does with the output. A host may draw it; it may as well keep
 a document, an index or any other structure derived from it, and update that as the output
@@ -322,7 +328,21 @@ What the tree does:
   under it, with a new one in its initial state.
 - **Props flow down and state stays.** A visit with the descriptor the node was last initialized
   from, read from the same instance of the parent, does nothing. Any other descriptor initializes
-  the node again with the state it holds, unless it is equal to the one the node holds.
+  the node again with the state it holds, unless it is equal to the one the node holds, or differs
+  only in props the node's render did not read.
+- **A prop the render did not read is not a change.** A render records the props its body read: a
+  prop it evaluated, one an override formula it wrote captured, and one a handler it bound reads.
+  A visit with a descriptor that changes only other props normalizes them (charged as an
+  initialization charges it) and compares the recorded ones as a kept child's are compared below;
+  when they are equal the instance takes the new props and keeps its render, its generation and
+  its tokens, rebound when its parent's instance changed. A prop whose default reads a changed
+  prop counts as changed.
+- **A dispatch renders only when a field the render read changed.** A render also records the
+  state fields its body read. After the handlers run, each patched field the render read is
+  compared with its old value, charged as `diff` charges a field; when none differs and the node's
+  environment record holds, the node takes the new state and keeps its output, tokens and
+  generation, and stays settled. A token read before such a dispatch still dispatches. The bare
+  `dispatch_component_actions` still renders after every batch.
 - **A child handed what it held is kept.** When a parent renders again, a child whose new
   descriptor is equal to its old one keeps its instance, its state and its rendered output, the
   same allocation, and does not render. Values are compared by value. A handler the child's body
@@ -399,12 +419,83 @@ What it does not do:
   no node the host did not visit. The host walks, because the host decides what a place is: which
   records are its own, what key a list item has, and whether an item out of view has an instance
   at all.
-- **The unit of change is a component.** There is no tracking of which state a body read. A
-  dispatch renders the whole body of each component it runs against. A node that renders hands
-  every node under it a descriptor read from another instance, so each is initialized again, with
-  the state it held, when the pass visits it, and so on down: a render reaches everything under
-  the node that rendered, whether or not the props it handed down changed. What is beside that
-  node, and above it unless an emit carried a change there, does not render.
+- **It does not reuse anything finer than a body.** A body that renders again runs all of it;
+  the tracking above decides only which bodies render.
+
+### Kept results
+
+The tree keeps, across renders, the top-level values, environment defaults and entry-module
+provides its renders evaluated, when no read they made was supplied by an override the render
+itself wrote. A later render of any node takes a kept result instead of evaluating it, and pays
+nothing for it beyond the node that asked; the render that evaluated it first paid. One result
+can have several variants, one for each situation it was used in: a palette under a light section
+and under a dark one. Formulas and the bundles of a body's own `provide` are reused within one
+call only.
+
+Each kept result has a record of its direct inputs, as a node does, and the tree keeps one
+revision counter. `set_environment` evaluates a kept result again only when one of its inputs
+changed, checked in the order it read them and stopping at the first that changed, so a branch no
+longer taken is never evaluated. A result evaluated again to the value it had, written the same
+way (`1` is not `1.0`), keeps its old revision, and nothing that used it renders. A kept result
+nothing uses any more is dropped when the operation ends. Checking a record costs nothing beyond
+what evaluating a result again and looking up an override-supplied value cost, which count against
+the operation's budget; a change that fails leaves the kept results as they were.
+
+### The change set
+
+`take_changes` returns what changed among the nodes since the host last called it and clears it:
+the keys of the nodes that **rendered** (by a dispatch, a visit, `set_environment`, or a rebinding
+that changed what their tokens name), that were **added**, and that were **removed** (every node
+dropped with a removed or replaced one listed under its own key). A key whose node was replaced is
+both removed and added; a node added and removed in between is in no list; a node that only took
+a new descriptor or new state is not listed. A host that keeps something derived from the tree,
+native controls or an index, updates exactly those keys after each change, without walking:
+
+```rust,no_run
+use nx_ir_runtime::{InstanceTree, Result, RuntimeOptions};
+use nx_value::NxValue;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+/// What the host made of each node: here only the output it last drew.
+struct Controls {
+    drawn: HashMap<String, Arc<NxValue>>,
+}
+
+impl Controls {
+    /// Brings the controls up to date with the tree after a dispatch, a pass or
+    /// `set_environment`.
+    fn update(&mut self, tree: &mut InstanceTree) {
+        let changes = tree.take_changes();
+        for key in &changes.removed {
+            self.drawn.remove(key);
+        }
+        for key in changes.added.iter().chain(&changes.rendered) {
+            if let Some(rendered) = tree.rendered(key) {
+                // ... rebuild the native controls for `key` from `rendered`, and read the new
+                // tokens into them ...
+                self.drawn.insert(key.clone(), Arc::clone(rendered));
+            }
+        }
+    }
+}
+
+fn tap(tree: &mut InstanceTree, controls: &mut Controls, token: &str) -> Result<()> {
+    let tapped = NxValue::Record {
+        type_name: Some("Button.Tapped".to_string()),
+        properties: Default::default(),
+    };
+    tree.dispatch("root", token, tapped, &RuntimeOptions::default())?;
+    // A dispatch that patched only fields no render read renders nothing, and the set is empty.
+    controls.update(tree);
+    Ok(())
+}
+```
+
+A dispatch updates only the nodes it ran against; the nodes under one that rendered are still
+visited by the host's next pass, which adds and removes them, so a host takes the change set after
+that pass as well. `is_settled` agrees with the change set: a node is unsettled exactly when it or
+a node under it rendered or was added since a pass last walked it.
 
 ### Cells a host binds outside a pass
 

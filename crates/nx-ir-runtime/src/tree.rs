@@ -9,16 +9,28 @@
 //! handlers when it hands the same ones; and dropped when the output no longer has its place.
 //! A handler found in one instance's output may have been bound by an enclosing component's
 //! body and passed down as content, and an action a component emits belongs to the handler its
-//! parent bound for it. [`InstanceTree`] is that composition, made of
-//! [`Program::initialize_component`] and [`Program::dispatch_component_actions`], and of
-//! rebinding a kept instance, which evaluates nothing.</para>
+//! parent bound for it. [`InstanceTree`] is that composition, made of the lifecycle's
+//! initialization, of a dispatch that renders only when the tree needs it, of normalizing props
+//! without rendering, and of rebinding a kept instance, which evaluates nothing.</para>
+//!
+//! <para>Every render, and every derived result the tree keeps across renders, is a tracked
+//! computation with a record of its direct inputs in read order: root environment reads, edges to
+//! kept results, override-supplied reads with the values found, and for a render the props and
+//! state fields its body read. A dispatch renders again only when a patched field the render read
+//! changed; a visit with a new descriptor only when a prop the render read changed; and
+//! [`InstanceTree::set_environment`] marks possibly stale, through reverse indexes, only what a
+//! changed root value reaches, then validates those nodes from the root down, evaluating a kept
+//! result again only when its own inputs changed and stopping a change at a result that comes
+//! back the same (the `kept` module holds the store and the rules).</para>
 //!
 //! <para>The tree knows nothing of what a host does with the output. One host draws it; another
 //! keeps a document, an index or some other structure derived from it. Either names each node
 //! by a key of its own choosing for the node's place in the output, reads what the node
-//! rendered, and visits the authored descriptors it finds there. The tree says which nodes have
-//! rendered since the host last walked them ([`InstanceTree::is_settled`]), so a host that
-//! follows changes walks only where something changed.</para>
+//! rendered, and visits the authored descriptors it finds there. The tree reports by key what
+//! rendered, was added and was removed since the host last asked
+//! ([`InstanceTree::take_changes`]), and which nodes have rendered since the host last walked
+//! them ([`InstanceTree::is_settled`]), so a host that follows changes updates or walks only
+//! where something changed.</para>
 
 use crate::component::{
     handler_property, ComponentInit, ComponentInstance, InitProps, NormalizedProps, Rebinding,

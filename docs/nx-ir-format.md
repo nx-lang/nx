@@ -799,15 +799,44 @@ place of the old. A reused result's recorded values count as reads of every deri
 evaluated around the use, each with its token computed again below where that evaluation began.
 Comparing tokens costs nothing, so a reused result costs nothing beyond the node that asked for
 it: one operation for the `reference` or `envRead` node. Its nodes are not evaluated and its value
-is not checked against its type again. Nothing is kept from one call to the next, so a call's count
-depends only on its images and input. A failure ends the call, so no failure is kept. For a call
-the instance tree makes, a reused result's reads are added to the render's record of what it read,
-as evaluating it would have added them.
+is not checked against its type again. Outside the instance tree nothing is kept from one call to
+the next, so a call's count depends only on its images and input. A failure ends the call, so no
+failure is kept. For a call the instance tree makes, a reused result's use is added to the render's
+record of its inputs, as evaluating it would have added it.
 
 Reuse changes no result. Because it does less work, a call may stay under a call depth, native
 stack or operation limit that evaluating every use afresh would reach: a default evaluated near the
 top of a call and reused far down it is not evaluated at the depth of the deep read. Both runtimes
 reuse alike, so they reach the same limits.
+
+**Results the instance tree keeps.** The Rust instance tree also keeps derived results across the
+calls it makes. A top-level value, a default or an entry-module provide that a render evaluated is
+kept when none of the reads it made, at any depth, was supplied or capped by a layer the render
+pushed; a formula, and the bundle of a render's own `envProvide`, is reused within one call only.
+A kept result has a record of its *direct inputs* in the order it read them: a read no layer of
+its place sets is a root read, with an edge to the kept result that supplied it when a default or
+a provide did; a read a layer sets is an override-supplied read holding the value found; and a
+kept result used otherwise is an edge. A render's record has the same form, with the props and
+state fields it read beside it.
+
+A kept result is taken into a later render, of any node, when no layer that render pushed sets a
+value any of its reads reached, and it is valid there: each input, in order, is classified at the
+use as it was recorded, a root read's value has not changed since the result was last found valid,
+an override-supplied read's lookup gives an equal value (evaluating any formula there), and an
+edge's result, validated first by the same rule and evaluated again when it is not valid, has not
+changed since. The check stops at the first input that does not hold, and the result is then
+evaluated again, so a check never evaluates what a fresh evaluation would not. A result evaluated
+again keeps its old value when the two are the same as a host sees them written: of one number
+kind, `-0.0` distinct from `0.0`, NaN never the same, and with equal origins when origins are
+collected. A result whose reads are classified or supplied differently at two places keeps a
+variant for each, and a use takes the first valid one in the order they were kept.
+
+Taking a kept result costs nothing beyond the node that asked for it, as reuse within a call does;
+the render that evaluated it first paid for it. Classifying a read and comparing revisions cost
+nothing. Looking up an override-supplied value costs what the lookup's reads and its comparison
+cost, evaluating a kept result again costs what the evaluation costs, and comparing it with the
+value it replaces costs what a comparison of the two values costs. So a render's count is a
+function of its images, its input and what the tree holds.
 
 ## Evaluation cost
 
