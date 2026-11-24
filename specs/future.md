@@ -2367,6 +2367,14 @@ then pass a few hundred times in a row.
   read 1,957, down from 23,475. What remains is that reading one field of a record default
   evaluates the whole record once, so `env.button.radius` still builds all of `env.button` and
   what it reads. Evaluating fields lazily would change when errors appear.
+- **A bundle's formula entries are evaluated at every read.** An entry-module bundle such as the
+  brand's `theme` is reused, but a formula among its entries (`color={if env.colorMode is { … }}`)
+  is held by no layer, so it is evaluated again at each read and applied on top of the reused
+  default. In `design-tokens-theme`, a later `env.color.*` read in the same call costs 33
+  operations in light mode and 44 in dark, against 2 for `env.button.radius`. Reusing these
+  formulas would need a new kind of kept result with its own key and read tracking, in the area
+  where `add-tracked-reactivity`'s review found its stale-output bugs, so it waits until a real app
+  shows color reads mattering.
 - **A palette generator.** `paletteFromHue(…)` building eleven steps from an OKLCH lightness curve,
   mapped with `toGamut(…, displayP3)`, so a brand can make a hue that matches the standard steps.
 - **Contrast-target tokens.** Roles defined by a target ratio against another role, as Adobe's
