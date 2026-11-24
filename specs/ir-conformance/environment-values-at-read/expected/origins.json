@@ -1,0 +1,8 @@
+{
+  "main.nx::direct": [],
+  "main.nx::imported": [],
+  "main.nx::named": [],
+  "main.nx::record": [
+    {"path": "", "module": "main.nx", "start": 396, "end": 445}
+  ]
+}

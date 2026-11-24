@@ -25,18 +25,19 @@ evaluated with arguments: the values a host passes, which no entrypoint without 
 supply, with the input size of each, and `argument-diagnostics`, whose cases are calls every
 runtime fails alike, each with the code of its diagnostic and the argument it names.
 
-`with-expressions` patches records and update records with `with`: field lists, paths through
-fields (one of them through a record its module does not import), chains, operands and `??`, beside
-the `apply` program it means. `environment-formulas` holds overrides that read the environment,
-which are formulas computed where the value is read: bundles in `provide` blocks, inline, named and
-passed as an argument, a `with` step after a bundle, an override read under a nearer one, captured
-locals, and a descriptor whose `$env` carries a formula. `environment-inline-provide` holds a
-main-module `provide env with { … }` whose entries are computed only by reads of the values they
-set, and bundles passed as component props: a default one read twice in the body, once in a
-section set to dark mode, and one the host passes. `environment-cycle` holds a case that fails with
-`nx-ir-environment-cycle` through a function the static check cannot follow; it is kept apart
-because generated JavaScript refuses a call of a function-typed value, and would skip the other
-program's entrypoints with it.
+`with-expressions` patches records and update records with `with`: field lists, paths through fields
+(one of them through a record its module does not import), chains, operands and `??`, beside the
+`apply` program it means. `environment-formulas` holds overrides that read the environment, which
+are formulas computed where the value is read: bundles in `provide` blocks, inline, named and passed
+as an argument, a `with` step after a bundle, an override read under a nearer one, captured locals,
+and a descriptor whose `$env` carries a formula. `environment-inline-provide` holds a main-module
+`provide env with { … }` whose entries are computed only by reads of the values they set, and
+bundles passed as component props: a default one read twice in the body, once in a section set to
+dark mode, and one the host passes. `environment-values-at-read` reads top-level values that read
+the environment (one in another module, one through another value, a record) under overrides, and
+names one in an override. `environment-cycle` holds a case that fails with `nx-ir-environment-cycle`
+through a function the static check cannot follow; it is kept apart because generated JavaScript
+refuses a call of a function-typed value, and would skip the other program's entrypoints with it.
 
 Two programs are of the size a host runs, where the others are as small as what they cover allows.
 `large-catalog` is a library of 45 external components, 11 of them abstract bases three levels
@@ -155,9 +156,9 @@ program as JavaScript and run every entrypoint of its entry module, whose value 
 recorded one. A case is not run there: its result comes from one IR runtime and is checked in the
 other. A program executable source codegen refuses (a match on patterns other than union cases, a
 call of a function-typed value, an action handler) is skipped, and so is an entrypoint that reaches
-such a construct at run time. No other entrypoint is skipped, though a top-level value that reads
-the environment still keeps its load-time value there (see `specs/future.md`, "Generated values are
-evaluated at load"), and no program names one under an override: `design-tokens-theme`'s
+such a construct at run time. No other entrypoint is skipped. A top-level value that reads the
+environment is a function there, computed at each read, so `environment-values-at-read` agrees in
+all three engines, and `design-tokens-theme`'s
 `darkAccent`, which reads the main module's bundle under a local mode, agrees because a bundle entry
 that reads the environment is a formula computed at each read, even in a bundle generated code
 evaluates when it loads. A formula in generated JavaScript is a closure holding its `module` and

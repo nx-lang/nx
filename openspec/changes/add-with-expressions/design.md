@@ -201,8 +201,10 @@ Generated code carries a formula as a function of no arguments that closes over 
 the environment through the generated helpers, beside the runtime's `module` and `locals`; `$env`
 entries otherwise have the runtime's shape. Serializing a generated formula throws rather than
 dropping it, and the conformance comparison matches formula entries by `module`, `locals` and the
-values reads through them give. An entry that only names a top-level value still has that value's
-load-time result in generated code, as other top-level values do.
+values reads through them give. A top-level value whose evaluation can read the environment is
+generated as a function of no arguments, and each reference to it as a call, so it is computed at
+each read as the IR runtimes compute it; an override or bundle entry that names one follows the
+environment of the read. Values that read no environment stay constants evaluated at load.
 Since a bundle's entries are formulas, a top-level bundle evaluated when a generated module loads
 still computes its entries at each read, which fixes the `darkAccent` divergence from #75 without
 treating `env.Update` values specially.

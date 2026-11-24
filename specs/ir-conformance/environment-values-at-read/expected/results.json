@@ -1,0 +1,10 @@
+{
+  "main.nx::direct": 25,
+  "main.nx::imported": 30,
+  "main.nx::named": 3,
+  "main.nx::record": {
+    "$type": "Insets",
+    "bottom": 10,
+    "top": 5
+  }
+}

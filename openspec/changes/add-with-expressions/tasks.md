@@ -22,7 +22,7 @@
 
 - [x] 4.1 Rust IR runtime: accept `environment-v2`; capture formulas in `envProvide` and `envUpdate` and evaluate them at the read with the prepared program, with the "sources after it" rule at any depth and the runtime cycle error; evaluate only a bundle's entries for the value read; carry formulas and bundles in `$env`, check only their shape in `enter`, and refuse a stale fingerprint at the read that evaluates the formula; record the reads they make for the instance tree, so `set_environment` reaches readers through them.
 - [x] 4.2 TypeScript runtime: the same, matching the Rust runtime's results and operation counts on the corpus.
-- [x] 4.3 Generated code: emit record `with` through the existing `apply`/`merge` helpers, bundle `with`, bundles in blocks, and formulas as functions of no arguments that close over their locals and also hold `module` and `locals`, in the generated environment helpers and `enter`; make `JSON.stringify` of a generated formula throw.
+- [x] 4.3 Generated code: emit record `with` through the existing `apply`/`merge` helpers, bundle `with`, bundles in blocks, and formulas as functions of no arguments that close over their locals and also hold `module` and `locals`, in the generated environment helpers and `enter`; make `JSON.stringify` of a generated formula throw. Generate a top-level value that reads the environment as a function of no arguments and each reference to it as a call, so it is computed at each read.
 
 ## 5. Editor
 

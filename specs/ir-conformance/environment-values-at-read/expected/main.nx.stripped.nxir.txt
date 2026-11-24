@@ -1,0 +1,45 @@
+module main.nx fingerprint 2958448438234778377
+links shared.nx version "" fingerprint 5641542836582198659
+requires environment-v1 environment-v2
+entrypoints functions [named direct record imported] components []
+
+environment gap: int =
+  0
+
+value tv: int =
+  (shared.nx:env.space mul 3)
+
+value doubled: int =
+  (tv mul 2)
+
+record Insets
+  top: int required
+  bottom: int required
+
+value insets: Insets =
+  <Insets top=shared.nx:env.space bottom=(shared.nx:env.space mul 2) />
+
+value plain: int =
+  7
+
+function named() =
+  provide env.gap:=tv {
+    provide shared.nx:env.space=1 {
+      env.gap
+    }
+  }
+
+function direct() =
+  provide shared.nx:env.space=2 {
+    ((tv add doubled) add plain)
+  }
+
+function record() =
+  provide shared.nx:env.space=5 {
+    insets
+  }
+
+function imported() =
+  provide shared.nx:env.space=10 {
+    shared.nx:triple
+  }

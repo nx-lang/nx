@@ -1,0 +1,10 @@
+{
+  "entry": "main.nx",
+  "emit": ["main.nx", "shared.nx"],
+  "entrypoints": [
+    { "module": "main.nx", "function": "named" },
+    { "module": "main.nx", "function": "direct" },
+    { "module": "main.nx", "function": "record" },
+    { "module": "main.nx", "function": "imported" }
+  ]
+}

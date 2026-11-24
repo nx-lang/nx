@@ -1,0 +1,9 @@
+module shared.nx fingerprint 5641542836582198659
+requires environment-v1
+entrypoints functions [] components []
+
+environment space: int =
+  4
+
+value triple: int =
+  (env.space mul 3)

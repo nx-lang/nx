@@ -1,0 +1,8 @@
+{
+  "counts": {
+    "main.nx::direct": 22,
+    "main.nx::imported": 8,
+    "main.nx::named": 11,
+    "main.nx::record": 16
+  }
+}

@@ -114,6 +114,19 @@ fn reads_environment(expression: &CodegenExpression, reading: &FxHashSet<Key>) -
     reads.environment || reads.named.iter().any(|named| reading.contains(named))
 }
 
+/// The top-level values whose evaluation can read the environment. Generated code computes each
+/// at every read, as the IR runtimes do, rather than once when its module loads.
+pub(crate) fn environment_reading_values(modules: &[CodegenModule]) -> FxHashSet<Key> {
+    let reading = reading_declarations(modules);
+    modules
+        .iter()
+        .flat_map(|module| &module.declarations)
+        .filter(|declaration| matches!(declaration.kind, CodegenDeclarationKind::Value { .. }))
+        .map(|declaration| key(&declaration.reference))
+        .filter(|key| reading.contains(key))
+        .collect()
+}
+
 /// Sets the formula flag on every override, in a `provide`, an element's `env.` attributes or an
 /// `env.Update`, whose value reads the environment.
 pub(crate) fn mark_formulas(modules: &mut [CodegenModule]) {

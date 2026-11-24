@@ -1,0 +1,20 @@
+// Top-level values that read the environment are computed at each read, in the environment of
+// that read, in every engine.
+import "./shared.nx"
+
+environment gap: int = 0
+
+let tv: int = { env.space * 3 }
+/// A value that reads one that reads the environment.
+let doubled: int = { tv * 2 }
+/// A record value that reads the environment.
+type Insets = { top:int bottom:int }
+let insets: Insets = <Insets top={env.space} bottom={env.space * 2} />
+let plain: int = { 7 }
+
+/// An override that names the value is a formula; the value is computed under the nearer `space`.
+let named() = { provide env.gap={tv} { provide env.space=1 { env.gap } } }
+/// A read under an override.
+let direct() = { provide env.space=2 { tv + doubled + plain } }
+let record() = { provide env.space=5 { insets } }
+let imported() = { provide env.space=10 { triple } }

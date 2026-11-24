@@ -509,6 +509,10 @@ struct EmitContext {
     /// The records and unions that extend an abstract base. TypeScript declares each as an
     /// interface extending its base, and pins each literal of one to its own type.
     extending: FxHashSet<ReferenceKey>,
+    /// The top-level values that read the environment: each is emitted as a function of no
+    /// arguments and every reference to it as a call, so it is computed at each read, in the
+    /// environment of that read, as the IR runtimes compute it.
+    environment_reading_values: FxHashSet<ReferenceKey>,
 }
 
 impl EmitContext {
@@ -614,6 +618,15 @@ impl EmitContext {
             schema_declarations,
             import_aliases,
             extending,
+            environment_reading_values: crate::formulas::environment_reading_values(
+                &program.modules,
+            )
+            .into_iter()
+            .map(|(module_id, definition_index)| ReferenceKey {
+                module_id,
+                definition_index,
+            })
+            .collect(),
         }
     }
 
@@ -626,6 +639,14 @@ impl EmitContext {
             .get(&module_id)
             .map(String::as_str)
             .expect("module should have an output file")
+    }
+
+    /// Whether `reference` names a top-level value generated as a function computed at each read.
+    fn reads_environment_value(&self, reference: &CodegenReference) -> bool {
+        reference.kind == ResolvedItemKind::Value
+            && self
+                .environment_reading_values
+                .contains(&ReferenceKey::new(reference))
     }
 
     fn reference_name(
@@ -1472,15 +1493,29 @@ fn emit_declaration(
             declared_ty,
         } => {
             let value = emit_declared_result(module.id, value, declared_ty.as_ref(), context);
+            // A value that reads the environment is computed at each read, in the environment of
+            // that read, so it is a function of no arguments and its references call it.
+            let lazy = context.reads_environment_value(&declaration.reference);
             if target.is_typescript() {
+                let ty = ty
+                    .as_ref()
+                    .map(|ty| emit_type(module.id, ty, module, context))
+                    .unwrap_or_else(|| "unknown".to_string());
+                if lazy {
+                    out.push_str(&format!(
+                        "{}const {} = (): {} => ({});\n",
+                        export_prefix, name, ty, value
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{}const {}: {} = {};\n",
+                        export_prefix, name, ty, value
+                    ));
+                }
+            } else if lazy {
                 out.push_str(&format!(
-                    "{}const {}: {} = {};\n",
-                    export_prefix,
-                    name,
-                    ty.as_ref()
-                        .map(|ty| emit_type(module.id, ty, module, context))
-                        .unwrap_or_else(|| "unknown".to_string()),
-                    value
+                    "{}const {} = () => ({});\n",
+                    export_prefix, name, value
                 ));
             } else {
                 out.push_str(&format!("{}const {} = {};\n", export_prefix, name, value));
@@ -3582,7 +3617,14 @@ fn emit_expression(
         CodegenExpressionKind::Literal(literal) => emit_literal(literal),
         CodegenExpressionKind::Identifier { name, reference } => reference
             .as_ref()
-            .map(|reference| context.reference_name(current_module_id, reference))
+            .map(|reference| {
+                let name = context.reference_name(current_module_id, reference);
+                if context.reads_environment_value(reference) {
+                    format!("{name}()")
+                } else {
+                    name
+                }
+            })
             .unwrap_or_else(|| safe_identifier(name)),
         // A division or remainder goes through a helper: integer division truncates, which
         // JavaScript's `/` does not, and a zero divisor is a runtime error on every other backend
@@ -3902,7 +3944,14 @@ fn emit_expression(
             reference,
         } => reference
             .as_ref()
-            .map(|reference| context.reference_name(current_module_id, reference))
+            .map(|reference| {
+                let name = context.reference_name(current_module_id, reference);
+                if context.reads_environment_value(reference) {
+                    format!("{name}()")
+                } else {
+                    name
+                }
+            })
             .unwrap_or_else(|| {
                 let access = format!(
                     "{}[{}]",
