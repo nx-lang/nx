@@ -107,7 +107,7 @@ all of its original scenarios included, and the REMOVED header matches the main 
   there. Decide whether a value whose type merely contains an `env.Update`, such as a record of light and
   dark bundles, is also emitted as a function.
 - **Fix:** New executable-code-generation delta: a formula is a closure of no arguments over its locals; scenarios for a main theme following a local mode and a generated formula. Design decision 8; task 4.3 and 6.4 (removes the `darkAccent` divergence).
-- **Verification:** There is now an executable-code-generation delta. It states that a formula is a closure of no arguments and that such an entry is meaningful only to the generated program that made it, which settles the conflict with "same `$env`". It also has scenarios for a generated formula and for the #75 `darkAccent` case, and task 6.4 removes the divergence. A residual issue: the delta says a top-level bundle loaded at module load "SHALL still follow the environment of each read". That holds only for entries whose own expression reads the environment. An entry that only names a top-level value, such as `accent={myAccent}` where `myAccent` matches on `env.colorMode`, still gets that value as it was at load, which is the existing "Generated values are evaluated at load" limit. Saying so in a sentence is enough. The new issues are in RF17.
+- **Verification:** There is now an executable-code-generation delta. It states that a formula is a closure of no arguments and that such an entry is meaningful only to the generated program that made it, which settles the conflict with "same `$env`". It also has scenarios for a generated formula and for the #75 `darkAccent` case, and task 6.4 removes the divergence. A residual issue: the delta says a top-level bundle loaded at module load "SHALL still follow the environment of each read". That holds only for entries whose own expression reads the environment. An entry that only names a top-level value, such as `accent={myAccent}` where `myAccent` matches on `env.colorMode`, still gets that value as it was at load, which is the existing "Generated values are evaluated at load" limit. Saying so in a sentence is enough. The new issues are in RF17. Follow-up: the executable-code-generation delta now says this (spec.md:20-22), and so does design decision 8.
 
 ### ✅ Verified - RF6 The runtime specs and the host `enter` API aren't updated
 - **Severity:** High
@@ -188,7 +188,7 @@ all of its original scenarios included, and the REMOVED header matches the main 
   overrides; an inline element; a `with` chain followed by the body; and an empty field list before the
   body.
 - **Fix:** The operand after `provide env with` is now the same operand set as `with`'s right side (name, member access, call, element, braced expression), optionally followed by more `with` steps, then overrides and the body. Design decision 2; task 1.2 lists the grammar tests.
-- **Verification:** The block form restricts the bundle to `with`'s operand set plus optional `with` steps (spec.md:146-149), and task 1.2 lists the grammar tests I suggested. The top-level form still says "an expression of type `env.Update`" (spec.md:191-192). There is no body after it, so it can be parsed, but using the same operand wording would keep the two forms alike. This is optional.
+- **Verification:** The block form restricts the bundle to `with`'s operand set plus optional `with` steps (spec.md:146-149), and task 1.2 lists the grammar tests I suggested. The top-level form still says "an expression of type `env.Update`" (spec.md:191-192). There is no body after it, so it can be parsed, but using the same operand wording would keep the two forms alike. This is optional. Follow-up: the top-level form now takes the same operand and optional `with` steps (environment-values spec.md:51-53).
 
 ### ✅ Verified - RF11 Editor, highlighting and migration specs and tasks are missing
 - **Severity:** Medium
@@ -267,7 +267,7 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
 ## New Findings Discovered During 2026-11-24 05:05 Verification
 
-### 🟡 Fixed - RF16 The encoding of a formula's fingerprint in `$env` isn't stated
+### ✅ Verified - RF16 The encoding of a formula's fingerprint in `$env` isn't stated
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/nx-ir-format/spec.md:78-79 (`formula` holds `module`, `node`, `fingerprint`, `locals`);
@@ -279,8 +279,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
 - **Recommendation:** Specify the JSON form of `fingerprint` in `$env` and `$entries`, for example a decimal
   string as the existing lossless-fingerprint requirement allows, and extend task 3.2 to document it.
 - **Fix:** `fingerprint` in `$env` and `$entries` is written in the lossless form program fingerprints use (nx-ir-format `$env` requirement, design decision 3, task 3.1).
+- **Verification:** `fingerprint` in `$env` and `$entries` now uses the lossless program-fingerprint form. The nx-ir-format `$env` requirement (spec.md:80-81), design decision 3 and task 3.1 all say so.
 
-### 🟡 Fixed - RF17 Generated formulas are closures, but nothing says how they are compared or serialized
+### ✅ Verified - RF17 Generated formulas are closures, but nothing says how they are compared or serialized
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:** specs/executable-code-generation/spec.md:11-16 (a formula is a function in `formula`,
@@ -300,8 +301,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   - Say what serializing a generated formula does. Either refuse with a diagnostic, or give the closure a
     `toJSON` that throws, so it is never dropped quietly.
 - **Fix:** Generated formulas also hold the runtime's `module` and `locals`; `JSON.stringify` of one throws naming the value (new scenario line); the conformance comparison matches formula entries by `value`, `path`, `module`, `locals` and the values reads give, not `node` or `fingerprint` (executable-code-generation delta, design decision 8, tasks 4.3 and 6.4). The RF5 note is added too: an entry that only names a top-level value keeps its load-time value in generated code.
+- **Verification:** The executable-code-generation delta now does three things. It makes `JSON.stringify` of a generated formula throw, with a new scenario line naming `gap`. It makes the comparison match formula entries by `value`, `path`, `module`, `locals` and the values they give, leaving out `node` and `fingerprint`. And it adds the RF5 note about entries that only name a top-level value. Task 4.3, task 6.4 and design decision 8 match. One sentence in the delta now contradicts itself; that is RF21.
 
-### 🟡 Fixed - RF18 The v1 IR can't be "what was emitted before" if every override gains a flag cell
+### ✅ Verified - RF18 The v1 IR can't be "what was emitted before" if every override gains a flag cell
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** specs/nx-ir-format/spec.md:8-11 (each override holds a reference, a path, a value node and
@@ -313,8 +315,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
   cell present only on a formula, or the formula form as a separate shape. Then the scenario holds, and a
   v1 reader rejects only v2 modules.
 - **Fix:** The formula flag is an optional fourth override cell present only on a formula, so a non-formula override's encoding is unchanged (nx-ir-format requirement, task 3.1).
+- **Verification:** The flag is now an optional fourth override cell, present only on a formula (nx-ir-format spec.md:9-11; task 3.1). A non-formula override is still `[ref, [str…], node]`, so the v1 scenario holds. This applies to `envUpdate` overrides too, since they have the same shape.
 
-### 🟡 Fixed - RF19 When a stale formula is refused differs between the deltas
+### ✅ Verified - RF19 When a stale formula is refused differs between the deltas
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:**
@@ -333,8 +336,9 @@ all of its original scenarios included, and the REMOVED header matches the main 
 
   Align the nx-ir-format scenario, both runtime deltas and task 4.1 with that choice.
 - **Fix:** One point everywhere: `enter` checks only the shape of `$env`; a formula with a wrong module, fingerprint or node is refused with `nx-ir-boundary-type` at the read that evaluates it. nx-ir-format requirement and its scenario (entering succeeds, the read fails), both runtime deltas, design decision 3 and task 4.1 now say this.
+- **Verification:** There is now one point everywhere. `enter` checks only the shape of `$env`, and a stale formula is refused with `nx-ir-boundary-type` at the read that evaluates it. nx-ir-format (spec.md:84-88, and the scenario at 115-119 where entering succeeds and the read fails), the rust-ir-runtime and typescript-ir-runtime deltas, design decision 3 and task 4.1 all agree. The TypeScript scenario ("the body reads that value") is consistent with it.
 
-### 🟡 Fixed - RF20 Two notes about the `darkAccent` divergence aren't in the migration tasks
+### ✅ Verified - RF20 Two notes about the `darkAccent` divergence aren't in the migration tasks
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** specs/ir-conformance/README.md:147 and crates/nx-api/tests/codegen/ir_corpus_tests.rs:1283-1286
@@ -344,6 +348,43 @@ all of its original scenarios included, and the REMOVED header matches the main 
 - **Recommendation:** Add both to task 6.4. If the list becomes empty, remove the constant or leave an
   empty list with its comment updated.
 - **Fix:** Task 6.4 now updates the `KNOWN_GENERATED_DIVERGENCES` doc comment (or removes the constant if empty) and `specs/ir-conformance/README.md`.
+- **Verification:** Task 6.4 now updates the `KNOWN_GENERATED_DIVERGENCES` doc comment, or removes the constant if it ends up empty, and updates `specs/ir-conformance/README.md`.
+
+## New Findings Discovered During 2026-11-24 05:40 Verification
+
+### 🟡 Fixed - RF21 The generated-formula sentence first replaces `module` and `locals`, then keeps them
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** specs/executable-code-generation/spec.md:12-15.
+- **Details:** The sentence says a formula is a function "in place of the runtime's `module`, `node`,
+  `fingerprint` and `locals`" and then that it "SHALL also hold the runtime's `module` and `locals`".
+  design.md:194-195 says "beside the runtime's `module` and `locals`", which is the intended reading.
+- **Recommendation:** Say "in place of the runtime's `node` and `fingerprint`", and keep the clause that
+  says it also holds `module` and `locals`.
+- **Fix:** The sentence now says a generated formula holds the runtime's `module` and `locals` in place of its `node` and `fingerprint`.
+
+### 🟡 Fixed - RF22 Design decision 5 misstates how an `env.` override through an empty optional field behaves
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** design.md:157-160 ("an `env.` override through an optional field applies only when the
+  field has a value"); crates/nx-ir-runtime/src/environment.rs:609-619 (`set_path`).
+- **Details:** When a step finds the field empty, `set_path` fails with `nx-ir-environment` ("Environment
+  override of field '…' found the field empty"). It does not skip the override. The only exception is the
+  last step of a plain (non-patch) override, which sets the field. Question 6's follow-up repeats the
+  claim.
+- **Recommendation:** Reword the reason. For example: "an `env.` override through an optional field fails
+  at run time when the field is empty, while a `with` path is rejected statically, so it can't fail". Or
+  drop the reason and keep only "stricter". The current main spec doesn't describe this runtime failure,
+  but that predates this change and can be left as it is.
+- **Fix:** Dropped the wrong reason; decision 5 now says only that `with` paths are stricter than the static rule for `env.` paths, which this change leaves as it is.
+
+### 🟡 Fixed - RF23 Three new lines go well past the wrap width
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** specs/nx-ir-format/spec.md:11 (151 characters), specs/environment-values/spec.md:53
+  (132), and specs/rust-ir-runtime/spec.md:13 (108). Each was edited in place without rewrapping.
+- **Recommendation:** Rewrap them to the ~100 characters the rest of the change uses.
+- **Fix:** Rewrapped the edited paragraphs in nx-ir-format, environment-values, rust-ir-runtime and executable-code-generation.
 
 ## Questions
 
@@ -377,27 +418,28 @@ all of its original scenarios included, and the REMOVED header matches the main 
      design decision 5's "It matches" is inaccurate: either say the `with` rule is stricter, or tighten
      `environment-path` in the same change.
    - Follow-up: design decision 5 now says `with` paths are stricter than `env.` paths, which this change leaves as they are (an `env.` override through an optional field applies only when the field has a value; a `with` patch always gives one). The top-level `provide env with` wording now uses the block form's operand (RF10 note).
+   - Verification (follow-up): this settles the question, since `with` paths are stricter and `env.` paths
+     stay as they are. But the reason given, that an `env.` override through an optional field "applies only
+     when the field has a value", doesn't match the runtime; see RF22.
 7. For an override that reads the environment only on some branches (`env.x={ if c { env.y } else { 1 } }`),
    is it a formula? A static read set would say yes. Confirm that this is intended.
    - Answer: yes, intended. The flag comes from the static read set, so a value that reads the environment on any branch is a formula (design decision 3).
 
 ## Summary
 
-`openspec validate add-with-expressions --strict` passes after the fixes. Each new delta is a MODIFIED
-block with the full main requirement and all of its scenarios, plus ADDED requirements, and every
-requirement has SHALL on its first line.
+`openspec validate add-with-expressions --strict` passes.
 
-All 15 original findings are ✅ Verified:
+| Findings | Status |
+| --- | --- |
+| RF1–RF20 | ✅ Verified |
+| RF21–RF23 | 🔴 Open, all Low |
 
-- The precedence is fixed.
-- The cycle rule and its runtime error are specified.
-- Bundles keep formulas wherever they travel.
-- The IR encoding, runtime, generated-code, instance-tree and editor deltas exist.
-
-Questions 2, 3, 4, 5 and 7 are answered in the artifacts. Question 1 is answered, but its answer raises
-RF16 and RF19. Question 6's answer still rests on an "It matches" claim that the code doesn't appear to
-support.
-
-New findings: 2 Medium (RF17 generated formula closures can't be compared or serialized; RF19 the
-stale-formula refusal point differs between deltas) and 3 Low (RF16 fingerprint JSON form; RF18 v1 IR
-shape versus the new flag; RF20 two leftover `darkAccent` notes).
+- **RF16–RF20:** verified in the second round. The fingerprint form, the optional flag cell, the generated
+  formulas' serialization and comparison, the single refusal point and the leftover `darkAccent` notes
+  are all settled.
+- **RF5 and RF10:** both follow-up notes are addressed.
+- **Question 6:** settled. `with` paths are stricter and `env.` paths stay as they are. Only the stated
+  reason needs a fix (RF22).
+- **Still open:** three Low findings, none of which changes behavior. RF21 is a self-contradicting
+  clause in the generated-formula sentence, RF22 is design decision 5's inaccurate description of `env.`
+  paths at run time, and RF23 is three unwrapped lines.

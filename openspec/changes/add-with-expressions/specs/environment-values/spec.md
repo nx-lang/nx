@@ -47,19 +47,19 @@ begins a block, a declaration, parameter or binding named `provide` SHALL be rej
   written only after `provide`
 
 ### Requirement: Only the main module provides values app-wide
-A module SHALL be able to contain, at its top level, `provide env.name = value`,
-`provide env.name.field = value`, and `provide env with bundle`, where `bundle` is the same operand
-as in a `provide` block (a name, member access, call, element or braced expression), optionally
-followed by more `with` steps, of type `env.Update`. The main module of a program SHALL be its entry module, which the host chooses:
-`chatLink.nx` for a chat link, the only module of a one-module program, and `app.nx` by convention
-for an app. A program SHALL apply the top-level provides of its main module alone, in the order
-written, and a module that another module of the program imports SHALL NOT contain a top-level
-provide: each one SHALL be rejected with `provide-outside-main-module`, whose message says that
-app-wide provides belong in the main module. A library module that exports a declaration SHALL
-count as imported, since a program that imports the library reaches it. A module that nothing
-imports, such as a library's own `app.nx` for previews, SHALL be allowed to contain them, and they
-SHALL take effect only when it is the entry module. A top-level `provide bundle` without `env with`
-SHALL be a syntax error whose message suggests `provide env with bundle`.
+A module SHALL be able to contain, at its top level, `provide env.name = value`, `provide
+env.name.field = value`, and `provide env with bundle`, where `bundle` is the same operand as in a
+`provide` block (a name, member access, call, element or braced expression), optionally followed by
+more `with` steps, of type `env.Update`. The main module of a program SHALL be its entry module,
+which the host chooses: `chatLink.nx` for a chat link, the only module of a one-module program, and
+`app.nx` by convention for an app. A program SHALL apply the top-level provides of its main module
+alone, in the order written, and a module that another module of the program imports SHALL NOT
+contain a top-level provide: each one SHALL be rejected with `provide-outside-main-module`, whose
+message says that app-wide provides belong in the main module. A library module that exports a
+declaration SHALL count as imported, since a program that imports the library reaches it. A module
+that nothing imports, such as a library's own `app.nx` for previews, SHALL be allowed to contain
+them, and they SHALL take effect only when it is the entry module. A top-level `provide bundle`
+without `env with` SHALL be a syntax error whose message suggests `provide env with bundle`.
 
 #### Scenario: The main module sets a value app-wide
 - **WHEN** `app.nx` imports `design.nx`, which declares `export environment space: int = 4`,

@@ -155,9 +155,8 @@ the bundle patches the place around it rather than resetting to defaults. This i
 `r with { a.b=1 }` means `r with { a=(r.a with { b=1 }) }`, with `r` evaluated once. Each step but
 the last must name a required field of a record type; an optional field, a union, or anything else
 is `with-path`, since there may be nothing to patch. Setting the whole field works instead. This is
-stricter than `env.` paths (`environment-path`), which this change leaves as they are: an `env.`
-override through an optional field applies only when the field has a value, while a `with` patch
-always gives a value.
+stricter than the static rule for `env.` paths (`environment-path`), which this change leaves as it
+is.
 
 ### 6. `with` on update records and bundles
 

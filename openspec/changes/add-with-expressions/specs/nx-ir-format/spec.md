@@ -6,23 +6,23 @@ its default node, and exported as other declarations are. A read SHALL be an `en
 `30`, holding a reference to the declaration, with any field read after it encoded as ordinary
 `member` nodes. A `provide` block, and an element with `env.` attributes, SHALL be an `envProvide`
 node, kind `31`, holding a list of overrides and a body. Each override SHALL hold a reference to the
-declaration, a list of field names that may be empty, a value node, and, only when the
-value is a formula, a fourth cell holding the formula flag; an override that is not a formula SHALL
-have no fourth cell, so its encoding is unchanged. A value is a formula when its static read set, following `env.` reads, the functions and values they
-call and the defaults of the values they read, is not empty. A bundle override SHALL hold no
-reference and an empty list, and its node SHALL be of type `env.Update`. An `env.Update` bundle
-SHALL be an `envUpdate` node, kind `32`, holding an optional `base` node of type `env.Update` and a
-list of overrides of the same shape as `envProvide`'s; its overrides SHALL be the base's followed by
-its own. A module with top-level provides SHALL hold one declaration of kind `provides`, named
-`$provides`, listing them in source order, each holding an optional reference to the declaration, a
-list of field names and a value node: an override names its declaration, and a bundle names none and
-its node is of `env.Update` type. A module that declares an environment value, contains an
-`envRead`, `envProvide` or `envUpdate` node or has top-level provides SHALL list the required feature
-`environment-v1`, and a module that does none of these SHALL NOT. A module that contains a formula
-override, a bundle override in an `envProvide`, or an `envUpdate` with a `base` SHALL list
-`environment-v2` as well, and a module that does none of these SHALL NOT. The `explain` text SHALL
-read the nodes as `env.` reads, `provide` blocks and `with` steps. Adding the declaration kind, the
-node kinds and the features SHALL NOT change the IR schema version.
+declaration, a list of field names that may be empty, a value node, and, only when the value is a
+formula, a fourth cell holding the formula flag; an override that is not a formula SHALL have no
+fourth cell, so its encoding is unchanged. A value is a formula when its static read set, following
+`env.` reads, the functions and values they call and the defaults of the values they read, is not
+empty. A bundle override SHALL hold no reference and an empty list, and its node SHALL be of type
+`env.Update`. An `env.Update` bundle SHALL be an `envUpdate` node, kind `32`, holding an optional
+`base` node of type `env.Update` and a list of overrides of the same shape as `envProvide`'s; its
+overrides SHALL be the base's followed by its own. A module with top-level provides SHALL hold one
+declaration of kind `provides`, named `$provides`, listing them in source order, each holding an
+optional reference to the declaration, a list of field names and a value node: an override names its
+declaration, and a bundle names none and its node is of `env.Update` type. A module that declares an
+environment value, contains an `envRead`, `envProvide` or `envUpdate` node or has top-level provides
+SHALL list the required feature `environment-v1`, and a module that does none of these SHALL NOT. A
+module that contains a formula override, a bundle override in an `envProvide`, or an `envUpdate`
+with a `base` SHALL list `environment-v2` as well, and a module that does none of these SHALL NOT.
+The `explain` text SHALL read the nodes as `env.` reads, `provide` blocks and `with` steps. Adding
+the declaration kind, the node kinds and the features SHALL NOT change the IR schema version.
 
 #### Scenario: A read and a provide are their own nodes
 - **WHEN** NX source contains `environment locale: string = "en-US"` and

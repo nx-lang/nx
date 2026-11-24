@@ -5,14 +5,14 @@ The Rust IR runtime SHALL accept modules that require `environment-v1` or `envir
 evaluate `envRead`, `envProvide` and `envUpdate` nodes, entry-module provides and `$env` as the
 format defines them, formulas and bundles included, with the same results and operation counts as
 the TypeScript runtime. The runtime SHALL export an environment type: an immutable value made from
-root values by `Environment::root`, and extended with a component descriptor's `$env` by `enter`.
-An environment SHALL hold formulas as captured data, and the runtime SHALL evaluate them with the
+root values by `Environment::root`, and extended with a component descriptor's `$env` by `enter`. An
+environment SHALL hold formulas as captured data, and the runtime SHALL evaluate them with the
 prepared program of the evaluation that reads them, so `enter` needs no program. Every evaluation,
 the component lifecycle included, SHALL take an environment through its options, and an evaluation
 given none SHALL run with no root values. Root values SHALL be named and checked as the
-environment-values capability defines, and a malformed `$env` SHALL be refused with `nx-ir-boundary-type` by
-`enter`, and a formula the program can't evaluate SHALL be refused with `nx-ir-boundary-type` at
-the read that evaluates it.
+environment-values capability defines, and a malformed `$env` SHALL be refused with
+`nx-ir-boundary-type` by `enter`, and a formula the program can't evaluate SHALL be refused with
+`nx-ir-boundary-type` at the read that evaluates it.
 
 #### Scenario: A function reads a root value
 - **WHEN** a host evaluates `let mode() = { env.colorMode }` with the root value `colorMode` equal to
