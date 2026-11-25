@@ -100,10 +100,16 @@
 - [x] 5.9 Tests for every `component-instance-tree` and `reactivity` tree scenario, including the
   modified scenarios of the existing requirements, a `set_environment` whose render fails after a
   kept result was evaluated again, and a dispatch skip followed by a tap on the old output.
-- [x] 5.10 A differential stress test of the tree: seeded random root changes (values written
-  differently that compare equal included), dispatches and passes over a program that mixes the
-  risky features, each step checked against a fresh initialization of every node and against the
-  change set.
+- [x] 5.10 A differential stress test of the tree against a model built on the bare lifecycle,
+  which holds state by key and runs taps through `dispatch_component_actions`: seeded random root
+  changes (values written differently that compare equal, roots for formula defaults and refused
+  values included), taps (patches that write the value a field holds, emits bound and unbound, two
+  emits in one handler, a handler in a content child, renders and emit handlers that fail), host
+  descriptors that change or leave, and `remove`, over a program whose nodes appear, leave and are
+  replaced at their keys. Each step checks the nodes, their state and output, failures and their
+  rollback, host effects, `is_settled` and the change set both ways. Not covered: a handler passed
+  as a prop other than an emit's, `remove` under a node a pass leaves unvisited, a pass that visits
+  only part of the tree, and operation limits.
 - [x] 5.11 A nightly workflow (`.github/workflows/thorough.yml`) that runs the stress test with 1000
   seeds of 100 steps from a base seed that differs each run (`NX_TREE_STRESS_BASE_SEED`), and can be
   started by hand with other counts.

@@ -1,27 +1,58 @@
 //! A differential stress test of the instance tree: seeded random sequences of root changes,
-//! dispatches and passes, after each of which every node's rendered output must be the one a
-//! fresh evaluation gives.
+//! taps, host descriptors and removals, after each of which the tree must hold what a model built
+//! on the bare lifecycle holds.
 //!
 //! <para>The tree keeps renders and derived results across operations and decides from its
 //! records what to evaluate again. A record that misses a read keeps output a fresh evaluation
-//! would not give. The reference here keeps nothing: after each step and the pass that follows
-//! it, it initializes every node through the bare lifecycle, with the root values, the place's
-//! overrides and the state the tree holds, and compares the outputs with their handler tokens left
-//! out. It also checks that the change set lists every node whose output changed.</para>
+//! would not give. The model keeps nothing of that: it holds the state of each node by key, and
+//! after each step it initializes every node through the bare lifecycle, with the root values, the
+//! place's overrides and the state it holds, and it runs each tap through
+//! `dispatch_component_actions` on the instances it initialized, against the node that created the
+//! handler, routing what a dispatch emits to the handler the parent bound, as the tree does. A node
+//! whose component changes at its key, whose parent is replaced, or that the host removed, starts
+//! from its initial state. After each step the tree must hold the model's nodes and no others,
+//! with the model's state and output, compared with handler tokens left out, and every node
+//! settled. What a token names is checked through the taps, whose state and effects must be the
+//! model's. An operation fails in the tree exactly
+//! when it fails in the model, and then changes nothing. The host effects of a tap are the
+//! model's.</para>
 //!
-//! <para>`NX_TREE_STRESS_SEEDS` sets how many seeds run (default 20), `NX_TREE_STRESS_BASE_SEED` the
-//! first of them (default 0, so the seeds are 0 to 19 unless it is set) and
-//! `NX_TREE_STRESS_ITERATIONS` how many steps each runs (default 40); `NX_TREE_STRESS_SEED` runs
-//! that one seed alone. A failure names the seed, the steps that led to it and every node whose
-//! output differs, and `NX_TREE_STRESS_SEED` with the seed it names, and the same
-//! `NX_TREE_STRESS_ITERATIONS`, runs it again. With `NX_TREE_STRESS_ALL` set, a seed goes on past a node that differs, and the
-//! end sums up, by node, how many seeds found it differing and the first difference found. Outputs
-//! compare as a host sees them written, so `0.0` and `-0.0` differ.</para>
+//! <para>The change set is checked both ways: a key is added when the model has a node there now
+//! and had none, or had one it replaced; removed the other way round; and rendered exactly when
+//! the node stayed and its output changed in any way, in value or in what a token names. After a
+//! tap or a root change, before the pass, a node is unsettled exactly when it or a node under it
+//! rendered.</para>
+//!
+//! <para>The program mixes the risky features: element overrides and `provide` blocks, an
+//! entry-module bundle with a formula entry, formulas the body provides (one reading its own
+//! value), field overrides, override formulas that capture a prop or a state field, a prop default
+//! that reads `env`, kept top-level values that read `env`, light and dark sections, values a host
+//! can write differently that compare equal, host roots for formula-declared values, refused root
+//! values, renders and emit handlers that fail on some values, patches that write the value a
+//! field holds, emits bound and unbound, two emits in one handler, a handler in a content child,
+//! and nodes that appear, leave and are replaced by another component at their key. It does not
+//! cover a handler passed as a prop other than an emit's, `remove` under a node that is left
+//! unvisited, a pass that visits only part of the tree, or operation limits.</para>
+//!
+//! <para>`NX_TREE_STRESS_SEEDS` sets how many seeds run (default 20), `NX_TREE_STRESS_BASE_SEED`
+//! the first of them (default 0) and `NX_TREE_STRESS_ITERATIONS` how many steps each runs (default
+//! 30); `NX_TREE_STRESS_SEED` runs that one seed alone. A value that is set must be a whole number,
+//! the counts at least 1. A failure, a panic in the runtime included, names the seed, the step and
+//! the steps that led to it, and gives the command that runs it again. With `NX_TREE_STRESS_ALL`
+//! set, a seed goes on past a node whose output or state differs, and the end sums up, by node, how
+//! many seeds found it differing and the first difference found. Outputs compare as a host sees
+//! them written, so `0.0` and `-0.0` differ.</para>
 
 use crate::ir_runtime_tests::program;
-use nx_ir_runtime::{ComponentInit, ComponentInstance, Environment, InstanceTree, RuntimeOptions};
+use nx_ir_runtime::{
+    ComponentInit, ComponentInstance, Environment, InstanceTree, Program, RuntimeOptions,
+    TreeChanges,
+};
 use nx_value::NxValue;
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
+use std::panic::AssertUnwindSafe;
+use std::rc::Rc;
 use std::sync::Arc;
 
 const CONTROLS: &str = "
@@ -33,11 +64,6 @@ external component <Button extends Node Text?:string emits { Tapped { } } />
 external component <Stack extends Node content Children?:Node+ />
 ";
 
-/// Every risky feature at once: element overrides and `provide` blocks, an entry-module bundle
-/// with a formula entry, formulas the body provides (one reading its own value), field
-/// overrides, a prop default that reads `env`, state the body reads and state only a handler
-/// reads, light and dark sections, kept top-level values that read `env`, conditional reads,
-/// and values a host can write differently that compare equal.
 const PROGRAM: &str = "
 type Mode = light | dark
 type Colors = { accent:string tone:string }
@@ -63,12 +89,17 @@ let amountOf: object = { held(env.amount) }
 let modeName(m:Mode): string = { if m is { dark => \"dark\" light => \"light\" } }
 let regionOf(m:Mode, l:string): string = { if m is { dark => l light => \"fixed\" } }
 
+component <Dir extends Node /> = {
+  <Label Text={direction + \" \" + env.label + \" \" + (12 / (env.space - 5))} />
+}
 component <Show extends Node text:string = { env.label } /> = {
   state { taps:int = 0 hidden:int = 0 }
   <Stack>
     <Label Text={text + \" \" + taps} />
     <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
+    <Button Text=\"Same\" onTapped=<State.Update taps={taps} /> />
     <Button Text=\"Hide\" onTapped=<State.Update hidden={hidden + 1} /> />
+    <Stack env.space={if text == \"x\" { 4 } else { env.space }}><Dir /></Stack>
   </Stack>
 }
 component <Zero extends Node /> = { <Num Value={env.z} /> }
@@ -76,9 +107,11 @@ component <Boxed extends Node /> = { <Num Value={env.boxed.v} /> }
 component <Card extends Node flag:boolean = false /> = {
   state { n:int = 0 }
   <Stack>
-    <Label Text={accentOf + \" \" + env.gap + \" \" + n} />
+    <Label Text={accentOf + \" \" + env.gap + \" \" + n + \" \" + (6 / (2 - n))} />
     { if flag { <Label Text={env.loud} /> } else { <Label Text={direction} /> } }
     <Button Text=\"Inc\" onTapped=<State.Update n={n + 1} /> />
+    <Button Text=\"Keep\" onTapped=<State.Update n={n} /> />
+    <Stack env.locale={if n > 0 { \"ar\" } else { env.locale }}><Dir /></Stack>
   </Stack>
 }
 component <Amount extends Node /> = { <Any Value={amountOf} /> }
@@ -93,24 +126,51 @@ component <Field extends Node /> = {
     provide env.colors.accent={env.locale} { <Label Text={env.colors.accent + env.colors.tone} /> }
   }</Stack>
 }
+component <Picker extends Node emits { Picked { value:int } } /> = {
+  state { picks:int = 0 }
+  <Stack>
+    <Label Text={\"picks \" + picks} />
+    <Button Text=\"Pick\" onTapped={<State.Update picks={picks + 1} /> <Picker.Picked value={picks} />} />
+    <Button Text=\"Twice\" onTapped={<Picker.Picked value={2} /> <Picker.Picked value={3} />} />
+  </Stack>
+}
+component <Frame extends Node content Children:Node+ /> = {
+  state { opened:int = 0 }
+  <Stack>
+    <Label Text={\"opened \" + opened} />
+    <Button Text=\"Open\" onTapped=<State.Update opened={opened + 1} /> />
+    {Children}
+  </Stack>
+}
 component <Page /> = {
-  state { dark:boolean = false flag:boolean = false labelled:boolean = false }
+  state {
+    dark:boolean = false flag:boolean = false labelled:boolean = false rows:int = 1 picked:int = 0
+    deep:int = 0
+  }
   <Stack>
     <Card flag={flag} />
     { if dark { <Stack env.mode=dark><Card /></Stack> } else { <Stack env.mode=light><Card /></Stack> } }
     <Stack env.gap={if env.space > 0 { 1 } else { 0 }}><Card flag={true} /></Stack>
-    <Loud />
+    { if rows > 0 { <Loud /> } else { <Label Text=\"none\" /> } }
     <Stack env.region={regionOf(env.mode, env.locale)}><Loud /></Stack>
     <SelfRef />
     <Stack env.colors.tone=\"p\"><Field /></Stack>
-    <Amount />
-    <Zero />
+    { if flag { <Amount /> } else { <Zero /> } }
+    { if rows > 1 { <Card flag={dark} /> } else { <Label Text=\"few\" /> } }
     <Stack env.z={0.0}><Boxed /></Stack>
     <Stack env.z={-0.0}><Boxed /></Stack>
     { if labelled { <Show text=\"x\" /> } else { <Show /> } }
+    <Label Text={\"picked \" + picked} />
+    <Picker onPicked=<State.Update picked={picked + 12 / (1 - action.value)} /> />
+    <Picker />
+    <Frame>
+      <Label Text={\"deep \" + deep} />
+      <Button Text=\"Deep\" onTapped=<State.Update deep={deep + 1} /> />
+    </Frame>
     <Button Text=\"Dark\" onTapped=<State.Update dark={!dark} /> />
     <Button Text=\"Flag\" onTapped=<State.Update flag={!flag} /> />
     <Button Text=\"Label\" onTapped=<State.Update labelled={!labelled} /> />
+    <Button Text=\"Rows\" onTapped=<State.Update rows={if rows > 1 { 0 } else { rows + 1 }} /> />
   </Stack>
 }
 let root() = { <Page /> }
@@ -137,11 +197,26 @@ impl Random {
     }
 }
 
-/// The values a host may give each root, including ones written differently that compare equal.
+fn text(value: &str) -> NxValue {
+    NxValue::String(value.to_string())
+}
+
+fn record(name: &str, fields: &[(&str, NxValue)]) -> NxValue {
+    NxValue::Record {
+        type_name: Some(name.to_string()),
+        properties: fields
+            .iter()
+            .map(|(field, value)| (field.to_string(), value.clone()))
+            .collect(),
+    }
+}
+
+/// The values a host may give each root: ones written differently that compare equal, values for
+/// the roots whose defaults are formulas, and ones the tree refuses (`space` 5 makes `Dir` divide
+/// by zero, and a string is not an `int` or a `Mode`).
 fn root_choices() -> Vec<(&'static str, Vec<NxValue>)> {
-    let text = |value: &str| NxValue::String(value.to_string());
     vec![
-        ("mode", vec![text("light"), text("dark")]),
+        ("mode", vec![text("light"), text("dark"), text("purple")]),
         ("locale", vec![text("en"), text("ar"), text("fr")]),
         ("region", vec![text("eu"), text("us")]),
         (
@@ -151,6 +226,7 @@ fn root_choices() -> Vec<(&'static str, Vec<NxValue>)> {
                 NxValue::Int(1),
                 NxValue::Int(3),
                 NxValue::Int(5),
+                text("wide"),
             ],
         ),
         (
@@ -165,22 +241,64 @@ fn root_choices() -> Vec<(&'static str, Vec<NxValue>)> {
             "amount",
             vec![NxValue::Int(1), NxValue::Float(1.0), NxValue::Int(2)],
         ),
+        ("gap", vec![NxValue::Int(7)]),
+        ("label", vec![text("host label")]),
+        ("loud", vec![text("host loud")]),
+        ("boxed", vec![record("Box", &[("v", NxValue::Float(2.0))])]),
+        (
+            "colors",
+            vec![record(
+                "Colors",
+                &[("accent", text("red")), ("tone", text("q"))],
+            )],
+        ),
     ]
 }
 
-fn env_var(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
+/// The descriptor a host passes at `host`, if any.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Host {
+    None,
+    Show,
+    ShowText,
+    Zero,
+}
+
+impl Host {
+    const ALL: [Host; 4] = [Host::None, Host::Show, Host::ShowText, Host::Zero];
+
+    fn descriptor(self) -> Option<NxValue> {
+        match self {
+            Host::None => None,
+            Host::Show => Some(record("Show", &[])),
+            Host::ShowText => Some(record("Show", &[("text", text("host"))])),
+            Host::Zero => Some(record("Zero", &[])),
+        }
+    }
+}
+
+/// The value of the variable `name`, or `default` when it is not set. A value that is set and is
+/// not a whole number, or is below `least`, stops the test, so a mistyped rerun cannot pass.
+fn env_var(name: &str, default: u64, least: u64) -> u64 {
+    let Some(value) = std::env::var_os(name) else {
+        return default;
+    };
+    let value = value.to_string_lossy();
+    match value.parse::<u64>() {
+        Ok(number) if number >= least => number,
+        _ => panic!(
+            "{name} must be a whole number from {least} to {}, not {value:?}",
+            u64::MAX
+        ),
+    }
 }
 
 fn options() -> RuntimeOptions {
     RuntimeOptions::default()
 }
 
-/// The output with every handler's token left out: a render through the bare lifecycle numbers
-/// its handlers afresh.
+/// The output with every handler's token left out: the model's instances number their handlers
+/// apart from the tree's.
 fn untokened(value: &NxValue) -> NxValue {
     match value {
         NxValue::Array(items) => NxValue::Array(items.iter().map(untokened).collect()),
@@ -199,32 +317,64 @@ fn untokened(value: &NxValue) -> NxValue {
     }
 }
 
-/// Whether two outputs are written alike: `NxValue`'s `==` finds `0.0` and `-0.0` equal.
-fn same_written(left: &NxValue, right: &NxValue) -> bool {
+/// Every handler token in `value`, at any depth, in a fixed order.
+fn tokens(value: &NxValue, found: &mut Vec<String>) {
+    match value {
+        NxValue::Array(items) => items.iter().for_each(|item| tokens(item, found)),
+        NxValue::Record { properties, .. } => {
+            for (name, item) in properties {
+                match item {
+                    NxValue::String(token) if name == "token" => found.push(token.clone()),
+                    _ => tokens(item, found),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn tokens_of(value: &NxValue) -> Vec<String> {
+    let mut found = Vec::new();
+    tokens(value, &mut found);
+    found
+}
+
+/// Whether two values are written alike: `NxValue`'s `==` finds `0.0` and `-0.0` equal.
+fn same_written<T: std::fmt::Debug>(left: &T, right: &T) -> bool {
     format!("{left:?}") == format!("{right:?}")
 }
 
+/// The components `PROGRAM` declares with a body, which a tree can instantiate.
+const AUTHORED: [&str; 12] = [
+    "Dir", "Show", "Zero", "Boxed", "Card", "Amount", "Loud", "SelfRef", "Field", "Picker",
+    "Frame", "Page",
+];
+
 /// The descriptors of authored components in `value`, depth first.
-fn authored<'a>(tree: &InstanceTree, value: &'a NxValue, found: &mut Vec<&'a NxValue>) {
+fn authored<'a>(value: &'a NxValue, found: &mut Vec<&'a NxValue>) {
     match value {
-        NxValue::Array(items) => items.iter().for_each(|item| authored(tree, item, found)),
+        NxValue::Array(items) => items.iter().for_each(|item| authored(item, found)),
         NxValue::Record {
             type_name,
             properties,
         } => {
             if type_name
                 .as_deref()
-                .is_some_and(|name| tree.can_instantiate(name))
+                .is_some_and(|name| AUTHORED.contains(&name))
             {
                 found.push(value);
                 return;
             }
-            properties
-                .values()
-                .for_each(|item| authored(tree, item, found));
+            properties.values().for_each(|item| authored(item, found));
         }
         _ => {}
     }
+}
+
+fn children_of(value: &NxValue) -> Vec<&NxValue> {
+    let mut found = Vec::new();
+    authored(value, &mut found);
+    found
 }
 
 fn props(descriptor: &NxValue) -> (&str, &BTreeMap<String, NxValue>) {
@@ -237,249 +387,8 @@ fn props(descriptor: &NxValue) -> (&str, &BTreeMap<String, NxValue>) {
     }
 }
 
-/// A descriptor of `Show` as a host writes it, with or without `text`.
-fn host_show(text: bool) -> NxValue {
-    let mut properties = BTreeMap::new();
-    if text {
-        properties.insert("text".to_string(), NxValue::String("host".to_string()));
-    }
-    NxValue::Record {
-        type_name: Some("Show".to_string()),
-        properties,
-    }
-}
-
-/// One run of a seed: the tree, the roots it was last given, and the steps so far.
-struct Run {
-    tree: InstanceTree,
-    /// In `NX_TREE_STRESS_ALL` mode, the nodes found differing so far, which a run goes on past.
-    differing: Option<BTreeMap<String, String>>,
-    roots: Vec<(String, NxValue)>,
-    host_text: bool,
-    steps: Vec<String>,
-    seed: u64,
-}
-
-impl Run {
-    fn fail(&self, message: String) -> ! {
-        std::panic::panic_any(Failure(format!(
-            "instance tree stress, seed {} (rerun with NX_TREE_STRESS_SEED={}): {message}\nsteps:\n  {}",
-            self.seed,
-            self.seed,
-            self.steps.join("\n  ")
-        )));
-    }
-
-    /// A pass over the tree as a host makes one: the Page at `root`, a host-written `Show` at
-    /// `host`, and every authored descriptor under them.
-    fn pass(&mut self) {
-        let page = self
-            .tree
-            .program()
-            .evaluate_function("root", &[], &options())
-            .unwrap_or_else(|error| self.fail(format!("root(): {error}")));
-        self.tree.begin();
-        let mut queue: Vec<(String, NxValue, Option<String>)> = vec![
-            ("root".to_string(), page, None),
-            ("host".to_string(), host_show(self.host_text), None),
-        ];
-        while let Some((key, descriptor, parent)) = queue.pop() {
-            let output = match self
-                .tree
-                .visit(&key, &descriptor, parent.as_deref(), &options())
-            {
-                Ok(output) => output,
-                Err(error) => self.fail(format!("visit {key}: {error}")),
-            };
-            let mut children = Vec::new();
-            authored(&self.tree, &output, &mut children);
-            for (index, child) in children.into_iter().enumerate() {
-                queue.push((format!("{key}/{index}"), child.clone(), Some(key.clone())));
-            }
-        }
-        self.tree.finish();
-    }
-
-    /// Every node's output, by key.
-    fn outputs(&self) -> BTreeMap<String, Arc<NxValue>> {
-        let mut outputs = BTreeMap::new();
-        let mut keys = vec!["root".to_string(), "host".to_string()];
-        while let Some(key) = keys.pop() {
-            let Some(output) = self.tree.rendered(&key) else {
-                continue;
-            };
-            let mut children = Vec::new();
-            authored(&self.tree, output, &mut children);
-            for index in 0..children.len() {
-                keys.push(format!("{key}/{index}"));
-            }
-            outputs.insert(key, Arc::clone(output));
-        }
-        outputs
-    }
-
-    /// Checks every node against a fresh initialization through the bare lifecycle, with the
-    /// state the tree holds, at the place the overrides above it give.
-    fn check_fresh(&mut self) {
-        let roots = Environment::root(self.roots.iter().cloned());
-        let page = self
-            .tree
-            .program()
-            .evaluate_function("root", &[], &options())
-            .unwrap_or_else(|error| self.fail(format!("root(): {error}")));
-        let mut queue: Vec<(String, NxValue, Environment, Option<ComponentInstance>)> = vec![
-            ("root".to_string(), page, roots.clone(), None),
-            ("host".to_string(), host_show(self.host_text), roots, None),
-        ];
-        let mut differ = Vec::new();
-        while let Some((key, descriptor, above, parent)) = queue.pop() {
-            let environment = above
-                .enter(&descriptor)
-                .unwrap_or_else(|error| self.fail(format!("$env of {key}: {error}")));
-            let Some(state) = self.tree.state(&key) else {
-                self.fail(format!("the tree holds no node at {key}"));
-            };
-            let (name, properties) = props(&descriptor);
-            let fresh = self
-                .tree
-                .program()
-                .initialize_component(
-                    name,
-                    properties,
-                    &ComponentInit {
-                        parent: parent.as_ref(),
-                        state: Some(state),
-                    },
-                    &RuntimeOptions {
-                        environment: environment.clone(),
-                        ..options()
-                    },
-                )
-                .unwrap_or_else(|error| self.fail(format!("fresh {key}: {error}")));
-            let held = self.tree.rendered(&key).expect("a node");
-            if !same_written(&untokened(held), &untokened(&fresh.rendered)) {
-                differ.push((
-                    key.clone(),
-                    format!(
-                        "{key} holds\n    {:?}\n  but a fresh render gives\n    {:?}",
-                        untokened(held),
-                        untokened(&fresh.rendered)
-                    ),
-                ));
-            }
-            let mut children = Vec::new();
-            authored(&self.tree, &fresh.rendered, &mut children);
-            for (index, child) in children.into_iter().enumerate() {
-                queue.push((
-                    format!("{key}/{index}"),
-                    child.clone(),
-                    environment.clone(),
-                    Some(fresh.instance.clone()),
-                ));
-            }
-        }
-        if differ.is_empty() {
-            return;
-        }
-        if let Some(differing) = &mut self.differing {
-            for (key, text) in differ {
-                differing
-                    .entry(key)
-                    .or_insert_with(|| format!("{text}\nafter:\n  {}", self.steps.join("\n  ")));
-            }
-            return;
-        }
-        self.fail(
-            differ
-                .into_iter()
-                .map(|(_, text)| text)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
-    }
-
-    /// Checks that the change set lists every node whose output changed, was added or left.
-    fn check_changes(&mut self, before: &BTreeMap<String, Arc<NxValue>>) {
-        let after = self.outputs();
-        let changes = self.tree.take_changes();
-        for (key, output) in &after {
-            match before.get(key) {
-                None => {
-                    if !changes.added.contains(key) {
-                        self.fail(format!("{key} is new but not listed as added: {changes:?}"));
-                    }
-                }
-                Some(old) if !same_written(old, output) => {
-                    if !changes.rendered.contains(key) && !changes.added.contains(key) {
-                        self.fail(format!(
-                            "{key} changed its output but is not listed: {changes:?}"
-                        ));
-                    }
-                }
-                Some(_) => {}
-            }
-        }
-        for key in before.keys() {
-            if !after.contains_key(key) && !changes.removed.contains(key) {
-                self.fail(format!(
-                    "{key} left but is not listed as removed: {changes:?}"
-                ));
-            }
-        }
-    }
-
-    /// One random step: new roots, a tap on a button somewhere, or a pass with another host
-    /// descriptor. Every step ends with a pass, as a host runs one after each change.
-    fn step(&mut self, random: &mut Random) {
-        let before = self.outputs();
-        match random.below(3) {
-            0 => {
-                let mut roots = Vec::new();
-                for (name, values) in root_choices() {
-                    if random.below(3) != 0 {
-                        roots.push((name.to_string(), random.pick(&values).clone()));
-                    }
-                }
-                self.steps.push(format!("set_environment {roots:?}"));
-                self.roots = roots.clone();
-                if let Err(error) = self
-                    .tree
-                    .set_environment(Environment::root(roots), &options())
-                {
-                    self.fail(format!("set_environment: {error}"));
-                }
-            }
-            1 => {
-                let keys: Vec<String> = before.keys().cloned().collect();
-                let key = random.pick(&keys).clone();
-                let mut buttons = Vec::new();
-                buttons_of(&before[&key], &mut buttons);
-                if buttons.is_empty() {
-                    self.steps.push(format!("tap nothing at {key}"));
-                } else {
-                    let (text, token) = random.pick(&buttons).clone();
-                    self.steps.push(format!("tap {text} at {key}"));
-                    let action = NxValue::from_json_str(r#"{ "$type": "Button.Tapped" }"#)
-                        .expect("an action");
-                    if let Err(error) = self.tree.dispatch(&key, &token, action, &options()) {
-                        self.fail(format!("tap {text} at {key}: {error}"));
-                    }
-                }
-            }
-            _ => {
-                self.host_text = random.below(2) == 0;
-                self.steps
-                    .push(format!("pass, host text {}", self.host_text));
-            }
-        }
-        self.pass();
-        self.check_fresh();
-        self.check_changes(&before);
-    }
-}
-
-/// The buttons in a node's own output, as text and token: those of the authored components in it
-/// belong to their own nodes.
+/// The buttons in a node's output, as text and token, in a fixed order. Those in the content of a
+/// descriptor it renders are its own; those an authored child renders are the child's.
 fn buttons_of(value: &NxValue, found: &mut Vec<(String, String)>) {
     match value {
         NxValue::Array(items) => items.iter().for_each(|item| buttons_of(item, found)),
@@ -505,51 +414,650 @@ fn buttons_of(value: &NxValue, found: &mut Vec<(String, String)>) {
     }
 }
 
-/// Runs `iterations` steps of `seed`. In `all` mode a node that differs is noted and the run goes
-/// on; the nodes found differing are returned, each with the first difference and its steps.
-fn run_seed(seed: u64, iterations: u64, all: bool) -> BTreeMap<String, String> {
+fn buttons(value: &NxValue) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    buttons_of(value, &mut found);
+    found
+}
+
+/// Whether `key` is `other` or a key under it.
+fn at_or_under(key: &str, other: &str) -> bool {
+    key == other
+        || key
+            .strip_prefix(other)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn parent_key(key: &str) -> Option<&str> {
+    key.rsplit_once('/').map(|(parent, _)| parent)
+}
+
+fn tapped() -> NxValue {
+    record("Button.Tapped", &[])
+}
+
+fn invocation(token: &str, action: NxValue) -> NxValue {
+    record(
+        "ActionHandlerInvocation",
+        &[("token", text(token)), ("action", action)],
+    )
+}
+
+/// A node of the model: what the bare lifecycle initialized at a key.
+#[derive(Clone)]
+struct ModelNode {
+    component: String,
+    state: BTreeMap<String, NxValue>,
+    instance: ComponentInstance,
+    rendered: NxValue,
+}
+
+/// What a walk of the model found: its nodes, and the keys at which it replaced a node it held.
+struct Walk {
+    nodes: BTreeMap<String, ModelNode>,
+    replaced: BTreeSet<String>,
+}
+
+/// The model: the nodes the bare lifecycle gives, by key, and the keys the host removed since.
+struct Model {
+    nodes: BTreeMap<String, ModelNode>,
+    removed: BTreeSet<String>,
+}
+
+impl Model {
+    /// Every node, initialized afresh through the bare lifecycle from the root and host
+    /// descriptors, with the state the model holds for a node of that component at that key.
+    fn walk(&self, program: &Program, roots: &Environment, host: Host) -> Result<Walk, String> {
+        let page = program
+            .evaluate_function("root", &[], &options())
+            .map_err(|error| format!("root(): {error}"))?;
+        let mut queue: Vec<(String, NxValue, Environment, bool)> =
+            vec![("root".to_string(), page, roots.clone(), false)];
+        if let Some(descriptor) = host.descriptor() {
+            queue.push(("host".to_string(), descriptor, roots.clone(), false));
+        }
+        let mut nodes: BTreeMap<String, ModelNode> = BTreeMap::new();
+        let mut replaced = BTreeSet::new();
+        while let Some((key, descriptor, above, parent_replaced)) = queue.pop() {
+            let environment = above
+                .enter(&descriptor)
+                .map_err(|error| format!("$env of {key}: {error}"))?;
+            let (name, properties) = props(&descriptor);
+            let held = self.nodes.get(&key);
+            let fresh = held.is_some()
+                && (parent_replaced
+                    || self.removed.contains(&key)
+                    || held.is_some_and(|node| node.component != name));
+            if fresh {
+                replaced.insert(key.clone());
+            }
+            let state = held.filter(|_| !fresh).map(|node| &node.state);
+            let parent = parent_key(&key)
+                .and_then(|parent| nodes.get(parent))
+                .map(|node| node.instance.clone());
+            let init = program
+                .initialize_component(
+                    name,
+                    properties,
+                    &ComponentInit {
+                        parent: parent.as_ref(),
+                        state,
+                    },
+                    &RuntimeOptions {
+                        environment: environment.clone(),
+                        ..options()
+                    },
+                )
+                .map_err(|error| format!("initialize {key}: {error}"))?;
+            for (index, child) in children_of(&init.rendered).into_iter().enumerate() {
+                queue.push((
+                    format!("{key}/{index}"),
+                    child.clone(),
+                    environment.clone(),
+                    parent_replaced || fresh,
+                ));
+            }
+            nodes.insert(
+                key,
+                ModelNode {
+                    component: name.to_string(),
+                    state: init.state,
+                    instance: init.instance,
+                    rendered: init.rendered,
+                },
+            );
+        }
+        Ok(Walk { nodes, replaced })
+    }
+
+    /// The node, `from` or above it, farthest from it whose output holds a handler that
+    /// `matches`, and the token it holds it under.
+    fn creator(
+        &self,
+        from: Option<&str>,
+        matches: impl Fn(&ComponentInstance, &str) -> bool,
+    ) -> Option<(String, String)> {
+        let mut found = None;
+        let mut next = from;
+        while let Some(key) = next {
+            let node = self.nodes.get(key)?;
+            if let Some(token) = tokens_of(&node.rendered)
+                .into_iter()
+                .find(|token| matches(&node.instance, token))
+            {
+                found = Some((key.to_string(), token));
+            }
+            next = parent_key(key);
+        }
+        found
+    }
+
+    /// A tap on the button at `index` in the output of the node at `key`, run through the bare
+    /// lifecycle as the tree runs it: against the node that created the handler, with each emit
+    /// routed to the handler the parent bound, the node farthest from the root first. Returns the
+    /// host effects, or the error, which leaves the model as it was.
+    fn tap(
+        &mut self,
+        program: &Program,
+        key: &str,
+        index: usize,
+    ) -> Result<Vec<(String, String, NxValue)>, String> {
+        let node = &self.nodes[key];
+        let (_, token) = buttons(&node.rendered)[index].clone();
+        let instance = node.instance.clone();
+        let Some(first) = self.creator(Some(key), |other, other_token| {
+            instance.same_handler(&token, other, other_token)
+        }) else {
+            return Err(format!("no node created the handler under {token}"));
+        };
+        let mut pending = vec![(first.0, first.1, tapped())];
+        let mut effects = Vec::new();
+        let mut next = self.nodes.clone();
+        while let Some(deepest) = pending
+            .iter()
+            .map(|(key, _, _)| key.clone())
+            .max_by_key(|key| key.matches('/').count())
+        {
+            let (batch, rest): (Vec<_>, Vec<_>) =
+                pending.into_iter().partition(|(key, _, _)| *key == deepest);
+            pending = rest;
+            let batch: Vec<NxValue> = batch
+                .into_iter()
+                .map(|(_, token, action)| invocation(&token, action))
+                .collect();
+            let node = &next[&deepest];
+            let result = program
+                .dispatch_component_actions(&node.instance, &batch, &options())
+                .map_err(|error| format!("dispatch at {deepest}: {error}"))?;
+            for action in result.effects {
+                let emit = match &action {
+                    NxValue::Record {
+                        type_name: Some(name),
+                        ..
+                    } => name
+                        .strip_prefix(&format!("{}.", node.component))
+                        .map(|emit| format!("on{emit}")),
+                    _ => None,
+                };
+                let bound = emit.and_then(|property| {
+                    self.creator(parent_key(&deepest), |other, other_token| {
+                        node.instance
+                            .bound_handler_is(&property, other, other_token)
+                    })
+                });
+                match bound {
+                    Some((key, token)) => pending.push((key, token, action)),
+                    None => effects.push((deepest.clone(), node.component.clone(), action)),
+                }
+            }
+            let node = next.get_mut(&deepest).expect("a node");
+            node.state = result.state;
+            node.instance = result.instance;
+        }
+        self.nodes = next;
+        Ok(effects)
+    }
+}
+
+/// What a step saw of the tree before it: each node's output and instance, by key.
+type Snapshot = BTreeMap<String, (Arc<NxValue>, ComponentInstance)>;
+
+/// One run of a seed: the tree, the model, the roots and host descriptor they were last given,
+/// and the steps so far.
+struct Run {
+    tree: InstanceTree,
+    model: Model,
+    /// In `NX_TREE_STRESS_ALL` mode, the nodes found differing so far, which a run goes on past.
+    differing: Option<BTreeMap<String, String>>,
+    roots: Vec<(String, NxValue)>,
+    host: Host,
+    steps: Rc<RefCell<Vec<String>>>,
+}
+
+impl Run {
+    fn fail(&self, message: String) -> ! {
+        std::panic::panic_any(Failure(message));
+    }
+
+    fn note(&self, step: String) {
+        self.steps.borrow_mut().push(step);
+    }
+
+    fn roots(&self) -> Environment {
+        Environment::root(self.roots.iter().cloned())
+    }
+
+    /// A pass over the tree as a host makes one: the Page at `root`, the host's descriptor at
+    /// `host`, and every authored descriptor under them, all or nothing.
+    fn pass(&mut self) {
+        let host = self.host;
+        let result = self.tree.atomically(|tree| {
+            let page = tree.program().evaluate_function("root", &[], &options())?;
+            tree.begin();
+            let mut queue: Vec<(String, NxValue, Option<String>)> =
+                vec![("root".to_string(), page, None)];
+            if let Some(descriptor) = host.descriptor() {
+                queue.push(("host".to_string(), descriptor, None));
+            }
+            while let Some((key, descriptor, parent)) = queue.pop() {
+                let output = tree.visit(&key, &descriptor, parent.as_deref(), &options())?;
+                for (index, child) in children_of(&output).into_iter().enumerate() {
+                    queue.push((format!("{key}/{index}"), child.clone(), Some(key.clone())));
+                }
+            }
+            tree.finish();
+            Ok::<(), nx_ir_runtime::NxIrRuntimeError>(())
+        });
+        if let Err(error) = result {
+            self.fail(format!("the pass failed: {error}"));
+        }
+    }
+
+    /// The tree's output and instance at every key the model holds.
+    fn snapshot(&self) -> Snapshot {
+        self.model
+            .nodes
+            .keys()
+            .filter_map(|key| {
+                let output = self.tree.rendered(key)?;
+                let instance = self.tree.instance(key)?;
+                Some((key.clone(), (Arc::clone(output), instance.clone())))
+            })
+            .collect()
+    }
+
+    /// Checks that nothing in the tree changed: the same allocation of output at every node, the
+    /// same state, and nothing in the change set.
+    fn check_unchanged(&mut self, before: &Snapshot, what: &str) {
+        for (key, (output, _)) in before {
+            let same = self
+                .tree
+                .rendered(key)
+                .is_some_and(|now| Arc::ptr_eq(now, output));
+            let state = self.tree.state(key);
+            if !same || state.is_none_or(|state| !same_written(state, &self.model.nodes[key].state))
+            {
+                self.fail(format!("{key} changed after {what}"));
+            }
+        }
+        let changes = self.tree.take_changes();
+        if !changes.is_empty() {
+            self.fail(format!("{what} left a change set: {changes:?}"));
+        }
+    }
+
+    /// Checks, after a tap or a root change and before the pass, that a node is unsettled exactly
+    /// when it or a node under it rendered: holds another allocation of output.
+    fn check_settled(&self, before: &Snapshot) {
+        let rendered: Vec<&String> = before
+            .iter()
+            .filter(|(key, (output, _))| {
+                !self
+                    .tree
+                    .rendered(key)
+                    .is_some_and(|now| Arc::ptr_eq(now, output))
+            })
+            .map(|(key, _)| key)
+            .collect();
+        for key in before.keys() {
+            let expected = !rendered.iter().any(|other| at_or_under(other, key));
+            if self.tree.is_settled(key) != expected {
+                self.fail(format!(
+                    "{key} is {}settled, but the nodes that rendered are {rendered:?}",
+                    if expected { "not " } else { "" }
+                ));
+            }
+        }
+    }
+
+    /// Walks the model after a step and checks the tree against it: the same nodes, each with
+    /// the model's state and output and settled, and the change set the difference makes.
+    fn check(&mut self, before: &Snapshot) {
+        let walk = self
+            .model
+            .walk(self.tree.program(), &self.roots(), self.host)
+            .unwrap_or_else(|error| self.fail(format!("the model's walk failed: {error}")));
+        let mut differ = Vec::new();
+        for (key, node) in &walk.nodes {
+            let (Some(held), Some(state), Some(instance)) = (
+                self.tree.rendered(key),
+                self.tree.state(key),
+                self.tree.instance(key),
+            ) else {
+                self.fail(format!("the tree holds no node at {key}"));
+            };
+            if instance.component() != node.component {
+                self.fail(format!(
+                    "{key} is a {} in the tree but a {} in the model",
+                    instance.component(),
+                    node.component
+                ));
+            }
+            if !same_written(&untokened(held), &untokened(&node.rendered)) {
+                differ.push((
+                    key.clone(),
+                    format!(
+                        "{key} holds\n    {:?}\n  but the model renders\n    {:?}",
+                        untokened(held),
+                        untokened(&node.rendered)
+                    ),
+                ));
+            } else if !same_written(state, &node.state) {
+                differ.push((
+                    key.clone(),
+                    format!(
+                        "{key} holds the state {state:?} but the model {:?}",
+                        node.state
+                    ),
+                ));
+            }
+            if !self.tree.is_settled(key) {
+                self.fail(format!("{key} is not settled after the pass"));
+            }
+        }
+        for key in self.model.nodes.keys() {
+            if !walk.nodes.contains_key(key) && self.tree.rendered(key).is_some() {
+                self.fail(format!(
+                    "the tree still holds {key}, which the model dropped"
+                ));
+            }
+        }
+        self.check_changes(before, &walk);
+        self.model.nodes = walk.nodes;
+        self.model.removed.clear();
+        if differ.is_empty() {
+            return;
+        }
+        if let Some(differing) = &mut self.differing {
+            let steps = self.steps.borrow().join("\n  ");
+            for (key, text) in differ {
+                differing
+                    .entry(key)
+                    .or_insert_with(|| format!("{text}\nafter:\n  {steps}"));
+            }
+            // Go on from what the tree holds, so one difference is not found again at every
+            // step.
+            for (key, node) in &mut self.model.nodes {
+                if let Some(state) = self.tree.state(key) {
+                    node.state = state.clone();
+                }
+            }
+            return;
+        }
+        self.fail(
+            differ
+                .into_iter()
+                .map(|(_, text)| text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+
+    /// Whether a token in the output of the node at `key` names a handler that a node above it
+    /// created and that node rendered since `before`: the token now names a handler of that
+    /// node's new instance.
+    fn rebound(&self, key: &str, before: &Snapshot) -> bool {
+        let (Some(output), Some(instance)) = (self.tree.rendered(key), self.tree.instance(key))
+        else {
+            return false;
+        };
+        tokens_of(output).iter().any(|token| {
+            let mut above = parent_key(key);
+            while let Some(other) = above {
+                let (Some(theirs), Some(their_instance)) =
+                    (self.tree.rendered(other), self.tree.instance(other))
+                else {
+                    return false;
+                };
+                let rendered = before
+                    .get(other)
+                    .is_none_or(|(held, _)| !Arc::ptr_eq(held, theirs));
+                if rendered
+                    && tokens_of(theirs)
+                        .iter()
+                        .any(|their| instance.same_handler(token, their_instance, their))
+                {
+                    return true;
+                }
+                above = parent_key(other);
+            }
+            false
+        })
+    }
+
+    /// Checks the change set against the model's: added where the model has a node it had not,
+    /// or replaced, and removed the other way round. A node that stayed is rendered when its
+    /// output changed in any way: in value, in a token's handler, or by a rebinding to a node
+    /// above that rendered. It may be when it rendered
+    /// output equal to what it held, as a record that cannot check a read renders at every check;
+    /// otherwise it is not.
+    fn check_changes(&mut self, before: &Snapshot, walk: &Walk) {
+        let mut expected = TreeChanges::default();
+        let mut may = Vec::new();
+        for key in walk.nodes.keys() {
+            if !self.model.nodes.contains_key(key) || walk.replaced.contains(key) {
+                expected.added.push(key.clone());
+                continue;
+            }
+            let (output, instance) = &before[key];
+            let now = self.tree.rendered(key).expect("a node");
+            let current = self.tree.instance(key).expect("a node");
+            let changed = !same_written(&**output, &**now)
+                || tokens_of(now)
+                    .iter()
+                    .any(|token| !instance.same_handler(token, current, token))
+                || self.rebound(key, before);
+            if changed {
+                expected.rendered.push(key.clone());
+            } else if !Arc::ptr_eq(output, now) {
+                may.push(key.clone());
+            }
+        }
+        for key in self.model.nodes.keys() {
+            if !walk.nodes.contains_key(key) || walk.replaced.contains(key) {
+                expected.removed.push(key.clone());
+            }
+        }
+        let mut changes = self.tree.take_changes();
+        let listed = changes.rendered.clone();
+        changes.rendered.retain(|key| !may.contains(key));
+        if changes != expected {
+            self.fail(format!(
+                "the change set is\n    {:?}\n  but the model expects\n    {expected:?}\n  \
+                 and allows {may:?} as rendered",
+                TreeChanges {
+                    rendered: listed,
+                    ..changes
+                }
+            ));
+        }
+    }
+
+    /// One random step: new roots, a tap on a button somewhere, another host descriptor, or a
+    /// host's removal of a node. Every step ends with a pass, as a host runs one after each
+    /// change.
+    fn step(&mut self, random: &mut Random) {
+        let before = self.snapshot();
+        match random.below(7) {
+            0 | 1 => {
+                let mut roots = Vec::new();
+                for (name, values) in root_choices() {
+                    if random.below(3) == 0 {
+                        roots.push((name.to_string(), random.pick(&values).clone()));
+                    }
+                }
+                self.note(format!("set_environment {roots:?}"));
+                let environment = Environment::root(roots.clone());
+                let expected = self
+                    .model
+                    .walk(self.tree.program(), &environment, self.host)
+                    .map(|_| ());
+                let actual = self.tree.set_environment(environment, &options());
+                match (expected, actual) {
+                    (Ok(()), Ok(())) => {
+                        self.roots = roots;
+                        self.check_settled(&before);
+                    }
+                    (Err(_), Err(_)) => self.check_unchanged(&before, "a refused root change"),
+                    (Ok(()), Err(error)) => {
+                        self.fail(format!("set_environment failed: {error}"));
+                    }
+                    (Err(error), Ok(())) => self.fail(format!(
+                        "set_environment succeeded, but the model fails: {error}"
+                    )),
+                }
+            }
+            2..=4 => {
+                let keys: Vec<String> = before.keys().cloned().collect();
+                let key = random.pick(&keys).clone();
+                let found = buttons(&before[&key].0);
+                if found.is_empty() {
+                    self.note(format!("tap nothing at {key}"));
+                } else {
+                    let index = random.below(found.len());
+                    let (label, token) = found[index].clone();
+                    self.note(format!("tap {label} at {key}"));
+                    let program = self.tree.program().clone();
+                    let expected = self.model.tap(&program, &key, index);
+                    let actual = self.tree.dispatch(&key, &token, tapped(), &options());
+                    match (expected, actual) {
+                        (Ok(expected), Ok(actual)) => {
+                            let actual: Vec<(String, String, NxValue)> = actual
+                                .into_iter()
+                                .map(|effect| (effect.key, effect.component, effect.action))
+                                .collect();
+                            if !same_written(&actual, &expected) {
+                                self.fail(format!(
+                                    "the host effects are {actual:?}, but the model's {expected:?}"
+                                ));
+                            }
+                            self.check_settled(&before);
+                        }
+                        (Err(_), Err(_)) => self.check_unchanged(&before, "a failed tap"),
+                        (Ok(_), Err(error)) => self.fail(format!("the tap failed: {error}")),
+                        (Err(error), Ok(_)) => {
+                            self.fail(format!("the tap succeeded, but the model fails: {error}"))
+                        }
+                    }
+                }
+            }
+            5 => {
+                self.host = *random.pick(&Host::ALL);
+                self.note(format!("pass, host {:?}", self.host));
+            }
+            _ => {
+                let keys: Vec<String> = before.keys().cloned().collect();
+                let key = random.pick(&keys).clone();
+                self.note(format!("remove {key}"));
+                if !self.tree.remove(&key) {
+                    self.fail(format!("remove {key} found no node"));
+                }
+                self.model.removed.insert(key);
+            }
+        }
+        self.pass();
+        self.check(&before);
+    }
+}
+
+/// Runs `iterations` steps of `seed`, noting each in `steps`. In `all` mode a node that differs
+/// is noted and the run goes on; the nodes found differing are returned, each with the first
+/// difference and its steps.
+fn run_seed(
+    seed: u64,
+    iterations: u64,
+    all: bool,
+    steps: &Rc<RefCell<Vec<String>>>,
+) -> BTreeMap<String, String> {
     let mut random = Random(seed);
     let mut run = Run {
         tree: InstanceTree::new(program(&format!("{CONTROLS}{PROGRAM}"))),
+        model: Model {
+            nodes: BTreeMap::new(),
+            removed: BTreeSet::new(),
+        },
         differing: all.then(BTreeMap::new),
         roots: Vec::new(),
-        host_text: false,
-        steps: vec!["pass".to_string()],
-        seed,
+        host: Host::Show,
+        steps: Rc::clone(steps),
     };
-    let empty = BTreeMap::new();
+    run.note("pass, host Show".to_string());
     run.pass();
-    run.check_fresh();
-    run.check_changes(&empty);
+    run.check(&Snapshot::new());
     for _ in 0..iterations {
         run.step(&mut random);
     }
     run.differing.unwrap_or_default()
 }
 
-/// A failure of one seed, with what to print.
+/// A failure the test found, which the seed's report adds the seed and the steps to.
 struct Failure(String);
 
+/// The text of a panic: the test's own failure, or a panic's message.
+fn panic_text(payload: Box<dyn std::any::Any + Send>) -> String {
+    match payload.downcast::<Failure>() {
+        Ok(failure) => failure.0,
+        Err(payload) => match payload.downcast::<String>() {
+            Ok(message) => format!("panicked: {message}"),
+            Err(payload) => match payload.downcast::<&str>() {
+                Ok(message) => format!("panicked: {message}"),
+                Err(_) => "panicked".to_string(),
+            },
+        },
+    }
+}
+
 #[test]
-fn the_tree_keeps_only_output_a_fresh_evaluation_gives() {
-    let iterations = env_var("NX_TREE_STRESS_ITERATIONS", 40);
-    let seeds: Vec<u64> = match std::env::var("NX_TREE_STRESS_SEED")
-        .ok()
-        .and_then(|value| value.parse().ok())
-    {
-        Some(seed) => vec![seed],
+fn the_tree_holds_what_the_bare_lifecycle_gives() {
+    let iterations = env_var("NX_TREE_STRESS_ITERATIONS", 30, 1);
+    let seeds: Vec<u64> = match std::env::var_os("NX_TREE_STRESS_SEED") {
+        Some(_) => vec![env_var("NX_TREE_STRESS_SEED", 0, 0)],
         None => {
-            let base = env_var("NX_TREE_STRESS_BASE_SEED", 0);
-            (base..base.saturating_add(env_var("NX_TREE_STRESS_SEEDS", 20))).collect()
+            let base = env_var("NX_TREE_STRESS_BASE_SEED", 0, 0);
+            let count = env_var("NX_TREE_STRESS_SEEDS", 20, 1);
+            let Some(last) = base.checked_add(count - 1) else {
+                panic!(
+                    "NX_TREE_STRESS_BASE_SEED {base} plus {count} seeds is past {}",
+                    u64::MAX
+                );
+            };
+            (base..=last).collect()
         }
     };
+    println!(
+        "instance tree stress: seeds {} to {}, {iterations} steps each",
+        seeds[0],
+        seeds[seeds.len() - 1]
+    );
     let all = std::env::var_os("NX_TREE_STRESS_ALL").is_some();
     // By node: how many seeds found it differing, and the first difference found.
     let mut by_node: BTreeMap<String, (usize, String)> = BTreeMap::new();
     let mut other: Vec<String> = Vec::new();
     for seed in seeds {
-        let result = std::panic::catch_unwind(|| run_seed(seed, iterations, all));
-        let message = match result {
+        let steps = Rc::new(RefCell::new(Vec::new()));
+        let result =
+            std::panic::catch_unwind(AssertUnwindSafe(|| run_seed(seed, iterations, all, &steps)));
+        let text = match result {
             Ok(differing) => {
                 for (key, text) in differing {
                     let entry = by_node
@@ -559,11 +1067,17 @@ fn the_tree_keeps_only_output_a_fresh_evaluation_gives() {
                 }
                 continue;
             }
-            Err(payload) => match payload.downcast::<Failure>() {
-                Ok(failure) => failure.0,
-                Err(payload) => std::panic::resume_unwind(payload),
-            },
+            Err(payload) => panic_text(payload),
         };
+        let steps = steps.borrow();
+        // The first entry is the pass before the first step, so a failure at step `n` needs
+        // `n` iterations to recur.
+        let step = steps.len().saturating_sub(1).max(1);
+        let message = format!(
+            "instance tree stress, seed {seed}, step {step} (rerun with NX_TREE_STRESS_SEED={seed} \
+             NX_TREE_STRESS_ITERATIONS={step}): {text}\nsteps:\n  {}",
+            steps.join("\n  ")
+        );
         if !all {
             panic!("{message}");
         }

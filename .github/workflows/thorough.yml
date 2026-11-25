@@ -1,17 +1,18 @@
 # The thorough run of the instance tree's differential stress test
 # (crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs). The pull request build runs it at
-# its defaults, 20 fixed seeds of 40 steps; this runs 1000 seeds of 100 steps each night, from a
+# its defaults, 20 fixed seeds of 30 steps; this runs 1000 seeds of 100 steps each night, from a
 # base seed that differs from run to run, so each night explores seeds no run has tried. A manual
 # run takes the seeds, the steps and the base seed as inputs, and runs against the branch picked
 # when it is started.
 #
-# A failure names its seed. To reproduce it locally, with the steps the run used (100 by default):
+# A failure, a panic in the runtime included, names its seed and step and gives the command that
+# runs it again locally, which the job summary repeats:
 #
-#   NX_TREE_STRESS_SEED=<seed> NX_TREE_STRESS_ITERATIONS=100 \
+#   NX_TREE_STRESS_SEED=<seed> NX_TREE_STRESS_ITERATIONS=<step> \
 #     cargo test -p nx-api --test codegen_parity ir_instance_tree_stress
 #
-# The whole run again: NX_TREE_STRESS_BASE_SEED=<base seed> NX_TREE_STRESS_SEEDS=1000 with the same
-# NX_TREE_STRESS_ITERATIONS. The log and the job summary give the base seed.
+# The whole run again: NX_TREE_STRESS_BASE_SEED=<base seed> NX_TREE_STRESS_SEEDS=1000
+# NX_TREE_STRESS_ITERATIONS=100. The log and the job summary give the base seed.
 name: 🎲 Thorough tests
 
 on:
@@ -20,15 +21,15 @@ on:
   workflow_dispatch:
     inputs:
       seeds:
-        description: How many seeds to run
+        description: How many seeds to run, 1 to 999999
         required: false
         default: '1000'
       iterations:
-        description: How many steps each seed runs
+        description: How many steps each seed runs, 1 to 999999
         required: false
         default: '100'
       base_seed:
-        description: The first seed (empty derives it from the run's id)
+        description: The first seed, 0 or up to 18 digits (empty derives it from the run's id)
         required: false
         default: ''
 
@@ -43,15 +44,17 @@ jobs:
   tree-stress:
     name: 🎲 Instance tree stress
     runs-on: ubuntu-latest
-    # The build takes about ten minutes without a cache and the default run about seven on a
-    # developer machine (4 ms a step), so an hour leaves room for a slower runner.
-    timeout-minutes: 60
+    # The build takes about ten minutes without a cache, and the default run about eleven on a
+    # developer machine (7 ms a step), so an hour and a half leaves room for a slower runner.
+    timeout-minutes: 90
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
     - name: Set up Rust and the pnpm workspace
       uses: ./.github/actions/setup-rust-node
-    # The inputs reach the script through the environment, never pasted into it, and must be
-    # whole numbers. A scheduled run has no inputs and takes the defaults.
+    # The inputs reach the script through the environment, never pasted into it. The counts
+    # are whole numbers from 1 to 999999 and the base seed 0 or a whole number of at most 18
+    # digits without a leading zero, so bash's arithmetic and the test's `u64` read them alike and
+    # the last seed stays in range for both. A scheduled run has no inputs and takes the defaults.
     - name: Choose the seeds
       env:
         SEEDS: ${{ inputs.seeds || '1000' }}
@@ -63,62 +66,77 @@ jobs:
           # Run ids grow, and 100000 seeds apart leaves each run its own range.
           BASE_SEED=$((RUN_ID * 100000))
         fi
-        for value in "$SEEDS" "$ITERATIONS" "$BASE_SEED"; do
-          if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-            echo "::error::seeds, iterations and base_seed must be whole numbers, not '${value}'."
-            exit 1
-          fi
-        done
+        if ! [[ "$SEEDS" =~ ^[1-9][0-9]{0,5}$ && "$ITERATIONS" =~ ^[1-9][0-9]{0,5}$ ]]; then
+          echo "::error::seeds and iterations must be whole numbers from 1 to 999999," \
+            "not '${SEEDS}' and '${ITERATIONS}'."
+          exit 1
+        fi
+        if ! [[ "$BASE_SEED" =~ ^(0|[1-9][0-9]{0,17})$ ]]; then
+          echo "::error::base_seed must be 0 or a whole number of at most 18 digits, not '${BASE_SEED}'."
+          exit 1
+        fi
+        LAST_SEED=$((BASE_SEED + SEEDS - 1))
         {
           echo "NX_TREE_STRESS_SEEDS=$SEEDS"
           echo "NX_TREE_STRESS_ITERATIONS=$ITERATIONS"
           echo "NX_TREE_STRESS_BASE_SEED=$BASE_SEED"
         } >> "$GITHUB_ENV"
-        echo "Base seed ${BASE_SEED}: seeds ${BASE_SEED} to $((BASE_SEED + SEEDS - 1)), ${ITERATIONS} steps each."
+        echo "Base seed ${BASE_SEED}: seeds ${BASE_SEED} to ${LAST_SEED}, ${ITERATIONS} steps each."
         {
           echo "## Instance tree stress"
           echo
           echo "- Commit: \`${GITHUB_SHA}\`"
           echo "- Base seed: \`${BASE_SEED}\`"
-          echo "- Seeds: ${SEEDS} (\`${BASE_SEED}\` to \`$((BASE_SEED + SEEDS - 1))\`), ${ITERATIONS} steps each"
+          echo "- Seeds: ${SEEDS} (\`${BASE_SEED}\` to \`${LAST_SEED}\`), ${ITERATIONS} steps each"
           echo
           echo "Reproduce the whole run:"
           echo
           echo "\`\`\`"
-          echo "NX_TREE_STRESS_BASE_SEED=${BASE_SEED} NX_TREE_STRESS_SEEDS=${SEEDS} NX_TREE_STRESS_ITERATIONS=${ITERATIONS} \\"
+          echo "NX_TREE_STRESS_BASE_SEED=${BASE_SEED} NX_TREE_STRESS_SEEDS=${SEEDS} \\"
+          echo "  NX_TREE_STRESS_ITERATIONS=${ITERATIONS} \\"
           echo "  cargo test -p nx-api --test codegen_parity ir_instance_tree_stress"
           echo "\`\`\`"
         } >> "$GITHUB_STEP_SUMMARY"
       shell: bash
     - name: Build the tests
       run: cargo test -p nx-api --test codegen_parity --locked --no-run
+    # `--nocapture` lets the test print the seeds it runs, as it read them.
     - name: 🎲 Run the stress test
       run: |
         set -o pipefail
-        cargo test -p nx-api --test codegen_parity --locked ir_instance_tree_stress 2>&1 \
+        cargo test -p nx-api --test codegen_parity --locked ir_instance_tree_stress -- --nocapture 2>&1 \
           | tee "${RUNNER_TEMP}/stress.log"
       shell: bash
     - name: Name the failing seed in the summary
       if: failure()
       run: |
         line=$(grep -m 1 'instance tree stress, seed' "${RUNNER_TEMP}/stress.log" || true)
-        if [ -n "$line" ]; then
-          seed=$(sed -E 's/^.*instance tree stress, seed ([0-9]+).*$/\1/' <<< "$line")
-          echo "::error::The instance tree stress test failed on seed ${seed}."
+        if [ -z "$line" ]; then
+          echo "::error::The instance tree stress test failed without naming a seed: see the log."
           {
             echo
-            echo "### Failed"
+            echo "### Failed without naming a seed"
             echo
-            echo "\`\`\`"
-            echo "$line"
-            echo "\`\`\`"
-            echo
-            echo "Reproduce it:"
-            echo
-            echo "\`\`\`"
-            echo "NX_TREE_STRESS_SEED=${seed} NX_TREE_STRESS_ITERATIONS=${NX_TREE_STRESS_ITERATIONS} \\"
-            echo "  cargo test -p nx-api --test codegen_parity ir_instance_tree_stress"
-            echo "\`\`\`"
+            echo "The build or the test failed before a seed's report; the log says where."
           } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
         fi
+        seed=$(sed -E 's/^.*instance tree stress, seed ([0-9]+), step ([0-9]+).*$/\1/' <<< "$line")
+        step=$(sed -E 's/^.*instance tree stress, seed ([0-9]+), step ([0-9]+).*$/\2/' <<< "$line")
+        echo "::error::The instance tree stress test failed on seed ${seed} at step ${step}."
+        {
+          echo
+          echo "### Failed"
+          echo
+          echo "\`\`\`"
+          echo "$line"
+          echo "\`\`\`"
+          echo
+          echo "Reproduce it:"
+          echo
+          echo "\`\`\`"
+          echo "NX_TREE_STRESS_SEED=${seed} NX_TREE_STRESS_ITERATIONS=${step} \\"
+          echo "  cargo test -p nx-api --test codegen_parity ir_instance_tree_stress"
+          echo "\`\`\`"
+        } >> "$GITHUB_STEP_SUMMARY"
       shell: bash
