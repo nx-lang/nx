@@ -3149,6 +3149,58 @@ fn a_kept_result_is_not_taken_where_an_override_supplies_a_value_written_otherwi
 }
 
 #[test]
+fn a_node_whose_place_now_supplies_a_value_written_otherwise_renders_again() {
+    // The first card's place moves from `env.z={-0.0}` to `env.z={0.0}` when `neg` flips: the
+    // same descriptor of the same component at the same key, under an override written otherwise.
+    let source = "
+type Box = { v:float64 }
+environment z: float64 = 1.0
+environment boxed: Box = { <Box v={env.z} /> }
+component <Card extends Node /> = { <Num Value={env.boxed.v} /> }
+component <Page /> = {
+  state { neg:boolean = true }
+  <Stack>
+    { if neg { <Stack env.z={-0.0}><Card /></Stack> } else { <Stack env.z={0.0}><Card /></Stack> } }
+    <Button Text=\"Flip\" onTapped=<State.Update neg={!neg} /> />
+  </Stack>
+}
+let root() = { <Page /> }
+";
+    let mut tree = linked(source);
+    cards_pass(&mut tree, "root", "Card");
+    let NxValue::Float(before) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    assert!(before == 0.0 && before.is_sign_negative());
+    tree.take_changes();
+    tap(&mut tree, "root", "Flip").unwrap();
+    cards_pass(&mut tree, "root", "Card");
+    let NxValue::Float(after) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    assert!(after == 0.0 && after.is_sign_positive());
+    assert_eq!(tree.take_changes().rendered, ["root", "root/0"]);
+}
+
+#[test]
+fn a_host_descriptor_with_a_prop_written_otherwise_initializes_the_node_again() {
+    let mut tree = linked("component <Card extends Node v:float64 /> = { <Num Value={v} /> }");
+    let card = |v: f64| NxValue::Record {
+        type_name: Some("Card".to_string()),
+        properties: BTreeMap::from([("v".to_string(), NxValue::Float(v))]),
+    };
+    for v in [0.0, -0.0] {
+        tree.begin();
+        tree.visit("root", &card(v), None, &options()).unwrap();
+        tree.finish();
+        let NxValue::Float(shown) = number(&tree, "root") else {
+            panic!("a float");
+        };
+        assert_eq!(shown.to_bits(), v.to_bits());
+    }
+}
+
+#[test]
 fn a_root_value_changed_to_one_written_otherwise_is_a_change() {
     let source = "
 environment z: float64 = 1.0

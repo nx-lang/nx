@@ -296,7 +296,7 @@ impl InstanceTree {
             });
         }
         if node.record.is_empty()
-            || (node.environment == *environment && node.verified == self.store.revision)
+            || (node.environment.same_written(environment) && node.verified == self.store.revision)
         {
             return Ok(Check {
                 holds: true,
@@ -949,7 +949,9 @@ impl InstanceTree {
             let instance = node.instance.clone();
             // Only the overrides may differ: the node takes them, so a later change is judged
             // against its new place.
-            if node.environment != *environment || !same(&node.descriptor, descriptor, 0, stack)? {
+            if !node.environment.same_written(environment)
+                || !same(&node.descriptor, descriptor, 0, stack)?
+            {
                 let kept = copy(descriptor, 0, stack)?;
                 if let Some(node) = self.nodes.get_mut(key) {
                     node.descriptor = Arc::new(kept);
@@ -1898,8 +1900,8 @@ fn same_descriptor(left: &NxValue, right: &NxValue, stack: &Stack) -> Result<boo
     }
 }
 
-/// Whether two values are the same value, as `==` on them says, for a descriptor a node holds
-/// and one a visit brings.
+/// Whether two values are the same value, as `==` on them says except that `0.0` and `-0.0`
+/// differ, for a descriptor a node holds and one a visit brings.
 fn same(left: &NxValue, right: &NxValue, depth: u32, stack: &Stack) -> Result<bool> {
     enter(right, depth, stack)?;
     let deeper = depth.saturating_add(1);
@@ -1938,6 +1940,8 @@ fn same(left: &NxValue, right: &NxValue, depth: u32, stack: &Stack) -> Result<bo
         }
         (NxValue::Array(_) | NxValue::Record { .. }, _)
         | (_, NxValue::Array(_) | NxValue::Record { .. }) => Ok(false),
+        // The same number, sign of zero included: a body can tell `-0.0` from `0.0`.
+        (NxValue::Float(left), NxValue::Float(right)) => Ok(left.to_bits() == right.to_bits()),
         (left, right) => Ok(left == right),
     }
 }

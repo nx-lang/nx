@@ -845,6 +845,8 @@ variant for each, and a use takes the first valid one in the order they were kep
 result evaluated again replaces is the first one found not valid at the place whose reads are all
 classified there as they were recorded, those after the input that stopped its check included.
 A root value that a host changes to one written otherwise, such as `0.0` to `-0.0`, is a change.
+So is a prop of a descriptor a node is visited with, and an override of the node's place: a node
+whose place moves from under `env.z={-0.0}` to under `env.z={0.0}` checks its record there.
 
 Taking a kept result costs nothing beyond the node that asked for it, as reuse within a call does;
 the render that evaluated it first paid for it. Classifying a read and comparing revisions cost

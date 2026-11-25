@@ -147,12 +147,96 @@ impl Environment {
         &self.entries
     }
 
+    /// Whether `other` has the same root values and overrides as a host would see them written:
+    /// `==` finds `0.0` and `-0.0` equal, and a body under one of them can tell them apart.
+    pub(crate) fn same_written(&self, other: &Environment) -> bool {
+        (Arc::ptr_eq(&self.roots, &other.roots)
+            || (self.roots.len() == other.roots.len()
+                && self.roots.iter().zip(other.roots.iter()).all(
+                    |((left_name, left), (right_name, right))| {
+                        left_name == right_name && written_alike(left, right)
+                    },
+                )))
+            && (Arc::ptr_eq(&self.entries, &other.entries)
+                || entries_alike(&self.entries, &other.entries))
+    }
+
     /// This environment with `roots` in place of its root values and the same overrides.
     pub fn with_roots(&self, roots: &Environment) -> Self {
         Self {
             roots: Arc::clone(&roots.roots),
             entries: Arc::clone(&self.entries),
         }
+    }
+}
+
+/// Whether two lists of entries are the same as a host would see them written.
+fn entries_alike(left: &[EnvironmentEntry], right: &[EnvironmentEntry]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|pair| match pair {
+            (
+                EnvironmentEntry::Value {
+                    value: left_value,
+                    path: left_path,
+                    to: left,
+                },
+                EnvironmentEntry::Value {
+                    value: right_value,
+                    path: right_path,
+                    to: right,
+                },
+            )
+            | (
+                EnvironmentEntry::Formula {
+                    value: left_value,
+                    path: left_path,
+                    formula: left,
+                },
+                EnvironmentEntry::Formula {
+                    value: right_value,
+                    path: right_path,
+                    formula: right,
+                },
+            ) => left_value == right_value && left_path == right_path && written_alike(left, right),
+            (EnvironmentEntry::Bundle(left), EnvironmentEntry::Bundle(right)) => {
+                entries_alike(left, right)
+            }
+            _ => false,
+        })
+}
+
+/// Whether two host values are written alike: as `==` finds them, except that a float is the
+/// same only as one with the same bits, so `0.0` and `-0.0` differ.
+pub(crate) fn written_alike(left: &NxValue, right: &NxValue) -> bool {
+    match (left, right) {
+        (NxValue::Float(left), NxValue::Float(right)) => left.to_bits() == right.to_bits(),
+        (NxValue::Array(left), NxValue::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| written_alike(left, right))
+        }
+        (
+            NxValue::Record {
+                type_name: left_type,
+                properties: left,
+            },
+            NxValue::Record {
+                type_name: right_type,
+                properties: right,
+            },
+        ) => {
+            left_type == right_type
+                && left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|((left_name, left), (right_name, right))| {
+                        left_name == right_name && written_alike(left, right)
+                    })
+        }
+        (left, right) => left == right,
     }
 }
 
