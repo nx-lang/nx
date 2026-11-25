@@ -649,3 +649,163 @@ are those of `design.md` itself.
 - **Evidence:** In the host arm `forward_edges` was false. A body's own `provide env.colors.accent={accentFor}` under `<Stack env.colors.tone="p">`, where `accentFor` is a kept top-level value that reads `env.locale`, gave its use as an edge on the read's track. That edge was dropped, so the record had nothing that a change of `locale` reaches.
 - **Fix:** cd71dff3. `take_own_inputs` moves the edges recorded while an own layer's source was evaluated into `own_inputs` as `Input::Edge`, and the host arm forwards them.
 - **Verification:** Verified. My probe renders `fr!p` after `locale = fr` and matches a fresh tree. A change of an unrelated root keeps the render. The edge is validated by deep verify like any other, so it adds no unsound reuse.
+
+## New Findings Discovered During 2026-11-25 00:57 Review
+
+Scope: the instance tree's differential stress test (5abba225, 025383a3:
+`crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs` and its module line in `codegen_parity.rs`) and the
+nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-runtime/README.md` paragraph and tasks
+5.10 and 5.11). Each experiment below was a throwaway edit, reverted afterwards.
+
+### 🔴 Open - RF35 The reference render takes its state from the tree, so a tree that loses or resets state agrees with it
+- **Severity:** Medium
+- **Confidence:** High (confirmed by experiment)
+- **Location:** `ir_instance_tree_stress_tests.rs` `Run::check_fresh` (`self.tree.state(&key)` passed as `ComponentInit::state`)
+- **Evidence:** The reference is independent of the tree's kept results and reuse: it runs `initialize_component`
+  with no `TreeCall`. But it renders each node with the state the tree holds, so every state bug is copied into the
+  reference. Experiment: in `tree.rs`, the visit path that initializes an existing node again was changed to pass
+  `state: None`, so a child's state resets to its defaults whenever its parent hands it a new descriptor. That breaks
+  the spec scenario "A parent that renders again re-initializes the child with the state it held". Four
+  `ir_instance_tree_tests` failed, but the stress test passed 200 seeds of 100 steps. Failure scenario: tap `Inc` on
+  `root/0` (Card `n` = 1), then tap `Flag` on the Page. The Card is initialized again with `n = 0`, shows `... 0`, and
+  the fresh render, given `n = 0`, agrees. A tap that is dropped entirely (state and output) is caught only by chance,
+  through records that go out of step.
+- **Recommendation:** Keep an independent model of state in the test: for every tap, apply the handler's known patch
+  (`taps + 1`, `hidden + 1`, `n + 1`, toggles) to a map of expected state by key, and reset it when a key leaves or is
+  replaced. Then render the reference from that map and check `tree.state(key)` against it. Otherwise, say in the
+  module doc and the README that state is taken from the tree and is not checked.
+
+### 🔴 Open - RF36 No step ever adds, removes or replaces a node, so the drop, replace and removed-list paths are never exercised
+- **Severity:** Medium
+- **Confidence:** High (measured)
+- **Location:** `ir_instance_tree_stress_tests.rs` `PROGRAM` (`Page`) and `host_show`; `Run::check_changes` removed and
+  added branches
+- **Evidence:** Every conditional in `Page` swaps descriptors of the same component at the same index (`Card` under
+  `Stack env.mode=dark` or `light`, `Show` with or without `text`), and the host always passes `Show` at `host`. No list
+  changes length and no branch drops a component. An instrumented run of 200 seeds of 100 steps had 14 nodes after the
+  first pass in every seed, and no later change set held an `added` or `removed` key. So the "A pass drops the nodes
+  whose places left the output" requirement and the "A node replaced at its key is removed and added" and "A dropped
+  subtree lists every node in it" scenarios get no random coverage. Neither do the loss of state on leaving, the reuse
+  of a key by another component, or stale nodes the tree fails to drop. `check_fresh` also never checks that the tree
+  holds no nodes beyond the reference's. Failure scenario: a regression in `finish` that keeps a dropped node's state,
+  so the node comes back at its key with old state, cannot be seen by this test.
+- **Recommendation:** Make the node set change: a branch that renders a component in one case and nothing (or a
+  different component) in the other, a list of authored children whose length depends on state or a root value, and a
+  host step that sometimes omits `host` or passes another component there. Also check that the tree's key set equals
+  the reference's (the tree's node keys, not only those reachable through rendered output).
+
+### 🔴 Open - RF37 The generator cannot reach several of the spec's risky paths: handlers across components, emits, rebinding, failing operations, equal patches
+- **Severity:** Medium
+- **Confidence:** High (from the program and the step kinds)
+- **Location:** `ir_instance_tree_stress_tests.rs` `PROGRAM`, `root_choices`, `Run::step`
+- **Evidence:** Each handler is bound and tapped in the same component, and no authored component emits or takes a
+  handler or content as a prop. So none of these scenarios can happen: "A handler in a content child patches its
+  owner", "A child's emit patches the parent", "Two emitted actions reach the parent in one batch", "An emit nobody
+  bound is a host effect", "A kept render under a new parent instance is rebound", "A visible handler with another
+  capture is a changed descriptor" and "A rebound node is reported as rendered". Because `untokened` drops handler
+  tokens from the comparison, a rebinding that points a token at the wrong live instance would only show up through a
+  tap. Every patch changes its field (`+ 1`, `!`), so "A field patched to the value it had causes no render" never
+  happens. No override formula captures a prop or a state field ("A prop an override formula captures renders", "A
+  field captured by an override formula causes a render"). Every root value is valid, and no render can fail, so the
+  all-or-nothing requirement ("A failed change leaves the kept results as they were", "A refused root value changes
+  nothing", "A chain that fails part way restores every node") gets no random coverage. Also, `gap` and the formula
+  entries `colors`, `boxed`, `loud` and `label` are never given as roots, so a host value replacing a formula default
+  is never tried. tasks.md 5.10 says the program "mixes the risky features", which overstates this.
+- **Recommendation:** Add a child that emits (`<Child onPicked=<State.Update ...> />`), one that takes a handler or
+  content prop from its parent, a patch that sometimes writes the value a field already holds, an override formula
+  that reads a prop and one that reads state, roots for the formula-declared values, and an occasional invalid root
+  value or a render that fails on some state, with a check that the tree, its state and its change set are unchanged
+  afterwards. Alternatively, list the uncovered scenarios in the module doc.
+
+### 🔴 Open - RF38 The change-set check is one-sided, so a tree that lists every node as rendered on every step passes
+- **Severity:** Low
+- **Confidence:** High (confirmed by experiment)
+- **Location:** `ir_instance_tree_stress_tests.rs` `Run::check_changes`
+- **Evidence:** The check fails only when a changed, new or departed node is missing from the change set. It never
+  checks that a key listed as `rendered`, `added` or `removed` is one whose output (or identity) changed. Experiment:
+  `take_changes` was changed to list every surviving node as rendered (`if true || self.rendered_since.contains(key)`),
+  and the stress test passed 50 seeds of 100 steps. That breaks "A dispatch that renders nothing reports nothing" and
+  "A node whose inputs come back equal is left alone", which are the reason the change set exists. The test also never
+  checks `is_settled`.
+- **Recommendation:** Also assert the converse. A key in `rendered` must have changed output, or rendered by
+  record: compare with tokens included, since a rebinding that changes tokens counts. A key in `added` must be absent
+  before or hold a new node, and a key in `removed` must be absent after or replaced. Optionally, check that
+  `is_settled` is true for every node after a pass.
+
+### 🔴 Open - RF39 A panic that is not the test's own `Failure` loses the seed, so the nightly log and summary cannot name it
+- **Severity:** Medium
+- **Confidence:** High (confirmed by experiment)
+- **Location:** `ir_instance_tree_stress_tests.rs` `the_tree_keeps_only_output_a_fresh_evaluation_gives`
+  (`Err(payload) => std::panic::resume_unwind(payload)`), `Run::check_fresh` (`.expect("a node")`);
+  `thorough.yml` "Name the failing seed in the summary"
+- **Evidence:** Only `Run::fail` adds the seed and steps to the message. A panic inside the runtime (an index out of
+  bounds, an `unwrap`, a `RefCell` double borrow in `kept.rs`) or at the test's own `expect` is re-raised as it is. The
+  log then shows `panicked at crates/nx-ir-runtime/src/...` with no seed and no steps, and in `NX_TREE_STRESS_ALL`
+  mode it also loses the summary of the seeds before it. Experiment: a panic injected into `InstanceTree::dispatch` for
+  `root/11` made the test fail with "index out of bounds" and no line matching `instance tree stress, seed`. So the
+  workflow's summary step writes nothing, and a nightly run of 1000 seeds that hits a runtime panic, the kind of bug a
+  stress test is most likely to find, cannot be reproduced without bisecting the seed range by hand.
+- **Recommendation:** In the loop, turn any panic payload into a `Failure`-style message naming the seed and the
+  payload's text (downcast to `&str` or `String`), or print `seed N` to stderr before each seed runs. Keep the steps by
+  holding them outside the `catch_unwind` closure, for example in a `RefCell` the closure shares. Have the workflow's
+  summary step say "failed without naming a seed" when it finds no line.
+
+### 🔴 Open - RF40 Values that do not parse fall back to the defaults silently, and the workflow's check lets through values that do not parse or that bash misreads
+- **Severity:** Medium
+- **Confidence:** High (confirmed in bash and with the test)
+- **Location:** `ir_instance_tree_stress_tests.rs` `env_var` and the `NX_TREE_STRESS_SEED` match (`.ok().and_then(parse)`);
+  `thorough.yml` "Choose the seeds" (`^[0-9]+$` check and `$((BASE_SEED + SEEDS - 1))`)
+- **Evidence:** `NX_TREE_STRESS_SEED=abc` runs the 20 default seeds and passes, so a mistyped rerun (a seed copied
+  with a trailing character, or `-1`) looks like a green reproduction of a failure. In the workflow, `base_seed`
+  `99999999999999999999` passes the regex, and bash prints the wrapped range `7766279631452241928 to ...` in the log
+  and the summary. Rust's `parse::<u64>` then fails, and `env_var` quietly uses base 0, so the run tries seeds 0 to 999
+  while the summary claims another range and gives a "reproduce the whole run" command that does not reproduce it.
+  `base_seed` `9223372036854775808` prints a negative range. `08` passes the regex but bash reads it as bad octal and
+  the step dies with `value too great for base`. `NX_TREE_STRESS_BASE_SEED` near `u64::MAX` is also silently cut short
+  by `saturating_add`. `seeds` `0` or `iterations` `0` passes and reports success having checked nothing beyond the
+  first pass.
+- **Recommendation:** In the test, panic on a set but unparsable variable instead of using the default, and reject a
+  base and count whose range overflows. In the workflow, limit the inputs to a sane length (for example
+  `^[1-9][0-9]{0,14}$`, or `^0$` for the base), so bash arithmetic and `u64` agree, and require `seeds` and
+  `iterations` of at least 1.
+
+### 🔴 Open - RF41 The failure message's rerun hint omits the step count, so the command it gives does not reproduce a late failure from the nightly run
+- **Severity:** Low
+- **Confidence:** High
+- **Location:** `ir_instance_tree_stress_tests.rs` `Run::fail` (`rerun with NX_TREE_STRESS_SEED={}`)
+- **Evidence:** The message says `rerun with NX_TREE_STRESS_SEED=N` and nothing more. A failure that the nightly run
+  (100 steps) finds at step 60 does not happen with the default 40 steps, so anyone who copies the hint from the log
+  sees the test pass. The job summary does give the full command, and the module doc mentions the step count. The
+  step sequence does not depend on the step count, so the step at which the failure happened is all that matters.
+- **Recommendation:** Put the step count in the hint, for example `rerun with NX_TREE_STRESS_SEED=N
+  NX_TREE_STRESS_ITERATIONS=M`, where `M` is the configured count, or the failing step's index plus one.
+
+### 🔴 Open - RF42 Two new lines break the 120-character limit
+- **Severity:** Low
+- **Confidence:** High
+- **Location:** `ir_instance_tree_stress_tests.rs:17` (127 characters), `thorough.yml:88` (127 characters); the
+  README paragraph's last edited line runs on with the unwrapped "The cost tests remain..." sentence
+- **Evidence:** AGENTS.md asks for comments wrapped at 120 characters (and a 120-character target generally).
+- **Recommendation:** Rewrap the doc comment and the README paragraph. Split the `echo` on line 88 of the workflow.
+
+### Notes on what was checked and found sound
+- The reference uses `initialize_component` with no `TreeCall`, so it shares no kept result, session memo or store
+  with the tree. `Program` holds no evaluation cache of its own beyond two declaration indexes (`OnceLock`).
+- `same_written` compares `Debug` output of `BTreeMap`-ordered values, so `0.0` versus `-0.0` and `Int(1)` versus
+  `Float(1.0)` are told apart and the order is deterministic. `untokened` drops any field named `token`. No value in
+  this program has one other than handlers, but see RF37 on what dropping tokens hides.
+- The test draws all its randomness from one SplitMix64 and walks with `BTreeMap` and `Vec`, with no time or threads,
+  so a seed's steps are the same in every process and do not depend on the step count.
+- The workflow has `contents: read`, the same pinned `actions/checkout` as `build.yml`, inputs passed through `env`
+  rather than spliced into the script, `pipefail` through `tee`, a filter that selects exactly the stress test, and
+  valid YAML. `RUN_ID * 100000` stays within bash's and `u64`'s range for any realistic run id. Measured locally, 200
+  seeds of 100 steps take about 77 s in a debug build, so the default run takes about 6.5 minutes, well within the
+  60-minute timeout.
+
+### Summary of this review
+- Eight new findings: five Medium (RF35, RF36, RF37, RF39, RF40) and three Low (RF38,
+  RF41, RF42). The reference is truly free of the tree's reuse, but it takes state from the tree (RF35). The node set
+  never changes (RF36), and handlers that cross components, emits, rebinding and failures are out of reach (RF37), so
+  the test checks the kept-result and environment machinery well and the structural, state and handler parts of the
+  tree hardly at all. The nightly workflow is sound apart from losing the seed on a runtime panic (RF39) and silent
+  fallbacks on bad input (RF40).
