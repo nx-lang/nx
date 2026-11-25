@@ -983,8 +983,9 @@ parent's handler, and initializes every node afresh from the root values, the pl
 and that state. The tree must hold the model's nodes and no others, with the model's state and
 output; an operation must fail exactly when the model's does, and then change nothing; the host
 effects must be the model's; every node must be settled after the pass, and before it unsettled
-exactly where something rendered; and the change set must be the model's in both directions. The
-module documentation lists what its program covers and what it does not.
+exactly where something rendered; the change set must be the model's in both directions; and a
+node that rendered to equal output must have had a reason to, such as a changed value at its
+place. The module documentation lists what its program covers and what it does not.
 `NX_TREE_STRESS_SEEDS` and `NX_TREE_STRESS_ITERATIONS` set how much it runs (20 seeds of 30 steps
 by default), `NX_TREE_STRESS_BASE_SEED` the first seed (0 by default, so a pull request's run
 always tries the same seeds), and `NX_TREE_STRESS_SEED` runs one seed; a value that is set must

@@ -611,6 +611,13 @@ impl InstanceTree {
         self.nodes.get(key).is_some_and(|node| !node.unsettled)
     }
 
+    /// Whether the node at `key` renders again at every check of its record: the record holds a
+    /// read it cannot check. For tests that tell a render the tree needs from one it does not.
+    #[doc(hidden)]
+    pub fn renders_at_every_check(&self, key: &str) -> bool {
+        self.nodes.get(key).is_some_and(Node::always_stale)
+    }
+
     /// Drops the node at `key` and every node under it, and says whether there was one.
     ///
     /// <para>A pass drops what the output no longer has. This is for a place the output still

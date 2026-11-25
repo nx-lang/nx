@@ -19,9 +19,14 @@
 //!
 //! <para>The change set is checked both ways: a key is added when the model has a node there now
 //! and had none, or had one it replaced; removed the other way round; and rendered exactly when
-//! the node stayed and its output changed in any way, in value or in what a token names. After a
-//! tap or a root change, before the pass, a node is unsettled exactly when it or a node under it
-//! rendered.</para>
+//! the node stayed and its output changed in any way, in value or in what a token names. A node
+//! that rendered output equal to what it held, its tokens aside, must have had a reason to: its
+//! record holds a read it cannot check (`renders_at_every_check`), the node above it rendered, its
+//! state or the host's descriptor changed, a value at its place is written otherwise, or a root
+//! its component reads directly was set, cleared or changed. That catches a tree that renders
+//! where a record holds, though not one that renders a reader of a changed root whose value read
+//! comes back equal. After a tap or a root change, before the pass, a node is unsettled exactly
+//! when it or a node under it rendered.</para>
 //!
 //! <para>The program mixes the risky features: element overrides and `provide` blocks, an
 //! entry-module bundle with a formula entry, formulas the body provides (one reading its own
@@ -174,6 +179,14 @@ component <Page /> = {
   </Stack>
 }
 let root() = { <Page /> }
+type PlaceValues = {
+  mode:Mode locale:string region:string space:int gap:int z:float64 amount:object boxed:Box colors:Colors
+  loud:string label:string
+}
+let placeValues(): PlaceValues = {
+  <PlaceValues mode={env.mode} locale={env.locale} region={env.region} space={env.space} gap={env.gap}
+    z={env.z} amount={env.amount} boxed={env.boxed} colors={env.colors} loud={env.loud} label={env.label} />
+}
 ";
 
 /// SplitMix64: a small seeded generator, so a seed always gives the same steps.
@@ -253,6 +266,27 @@ fn root_choices() -> Vec<(&'static str, Vec<NxValue>)> {
             )],
         ),
     ]
+}
+
+/// The environment values a component's render may read directly, as a root read whose revision
+/// a change of the root makes stale: in its body, its prop defaults and the sources of its own
+/// overrides, and in the formula defaults evaluated under its own overrides, which are not kept.
+/// What it reads only through a kept top-level value (`direction`, `accentOf`, `amountOf`) or a
+/// formula default it reads where nothing of its own overrides is not here: those reads stop at
+/// the cutoff. A read of `gap` reads `space` too, through the entry bundle's formula. The lists
+/// may say more than a render reads, never less.
+fn direct_reads(component: &str) -> &'static [&'static str] {
+    match component {
+        "Dir" => &["label", "space"],
+        "Show" => &["label", "space"],
+        "Zero" => &["z"],
+        "Boxed" => &["boxed"],
+        "Card" => &["gap", "space", "loud"],
+        "Loud" => &["mode", "locale", "region", "loud", "colors"],
+        "SelfRef" => &["space", "gap", "label", "locale"],
+        "Field" => &["locale", "colors", "mode"],
+        _ => &[],
+    }
 }
 
 /// The descriptor a host passes at `host`, if any.
@@ -450,6 +484,8 @@ struct ModelNode {
     state: BTreeMap<String, NxValue>,
     instance: ComponentInstance,
     rendered: NxValue,
+    /// The node's place: the root values and the overrides above it and on its descriptor.
+    environment: Environment,
 }
 
 /// What a walk of the model found: its nodes, and the keys at which it replaced a node it held.
@@ -524,6 +560,7 @@ impl Model {
                     state: init.state,
                     instance: init.instance,
                     rendered: init.rendered,
+                    environment,
                 },
             );
         }
@@ -619,8 +656,9 @@ impl Model {
     }
 }
 
-/// What a step saw of the tree before it: each node's output and instance, by key.
-type Snapshot = BTreeMap<String, (Arc<NxValue>, ComponentInstance)>;
+/// What a step saw of the tree before it: each node's output and instance, and whether its record
+/// makes it render at every check, by key.
+type Snapshot = BTreeMap<String, (Arc<NxValue>, ComponentInstance, bool)>;
 
 /// One run of a seed: the tree, the model, the roots and host descriptor they were last given,
 /// and the steps so far.
@@ -631,6 +669,9 @@ struct Run {
     differing: Option<BTreeMap<String, String>>,
     roots: Vec<(String, NxValue)>,
     host: Host,
+    /// The host descriptor and the roots before the step.
+    host_before: Host,
+    roots_before: Vec<(String, NxValue)>,
     steps: Rc<RefCell<Vec<String>>>,
 }
 
@@ -673,7 +714,8 @@ impl Run {
         }
     }
 
-    /// The tree's output and instance at every key the model holds.
+    /// The tree's output and instance at every key the model holds, and whether the node renders at
+    /// every check.
     fn snapshot(&self) -> Snapshot {
         self.model
             .nodes
@@ -681,7 +723,11 @@ impl Run {
             .filter_map(|key| {
                 let output = self.tree.rendered(key)?;
                 let instance = self.tree.instance(key)?;
-                Some((key.clone(), (Arc::clone(output), instance.clone())))
+                let every_check = self.tree.renders_at_every_check(key);
+                Some((
+                    key.clone(),
+                    (Arc::clone(output), instance.clone(), every_check),
+                ))
             })
             .collect()
     }
@@ -689,7 +735,7 @@ impl Run {
     /// Checks that nothing in the tree changed: the same allocation of output at every node, the
     /// same state, and nothing in the change set.
     fn check_unchanged(&mut self, before: &Snapshot, what: &str) {
-        for (key, (output, _)) in before {
+        for (key, (output, _, _)) in before {
             let same = self
                 .tree
                 .rendered(key)
@@ -711,7 +757,7 @@ impl Run {
     fn check_settled(&self, before: &Snapshot) {
         let rendered: Vec<&String> = before
             .iter()
-            .filter(|(key, (output, _))| {
+            .filter(|(key, (output, _, _))| {
                 !self
                     .tree
                     .rendered(key)
@@ -831,7 +877,7 @@ impl Run {
                 };
                 let rendered = before
                     .get(other)
-                    .is_none_or(|(held, _)| !Arc::ptr_eq(held, theirs));
+                    .is_none_or(|(held, _, _)| !Arc::ptr_eq(held, theirs));
                 if rendered
                     && tokens_of(theirs)
                         .iter()
@@ -845,12 +891,63 @@ impl Run {
         })
     }
 
+    /// Whether the node at `key` had a reason to render in the step: the node above it rendered
+    /// (so its descriptor may name other handlers), the host gave another descriptor, its state
+    /// changed, some environment value at its place is now written otherwise, or the host set,
+    /// cleared or changed the root of a value its component reads directly, which is a change to
+    /// that read even where the value read is the same. A render with none of these is one no
+    /// record needs: a read through a kept result that comes back equal stops at the cutoff.
+    fn had_reason(&self, key: &str, before: &Snapshot, now: &ModelNode) -> bool {
+        let parent_rendered = match parent_key(key) {
+            Some(parent) => before.get(parent).is_none_or(|(held, _, _)| {
+                !self
+                    .tree
+                    .rendered(parent)
+                    .is_some_and(|current| Arc::ptr_eq(held, current))
+            }),
+            None => key == "host" && self.host != self.host_before,
+        };
+        let then = &self.model.nodes[key];
+        let roots = |roots: &[(String, NxValue)]| -> BTreeMap<String, String> {
+            roots
+                .iter()
+                .map(|(name, value)| (name.clone(), format!("{value:?}")))
+                .collect()
+        };
+        let (after, earlier) = (roots(&self.roots), roots(&self.roots_before));
+        let root_changed = direct_reads(&now.component)
+            .iter()
+            .any(|name| after.get(*name) != earlier.get(*name));
+        parent_rendered
+            || root_changed
+            || !same_written(&then.state, &now.state)
+            || !same_written(
+                &self.place_values(&then.environment),
+                &self.place_values(&now.environment),
+            )
+    }
+
+    /// Every environment value at a place, as the bare lifecycle evaluates them there.
+    fn place_values(&self, environment: &Environment) -> NxValue {
+        self.tree
+            .program()
+            .evaluate_function(
+                "placeValues",
+                &[],
+                &RuntimeOptions {
+                    environment: environment.clone(),
+                    ..options()
+                },
+            )
+            .unwrap_or_else(|error| self.fail(format!("placeValues(): {error}")))
+    }
+
     /// Checks the change set against the model's: added where the model has a node it had not,
     /// or replaced, and removed the other way round. A node that stayed is rendered when its
     /// output changed in any way: in value, in a token's handler, or by a rebinding to a node
-    /// above that rendered. It may be when it rendered
-    /// output equal to what it held, as a record that cannot check a read renders at every check;
-    /// otherwise it is not.
+    /// above that rendered, and is not otherwise. A node that rendered output equal to what it held
+    /// may be listed or not; it must have had a reason to render, by `had_reason`, unless its
+    /// record holds a read it cannot check, which renders at every check.
     fn check_changes(&mut self, before: &Snapshot, walk: &Walk) {
         let mut expected = TreeChanges::default();
         let mut may = Vec::new();
@@ -859,9 +956,20 @@ impl Run {
                 expected.added.push(key.clone());
                 continue;
             }
-            let (output, instance) = &before[key];
+            let (output, instance, every_check) = &before[key];
             let now = self.tree.rendered(key).expect("a node");
             let current = self.tree.instance(key).expect("a node");
+            let rendered = !Arc::ptr_eq(output, now);
+            if rendered
+                && same_written(&untokened(output), &untokened(now))
+                && !every_check
+                && !self.had_reason(key, before, &walk.nodes[key])
+            {
+                self.fail(format!(
+                    "{key} rendered again with nothing it could read changed: no value at its \
+                     place, no root, no state and no descriptor"
+                ));
+            }
             let changed = !same_written(&**output, &**now)
                 || tokens_of(now)
                     .iter()
@@ -869,7 +977,7 @@ impl Run {
                 || self.rebound(key, before);
             if changed {
                 expected.rendered.push(key.clone());
-            } else if !Arc::ptr_eq(output, now) {
+            } else if rendered {
                 may.push(key.clone());
             }
         }
@@ -898,6 +1006,8 @@ impl Run {
     /// change.
     fn step(&mut self, random: &mut Random) {
         let before = self.snapshot();
+        self.host_before = self.host;
+        self.roots_before = self.roots.clone();
         match random.below(7) {
             0 | 1 => {
                 let mut roots = Vec::new();
@@ -999,6 +1109,8 @@ fn run_seed(
         differing: all.then(BTreeMap::new),
         roots: Vec::new(),
         host: Host::Show,
+        host_before: Host::Show,
+        roots_before: Vec::new(),
         steps: Rc::clone(steps),
     };
     run.note("pass, host Show".to_string());

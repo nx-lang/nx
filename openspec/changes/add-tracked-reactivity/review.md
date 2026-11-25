@@ -836,7 +836,7 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
 
 ## New Findings Discovered During 2026-11-25 01:30 Verification
 
-### 🔴 Open - RF44 The change-set allowance for equal re-renders lets a tree that drops its equality cutoff pass the stress test
+### 🟡 Fixed - RF44 The change-set allowance for equal re-renders lets a tree that drops its equality cutoff pass the stress test
 - **Severity:** Low
 - **Confidence:** High (confirmed by experiment)
 - **Location:** `crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs` `Run::check_changes` (`may`) and
@@ -853,6 +853,15 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   nodes. Another is to count, for a fixed seed, how many nodes rendered output equal to what they held, and fail when
   the count grows past a bound. Otherwise, say in the module doc that the stress test does not check that renders are
   avoided, and that the tree tests cover that.
+- **Fix:** A node that rendered output equal to what it held, tokens aside, must now have had a reason to render, or the test fails. The allowed reasons are:
+  - its record holds a read it cannot check, read through a new `#[doc(hidden)]` `InstanceTree::renders_at_every_check`, taken before the step;
+  - the node above it rendered;
+  - the host gave another descriptor;
+  - its state changed;
+  - an environment value at its place is now written otherwise, which the model evaluates through a `placeValues()` function before and after;
+  - the host set, cleared or changed the root of a value its component reads directly (`direct_reads`, a generous per-component list).
+
+  The check covers equal-output renders that the dispatch's new tokens hid as well. Your experiment (`holds: false` in `record_holds`) now fails at seed 1, step 16 of the default run, and in 12 of 50 seeds of 100 steps. With the experiment reverted, 200 seeds of 100 steps pass. The check does not catch a tree that renders a direct reader of a changed root when the value read comes back equal; the module doc says so.
 
 ### Summary of the 2026-11-25 01:30 verification
 - RF35–RF43 are verified. My three experiments from the review now fail with a named seed and step: the state reset,
