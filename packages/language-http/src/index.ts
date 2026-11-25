@@ -311,6 +311,9 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
       ...(suggestions === undefined ? {} : { suggestions }),
     };
   }
+  if (query === "sourceTree" && suggestions !== undefined) {
+    return { documents, uri, position, suggestions };
+  }
   if (query === "sourceEdit") {
     if (typeof record.key !== "string") {
       return { problem: "The 'sourceEdit' query needs 'key', the key of the node to edit." };

@@ -73,7 +73,11 @@ values first.
 
 - **Language service** (`crates/nx-language-service`): a suggestion pass over the analysis that
   answers `sourceTree`, using the type checker's scope and alias information; `name` values and the
-  wider `setValue` target in `source_edit.rs`. No compiler, IR or runtime change.
+  wider `setValue` target in `source_edit.rs`. No IR or runtime change. Two small compiler fixes
+  came with it: a written `import "@nx/color" as c` in a module whose hex literal already brought
+  `@nx/color` in is no longer reported as imported twice (a second written import still is), and
+  prepared modules record the names two imports both provide (`ambiguous_names`), which the
+  suggestion pass leaves out without reading diagnostic text.
 - **Protocol and TypeScript** (`packages/language-protocol` request and answer shapes, `language-core`, the wasm and Node
   snapshots, the HTTP handler and client): the option, the answer's `suggestions`, the property
   `suggestionKey` and the `name` edit value, with Rust and TypeScript parity tests.

@@ -1295,3 +1295,25 @@ fn design_semantic_tokens_are_exported_environment_values() {
         .source
         .contains("export let standardPalette: StandardPalette"));
 }
+
+#[test]
+fn a_written_color_import_beside_a_hex_literal_binds_and_a_repeat_is_reported() {
+    // A hex literal brings in `@nx/color` on its own; the author's import of it is still theirs.
+    let written = errors(
+        &[(
+            "main.nx",
+            "import \"@nx/color\" as c\nlet accent = #ff0000\nlet tint: c.Color = { c.withAlpha(accent, 0.5) }\nlet root() = 1",
+        )],
+        &ProgramBuildContext::empty(),
+    );
+    assert!(written.is_empty(), "{written:#?}");
+
+    let repeated = errors(
+        &[(
+            "main.nx",
+            "import \"@nx/color\" as c\nimport \"@nx/color\" as d\nlet accent = #ff0000\nlet root() = 1",
+        )],
+        &ProgramBuildContext::empty(),
+    );
+    assert_one_error(&repeated, &["@nx/color", "imported more than once"]);
+}

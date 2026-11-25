@@ -72,7 +72,7 @@ export interface NamedPlace {
   readonly type?: string;
 }
 
-/** The node kinds a named value may be written over: a literal, a case, a name, or a color's. */
+/** The node kinds a named value may be written over: a literal, a case, a name, an element, or a color call. */
 function replaceable(index: TreeIndex, at: number): boolean {
   const node = index.tree.nodes[at]!;
   switch (node.role) {
@@ -83,6 +83,7 @@ function replaceable(index: TreeIndex, at: number): boolean {
     case "member":
       return nameAt(index, at) !== undefined;
     case "element":
+      return true;
     case "call":
       return node.color !== undefined;
     default:
@@ -168,18 +169,26 @@ export function letPlace(index: TreeIndex, at: number): NamedPlace | undefined {
  * or state field of another declaration and a value marked `self` with the place's declaration.
  */
 export function namedValues(tree: SourceTree, place: NamedPlace): SourceSuggestion[] {
-  return (tree.suggestions ?? []).filter(
-    (suggestion) =>
-      suggestion.key === place.suggestionKey &&
-      (suggestion.scope === undefined || suggestion.scope === place.within) &&
-      !(place.within !== undefined && suggestion.self?.includes(place.within) === true)
+  return (tree.suggestions ?? []).filter((suggestion) => suggestion.key === place.suggestionKey && reaches(suggestion, place.within));
+}
+
+/** Whether `suggestion` reaches a place written in the declaration at index `within`. */
+function reaches(suggestion: SourceSuggestion, within: number | undefined): boolean {
+  return (
+    (suggestion.scope === undefined || suggestion.scope === within) &&
+    !(within !== undefined && suggestion.self?.includes(within) === true)
   );
 }
 
-/** The suggestion the tree has for `name`, preferring one with a preview. */
-export function suggestionNamed(tree: SourceTree, name: string): SourceSuggestion | undefined {
-  const all = (tree.suggestions ?? []).filter((suggestion) => suggestion.name === name);
-  return all.find((suggestion) => suggestion.preview !== undefined) ?? all[0];
+/**
+ * The suggestion the tree has for `name` as written in the declaration at index `within`: one that
+ * reaches there, as {@link namedValues} filters them, preferring one with `key`, then one with a
+ * preview.
+ */
+export function suggestionNamed(tree: SourceTree, name: string, within: number | undefined, key?: string): SourceSuggestion | undefined {
+  const all = (tree.suggestions ?? []).filter((suggestion) => suggestion.name === name && reaches(suggestion, within));
+  const withPreview = all.filter((suggestion) => suggestion.preview !== undefined);
+  return withPreview.find((suggestion) => suggestion.key === key) ?? withPreview[0] ?? all[0];
 }
 
 /**

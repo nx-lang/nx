@@ -12,7 +12,7 @@ import { isComposition } from "./compact.js";
 import { isElementFunction, VALUE_ROLES } from "./card.js";
 import { isBooleanType, presentationOf, type Presentation } from "./labels.js";
 import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
-import { nameAt, suggestionNamed } from "./named.js";
+import { enclosingDeclaration, nameAt, suggestionNamed } from "./named.js";
 
 /** One colored range of the text, in UTF-16 offsets. Ranges are in text order and do not overlap. */
 export interface NxViewerColor {
@@ -867,7 +867,7 @@ export function renderSource(
     // does a name whose suggestion previews a color, as `env.color.accent`.
     const named = value.role === "reference" ? referencedColor(value) : undefined;
     const name = named === undefined ? nameAt(index, at) : undefined;
-    const preview = name === undefined ? undefined : suggestionNamed(tree, name)?.preview;
+    const preview = name === undefined ? undefined : suggestionNamed(tree, name, enclosingDeclaration(tree, at))?.preview;
     if (named !== undefined || preview?.kind === "color") {
       const square = document.createElement("span");
       square.className = "swatch";

@@ -39,9 +39,11 @@ unbraced place needs. A `color` value SHALL keep its current meaning on a hex li
 constructor call or a color element: the color-tooling capability's edit of the written channels,
 which keeps the written form and its braces, and which takes precedence over the brace-dropping rule
 above. On a name target a `color` value SHALL be written as the color literal it carries, as at an
-unbraced place. A `color` value on any other literal or on a case, a constructor call it cannot
-edit, or any value other than `color` or `name` on a hex literal or a constructor call, SHALL be
-refused as `invalidValue`, as today.
+unbraced place. A `color` value on any other literal or on a case, or any value other than `color`
+or `name` on a hex literal or a constructor call, SHALL be refused as `invalidValue`, as today. A
+`color` value on a constructor call or a color element the color tooling cannot edit, as one whose
+channels are computed or out of range or one in a wider space, SHALL be refused as `notEditable`,
+as today, and SHALL NOT be written over it.
 
 The service SHALL NOT check the value against the place's type, nor that a name resolves; a value of
 the wrong type, or a name the module cannot see, SHALL be written and then reported by the type
@@ -116,6 +118,10 @@ checker as a hand edit would be.
 - **WHEN** a client sets the value of `tint=<Color.srgb r=0.2 g=0.4 b=0.8 />` to the color `#336699`
 - **THEN** the attribute SHALL stay a `<Color.srgb … />` element, with only its channel fields
   changed as the color-tooling capability edits them
+
+#### Scenario: A color on a computed color element is refused
+- **WHEN** a client sets the value of `tint=<Color.srgb r={x} g=0 b=0 />` to the color `#ff0000`
+- **THEN** the answer SHALL hold no edits and the refusal `notEditable`, and the element SHALL stay
 
 #### Scenario: A color on a number is refused
 - **WHEN** a client sets the value of `padding=8` to the color `#ffffff`

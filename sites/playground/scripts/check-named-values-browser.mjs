@@ -76,6 +76,18 @@ try {
   await page.keyboard.press("Control+z");
   await page.waitForFunction(() => document.querySelector("nx-viewer").text.includes("padding={env.space.md}"));
 
+  // A property written as a plain number binds to a token.
+  const border = row(`${tile}.border`);
+  await border.hover();
+  await border.locator(".named-values").click();
+  await popover.waitFor();
+  assert.equal(await popover.locator(".named-row.current").count(), 0, "a literal marks no row");
+  await popover.locator('.named-row[data-name="env.borderWidth.thin"]').click();
+  await page.waitForFunction(() => document.querySelector("nx-viewer").text.includes("border={env.borderWidth.thin}"));
+  await viewer.locator(".body").focus();
+  await page.keyboard.press("Control+z");
+  await page.waitForFunction(() => document.querySelector("nx-viewer").text.includes("border=1"));
+
   // An unset property's hexagon adds it as a token.
   const unset = viewer.locator(`[data-named-key="${tile}.radius"].sheet-row`);
   if ((await unset.count()) === 0) {
@@ -106,7 +118,7 @@ try {
   assert.equal(await popover.count(), 0);
 
   assert.deepEqual(errors, []);
-  console.log("PASS: named values: popover, filter, choose, undo, unset property, swatches.");
+  console.log("PASS: named values: popover, filter, choose, undo, literal binding, unset property, swatches.");
 } finally {
   await browser?.close();
   try { process.kill(-server.pid, "SIGTERM"); } catch {}

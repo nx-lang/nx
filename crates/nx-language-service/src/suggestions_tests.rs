@@ -640,3 +640,25 @@ let root() = <g.Group>
         "{widths:?}"
     );
 }
+
+#[test]
+fn a_value_with_no_matching_suggestion_adds_no_declaration() {
+    let tree = tree(
+        "import \"@nx/design\"\ncomponent <Box padding: Spacing = 0 /> = { <div /> }\nlet root() = <Box padding=4 />",
+    );
+    assert!(names(&tree, SPACING).contains(&"env.space.md".to_string()));
+    let listed = tree
+        .declarations
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+    for unmatched in ["env.color", "env.radius", "env.shadow", "standardPalette"] {
+        assert!(!listed.contains(&unmatched), "{unmatched} in {listed:?}");
+    }
+    for suggestion in &tree.suggestions {
+        assert!(
+            (suggestion.declaration as usize) < tree.declarations.len(),
+            "{suggestion:?}"
+        );
+    }
+}

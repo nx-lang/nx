@@ -229,12 +229,18 @@ let pair = <Pair options={ <Option value="a" label="A" /> <Option value="b" labe
 // Tokens: a property typed by a design token type offers its named values. Select Tile's Padding
 // or Fill and click the hexagon past its value (or press Ctrl+Space, or Alt+Esc), then pick one:
 // the environment's tokens come first. Click a token to swap it, or choose Replace with value in its
-// menu to write its value instead. Radius is unset: its hexagon adds it as a token.
-component <Tile padding: design.Spacing = 16 fill: design.Color = #ffffff radius: design.Radius = 0 /> = {
+// menu to write its value instead. Border is a plain number: its hexagon binds it to a token.
+// Radius is unset: its hexagon adds it as a token.
+component <Tile
+  padding: design.Spacing = 16
+  fill: design.Color = #ffffff
+  border: design.BorderWidth = 0
+  radius: design.Radius = 0
+/> = {
   <div />
 }
 
-let tiles = <Tile padding={env.space.md} fill={env.color.surface} />
+let tiles = <Tile padding={env.space.md} fill={env.color.surface} border=1 />
 
 let root(): Menu = {
   // No visualizer: the box icon, and folded (its chevron, or Left) it counts its children

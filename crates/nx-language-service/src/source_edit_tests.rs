@@ -1556,6 +1556,30 @@ fn color_edits_refuse_wrong_kinds_removed_nodes_and_noneditable_expressions() {
             node.key
         );
     }
+    // A color element whose channels are computed or out of range is still a color: a `color`
+    // value is refused there, not written over the element as a hex literal.
+    let source = "import \"@nx/color\" as c\nlet x = 0.5\nlet computed: c.Color = <c.Color.srgb r={x} g=0 b=0 />\nlet invalid: c.Color = <c.Color.srgb r=2 g=0 b=0 />";
+    let tree = snapshot_for(source)
+        .source_tree(&DocumentUri::from(URI))
+        .unwrap();
+    for key in ["computed.value", "invalid.value"] {
+        assert!(tree.nodes.iter().any(|node| node.key == key), "{key}");
+        let answer = edit(
+            source,
+            key,
+            SourceEdit::SetValue {
+                value: SourceEditValue::Color {
+                    text: "#ff0000".into(),
+                },
+            },
+        );
+        assert!(answer.edits.is_empty(), "{key}: {:?}", answer.edits);
+        assert_eq!(
+            answer.refused,
+            Some(SourceEditRefusal::NotEditable),
+            "{key}"
+        );
+    }
     let old = snapshot_for("let accent = #fff")
         .source_tree(&DocumentUri::from(URI))
         .unwrap();

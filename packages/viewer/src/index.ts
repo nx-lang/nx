@@ -1939,6 +1939,11 @@ export class NxViewerElement extends ElementBase {
       const after = drawn.nextElementSibling?.matches(".value-brace") === true ? drawn.nextElementSibling : drawn;
       after.after(anchor);
     }
+    // A property read on its field's line or in a folded element value's head offers its named
+    // values from Ctrl+Space and a click on its token, with no button there to crowd the line.
+    for (const property of this.#body.querySelectorAll<HTMLElement>(".inline-prop[data-key], .row-title[data-field]")) {
+      this.#offeredPlace(property.dataset["key"] ?? property.dataset["field"]!);
+    }
     // A property written on a line has the same menu, right after it while it is selected, taking
     // room there, so it shows where the reader clicked.
     for (const property of this.#body.querySelectorAll<HTMLElement>(".line-property[data-key]")) {
@@ -1956,6 +1961,12 @@ export class NxViewerElement extends ElementBase {
       const anchor = this.ownerDocument.createElement("span");
       anchor.className = "property-menu";
       anchor.append(mark);
+      // Its named values have their button first, as a row's have, shown while it is selected.
+      const place = this.#offeredPlace(property.dataset["key"]!);
+      if (place !== undefined) {
+        anchor.prepend(this.#namedButton(place, index.tree.nodes[at]!.name ?? "the property"));
+        anchor.classList.add("with-named");
+      }
       property.after(anchor);
     }
     this.#markItems(index);
@@ -4511,7 +4522,7 @@ export class NxViewerElement extends ElementBase {
     const button = document.createElement("span");
     button.className = "named-values";
     button.setAttribute("role", "button");
-    button.setAttribute("aria-haspopup", "listbox");
+    button.setAttribute("aria-haspopup", "dialog");
     button.setAttribute("aria-expanded", "false");
     button.setAttribute("aria-label", `Named values for ${label}`);
     button.title = "Named values";
@@ -4530,6 +4541,50 @@ export class NxViewerElement extends ElementBase {
     const parent = tree?.nodes[target.at]?.parent;
     const owner = parent === undefined ? undefined : tree!.nodes[parent];
     return owner?.role === "attribute" || owner?.role === "declaration" ? owner.key : undefined;
+  }
+
+  /**
+   * The key of the place whose token a plain click at `target` is on: an inspector row whose value
+   * is a name, or a name written whole as a line property's or a `let`'s value.
+   */
+  #tokenPlaceOf(target: Element, event: MouseEvent): string | undefined {
+    const index = this.#index;
+    if (
+      !this.#editable ||
+      index === undefined ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.shiftKey ||
+      target.closest?.(".row-anchor, .property-menu, .named-anchor") != null
+    ) {
+      return undefined;
+    }
+    const token = target.closest?.(".reference-token") as HTMLElement | null | undefined;
+    const tokenRow = token?.closest<HTMLElement>(".sheet-row[data-key]");
+    if (tokenRow !== null && tokenRow !== undefined && this.#body.contains(tokenRow) && this.#namedPlaces.has(tokenRow.dataset["key"]!)) {
+      return tokenRow.dataset["key"]!;
+    }
+    // A name a folded element value reads by.
+    const titled = target.closest?.(".nested-head .row-title[data-field]") as HTMLElement | null | undefined;
+    if (titled !== null && titled !== undefined && this.#body.contains(titled)) {
+      const field = titled.dataset["field"]!;
+      return this.#offeredPlace(field)?.current === undefined ? undefined : field;
+    }
+    // Up from the drawn node clicked, through the names a member chain is made of.
+    for (let drawn = target.closest?.("[data-key]") as HTMLElement | null | undefined; drawn !== null && drawn !== undefined && this.#body.contains(drawn); drawn = drawn.parentElement?.closest<HTMLElement>("[data-key]")) {
+      const at = index.byKey.get(drawn.dataset["key"]!);
+      if (at === undefined || nameAt(index, at) === undefined) {
+        return undefined;
+      }
+      const parent = index.tree.nodes[at]!.parent;
+      const owner = parent === undefined ? undefined : index.tree.nodes[parent]!;
+      const place = owner === undefined ? undefined : this.#namedPlaces.get(owner.key);
+      if (place !== undefined && place.value === at) {
+        return owner!.key;
+      }
+    }
+    return undefined;
   }
 
   /** The named-values button drawn for the place with `key`, if one is. */
@@ -4556,7 +4611,10 @@ export class NxViewerElement extends ElementBase {
     const button = this.#namedButtonOf(key);
     const valueKey = place.value === undefined ? undefined : index.tree.nodes[place.value]!.key;
     const anchor =
-      button?.closest<HTMLElement>(".sheet-value") ?? (valueKey === undefined ? undefined : this.#rendered.get(valueKey)) ?? button;
+      button?.closest<HTMLElement>(".sheet-value") ??
+      (valueKey === undefined ? undefined : this.#rendered.get(valueKey)) ??
+      button ??
+      this.#rendered.get(key);
     if (anchor === undefined) {
       return;
     }
@@ -4645,16 +4703,22 @@ export class NxViewerElement extends ElementBase {
       option.title = suggestion.doc === undefined ? suggestion.type : `${suggestion.type}\n${suggestion.doc}`;
       group.append(option);
     }
+    // Outside the listbox, which holds options alone, and announced when it shows.
     const empty = document.createElement("div");
     empty.className = "named-empty";
-    empty.textContent = "No named values match";
+    empty.setAttribute("role", "status");
+    empty.setAttribute("aria-live", "polite");
     empty.hidden = true;
-    list.append(empty);
+    // The active row's type and doc, which its hover card gives the pointer, for the keyboard.
+    const detail = document.createElement("div");
+    detail.className = "named-detail";
+    detail.id = "nx-viewer-named-detail";
+    input.setAttribute("aria-describedby", detail.id);
     const foot = document.createElement("div");
     foot.className = "named-foot";
     foot.textContent = "Previews show default values";
     this.#popover.className = "popover named";
-    this.#popover.replaceChildren(input, list, foot);
+    this.#popover.replaceChildren(input, list, empty, detail, foot);
     this.#popover.hidden = false;
     const session: NamedSession = { place, anchor, button, input, rows, active: undefined };
     this.#named = session;
@@ -4698,10 +4762,13 @@ export class NxViewerElement extends ElementBase {
     const empty = this.#popover.querySelector<HTMLElement>(".named-empty");
     if (empty !== null) {
       empty.hidden = shown.length > 0;
+      empty.textContent = shown.length > 0 ? "" : "No named values match";
     }
     this.#placeCard(session.anchor, this.#popover);
+    // Nothing is active until the reader moves, types or points, unless a row is marked, so Enter
+    // straight away changes nothing; typing makes the first match active.
     const keep = prefer ?? session.active;
-    this.#setNamedActive(session, keep !== undefined && shown.includes(keep) ? keep : shown[0], true);
+    this.#setNamedActive(session, keep !== undefined && shown.includes(keep) ? keep : words.length > 0 ? shown[0] : undefined, true);
   }
 
   /** Makes `row` the row Enter chooses, announced, and with `reveal`, scrolls the list alone to it. */
@@ -4709,6 +4776,11 @@ export class NxViewerElement extends ElementBase {
     session.active = row;
     for (const candidate of session.rows) {
       candidate.classList.toggle("active", candidate === row);
+    }
+    const detail = this.#popover.querySelector<HTMLElement>(".named-detail");
+    if (detail !== null) {
+      // One line, kept as the active row changes, so the popover keeps its size.
+      detail.textContent = (row?.title ?? "").replace(/\n/g, " \u2014 ");
     }
     if (row === undefined) {
       session.input.removeAttribute("aria-activedescendant");
@@ -4829,7 +4901,7 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     const document = this.ownerDocument;
-    const token = (name: string): Node[] => {
+    const token = (name: string, place: NamedPlace): Node[] => {
       const brace = (text: string): HTMLElement => {
         const mark = document.createElement("span");
         mark.className = "t block-brace value-brace";
@@ -4839,7 +4911,7 @@ export class NxViewerElement extends ElementBase {
       const written = document.createElement("span");
       written.className = "pending-name";
       written.textContent = name;
-      const preview = suggestionNamed(index.tree, name)?.preview;
+      const preview = suggestionNamed(index.tree, name, place.within, place.suggestionKey)?.preview;
       const swatch = preview?.kind === "color" ? [this.#swatchOf(preview.value, preview.outsideSrgb === true)] : [];
       return [...swatch, brace("{"), written, brace("}")];
     };
@@ -4856,7 +4928,7 @@ export class NxViewerElement extends ElementBase {
         }
         row.classList.replace("dimmed-row", "added-row");
         row.querySelector(".more-default")?.remove();
-        value.replaceChildren(...token(name));
+        value.replaceChildren(...token(name, place));
         value.classList.remove("editable-value");
         value.classList.add("pending", "reference-token");
         continue;
@@ -4867,7 +4939,7 @@ export class NxViewerElement extends ElementBase {
         const anchor = cell.querySelector<HTMLElement>(":scope > .row-anchor");
         const shown = document.createElement("span");
         shown.className = "pending";
-        shown.append(...token(name));
+        shown.append(...token(name, place));
         cell.replaceChildren(shown, ...(anchor === null ? [] : [anchor]));
         cell.classList.add("reference-token");
         continue;
@@ -4893,8 +4965,7 @@ export class NxViewerElement extends ElementBase {
     if (!this.#editable || index === undefined || place === undefined || place.current === undefined || place.value === undefined || this.#pendingNames.has(key)) {
       return undefined;
     }
-    const all = (index.tree.suggestions ?? []).filter((suggestion) => suggestion.name === place.current && suggestion.preview !== undefined);
-    const preview = (all.find((suggestion) => suggestion.key === place.suggestionKey) ?? all[0])?.preview;
+    const preview = suggestionNamed(index.tree, place.current, place.within, place.suggestionKey)?.preview;
     if (preview === undefined) {
       return undefined;
     }
@@ -5091,11 +5162,17 @@ export class NxViewerElement extends ElementBase {
     }
     this.#namedClosedOnPress = undefined;
     // A click on a token opens the named values of its property, when it offers them.
-    const token =
-      this.#editable && target.closest?.(".row-anchor") == null ? (target.closest?.(".reference-token") as HTMLElement | null | undefined) : undefined;
-    const tokenRow = token?.closest<HTMLElement>(".sheet-row[data-key]");
-    if (tokenRow !== null && tokenRow !== undefined && this.#body.contains(tokenRow) && this.#namedPlaces.has(tokenRow.dataset["key"]!)) {
-      this.#openNamed(tokenRow.dataset["key"]!);
+    const tokenPlace = this.#tokenPlaceOf(target, event);
+    if (tokenPlace !== undefined) {
+      // A token in a folded element value opens that value first, then its property's popover.
+      const nested = target.closest?.(".row-title[data-field]") == null ? undefined : target.closest?.(".nested-head[data-key]");
+      const nestedKey = nested === null || nested === undefined ? undefined : keyOf(nested as HTMLElement);
+      if (nestedKey !== undefined && !this.#valuesOpen.has(nestedKey)) {
+        this.#toggleValue(nestedKey);
+      }
+      if (this.#offeredPlace(tokenPlace) !== undefined) {
+        this.#openNamed(tokenPlace);
+      }
       return;
     }
     // A row's menu opens from the mark at its end.

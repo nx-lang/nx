@@ -314,3 +314,100 @@ _Answers (fix pass): ButtonGap keeps only its own values, by design, noted as a 
   color-tooling for Replace with value (RF3), incomplete reachability (RF4), suggestion-key inflation
   (RF5) and a graphics import collision (RF6).
 - The rest are clarity and scenario gaps. Fix RF1 to RF6 in the artifacts before implementation.
+
+## New Findings Discovered During 2026-11-25 18:59 Review
+
+**Scope of this pass:** the implementation, `git diff 61998c1..HEAD`: `crates/nx-language-service/src/{suggestions,suggestions_tests,source_tree,source_edit,source_edit_tests,environment,lib}.rs`, `crates/nx-program/src/artifacts.rs`, `crates/nx-program/src/std/graphics/graphics.nx`, `crates/nx-api/src/nx_text.rs`, `packages/language-protocol`, `packages/language-core`, `packages/language-http`, `bindings/node`, `bindings/wasm` (host and parity test), `packages/viewer/src/{named,index,source,edit,styles}.ts` and `test/named.test.ts`, `sites/playground` (reading, ReadingView, visual-test-cases example, browser check), docs and `specs/future.md`. Checked against every delta spec of the change.
+**Ran:** `cargo test -p nx-language-service` (386 passed), `cargo test -p nx-api` (all passed), the viewer's `named.test.js` (15 passed), `openspec validate --strict` (valid). Probed `sourceTree` with `suggestions` through the wasm host on small documents and on `visual-test-cases.nx`. Skia tests and the Playwright check were not run.
+
+### 🟡 Fixed - RF18 The HTTP handler drops `suggestions` from a `sourceTree` request that names no `visualizers`
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:** `validateQuery` parses `suggestions` (`packages/language-http/src/index.ts:287-293`) but returns it only from the `record.visualizers !== undefined` branch (`:294-312`). A request of `{ documents, uri, suggestions: true }` falls through to `return { documents, uri, position }` (`:327`), so the answer has no suggestions and no keys, and nothing reports why. The source-tree delta makes `suggestions` independent of `visualizers`, and task 3.1 says the HTTP handler passes it through. `packages/language-http/test/handler.test.ts` has no `suggestions` test, so this went unnoticed. The playground works only because it also sends `visualizers: {}`.
+- **Recommendation:** Return `suggestions` from the plain `sourceTree` path as well. For example, build the `sourceTree` result once after both checks. Add handler tests for `suggestions` with and without `visualizers`, for a non-boolean `suggestions` (400), and for `name` and `color` edit values, which are also new in `sourceEditValueOf`.
+- **Fix:** `validateQuery` now returns `suggestions` from a plain `sourceTree` request too. A handler test covers `suggestions` with and without `visualizers`, a non-boolean `suggestions` (400), a `name` edit (`{gap}`), a `color` edit value and a malformed `name` value (400).
+
+### 🟡 Fixed - RF19 A `color` value on a color element with no static color now replaces the element with a hex literal instead of being refused
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:** `edit_tree` now sends a `color` `setValue` on an element to `set_constructor_color` only when `tree.nodes[at].color.is_some()` (`crates/nx-language-service/src/source_edit.rs:158-163`). Before, every element went there and was refused unless its color was known. A canonical `Color` element whose channels are computed (`tint=<c.Color.srgb r={x} g=0 b=0 />`) or invalid (`<c.Color.srgb r=2 g=0 b=0 />`, which carries only `color_error`) now goes to `set_value`. There `SourceRole::Element => true` (`:322`) makes it replaceable, and the value is spelled as hex over the whole element. The source-edits delta says a `color` value "SHALL keep its current meaning on ... a color element", and color-tooling says computed colors "SHALL remain read-only; the picker SHALL NOT replace them with a constant". No test covers a color element without a swatch.
+- **Recommendation:** Decide "is a color element" from the element's declaration (the canonical `Color` union, as `set_constructor_color` checks), not from whether a swatch was found. Send every such element to `set_constructor_color`, which refuses one it cannot edit. Add tests for a computed channel and an invalid channel.
+- **Fix:** `edit_tree` sends a `color` value on any element whose declaration is the canonical `@nx/color` `Color` (new `is_color_element`), or whose color is known, to `set_constructor_color`, which refuses one it can't edit. A test in `color_edits_refuse_wrong_kinds_removed_nodes_and_noneditable_expressions` covers a computed channel (`r={x}`) and an out-of-range one (`r=2`): no edits, `notEditable`.
+
+### 🟡 Fixed - RF20 The viewer offers no named values for a property whose written value is an element without a color, so a `Paint` cannot be bound to a named `Paint`
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Evidence:** `replaceable` in `packages/viewer/src/named.ts:76-91` accepts an `element` or `call` only when `node.color !== undefined`. So `fill=<Paint.color color=#2563eb />`, with `let blue: Paint = …` in reach, gets no button, no Ctrl+Space and no popover, though `fill` carries a `Paint` suggestion key and the tree lists `blue`. The viewer delta says such a property "SHALL offer its named values", with no exception for element values. The source-edits delta's "A name replaces an element" (`fill=<Paint.color …/>` → `fill={blue}`), which the service implements, can't be reached from Visual. Graphics' `fill`/`stroke` written as elements are the commonest case. `specs/future.md` defers only element-typed *properties*, not element *values* of record- or union-typed properties.
+- **Recommendation:** Treat any whole element value as replaceable, as the service does. Keep the color requirement only for `call`. Add a viewer test that binds `fill=<Paint.color …/>` to a `Paint` `let`.
+- **Fix:** `replaceable` accepts any whole element value (a call still needs a color). New viewer test "binds a paint written as an element to a named paint": `fill=<g.Paint.color …/>` has the button, lists `blue: g.Paint`, and choosing it sends `setValue` `{name: blue}` at the element.
+
+### 🟡 Fixed - RF21 Properties read on a field's line and `let` tokens get no named-values button, and a click on them doesn't open the popover
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** The button is added only for rows with the `prop-field` class (`packages/viewer/src/index.ts:1919`), and a token click opens the popover only inside `.sheet-row[data-key]` (`:5096`). The properties of a short element value read on its field's line (`.line-property`), which the viewer spec says are "edited and scrubbed there as an inspector's fields are", get neither. That is why the graphics test must unfold the paint first ("offers colors with their swatches for a paint's color, unfolded"). The viewer delta's scenario "Colors with their swatches" speaks of the inspector without requiring an unfold. A `let` whose value is a token, such as `let tight: Spacing = {env.space.sm}`, gets the button, but a click on its token doesn't open the popover, as "A click on a token value SHALL open the named-values popover" requires.
+- **Recommendation:** Give line properties the same button (and Ctrl+Space through their selection), and handle token clicks for line properties and `let` values. Otherwise, record the gap in `specs/future.md` and narrow the scenario.
+- **Fix:** A token click now opens the popover for any place whose value is a name: an inspector row, a `let` value, a line property, and a name in a folded element value's head (it unfolds the value first). Properties on a Source-style line (`.line-property`) get the hexagon beside their menu while selected. Inspector inline properties and folded-head fields register their places, so Ctrl+Space on their selection opens it, but draw no hexagon, to keep the line uncrowded; that gap is in `specs/future.md`. Tests: "opens from a click on a let's token" and "offers a line property's named values from Ctrl+Space and a click on its token" (no unfold needed).
+
+### 🟡 Fixed - RF22 Every reachable value is added to the declaration table, and its read closure computed, even when none of its suggestions match
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** `attach_suggestions` calls `self.entry(&root.start)` and `reads_closure` for each root before `visit` decides whether anything matches (`crates/nx-language-service/src/suggestions.rs:1039-1068`). A document with one `Spacing` property got 10 extra table entries (`env.colorMode`, `env.color`, `env.radius`, `env.borderWidth`, `env.font`, `env.text`, `env.shadow`, `env.motion`, `standardPalette`, …), and only `env.space` produced suggestions (3 declarations without suggestions, 13 with). The design keeps the list small ("Only entries whose key some property or `let` of the declaration table uses are sent"). The source-tree delta only requires each suggestion's declaration to be listed.
+- **Recommendation:** Run `visit` into a temporary list first. Allocate the `declaration`, `scope` and `self` table indices only when that root produced at least one suggestion, and compute `reads_closure` lazily too.
+- **Fix:** Each root is matched first into a temporary list. Its `declaration`, `scope` and `self` table entries, and `reads_closure`, are computed only when it produced a suggestion. Test `a_value_with_no_matching_suggestion_adds_no_declaration`: a document with one `Spacing` property lists only `Box`, `Spacing`, `root`, `env.space`.
+
+### 🟡 Fixed - RF23 A compiler change to duplicate-import reporting ships without a test, a spec delta or a mention in the proposal
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** `apply_graph_imports` no longer reports "imported more than once" for a written import that follows a synthesized one, such as `import "@nx/color" as c` after the one a hex literal synthesizes. The written import now binds normally (`crates/nx-program/src/artifacts.rs:2894-2915`). This changes compiler diagnostics and bindings. The proposal's Impact says "No compiler, IR or runtime change", no delta (module-imports) covers it, and no test in `nx-program` exercises it. Only the commit message mentions it.
+- **Recommendation:** Add an `nx-program` test: a hex literal plus a later `import "@nx/color" as c` gives no diagnostic, `c.` names resolve, and a second written import is still reported. Mention the fix in the proposal's Impact, or add a small module-imports delta.
+- **Fix:** New `nx-program` test `a_written_color_import_beside_a_hex_literal_binds_and_a_repeat_is_reported` (the written `c.` import binds with no diagnostic; a second written import is still reported). The proposal's Impact now names both compiler fixes.
+
+### 🟡 Fixed - RF24 Token swatches and Replace with value find a name's preview by its text alone, ignoring scope
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** `suggestionNamed` (`packages/viewer/src/named.ts`, used for a token's swatch at `packages/viewer/src/source.ts:870`) and `#replacementOf` (`packages/viewer/src/index.ts:4896`) pick the first suggestion with that `name` and a preview, without the `scope`/`self` filter `namedValues` applies. With RF16's case (`let tint: Color = {env.color.accent}` and `component <Badge tint: Color = #000000 />`), the `declaration`-group `tint` scoped to `Badge` comes before the document's `tint`. So a top-level `{tint}` token shows Badge's default swatch, and Replace with value writes `#000000`, not the `let`'s value.
+- **Recommendation:** Resolve the preview with the same filter as `namedValues`, for the place's declaration (`within`). For a token outside any place, prefer unscoped entries, and scoped ones only inside their scope.
+- **Fix:** `suggestionNamed(tree, name, within, key?)` filters by the same scope and `self` rules as `namedValues` (shared `reaches`). Token swatches pass the token's enclosing declaration, pending tokens and `#replacementOf` pass the place's. Test: with a top-level `tint` and Badge's `tint` parameter, `<Card fill={tint} />` shows the accent swatch and Replace with value offers `#155dfc`.
+
+### 🟡 Fixed - RF25 The first row is active as soon as the popover opens, so Enter right away resets a written property to its default
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** `#openNamed` calls `#filterNamed(session, current row)`, and with no marked row `#filterNamed` makes `shown[0]` active (`packages/viewer/src/index.ts:4664`, `#filterNamed`). For `padding=8` that row is `Default`, so Ctrl+Space then Enter fires `remove`. The viewer delta says "Up and Down SHALL move through the rows, from the marked row when none is active yet", which implies nothing is active until the reader moves or types. No test covers the keyboard path: Up/Down from the marked row, or Enter with nothing typed.
+- **Recommendation:** Leave no row active until Up/Down, typing or the pointer picks one (keep the marked row active when there is one). Make Enter with no active row do nothing. Add keyboard tests.
+- **Fix:** No row is active at open unless one is marked; typing makes the first match active; Enter with none active does nothing. Tests: "walks the rows with the arrows, and Enter with none active changes nothing" and "walks from the marked row".
+
+### 🟡 Fixed - RF26 The popover's accessibility has small gaps: a non-option inside the listbox, and hover cards available only as a `title`
+- **Severity:** Low
+- **Confidence:** Medium
+- **Evidence:** The "No named values match" element is a plain `div` inside the `role="listbox"` list (`packages/viewer/src/index.ts:4649`), which ARIA doesn't allow there. Screen readers won't announce an empty result, because the combobox's `aria-activedescendant` is just removed. Each row's "hover card" (type and doc) is only a `title` attribute (`:4645`), which keyboard and touch users can't reach. The viewer elsewhere uses real hover cards, which the delta's "A row's hover card SHALL give its type and doc" suggests. The button says `aria-haspopup="listbox"`, but what opens is a combobox's container, and it holds focus.
+- **Recommendation:** Move the empty message out of the listbox and announce it through a polite live region (or `aria-describedby` on the input). Show the active row's type and doc in the viewer's card, or in the foot, for the keyboard path. Consider `aria-haspopup="dialog"` for the button.
+- **Fix:** The empty message is now outside the listbox, `role=status` with `aria-live=polite`, text set only when shown. A `.named-detail` line below the list shows the active row's type and doc and is the input's `aria-describedby`. The button says `aria-haspopup="dialog"`. Asserted in the first viewer test.
+
+### 🟡 Fixed - RF27 The source-edits delta says an uneditable constructor call refuses a `color` value as `invalidValue`, but the service answers `notEditable`
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** The delta: "A `color` value on ... a constructor call it cannot edit ... SHALL be refused as `invalidValue`." `set_constructor_color` returns `NotEditable` for `c.rgb(0,0,0)`, `c.withAlpha(…)`, `c.tryParse(…)` and wide color elements, and the existing test `color_edits_refuse_wrong_kinds_removed_nodes_and_noneditable_expressions` asserts `NotEditable`. The code keeps today's behavior and the delta misstates it.
+- **Recommendation:** Change the delta to say `notEditable` for a constructor call or color element the color tooling cannot edit, and keep `invalidValue` for a `color` value on another literal or a case.
+- **Fix:** The source-edits delta now says a `color` value on a constructor call or color element the color tooling can't edit is refused as `notEditable`, and is not written over it. `invalidValue` stays for other literals and cases. New scenario: "A color on a computed color element is refused".
+
+### 🟡 Fixed - RF28 The suggestion pass detects ambiguous imports by parsing diagnostic message text
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** `ambiguous_names` (`crates/nx-language-service/src/suggestions.rs:387-415`) strips the prefixes `"Imported name '"` and `"Ambiguous imported name '"` from diagnostic messages, which `crates/nx-program/src/artifacts.rs:3351,3734,3854` format. Rewording either message silently brings ambiguous names back into the suggestions, and only one test (`an_ambiguous_name_is_left_out`) would catch it, for one of the two messages.
+- **Recommendation:** Expose ambiguity as data: a diagnostic code, or the set of ambiguous names on the prepared module. Use that instead of the message text, or at least share the prefix constants with the code that formats them.
+- **Fix:** `PreparedModule` records ambiguous names (`mark_name_ambiguous`, `ambiguous_names()`) where the three ambiguity diagnostics are added in `artifacts.rs`, and `ambiguous_names` in `suggestions.rs` reads that instead of message text. `an_ambiguous_name_is_left_out` still passes.
+
+### 🟡 Fixed - RF29 The playground example and the viewer tests miss parts of the scenarios they claim
+- **Severity:** Low
+- **Confidence:** High
+- **Evidence:** The playground delta asks for an example "that ... writes properties with tokens, with literals and unset". `let tiles = <Tile padding={env.space.md} fill={env.color.surface} />` (`sites/playground/src/examples/nx/visual-test-cases.nx:237`) has tokens and an unset `radius`, but no literal-written property to bind. The viewer test "adds an unset property with a name, and Default leaves it unset" never chooses `Default` on the unset property. There are no tests for the token-click path on a `let`, for Escape keeping the selection after a click-opened popover, or for a token without a preview offering no Replace with value. Task 5.6 is checked.
+- **Recommendation:** Add a literal property to `Tile` (for example `radius=4`, leaving another unset) and cover binding it in the browser check. Add the missing viewer assertions, or rename the test to match what it checks.
+- **Fix:** Tile gains `border: design.BorderWidth = 0`, written as `border=1` in `tiles`. The browser check binds it to `env.borderWidth.thin` and undoes it. The viewer test for unset properties now chooses Default on `tokened.body.radius` (no edit, still unset). New tests cover Escape after a click-opened popover (selection stays), a `let` token click, and a token without a preview (`{sum}`, no Replace with value).
+
+## Questions (2026-11-25 18:59 pass)
+- (Answered by the fix: yes, element values are offered named values.) RF20: are element values of record- or union-typed properties (`fill=<Paint.color …/>`) meant to be offered named values in this change? The service supports replacing them and the viewer delta doesn't exclude them, but the viewer filters them out. If it's deliberate, record it in `specs/future.md`.
+
+## Summary (2026-11-25 18:59 pass)
+- The implementation is substantial and mostly faithful to the deltas. Keys, matching, grouping, ordering, `self`, shadowing and previews behaved as specified in every probe, and the Rust and viewer suites pass.
+- Three Medium issues: the HTTP host drops `suggestions` without `visualizers` (RF18); a `color` edit can now overwrite a computed color element with hex (RF19); and the viewer can't bind element-valued properties such as `Paint` (RF20).
+- The rest are Low: line properties and `let` tokens (RF21), table bloat (RF22), an unflagged compiler change (RF23), scope-blind previews (RF24), keyboard default activation (RF25), popover ARIA details (RF26), a spec/code mismatch on refusal codes (RF27), fragile ambiguity detection (RF28), and example and test gaps (RF29).

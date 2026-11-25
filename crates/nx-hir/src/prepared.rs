@@ -470,6 +470,8 @@ pub struct PreparedModule {
     /// the namespace: a second import of `env.colorMode`. An `env.` read sees every one of them,
     /// so it can report the name as ambiguous rather than resolve it to whichever came first.
     hidden_environment_bindings: Vec<PreparedBinding>,
+    /// The visible names two imports both provide, which a diagnostic reports as ambiguous.
+    ambiguous_names: Vec<String>,
 }
 
 impl PreparedModule {
@@ -485,6 +487,7 @@ impl PreparedModule {
             diagnostics: Vec::new(),
             incomplete_imports: Vec::new(),
             hidden_environment_bindings: Vec::new(),
+            ambiguous_names: Vec::new(),
         };
         prepared.add_local_bindings();
         prepared
@@ -528,6 +531,20 @@ impl PreparedModule {
     /// Records one prepared-binding diagnostic.
     pub fn add_diagnostic(&mut self, diagnostic: LoweringDiagnostic) {
         self.diagnostics.push(diagnostic);
+    }
+
+    /// Records that two imports both provide the visible name `name`, as the diagnostic recorded
+    /// with it reports, so tools can leave the name out without reading the diagnostic's text.
+    pub fn mark_name_ambiguous(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        if !self.ambiguous_names.contains(&name) {
+            self.ambiguous_names.push(name);
+        }
+    }
+
+    /// The visible names two imports both provide, in the order they were found.
+    pub fn ambiguous_names(&self) -> &[String] {
+        &self.ambiguous_names
     }
 
     /// Records that the import written at `span` did not bind every name its author meant it

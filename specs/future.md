@@ -2442,6 +2442,10 @@ viewer's named-values popover). Left for later:
   formatter resolve a type spelled through an import alias (`design.Radius`) by its last part, which
   picks the wrong declaration when two modules declare the same name. The source tree could carry
   each property's resolved type declaration instead.
+- **A button for properties read on a line.** A property shown in a folded element value's head or
+  on its field's line offers its named values from Ctrl+Space and a click on its token, but draws no
+  hexagon there, so a pointer reader finds it only by unfolding. A button that does not crowd the
+  line (shown while the property is selected) would close the gap.
 - **Visual at phone width in the playground.** At a 390-pixel viewport the playground's NX pane
   gives `<nx-viewer>` about 62 pixels, so Visual is unreadable on a phone. This predates value
   suggestions (every example shows it); the pane's layout, not the viewer, needs the fix.

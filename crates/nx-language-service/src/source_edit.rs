@@ -157,7 +157,8 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
         SourceEdit::SetValue {
             value: SourceEditValue::Color { text },
         } if tree.nodes[at].role == SourceRole::Call
-            || (tree.nodes[at].role == SourceRole::Element && tree.nodes[at].color.is_some()) =>
+            || (tree.nodes[at].role == SourceRole::Element
+                && (tree.nodes[at].color.is_some() || is_color_element(tree, at))) =>
         {
             set_constructor_color(source, tree, at, text)
         }
@@ -1016,6 +1017,17 @@ fn tag_name_end(source: &str, element_start: usize) -> Option<usize> {
             .find_map(|child| find(child, start))
     }
     find(syntax.root(), element_start)
+}
+
+/// Whether the element at `at` constructs the canonical `Color` union, whatever its channels: one
+/// whose color is computed or invalid is still a color, which a `color` value must not overwrite.
+fn is_color_element(tree: &SourceTree, at: usize) -> bool {
+    tree.nodes[at]
+        .declaration
+        .and_then(|index| tree.declarations.get(index as usize))
+        .is_some_and(|declaration| {
+            declaration.module == "@nx/color/color.nx" && declaration.name == "Color"
+        })
 }
 
 fn set_constructor_color(

@@ -39,6 +39,16 @@ const CARD = [
   "let root() = <Card padding=8 radius={env.radius.md} fill={standardPalette.green500} />",
   "",
   "let tokened() = <Card padding={env.space.md} background={env.color.surface} />",
+  "",
+  "let tight: Spacing = {env.space.sm}",
+  "",
+  "let sum: Spacing = { gap + 2 }",
+  "",
+  "let summed() = <Card padding={sum} />",
+  "",
+  "let tint: Color = {env.color.accent}",
+  "",
+  "let tinted() = <Card fill={tint} />",
   ""
 ].join("\n");
 
@@ -138,7 +148,43 @@ describe("named values", () => {
     assert.equal(popover(element).querySelector(".named-foot")!.textContent, "Previews show default values");
     const input = popover(element).querySelector("input")!;
     assert.equal(input.getAttribute("role"), "combobox");
-    assert.ok(input.getAttribute("aria-activedescendant"));
+    assert.equal(input.getAttribute("aria-activedescendant"), null, "no row is active until the reader picks one");
+    assert.equal(button(element, "root.body.padding")!.getAttribute("aria-haspopup"), "dialog");
+    assert.equal(popover(element).querySelector(".named-list .named-empty"), null, "the listbox holds options alone");
+    input.value = "zzzz";
+    input.dispatchEvent(new window.Event("input"));
+    const empty = popover(element).querySelector<HTMLElement>(".named-empty")!;
+    assert.equal(empty.getAttribute("role"), "status");
+    assert.equal(empty.hidden, false);
+    assert.equal(empty.textContent, "No named values match");
+    input.value = "gap";
+    input.dispatchEvent(new window.Event("input"));
+    assert.match(popover(element).querySelector(".named-detail")!.textContent ?? "", /Spacing/, "the active row's type shows for the keyboard");
+  });
+
+  it("walks the rows with the arrows, and Enter with none active changes nothing", async () => {
+    const element = show(await card());
+    const fired = edits(element);
+    button(element, "root.body.padding")!.click();
+    const input = popover(element).querySelector("input")!;
+    press(input, "Enter");
+    assert.deepEqual(fired, []);
+    assert.equal(popover(element).hidden, false, "the popover stays open");
+    press(input, "ArrowDown");
+    assert.equal(popover(element).querySelector(".named-row.active")?.getAttribute("data-default"), "true");
+    press(input, "ArrowDown");
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-row.active")?.dataset["name"], "env.space.none");
+    press(input, "Enter");
+    assert.deepEqual(fired, [{ key: "root.body.padding.value", edit: { kind: "setValue", value: { kind: "name", name: "env.space.none" } } }]);
+  });
+
+  it("walks from the marked row", async () => {
+    const element = show(await card());
+    button(element, "root.body.radius")!.click();
+    const input = popover(element).querySelector("input")!;
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-row.active")?.dataset["name"], "env.radius.md");
+    press(input, "ArrowDown");
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-row.active")?.dataset["name"], "env.radius.lg");
   });
 
   it("shows colors with their swatches and filters by words", async () => {
@@ -189,7 +235,7 @@ describe("named values", () => {
     assert.ok(inside.includes("# Badge") && inside.some((row) => row.startsWith("tint")), inside.join("\n"));
     press(popover(element).querySelector("input")!, "Escape");
     button(element, "root.body.fill")!.click();
-    assert.ok(!listed(element).some((row) => row.startsWith("tint")));
+    assert.ok(!listed(element).includes("# Badge"), listed(element).join("\n"));
   });
 
   it("shows no button when not editable", async () => {
@@ -214,6 +260,47 @@ describe("named values", () => {
     button(element, "root.body.background")!.click();
     choose(element, "env.color.surface");
     assert.deepEqual(fired, [{ key: "root.body", edit: { kind: "addProperty", name: "background", value: { kind: "name", name: "env.color.surface" } } }]);
+    // An unset property with a default: its Default row leaves it unset.
+    button(element, "tokened.body.radius")!.click();
+    const rows = [...popover(element).querySelectorAll<HTMLElement>(".named-row")];
+    assert.equal(rows[0]!.dataset["default"], "true");
+    rows[0]!.click();
+    assert.equal(fired.length, 1, "Default adds nothing");
+    assert.ok(button(element, "tokened.body.radius"), "the property is still unset");
+  });
+
+  it("keeps the selection when Escape closes a popover a click opened", async () => {
+    const element = show(await card());
+    rendered(element, "tokened.body.padding").querySelector<HTMLElement>(".reference-token")!.click();
+    assert.equal(popover(element).hidden, false);
+    press(popover(element).querySelector("input")!, "Escape");
+    assert.equal(popover(element).hidden, true);
+    assert.equal(element.selection, "tokened.body.padding");
+  });
+
+  it("opens from a click on a let's token", async () => {
+    const element = show(await card());
+    rendered(element, "tight.value").click();
+    assert.equal(popover(element).hidden, false);
+    assert.ok(listed(element).some((row) => row.startsWith("* env.space.sm")), listed(element).join("\n"));
+  });
+
+  it("previews a name by the value it names where it is written, not a parameter's of the same name", async () => {
+    const element = show(await card());
+    const swatch = rendered(element, "tinted.body.fill").querySelector<HTMLElement>(".swatch");
+    assert.ok(swatch, "the token shows its swatch");
+    assert.notEqual(swatch.style.backgroundColor, "rgb(0, 0, 0)", "not Badge's tint default");
+    rendered(element, "tinted.body.fill").querySelector<HTMLElement>(".row-menu")!.click();
+    const replace = [...root(element).querySelectorAll<HTMLElement>(".menu .menu-item")].find((item) => item.dataset["action"] === "replace");
+    assert.ok(replace, "Replace with value is offered");
+    assert.match(replace.textContent ?? "", /#155dfc/);
+  });
+
+  it("offers no Replace with value for a token without a preview", async () => {
+    const element = show(await card());
+    rendered(element, "summed.body.padding").querySelector<HTMLElement>(".row-menu")!.click();
+    const items = [...root(element).querySelectorAll<HTMLElement>(".menu .menu-item")].map((item) => item.dataset["action"]);
+    assert.ok(!items.includes("replace"), items.join(", "));
   });
 
   it("opens from a click on a token, its name marked, and swaps it", async () => {
@@ -274,6 +361,10 @@ const DRAWING = [
   "let drawing() = <g.Circle cx=10 cy=10 r=8 opacity=0.5 fill=<g.Paint.color color=#2563eb/> />",
   "",
   "let box() = <g.Rectangle width=10 height=10 rx=2 />",
+  "",
+  "let blue: g.Paint = <g.Paint.color color=#2563eb/>",
+  "",
+  "let tinted() = <g.Circle cx=1 cy=1 r=1 fill=<g.Paint.color color={env.color.accent}/> />",
   ""
 ].join("\n");
 
@@ -285,6 +376,29 @@ describe("named values in graphics", () => {
     assert.ok(button(element, "box.body.rx"), "rx offers radii");
     button(element, "box.body.rx")!.click();
     assert.ok(listed(element).some((row) => row.startsWith("env.radius.md ")), listed(element).join("\n"));
+  });
+
+  it("binds a paint written as an element to a named paint", async () => {
+    const element = show(await treeOf([{ uri: "nx:///drawing.nx", identity: "drawing.nx", source: DRAWING }], { visualizers: { modules: [] }, suggestions: true }));
+    const fill = button(element, "drawing.body.fill");
+    assert.ok(fill, "a paint element offers named paints");
+    const changes = edits(element);
+    fill.click();
+    assert.ok(listed(element).includes("blue"), listed(element).join("\n"));
+    choose(element, "blue");
+    assert.deepEqual(changes, [{ key: "drawing.body.fill.value", edit: { kind: "setValue", value: { kind: "name", name: "blue" } } }]);
+  });
+
+  it("offers a line property's named values from Ctrl+Space and a click on its token", async () => {
+    const element = show(await treeOf([{ uri: "nx:///drawing.nx", identity: "drawing.nx", source: DRAWING }], { visualizers: { modules: [] }, suggestions: true }));
+    element.selection = "drawing.body.fill.value.color";
+    press(root(element).querySelector(".body")!, " ", { ctrlKey: true });
+    assert.equal(popover(element).hidden, false);
+    assert.ok(listed(element).some((row) => row.startsWith("env.color.accent ")), listed(element).join("\n"));
+    press(popover(element).querySelector("input")!, "Escape");
+    root(element).querySelector<HTMLElement>('[data-field="tinted.body.fill.value.color"] [data-hover="tinted.body.fill.value.color.value"]')!.click();
+    assert.equal(popover(element).hidden, false);
+    assert.ok(listed(element).some((row) => row.startsWith("* env.color.accent ")), listed(element).join("\n"));
   });
 
   it("offers colors with their swatches for a paint's color, unfolded", async () => {

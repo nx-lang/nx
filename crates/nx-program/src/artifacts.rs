@@ -3353,6 +3353,7 @@ fn add_workspace_item_bindings(
                 ),
                 span,
             });
+            module.mark_name_ambiguous(visible_name.to_string());
             continue;
         }
 
@@ -3736,6 +3737,7 @@ fn add_ambiguous_interface_diagnostic(
         ),
         span,
     });
+    module.mark_name_ambiguous(visible_name.to_string());
 }
 
 /// Binds a selectively imported library declaration's derived `<Name>.Update`, `<Name>.Property`,
@@ -3858,6 +3860,7 @@ fn add_imported_interface_bindings(
                 ),
                 span,
             });
+            module.mark_name_ambiguous(visible_name.to_string());
             continue;
         }
 

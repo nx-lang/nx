@@ -385,33 +385,11 @@ fn import_for(from: &str, imports: &[Import], visible: &str, target: &str) -> Op
 
 /// The names the module's own imports leave ambiguous, which reading would report.
 fn ambiguous_names(artifact: &nx_types::ModuleArtifact) -> FxHashSet<String> {
-    let mut names = FxHashSet::default();
-    let lowering = artifact
+    artifact
         .prepared_module
         .as_deref()
-        .map(|prepared| {
-            prepared
-                .diagnostics()
-                .iter()
-                .map(|diagnostic| diagnostic.message.as_str())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let messages = artifact
-        .diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.message())
-        .chain(lowering);
-    for message in messages {
-        for prefix in ["Imported name '", "Ambiguous imported name '"] {
-            if let Some(rest) = message.strip_prefix(prefix) {
-                if let Some(end) = rest.find('\'') {
-                    names.insert(rest[..end].to_string());
-                }
-            }
-        }
-    }
-    names
+        .map(|prepared| prepared.ambiguous_names().iter().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// The identity a written import path names, from the module with identity `from`: `./brand.nx`
@@ -1037,6 +1015,32 @@ impl TreeBuilder<'_> {
 
         let mut suggestions = Vec::new();
         for root in roots {
+            // Matched first, so a value none of whose suggestions some place uses adds nothing to
+            // the declaration table, and its reads are not followed.
+            let mut found = Vec::new();
+            let probe = Context {
+                group: SourceSuggestionGroup {
+                    kind: root.group,
+                    label: root.label.clone(),
+                },
+                scope: None,
+                declaration: 0,
+                self_: Vec::new(),
+                value: root.value.clone(),
+            };
+            self.visit(
+                &workspace,
+                &probe,
+                &used,
+                root.name.clone(),
+                &[],
+                &root.ty,
+                root.doc.clone(),
+                &mut found,
+            );
+            if found.is_empty() {
+                continue;
+            }
             let declaration = self.entry(&root.start);
             let scope = root.scope.as_ref().and_then(|scope| self.entry(scope));
             let Some(declaration) = declaration else {
@@ -1066,26 +1070,12 @@ impl TreeBuilder<'_> {
                 .filter_map(|origin| self.entry(origin))
                 .collect::<Vec<_>>();
             self_.sort_unstable();
-            let context = Context {
-                group: SourceSuggestionGroup {
-                    kind: root.group,
-                    label: root.label.clone(),
-                },
-                scope,
-                declaration,
-                self_,
-                value: root.value.clone(),
-            };
-            self.visit(
-                &workspace,
-                &context,
-                &used,
-                root.name.clone(),
-                &[],
-                &root.ty,
-                root.doc.clone(),
-                &mut suggestions,
-            );
+            for mut suggestion in found {
+                suggestion.declaration = declaration;
+                suggestion.scope = scope;
+                suggestion.self_ = self_.clone();
+                suggestions.push(suggestion);
+            }
         }
         suggestions
     }
