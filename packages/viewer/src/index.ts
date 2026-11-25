@@ -4703,12 +4703,12 @@ export class NxViewerElement extends ElementBase {
       option.title = suggestion.doc === undefined ? suggestion.type : `${suggestion.type}\n${suggestion.doc}`;
       group.append(option);
     }
-    // Outside the listbox, which holds options alone, and announced when it shows.
+    // Outside the listbox, which holds options alone; always there, so a screen reader announces
+    // the text it gains, and empty while rows show.
     const empty = document.createElement("div");
     empty.className = "named-empty";
     empty.setAttribute("role", "status");
     empty.setAttribute("aria-live", "polite");
-    empty.hidden = true;
     // The active row's type and doc, which its hover card gives the pointer, for the keyboard.
     const detail = document.createElement("div");
     detail.className = "named-detail";
@@ -4761,7 +4761,6 @@ export class NxViewerElement extends ElementBase {
     }
     const empty = this.#popover.querySelector<HTMLElement>(".named-empty");
     if (empty !== null) {
-      empty.hidden = shown.length > 0;
       empty.textContent = shown.length > 0 ? "" : "No named values match";
     }
     this.#placeCard(session.anchor, this.#popover);

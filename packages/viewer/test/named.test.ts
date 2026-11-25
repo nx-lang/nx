@@ -155,7 +155,6 @@ describe("named values", () => {
     input.dispatchEvent(new window.Event("input"));
     const empty = popover(element).querySelector<HTMLElement>(".named-empty")!;
     assert.equal(empty.getAttribute("role"), "status");
-    assert.equal(empty.hidden, false);
     assert.equal(empty.textContent, "No named values match");
     input.value = "gap";
     input.dispatchEvent(new window.Event("input"));

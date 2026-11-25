@@ -1160,7 +1160,7 @@ export const styles = `
 }
 .popover .named-rule { height: 1px; margin: 3px 8px; background: var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f)); }
 .popover .named-empty { padding: 8px 10px; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
-.popover .named-empty[hidden] { display: none; }
+.popover .named-empty:empty { padding: 0; }
 .popover .named-detail {
   padding: 4px 10px;
   border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
