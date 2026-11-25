@@ -1079,10 +1079,10 @@ export const styles = `
   visibility: hidden;
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
 }
-.source .named-values > svg { width: 0.95em; height: 0.95em; }
-.source .row-anchor.with-named > .row-menu { left: 2.4ch; }
-.source .property-menu.with-named:has(> .row-menu.selected) { width: 5ch; }
-.source .property-menu.with-named > .row-menu { left: 2.4ch; }
+.source .named-values > svg { width: 1.15em; height: 1.15em; }
+.source .row-anchor.with-named > .row-menu { left: 3ch; }
+.source .property-menu.with-named:has(> .row-menu.selected) { width: 5.6ch; }
+.source .property-menu.with-named > .row-menu { left: 3ch; }
 .source .named-anchor { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
 .source .sheet-row:hover > :is(.sheet-value, .sheet-below) > .row-anchor > .named-values,
 .source .sheet-row.selected > :is(.sheet-value, .sheet-below) > .row-anchor > .named-values,

@@ -312,18 +312,13 @@ function hexagon(document: Document): SVGSVGElement {
   svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.4");
-  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("stroke-width", "1.3");
+  // Sharp corners and no inner mark, so the six sides read as a hexagon even at text size.
+  svg.setAttribute("stroke-linejoin", "miter");
   svg.setAttribute("aria-hidden", "true");
   const outline = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  outline.setAttribute("d", "M8 1.8 13.4 4.9v6.2L8 14.2 2.6 11.1V4.9z");
-  const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  dot.setAttribute("cx", "8");
-  dot.setAttribute("cy", "8");
-  dot.setAttribute("r", "1.6");
-  dot.setAttribute("fill", "currentColor");
-  dot.setAttribute("stroke", "none");
-  svg.append(outline, dot);
+  outline.setAttribute("d", "M8 1.2 13.9 4.6v6.8L8 14.8 2.1 11.4V4.6z");
+  svg.append(outline);
   return svg;
 }
 
