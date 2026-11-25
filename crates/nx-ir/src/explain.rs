@@ -906,9 +906,15 @@ impl<'a> Explainer<'a> {
                 let slot = self.int_operand(entry, 6, "actionHandler")?;
                 let owner = self
                     .optional_reference_suffix(self.operand(entry, 7, "actionHandler")?, "owner")?;
+                // A handler that reads the environment captures the overrides around it.
+                let reads = match entry.get(9) {
+                    None => "",
+                    Some(_) if self.int_operand(entry, 9, "actionHandler")? == 1 => " reads env",
+                    Some(_) => return Err(self.malformed("an actionHandler flag is not 1")),
+                };
                 // The slot is printed because the body's reads of `action` print only the name.
                 let mut lines = vec![format!(
-                    "handler {component}.{emit} action@{slot}:{action}{owner} =>"
+                    "handler {component}.{emit} action@{slot}:{action}{owner}{reads} =>"
                 )];
                 lines.extend(indent(self.node(self.int_operand(
                     entry,

@@ -141,6 +141,8 @@ const STRS: &[Op] = &[Op::Str];
 /// field path, the value; a formula also carries the formula flag, as [`Op::FlaggedList`] writes it.
 const OVERRIDE: &[Op] = &[Op::OptRef, Op::List(STRS), Op::Node];
 const NODE: &[Op] = &[Op::Node];
+/// A trailing flag cell.
+const FLAG: &[Op] = &[Op::Int];
 /// One top-level provide: the environment value, absent for a bundle, the field path, the value.
 const PROVIDE: &[Op] = &[Op::OptRef, Op::List(STRS), Op::Node];
 const REFS: &[Op] = &[Op::RefPair];
@@ -249,7 +251,16 @@ impl Table {
                 node::RECORD | node::COMPONENT => &[Op::Ref, Op::List(PROPERTY), Op::List(NODES)],
                 node::UNION_CASE => &[Op::Ref, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ELEMENT => &[Op::Int, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
-                node::ACTION_HANDLER => &[Op::Ref, Op::Str, Op::Ref, Op::Int, Op::OptRef, Op::Node],
+                // The environment flag is left out for a handler whose body reads no environment.
+                node::ACTION_HANDLER => &[
+                    Op::Ref,
+                    Op::Str,
+                    Op::Ref,
+                    Op::Int,
+                    Op::OptRef,
+                    Op::Node,
+                    Op::Trailing(FLAG),
+                ],
                 node::ENV_READ => &[Op::Ref],
                 node::ENV_PROVIDE => &[Op::FlaggedList(OVERRIDE), Op::Node],
                 // The base, the bundle whose entries come first, is left out when there is none.

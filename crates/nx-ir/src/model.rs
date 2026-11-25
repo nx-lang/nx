@@ -57,6 +57,11 @@ pub const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1: &str = "environment-v1";
 /// is written refuses the module by name rather than giving formulas the wrong values.
 pub const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2: &str = "environment-v2";
 
+/// Required as well by a module that holds an action handler whose body reads the environment,
+/// flagged so that it captures the overrides of the provides around it, so a runtime that runs
+/// every handler in its component's environment refuses the module by name.
+pub const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3: &str = "environment-v3";
+
 /// The kind numbers of schema 5. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
