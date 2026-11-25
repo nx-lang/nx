@@ -1,0 +1,126 @@
+{
+  "main.nx::Page": {
+    "batches": [
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ],
+      [
+        {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+        {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+        {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+        {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+        {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+        {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+        {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+        {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+        {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+        {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+        {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+      ]
+    ],
+    "initial": [
+      {"path": "", "module": "main.nx", "start": 1203, "end": 2087},
+      {"path": "/children/0", "module": "main.nx", "start": 1215, "end": 1236},
+      {"path": "/children/1", "module": "main.nx", "start": 1270, "end": 1336},
+      {"path": "/children/2", "module": "main.nx", "start": 1345, "end": 1426},
+      {"path": "/children/3", "module": "main.nx", "start": 1431, "end": 1513},
+      {"path": "/children/4", "module": "main.nx", "start": 1556, "end": 1624},
+      {"path": "/children/5", "module": "main.nx", "start": 1683, "end": 1771},
+      {"path": "/children/6", "module": "main.nx", "start": 1818, "end": 1895},
+      {"path": "/children/6/children/0", "module": "main.nx", "start": 1823, "end": 1889},
+      {"path": "/children/7", "module": "main.nx", "start": 1904, "end": 1970},
+      {"path": "/children/8", "module": "main.nx", "start": 2004, "end": 2072}
+    ]
+  },
+  "main.nx::root": [
+    {"path": "", "module": "main.nx", "start": 2106, "end": 2114}
+  ]
+}

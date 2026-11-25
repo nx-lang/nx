@@ -1,0 +1,45 @@
+// Action handlers and environment values: a handler sees the overrides written around it, in the
+// body that makes it. The handlers sit inside a `provide` block, on an element with `env.`
+// attributes, behind a function call, under two formulas, in content another component places
+// inside an override of its own, and on a child's emit; one more reads no environment at all, so
+// it captures nothing and costs what it did before.
+abstract external component <Node />
+external component <Label extends Node text:string />
+external component <Button extends Node label:string emits { Tapped { } } />
+component <Stack extends Node content children:Node+ /> = { <column>{children}</column> }
+
+environment mode: string = "outer"
+environment space: int = 1
+environment gap: int = 0
+
+let current() = { env.mode }
+
+// Puts its content inside an override of its own, which the content's handlers do not see.
+component <Box extends Node content children:Node+ /> = {
+  <column>{ provide env.mode="box" { children } }</column>
+}
+
+component <Card extends Node emits { Logged { } } /> = {
+  <Button label="Log" onTapped=<Card.Logged /> />
+}
+
+component <Page /> = {
+  state { last:string = "" count:int = 0 }
+  <Stack>
+    <Label text={last} />
+    { provide env.mode="block" { <Button label="Block" onTapped=<State.Update last={env.mode} /> /> } }
+    <Button env.mode="attr" label="Attr" onTapped=<State.Update last={env.mode} /> />
+    <Button env.mode="call" label="Call" onTapped=<State.Update last={current()} /> />
+    { provide env.mode={env.mode + "!"} { <Button label="Formula" onTapped=<State.Update last={env.mode} /> /> } }
+    {
+      provide env.gap={env.space * 2} {
+        <Button label="Gap" onTapped=<State.Update last={"gap " + env.gap + " " + env.gap} /> />
+      }
+    }
+    { provide env.mode="page" { <Box><Button label="Inner" onTapped=<State.Update last={env.mode} /> /></Box> } }
+    <Card env.mode="card" onLogged=<State.Update last={env.mode} /> />
+    { provide env.mode="plain" { <Button label="Count" onTapped=<State.Update count={count + 1} /> /> } }
+  </Stack>
+}
+
+let root() = { <Page /> }

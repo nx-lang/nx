@@ -1,0 +1,137 @@
+module main.nx fingerprint 10002802473806967495
+requires update-records-v1 action-handlers-v1 environment-v1 environment-v2 environment-v3
+entrypoints functions [current root] components [Node Label Button Stack Box Card Page]
+
+component Node abstract external @6:1-6:37
+
+component Label external @7:1-7:54
+  props
+    text: string required
+
+component Button external @8:1-8:77
+  props
+    label: string required
+  emits
+    Tapped = Button.Tapped
+
+record Button.Tapped @8:62-8:72
+
+component Stack @9:1-9:90
+  props
+    content children: Node+ required
+  body =
+    <column>
+      children
+    </column>
+
+environment mode: string @11:1-11:35 =
+  "outer"
+
+environment space: int @12:1-12:27 =
+  1
+
+environment gap: int @13:1-13:25 =
+  0
+
+function current() @15:1-15:29 =
+  env.mode
+
+component Box @18:1-20:2
+  props
+    content children: Node+ required
+  body =
+    <column>
+      provide env.mode="box" {
+        children
+      }
+    </column>
+
+component Card @22:1-24:2
+  emits
+    Logged = Card.Logged
+  body =
+    <Button label="Log"
+      onTapped=handler Button.Tapped action@0:Button.Tapped owner Card =>
+        <Card.Logged />
+    >
+    </Button>
+
+record Card.Logged @22:38-22:48
+
+component Page state Page.State @26:1-43:2
+  state
+    last: string = ""
+    count: int = 0
+  body =
+    <Stack>
+      <Label text=last />
+      provide env.mode="block" {
+        <Button label="Block"
+          onTapped=handler Button.Tapped action@2:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=env.mode />
+        >
+        </Button>
+      }
+      provide env.mode="attr" {
+        <Button label="Attr"
+          onTapped=handler Button.Tapped action@3:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=env.mode />
+        >
+        </Button>
+      }
+      provide env.mode="call" {
+        <Button label="Call"
+          onTapped=handler Button.Tapped action@4:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=current() />
+        >
+        </Button>
+      }
+      provide env.mode:=(env.mode concat "!") {
+        <Button label="Formula"
+          onTapped=handler Button.Tapped action@5:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=env.mode />
+        >
+        </Button>
+      }
+      provide env.gap:=(env.space mul 2) {
+        <Button label="Gap"
+          onTapped=handler Button.Tapped action@6:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=((("gap " concat text<int>(env.gap)) concat " ") concat text<int>(env.gap)) />
+        >
+        </Button>
+      }
+      provide env.mode="page" {
+        <Box>
+          <Button label="Inner"
+            onTapped=handler Button.Tapped action@7:Button.Tapped owner Page reads env =>
+              <Page.State.Update last=env.mode />
+          >
+          </Button>
+        </Box>
+      }
+      provide env.mode="card" {
+        <Card
+          onLogged=handler Card.Logged action@8:Card.Logged owner Page reads env =>
+            <Page.State.Update last=env.mode />
+        >
+        </Card>
+      }
+      provide env.mode="plain" {
+        <Button label="Count"
+          onTapped=handler Button.Tapped action@9:Button.Tapped owner Page =>
+            <Page.State.Update count=(count add 1) />
+        >
+        </Button>
+      }
+    </Stack>
+
+function root() @45:1-45:26 =
+  <Page />
+
+record Page.State @26:1-43:2
+  last: string required
+  count: int required
+
+record Page.State.Update update of Page.State @26:1-43:2
+  last: string
+  count: int
