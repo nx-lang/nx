@@ -264,9 +264,15 @@ impl Rebinding {
                 }
             }
         }
-        let replacement = captured.map(|captured| {
+        // A handler held inside a captured override is replaced as one in a captured slot is.
+        let environment = match &handler.environment {
+            Some(value) => self.value(value, depth, meter, stack)?,
+            None => None,
+        };
+        let replacement = (captured.is_some() || environment.is_some()).then(|| {
             Arc::new(Handler {
-                captured,
+                captured: captured.unwrap_or_else(|| handler.captured.clone()),
+                environment: environment.or_else(|| handler.environment.clone()),
                 ..Handler::clone(handler)
             })
         });
@@ -954,10 +960,13 @@ impl<'p> Machine<'p> {
             declaration,
             depth: 0,
         };
-        let results = match self.eval(cx, &mut frame, node.body)? {
-            Value::Seq(items) => items.to_vec(),
-            other => vec![other],
-        };
+        let results =
+            self.with_captured_overrides(cx, handler.node, handler.environment.as_ref(), || {
+                Ok(match self.eval(cx, &mut frame, node.body)? {
+                    Value::Seq(items) => items.to_vec(),
+                    other => vec![other],
+                })
+            })?;
         if results.is_empty() {
             return fail(
                 "nx-ir-handler-result",
@@ -1985,6 +1994,7 @@ mod rebinding_tests {
             action_name: Arc::from("Card.Logged"),
             owner: Some(Arc::from("main::Page")),
             captured: Vec::new(),
+            environment: None,
         })
     }
 
