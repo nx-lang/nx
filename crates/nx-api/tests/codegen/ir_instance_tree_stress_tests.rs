@@ -34,7 +34,7 @@
 //! <para>The program mixes the risky features: element overrides and `provide` blocks, an
 //! entry-module bundle with a formula entry, formulas the body provides (one reading its own
 //! value), field overrides, override formulas that capture a prop or a state field, a prop default
-//! that reads `env`, kept top-level values that read `env`, light and dark sections, values a host
+//! that reads `env`, handlers that read the environment inside a provide in a content child, kept top-level values that read `env`, light and dark sections, values a host
 //! can write differently that compare equal, host roots for formula-declared values, refused root
 //! values, renders and emit handlers that fail on some values, patches that write the value a
 //! field holds, emits bound and unbound, two emits in one handler, a handler in a content child,
@@ -155,7 +155,7 @@ component <Frame extends Node content Children:Node+ /> = {
 component <Page /> = {
   state {
     dark:boolean = false flag:boolean = false labelled:boolean = false rows:int = 1 picked:int = 0
-    deep:int = 0
+    deep:int = 0 where:string = \"\"
   }
   <Stack>
     <Card flag={flag} />
@@ -174,8 +174,13 @@ component <Page /> = {
     <Picker onPicked=<State.Update picked={picked + 12 / (1 - action.value)} /> />
     <Picker />
     <Frame>
-      <Label Text={\"deep \" + deep} />
+      <Label Text={\"deep \" + deep + \" \" + where} />
       <Button Text=\"Deep\" onTapped=<State.Update deep={deep + 1} /> />
+      {
+        provide env.locale={if dark { \"ar\" } else { \"he\" }} env.space={env.space + 1} {
+          <Button Text=\"Where\" onTapped=<State.Update where={env.locale + \" \" + env.space + \" \" + env.label} /> />
+        }
+      }
     </Frame>
     <Button Text=\"Dark\" onTapped=<State.Update dark={!dark} /> />
     <Button Text=\"Flag\" onTapped=<State.Update flag={!flag} /> />
@@ -648,9 +653,9 @@ impl Model {
     }
 
     /// A tap on the button at `index` in the output of the node at `key`, run through the bare
-    /// lifecycle as the tree runs it: against the node that created the handler, with each emit
-    /// routed to the handler the parent bound, the node farthest from the root first. Returns the
-    /// host effects, or the error, which leaves the model as it was.
+    /// lifecycle as the tree runs it: against the node that created the handler, in its place,
+    /// with each emit routed to the handler the parent bound, the node farthest from the root
+    /// first. Returns the host effects, or the error, which leaves the model as it was.
     fn tap(
         &mut self,
         program: &Program,
@@ -682,7 +687,14 @@ impl Model {
                 .collect();
             let node = &next[&deepest];
             let result = program
-                .dispatch_component_actions(&node.instance, &batch, &options())
+                .dispatch_component_actions(
+                    &node.instance,
+                    &batch,
+                    &RuntimeOptions {
+                        environment: node.environment.clone(),
+                        ..options()
+                    },
+                )
                 .map_err(|error| format!("dispatch at {deepest}: {error}"))?;
             for action in result.effects {
                 let emit = match &action {

@@ -4628,3 +4628,487 @@ fn results_do_not_survive_the_call() {
     let run = |options: &RuntimeOptions| program.evaluate_function("both", &[], options);
     assert_eq!(cost(run), cost(run));
 }
+
+// ------------------------------------------------------------------------------------------------
+// Handlers keep the overrides written around them
+// ------------------------------------------------------------------------------------------------
+
+/// Handlers inside overrides: `Page` holds them in a `provide` block, on an element with `env.`
+/// attributes, behind a call, under formulas, and for a child's emit; `Quiet` reads nothing in its
+/// render, so only its handler sees a root change; `LocaleList` passes its own `env.locale` to its
+/// parent in an action field.
+const HANDLER_ENVIRONMENT_SOURCE: &str = "
+external component <Button Text?:string emits { Tapped { } } />
+external component <Label Text?:string />
+external component <Stack content Children?:object+ />
+environment mode: string = \"outer\"
+environment space: int = 1
+environment gap: int = 0
+environment locale: string = \"en-US\"
+let current() = { env.mode }
+let letters = { \"a\" \"b\" }
+component <Card emits { Logged { } } /> = { <Button Text=\"Log\" onTapped=<Card.Logged /> /> }
+component <Page /> = {
+  state { last:string = \"\" count:int = 0 }
+  <Stack>
+  <Label Text={last} />
+  { provide env.mode=\"block\" { <Button Text=\"Block\" onTapped=<State.Update last={env.mode} /> /> } }
+  <Button env.mode=\"attr\" Text=\"Attr\" onTapped=<State.Update last={env.mode} /> />
+  <Button env.mode=\"call\" Text=\"Call\" onTapped=<State.Update last={current()} /> />
+  { provide env.mode={env.mode + \"!\"} { <Button Text=\"Formula\" onTapped=<State.Update last={env.mode} /> /> } }
+  <Button Text=\"Plain\" onTapped=<State.Update last={env.mode} /> />
+  { provide env.mode=\"count\" { <Button Text=\"Count\" onTapped=<State.Update count={count + 1} /> /> } }
+  <Card env.mode=\"card\" onLogged=<State.Update last={env.mode} /> />
+  <Card env.space={env.space * 2} onLogged=<State.Update last={\"\" + env.space} /> />
+  </Stack>
+}
+component <Quiet /> = {
+  state { last:string = \"\" }
+  <Stack>{ provide env.gap={env.space * 2} { <Button Text=\"Gap\" onTapped=<State.Update last={\"\" + env.gap} /> /> } }</Stack>
+}
+component <LocaleList emits { Picked { item:string locale:string } } /> = {
+  <Stack>
+    {
+      for item in letters {
+        <Button Text={item} onTapped=<LocaleList.Picked item={item} locale={env.locale} /> />
+      }
+    }
+  </Stack>
+}
+component <Section content Children:object+ /> = { <Stack>{ provide env.locale=\"fr-FR\" { Children } }</Stack> }
+component <Chooser /> = {
+  state { picked:string = \"\" }
+  <Section>
+    <LocaleList onPicked=<State.Update picked={action.item + \" \" + action.locale + \" \" + env.locale} /> />
+  </Section>
+}
+";
+
+fn roots_of(values: &[(&str, NxValue)]) -> RuntimeOptions {
+    RuntimeOptions {
+        environment: nx_ir_runtime::Environment::root(values.iter().cloned()),
+        ..options()
+    }
+}
+
+/// The first record of `type_name` whose `Text` is `text`, depth first.
+fn find_text<'a>(value: &'a NxValue, type_name: &str, text: &str) -> Option<&'a NxValue> {
+    match value {
+        NxValue::Array(items) => items
+            .iter()
+            .find_map(|item| find_text(item, type_name, text)),
+        NxValue::Record {
+            type_name: found,
+            properties,
+        } => {
+            if found.as_deref() == Some(type_name)
+                && properties.get("Text") == Some(&NxValue::String(text.to_string()))
+            {
+                return Some(value);
+            }
+            properties
+                .values()
+                .find_map(|item| find_text(item, type_name, text))
+        }
+        _ => None,
+    }
+}
+
+/// The token a handler record carries.
+fn token_of(handler: Option<&NxValue>) -> String {
+    match handler {
+        Some(NxValue::Record { properties, .. }) => match properties.get("token") {
+            Some(NxValue::String(token)) => token.clone(),
+            other => panic!("no token: {other:?}"),
+        },
+        other => panic!("not a handler: {other:?}"),
+    }
+}
+
+fn property<'a>(value: &'a NxValue, name: &str) -> Option<&'a NxValue> {
+    match value {
+        NxValue::Record { properties, .. } => properties.get(name),
+        _ => None,
+    }
+}
+
+/// Taps the button `text` of `component`, initialized and dispatched under `options`, and returns
+/// the state field `field` after.
+fn tapped_state(
+    program: &Program,
+    component: &str,
+    text: &str,
+    field: &str,
+    init: &RuntimeOptions,
+    dispatch: &RuntimeOptions,
+) -> NxValue {
+    let initialized = program
+        .initialize_component(component, &BTreeMap::new(), &ComponentInit::default(), init)
+        .unwrap();
+    let button = find_text(&initialized.rendered, "Button", text).expect("the button");
+    let token = token_of(property(button, "onTapped"));
+    let result = program
+        .dispatch_component_actions(&initialized.instance, &[tap(&token)], dispatch)
+        .unwrap();
+    result.state[field].clone()
+}
+
+#[test]
+fn a_handler_sees_the_overrides_written_around_it() {
+    let program = program(HANDLER_ENVIRONMENT_SOURCE);
+    for (text, expected) in [
+        ("Block", "block"),
+        ("Attr", "attr"),
+        ("Call", "call"),
+        ("Formula", "outer!"),
+        ("Plain", "outer"),
+    ] {
+        assert_eq!(
+            tapped_state(&program, "Page", text, "last", &options(), &options()),
+            NxValue::String(expected.to_string()),
+            "{text}"
+        );
+    }
+    // A place's value is seen beneath the overrides around the handler.
+    let placed = roots_of(&[("mode", NxValue::String("placed".to_string()))]);
+    assert_eq!(
+        tapped_state(&program, "Page", "Plain", "last", &placed, &placed),
+        NxValue::String("placed".to_string())
+    );
+    assert_eq!(
+        tapped_state(&program, "Page", "Formula", "last", &placed, &placed),
+        NxValue::String("placed!".to_string())
+    );
+}
+
+#[test]
+fn a_captured_formula_follows_the_environment_of_the_dispatch() {
+    let program = program(HANDLER_ENVIRONMENT_SOURCE);
+    let one = roots_of(&[("space", NxValue::Int(1))]);
+    let five = roots_of(&[("space", NxValue::Int(5))]);
+    assert_eq!(
+        tapped_state(&program, "Quiet", "Gap", "last", &one, &one),
+        NxValue::String("2".to_string())
+    );
+    assert_eq!(
+        tapped_state(&program, "Quiet", "Gap", "last", &one, &five),
+        NxValue::String("10".to_string())
+    );
+}
+
+#[test]
+fn an_emit_handler_runs_exactly_against_the_parent_and_twice_through_the_child() {
+    let program = program(HANDLER_ENVIRONMENT_SOURCE);
+    let four = roots_of(&[("space", NxValue::Int(4))]);
+    let page = program
+        .initialize_component("Page", &BTreeMap::new(), &ComponentInit::default(), &four)
+        .unwrap();
+    let NxValue::Record { properties, .. } = &page.rendered else {
+        panic!("{:?}", page.rendered)
+    };
+    let NxValue::Array(children) = &properties["Children"] else {
+        panic!("{properties:?}")
+    };
+    let cards: Vec<&NxValue> = children
+        .iter()
+        .filter(|child| matches!(child, NxValue::Record { type_name: Some(name), .. } if name == "Card"))
+        .collect();
+    assert_eq!(cards.len(), 2);
+    let logged = |token: &str| {
+        json(&format!(
+            r#"{{ "$type": "ActionHandlerInvocation", "token": "{token}", "action": {{ "$type": "Card.Logged" }} }}"#
+        ))
+    };
+    // Dispatched by the parent's token against the parent, in the parent's environment.
+    for (card, expected) in [(cards[0], "card"), (cards[1], "8")] {
+        let token = token_of(property(card, "onLogged"));
+        let result = program
+            .dispatch_component_actions(&page.instance, &[logged(&token)], &four)
+            .unwrap();
+        assert_eq!(result.state["last"], NxValue::String(expected.to_string()));
+    }
+    // Through the child, in the child's environment: an override that sets a value gives the
+    // same result, and one that reads the value it sets applies twice.
+    for (card, expected) in [(cards[0], "card"), (cards[1], "16")] {
+        let NxValue::Record { properties, .. } = card else {
+            panic!()
+        };
+        let mut props = properties.clone();
+        props.remove("$env");
+        let child_options = RuntimeOptions {
+            environment: four.environment.enter(card).unwrap(),
+            ..options()
+        };
+        let init = ComponentInit {
+            parent: Some(&page.instance),
+            state: None,
+        };
+        let child = program
+            .initialize_component("Card", &props, &init, &child_options)
+            .unwrap();
+        let result = program
+            .dispatch_component_actions(
+                &child.instance,
+                &[json(r#"{ "$type": "Card.Logged" }"#)],
+                &child_options,
+            )
+            .unwrap();
+        assert_same(
+            &NxValue::Array(result.effects.clone()),
+            &format!(r#"[{{ "$type": "Page.State.Update", "last": "{expected}" }}]"#),
+        );
+    }
+}
+
+#[test]
+fn a_child_passes_its_environment_to_its_parent_in_an_action_field() {
+    let program = program(HANDLER_ENVIRONMENT_SOURCE);
+    let chooser = program
+        .initialize_component(
+            "Chooser",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    // A host composes Section under Chooser and LocaleList under Section, each in the environment
+    // it enters for the descriptor.
+    let child = |parent: &nx_ir_runtime::ComponentInitResult,
+                 descriptor: &NxValue,
+                 environment: &nx_ir_runtime::Environment,
+                 component: &str| {
+        let NxValue::Record { properties, .. } = descriptor else {
+            panic!("{descriptor:?}")
+        };
+        let mut props = properties.clone();
+        props.remove("$env");
+        let child_options = RuntimeOptions {
+            environment: environment.enter(descriptor).unwrap(),
+            ..options()
+        };
+        let init = ComponentInit {
+            parent: Some(&parent.instance),
+            state: None,
+        };
+        let initialized = program
+            .initialize_component(component, &props, &init, &child_options)
+            .unwrap();
+        (initialized, child_options)
+    };
+    let (section, section_options) = child(
+        &chooser,
+        &chooser.rendered,
+        &options().environment,
+        "Section",
+    );
+    let list_descriptor = match property(&section.rendered, "Children") {
+        Some(NxValue::Array(items)) => items[0].clone(),
+        Some(other) => other.clone(),
+        None => panic!("{:?}", section.rendered),
+    };
+    let (list, list_options) = child(
+        &section,
+        &list_descriptor,
+        &section_options.environment,
+        "LocaleList",
+    );
+    let button = find_text(&list.rendered, "Button", "b").expect("the row");
+    let token = token_of(property(button, "onTapped"));
+    let emitted = program
+        .dispatch_component_actions(&list.instance, &[tap(&token)], &list_options)
+        .unwrap();
+    assert_same(
+        &NxValue::Array(emitted.effects.clone()),
+        r#"[{ "$type": "LocaleList.Picked", "item": "b", "locale": "fr-FR" }]"#,
+    );
+    // The parent reads the child's value from the action, a plain string, and its own from
+    // `env.`: the place where the parent wrote the handler sets no locale.
+    let NxValue::Record { properties, .. } = &chooser.rendered else {
+        panic!()
+    };
+    let list = match &properties["Children"] {
+        NxValue::Array(content) => content[0].clone(),
+        other => other.clone(),
+    };
+    let picked = token_of(property(&list, "onPicked"));
+    let invocation = json(&format!(
+        r#"{{ "$type": "ActionHandlerInvocation", "token": "{picked}", "action": {{ "$type": "LocaleList.Picked", "item": "b", "locale": "fr-FR" }} }}"#
+    ));
+    let result = program
+        .dispatch_component_actions(&chooser.instance, &[invocation], &options())
+        .unwrap();
+    assert_eq!(
+        result.state["picked"],
+        NxValue::String("b fr-FR en-US".to_string())
+    );
+}
+
+/// The explained text of the entry image `source` emits.
+fn explained_entry(source: &str) -> String {
+    let images = emit_nx_ir(
+        &artifact(source),
+        &NxIrEmitOptions {
+            modules: Some(Vec::new()),
+            debug: false,
+        },
+    )
+    .expect("nx ir");
+    let entry = images
+        .into_iter()
+        .find(|image| image.identity == "main.nx")
+        .expect("the entry");
+    nx_ir::explain_nx_ir_image(&entry.bytes).expect("explains")
+}
+
+#[test]
+fn a_handler_whose_body_can_read_the_environment_is_flagged_behind_environment_v3() {
+    let controls = "
+external component <Button Text?:string emits { Tapped { } } />
+external component <Stack content Children?:object+ />
+environment mode: string = \"outer\"
+let current() = { env.mode }
+component <Badge text:string = {env.mode} /> = { <Button Text={text} /> }
+type Pick = <function />: string
+let through(pick:Pick): string = { <pick /> }
+";
+    let reads = |handler: &str| {
+        let text = explained_entry(&format!(
+            "{controls}
+component <Page /> = {{
+  state {{ last:string = \"\" count:int = 0 }}
+  <Stack>{{ provide env.mode=\"block\" {{ <Button onTapped={handler} /> }} }}</Stack>
+}}"
+        ));
+        let flagged = text.contains(" reads env =>");
+        let listed = text
+            .lines()
+            .any(|line| line.starts_with("requires") && line.contains("environment-v3"));
+        assert_eq!(flagged, listed, "{handler}: {text}");
+        flagged
+    };
+    assert!(reads("<State.Update last={env.mode} />"));
+    assert!(reads("<State.Update last={current()} />"));
+    assert!(reads(
+        "{ <State.Update last={\"\" + (<Badge /> == <Badge />)} /> }"
+    ));
+    assert!(reads("<State.Update last={through(current)} />"));
+    assert!(!reads("<State.Update count={count + 1} />"));
+    assert!(!reads(
+        "{ provide env.mode=\"inner\" { <State.Update count={count + 1} /> } }"
+    ));
+}
+
+#[test]
+fn a_flagged_handler_without_environment_v3_is_refused() {
+    let images = emit_nx_ir(
+        &artifact(HANDLER_ENVIRONMENT_SOURCE),
+        &NxIrEmitOptions {
+            modules: Some(Vec::new()),
+            debug: false,
+        },
+    )
+    .expect("nx ir");
+    let entry = images
+        .into_iter()
+        .find(|image| image.identity == "main.nx")
+        .expect("the entry");
+    let mut model = nx_ir::NxIrImage::open(&entry.bytes)
+        .expect("opens")
+        .to_artifact();
+    assert!(PreparedModule::prepare(nx_ir::write_nx_ir_image(&model).unwrap()).is_ok());
+    model
+        .required_features
+        .retain(|feature| feature != "environment-v3");
+    let error = PreparedModule::prepare(nx_ir::write_nx_ir_image(&model).unwrap())
+        .err()
+        .expect("refused");
+    assert!(error.to_string().contains("environment-v3"), "{error}");
+
+    // A flag cell that is not `1` is malformed whatever the module lists.
+    model.required_features.push("environment-v3".to_string());
+    let handler = model
+        .nodes
+        .iter_mut()
+        .find_map(|node| match node {
+            nx_ir::IrItem::List(cells)
+                if cells.first()
+                    == Some(&nx_ir::IrItem::Int(nx_ir::kinds::node::ACTION_HANDLER))
+                    && cells.len() == 10 =>
+            {
+                Some(cells)
+            }
+            _ => None,
+        })
+        .expect("a flagged handler");
+    handler[9] = nx_ir::IrItem::Int(2);
+    assert!(PreparedModule::prepare(nx_ir::write_nx_ir_image(&model).unwrap()).is_err());
+}
+
+#[test]
+fn a_stored_instance_keeps_the_overrides_its_handlers_captured() {
+    let artifact = artifact(HANDLER_ENVIRONMENT_SOURCE);
+    let first = link(&artifact, false);
+    let page = first
+        .initialize_component(
+            "Page",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    let stored = serde_json::to_string(&page.instance).unwrap();
+    let second = link(&artifact, false);
+    let restored = second
+        .restore_component_instance(&mut serde_json::Deserializer::from_str(&stored))
+        .unwrap();
+    for (text, expected) in [("Block", "block"), ("Attr", "attr"), ("Formula", "outer!")] {
+        let button = find_text(&page.rendered, "Button", text).expect("the button");
+        let token = token_of(property(button, "onTapped"));
+        let original = first
+            .dispatch_component_actions(&page.instance, &[tap(&token)], &options())
+            .unwrap();
+        let again = second
+            .dispatch_component_actions(&restored, &[tap(&token)], &options())
+            .unwrap();
+        assert_eq!(original.state, again.state);
+        assert_eq!(again.state["last"], NxValue::String(expected.to_string()));
+    }
+
+    // An entry that names a value the program does not declare is refused, not run.
+    assert!(stored.contains("main.nx::mode"));
+    let altered = stored.replace("main.nx::mode", "main.nx::missing");
+    assert!(second
+        .restore_component_instance(&mut serde_json::Deserializer::from_str(&altered))
+        .is_err());
+}
+
+#[test]
+fn handlers_under_one_provide_share_their_stored_overrides() {
+    let program = program(
+        "
+external component <Button Text?:string emits { Tapped { } } />
+external component <Stack content Children?:object+ />
+environment mode: string = \"outer\"
+component <Rows items?:string+ /> = {
+  state { last:string = \"\" }
+  <Stack>{ provide env.mode=\"a-rather-long-value-that-would-show-if-it-were-written-for-every-row\" {
+    for item in items { <Button Text={item} onTapped=<State.Update last={item + env.mode} /> /> }
+  } }</Stack>
+}",
+    );
+    let size = |rows: usize| {
+        let items: Vec<String> = (0..rows).map(|row| format!("{row}")).collect();
+        let props = fields(&serde_json::json!({ "items": items }).to_string());
+        let rows = program
+            .initialize_component("Rows", &props, &ComponentInit::default(), &options())
+            .unwrap();
+        let stored = serde_json::to_string(&rows.instance).unwrap();
+        assert_eq!(stored.matches("a-rather-long-value").count(), 1);
+        stored.len()
+    };
+    let (small, large) = (size(10), size(1_000));
+    assert!(
+        large < small * 200,
+        "{small} bytes for 10 rows, {large} for 1,000"
+    );
+}
