@@ -65,6 +65,15 @@ SHALL still read that instance's state live.
   against `Page`'s instance, in `Page`'s environment, with a `Card.Logged` action
 - **THEN** `Page`'s `last` SHALL be `8`
 
+#### Scenario: A child passes its environment to its parent in an action field
+- **WHEN** `LocaleList` declares `emits { Picked { item:string locale:string } }` and its row
+  handler is `<LocaleList.Picked item={item} locale={env.locale} />`, and a parent renders
+  `<LocaleList onPicked=<State.Update picked={action.locale + " " + env.locale} /> />` with
+  `env.locale` set to `"fr-FR"` around the `LocaleList` and `"en-US"` at the parent
+- **THEN** the parent's handler SHALL read `action.locale` as `"fr-FR"`, the plain string the
+  child's handler computed where it was written, and `env.locale` as `"en-US"`, its own value
+- **AND** `action.locale` SHALL NOT be a formula: an action field is an ordinary value
+
 ### Requirement: Handler equality covers the captured overrides
 Two action handlers SHALL be equal when they were made by one node and both their captured slots
 and their captured overrides are equal. Captured slots SHALL be compared first, in ascending slot

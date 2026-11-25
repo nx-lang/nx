@@ -263,9 +263,16 @@ the flag and `environment-v3`, and the corpus images are regenerated.
 
 ## Open Questions
 
-- Lexical rather than placement scoping for handlers (Decision 1). Recommended: lexical.
-- Whether to make the bare-API emit path exact now by giving an instance its environment
-  (Decision 8). Recommended: later.
-- Whether to narrow the capture to the values a handler reads (Decision 3). Recommended: later.
-- The feature name, `environment-v3` or `action-handlers-v2` (Decision 4). Recommended:
-  `environment-v3`.
+All resolved, each with the recommended answer:
+
+- **Scoping (Decision 1): lexical.** A handler sees the overrides where it is written, not where it
+  is placed. A child that wants its parent to see a value of its own environment passes it in an
+  action field, as an ordinary value computed where the child writes the action.
+- **The bare-API emit path (Decision 8): documented, made exact later.** An emit is dispatched
+  exactly against the parent. The double application through the child is documented on the
+  lifecycle API, and `specs/future.md` records the fix of an instance that carries its environment.
+- **Narrowing the capture to the values read (Decision 3): later.** It is recorded in
+  `specs/future.md`.
+- **The feature name (Decision 4): `environment-v3`.**
+- **When the overrides are captured: at render.** A handler holds the overrides of the render that
+  made it, and a captured formula is evaluated at the read, in the environment of the dispatch.
