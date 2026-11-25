@@ -979,7 +979,12 @@ and after each step checks every node's output against a fresh initialization th
 lifecycle, with the state the tree holds, and the change set against the outputs that changed
 (`cargo test -p nx-api --test codegen_parity ir_instance_tree_stress`).
 `NX_TREE_STRESS_SEEDS` and `NX_TREE_STRESS_ITERATIONS` set how much it runs (20 seeds of 40 steps by
-default), `NX_TREE_STRESS_SEED` reruns one seed a failure names, and `NX_TREE_STRESS_ALL` runs
-every seed past differences and sums them up by node. The cost tests remain in `nx-codegen`; they run generated host values
+default), `NX_TREE_STRESS_BASE_SEED` the first seed (0 by default, so a pull request's run always
+tries the same seeds), `NX_TREE_STRESS_SEED` reruns one seed a failure names, with the same
+`NX_TREE_STRESS_ITERATIONS`, and `NX_TREE_STRESS_ALL` runs every seed past differences and sums them
+up by node. The nightly `thorough.yml` workflow runs 1000 seeds of 100 steps from a base seed it
+derives from the run's id, so each night tries new seeds; it can also be started by hand with other
+counts, a base seed and a branch, and its job summary gives the base seed and the command that
+reruns a failing seed. The cost tests remain in `nx-codegen`; they run generated host values
 through this runtime and the TypeScript one and hold this runtime's allocations to its counts
 (`cargo test -p nx-codegen --test cost_differential` and `--test cost_allocation`).

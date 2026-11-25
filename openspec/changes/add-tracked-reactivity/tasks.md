@@ -104,6 +104,9 @@
   differently that compare equal included), dispatches and passes over a program that mixes the
   risky features, each step checked against a fresh initialization of every node and against the
   change set.
+- [x] 5.11 A nightly workflow (`.github/workflows/thorough.yml`) that runs the stress test with 1000
+  seeds of 100 steps from a base seed that differs each run (`NX_TREE_STRESS_BASE_SEED`), and can be
+  started by hand with other counts.
 
 ## 6. Corpus and cost model
 

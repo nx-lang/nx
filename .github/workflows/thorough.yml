@@ -1,0 +1,124 @@
+# The thorough run of the instance tree's differential stress test
+# (crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs). The pull request build runs it at
+# its defaults, 20 fixed seeds of 40 steps; this runs 1000 seeds of 100 steps each night, from a
+# base seed that differs from run to run, so each night explores seeds no run has tried. A manual
+# run takes the seeds, the steps and the base seed as inputs, and runs against the branch picked
+# when it is started.
+#
+# A failure names its seed. To reproduce it locally, with the steps the run used (100 by default):
+#
+#   NX_TREE_STRESS_SEED=<seed> NX_TREE_STRESS_ITERATIONS=100 \
+#     cargo test -p nx-api --test codegen_parity ir_instance_tree_stress
+#
+# The whole run again: NX_TREE_STRESS_BASE_SEED=<base seed> NX_TREE_STRESS_SEEDS=1000 with the same
+# NX_TREE_STRESS_ITERATIONS. The log and the job summary give the base seed.
+name: 🎲 Thorough tests
+
+on:
+  schedule:
+  - cron: '17 7 * * *' # 07:17 UTC each night
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: How many seeds to run
+        required: false
+        default: '1000'
+      iterations:
+        description: How many steps each seed runs
+        required: false
+        default: '100'
+      base_seed:
+        description: The first seed (empty derives it from the run's id)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thorough-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tree-stress:
+    name: 🎲 Instance tree stress
+    runs-on: ubuntu-latest
+    # The build takes about ten minutes without a cache and the default run about seven on a
+    # developer machine (4 ms a step), so an hour leaves room for a slower runner.
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+    - name: Set up Rust and the pnpm workspace
+      uses: ./.github/actions/setup-rust-node
+    # The inputs reach the script through the environment, never pasted into it, and must be
+    # whole numbers. A scheduled run has no inputs and takes the defaults.
+    - name: Choose the seeds
+      env:
+        SEEDS: ${{ inputs.seeds || '1000' }}
+        ITERATIONS: ${{ inputs.iterations || '100' }}
+        BASE_SEED: ${{ inputs.base_seed }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        if [ -z "$BASE_SEED" ]; then
+          # Run ids grow, and 100000 seeds apart leaves each run its own range.
+          BASE_SEED=$((RUN_ID * 100000))
+        fi
+        for value in "$SEEDS" "$ITERATIONS" "$BASE_SEED"; do
+          if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+            echo "::error::seeds, iterations and base_seed must be whole numbers, not '${value}'."
+            exit 1
+          fi
+        done
+        {
+          echo "NX_TREE_STRESS_SEEDS=$SEEDS"
+          echo "NX_TREE_STRESS_ITERATIONS=$ITERATIONS"
+          echo "NX_TREE_STRESS_BASE_SEED=$BASE_SEED"
+        } >> "$GITHUB_ENV"
+        echo "Base seed ${BASE_SEED}: seeds ${BASE_SEED} to $((BASE_SEED + SEEDS - 1)), ${ITERATIONS} steps each."
+        {
+          echo "## Instance tree stress"
+          echo
+          echo "- Commit: \`${GITHUB_SHA}\`"
+          echo "- Base seed: \`${BASE_SEED}\`"
+          echo "- Seeds: ${SEEDS} (\`${BASE_SEED}\` to \`$((BASE_SEED + SEEDS - 1))\`), ${ITERATIONS} steps each"
+          echo
+          echo "Reproduce the whole run:"
+          echo
+          echo "\`\`\`"
+          echo "NX_TREE_STRESS_BASE_SEED=${BASE_SEED} NX_TREE_STRESS_SEEDS=${SEEDS} NX_TREE_STRESS_ITERATIONS=${ITERATIONS} \\"
+          echo "  cargo test -p nx-api --test codegen_parity ir_instance_tree_stress"
+          echo "\`\`\`"
+        } >> "$GITHUB_STEP_SUMMARY"
+      shell: bash
+    - name: Build the tests
+      run: cargo test -p nx-api --test codegen_parity --locked --no-run
+    - name: 🎲 Run the stress test
+      run: |
+        set -o pipefail
+        cargo test -p nx-api --test codegen_parity --locked ir_instance_tree_stress 2>&1 \
+          | tee "${RUNNER_TEMP}/stress.log"
+      shell: bash
+    - name: Name the failing seed in the summary
+      if: failure()
+      run: |
+        line=$(grep -m 1 'instance tree stress, seed' "${RUNNER_TEMP}/stress.log" || true)
+        if [ -n "$line" ]; then
+          seed=$(sed -E 's/^.*instance tree stress, seed ([0-9]+).*$/\1/' <<< "$line")
+          echo "::error::The instance tree stress test failed on seed ${seed}."
+          {
+            echo
+            echo "### Failed"
+            echo
+            echo "\`\`\`"
+            echo "$line"
+            echo "\`\`\`"
+            echo
+            echo "Reproduce it:"
+            echo
+            echo "\`\`\`"
+            echo "NX_TREE_STRESS_SEED=${seed} NX_TREE_STRESS_ITERATIONS=${NX_TREE_STRESS_ITERATIONS} \\"
+            echo "  cargo test -p nx-api --test codegen_parity ir_instance_tree_stress"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+      shell: bash
