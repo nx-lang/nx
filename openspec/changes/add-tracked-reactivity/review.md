@@ -657,7 +657,7 @@ Scope: the instance tree's differential stress test (5abba225, 025383a3:
 nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-runtime/README.md` paragraph and tasks
 5.10 and 5.11). Each experiment below was a throwaway edit, reverted afterwards.
 
-### 🟡 Fixed - RF35 The reference render takes its state from the tree, so a tree that loses or resets state agrees with it
+### ✅ Verified - RF35 The reference render takes its state from the tree, so a tree that loses or resets state agrees with it
 - **Severity:** Medium
 - **Confidence:** High (confirmed by experiment)
 - **Location:** `ir_instance_tree_stress_tests.rs` `Run::check_fresh` (`self.tree.state(&key)` passed as `ComponentInit::state`)
@@ -675,8 +675,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   replaced. Then render the reference from that map and check `tree.state(key)` against it. Otherwise, say in the
   module doc and the README that state is taken from the tree and is not checked.
 - **Fix:** The test now keeps a model on the bare lifecycle (`Model` in the test). It holds each node's state by key. A tap runs through `dispatch_component_actions` on the model's own instances, against the node that created the handler, found with `same_handler`. Emits go to the handler the parent bound, found with `bound_handler_is`, the deepest node first, as the tree routes them. Each step then initializes every node afresh from the model's state: state resets when the component at a key changes, when a node above it is replaced, or after a `remove`. The tree's `state(key)` and output are compared with the model's, and so are the host effects of each tap. Your experiment (`state: None` in `initialize_node`) now fails at seed 1, step 10.
+- **Verification:** Verified. I re-ran my experiment, passing `state: None` when an existing node is initialized again. It now fails at seed 1, step 10, with `root/10 holds ...`. The model is independent of the tree's state: it keeps state by key from `initialize_component` and `dispatch_component_actions` on its own instances, and resets it when a key is replaced or removed. It compares `tree.state(key)` too. The model still uses the runtime's `Environment::enter`, `same_handler` and `bound_handler_is`, so a bug in those would be shared. That is acceptable for a test aimed at the tree's reuse and composition.
 
-### 🟡 Fixed - RF36 No step ever adds, removes or replaces a node, so the drop, replace and removed-list paths are never exercised
+### ✅ Verified - RF36 No step ever adds, removes or replaces a node, so the drop, replace and removed-list paths are never exercised
 - **Severity:** Medium
 - **Confidence:** High (measured)
 - **Location:** `ir_instance_tree_stress_tests.rs` `PROGRAM` (`Page`) and `host_show`; `Run::check_changes` removed and
@@ -695,8 +696,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   host step that sometimes omits `host` or passes another component there. Also check that the tree's key set equals
   the reference's (the tree's node keys, not only those reachable through rendered output).
 - **Fix:** `Page` now has conditional children whose count depends on state (`rows`). Some branches swap an authored component for a `Label`, and one swaps `Zero` for `Amount` at the same index. Because keys are positions, nodes after a branch move and are replaced by another component. The host step passes `Show` with or without `text`, `Zero`, or nothing at `host`. A new step calls `tree.remove` on a random key, which the next pass visits again. The tree must hold every node the model has, with the model's component, and none the model dropped. The change set's `added` and `removed` must equal the model's exactly, so the tree's key set is checked at every step. Measured over 50 seeds of 100 steps: 1105 of 5050 steps added nodes, 1068 removed some and 940 replaced some.
+- **Verification:** Verified. I instrumented `check_changes` over 30 seeds of 100 steps. Of 3030 checks, 664 had added keys, 642 had removed keys and 564 had replaced keys. The steps were 910 root changes, 1246 taps, 447 host changes and 427 removals. `check` fails when the tree still holds a key the model dropped, or when the tree's component at a key differs from the model's.
 
-### 🟡 Fixed - RF37 The generator cannot reach several of the spec's risky paths: handlers across components, emits, rebinding, failing operations, equal patches
+### ✅ Verified - RF37 The generator cannot reach several of the spec's risky paths: handlers across components, emits, rebinding, failing operations, equal patches
 - **Severity:** Medium
 - **Confidence:** High (from the program and the step kinds)
 - **Location:** `ir_instance_tree_stress_tests.rs` `PROGRAM`, `root_choices`, `Run::step`
@@ -719,8 +721,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   value or a render that fails on some state, with a check that the tree, its state and its change set are unchanged
   afterwards. Alternatively, list the uncovered scenarios in the module doc.
 - **Fix:** The program now has: `Picker`, which emits (`Pick` patches and emits; `Twice` emits two actions in one handler), bound by `Page` with a handler that divides by `1 - action.value` and so fails part way through a chain; an unbound `Picker`, whose emits reach the host; a `Frame` whose content holds a `Page` button (a handler in a content child, rebound when `Page` renders); `Same` and `Keep` buttons that write the value a field holds; override formulas that capture a prop (`Show`'s `env.space`) and a state field (`Card`'s `env.locale`); `Card` and `Dir` renders that divide by zero for some state or `space` (a failing dispatch, and a refused `set_environment`); roots for `gap`, `label`, `loud`, `boxed` and `colors`; and refused roots (`mode` `purple`, `space` `wide`). An operation must fail exactly when the model's does, and must then leave every node's output allocation and state unchanged with an empty change set. Over 50 seeds of 100 steps, 314 root changes were refused and 44 taps failed, 7 of them in a chain. The module doc, the README and tasks.md 5.10 now list what is not covered: a handler passed as a prop other than an emit's, `remove` under a node a pass leaves unvisited, a pass that visits only part of the tree, and operation limits.
+- **Verification:** Verified. The program now has emits, bound and unbound, and two emits in one handler. It has a handler in a content child (`Frame`), patches that write the value a field already holds (`Same`, `Keep`), and override formulas that capture a prop and a state field. It has failing renders and failing emit handlers, refused roots, and roots for the formula-declared values. Failed operations are checked to leave the output allocations, the state and the change set unchanged. What is still not covered is listed in the module doc, the README and tasks.md 5.10.
 
-### 🟡 Fixed - RF38 The change-set check is one-sided, so a tree that lists every node as rendered on every step passes
+### ✅ Verified - RF38 The change-set check is one-sided, so a tree that lists every node as rendered on every step passes
 - **Severity:** Low
 - **Confidence:** High (confirmed by experiment)
 - **Location:** `ir_instance_tree_stress_tests.rs` `Run::check_changes`
@@ -735,8 +738,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   before or hold a new node, and a key in `removed` must be absent after or replaced. Optionally, check that
   `is_settled` is true for every node after a pass.
 - **Fix:** `check_changes` builds the expected set from the model and compares it with `take_changes` exactly. A node that stayed must be listed as rendered when its output changed in any way: in value with tokens, in what a token's handler is (`same_handler`), or by a rebinding to a node above it that rendered. It must not be listed otherwise. The one allowance is a node that rendered output equal to what it held (a new allocation): a record with an `Unchecked` read renders at every check, and the spec does not forbid listing it. After the pass every node must be settled. After a tap or a root change, before the pass, a node must be unsettled exactly when it or a node under it holds a new allocation. Your experiment (`if true || ...` in `take_changes`) now fails at seed 0, step 1.
+- **Verification:** Verified for the experiment I described: the `if true || ...` change in `take_changes` now fails at seed 0, step 1. The allowance for nodes that rendered to equal output leaves a related gap, which is now RF44.
 
-### 🟡 Fixed - RF39 A panic that is not the test's own `Failure` loses the seed, so the nightly log and summary cannot name it
+### ✅ Verified - RF39 A panic that is not the test's own `Failure` loses the seed, so the nightly log and summary cannot name it
 - **Severity:** Medium
 - **Confidence:** High (confirmed by experiment)
 - **Location:** `ir_instance_tree_stress_tests.rs` `the_tree_keeps_only_output_a_fresh_evaluation_gives`
@@ -754,8 +758,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   holding them outside the `catch_unwind` closure, for example in a `RefCell` the closure shares. Have the workflow's
   summary step say "failed without naming a seed" when it finds no line.
 - **Fix:** Each seed's steps live in an `Rc<RefCell<Vec<String>>>` held outside `catch_unwind`. Any panic payload (`Failure`, `String` or `&str`) becomes the seed's report: `instance tree stress, seed N, step K (rerun with ...): panicked: <message>`, followed by the steps. In `NX_TREE_STRESS_ALL` mode it joins the summary of the other seeds. With your injected index panic, the test now reports `seed 0, step 3 ... panicked: index out of bounds`. When the log has no seed line, the workflow's summary step now writes "Failed without naming a seed" with an `::error::`.
+- **Verification:** Verified. I re-ran the injected index panic in `InstanceTree::dispatch`. The report reads `instance tree stress, seed 0, step 3 (rerun with NX_TREE_STRESS_SEED=0 NX_TREE_STRESS_ITERATIONS=3): panicked: index out of bounds ...`, followed by the steps. The rerun command it gives reproduces the panic. The workflow's `sed` pulls the seed and step out of that line, and there is a summary branch for when no line names a seed.
 
-### 🟡 Fixed - RF40 Values that do not parse fall back to the defaults silently, and the workflow's check lets through values that do not parse or that bash misreads
+### ✅ Verified - RF40 Values that do not parse fall back to the defaults silently, and the workflow's check lets through values that do not parse or that bash misreads
 - **Severity:** Medium
 - **Confidence:** High (confirmed in bash and with the test)
 - **Location:** `ir_instance_tree_stress_tests.rs` `env_var` and the `NX_TREE_STRESS_SEED` match (`.ok().and_then(parse)`);
@@ -774,8 +779,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   `^[1-9][0-9]{0,14}$`, or `^0$` for the base), so bash arithmetic and `u64` agree, and require `seeds` and
   `iterations` of at least 1.
 - **Fix:** `env_var` now panics when a variable is set but is not a whole number, or is below its minimum: 1 for `NX_TREE_STRESS_SEEDS` and `NX_TREE_STRESS_ITERATIONS`, 0 for the seeds. `NX_TREE_STRESS_SEED=abc` stops with "must be a whole number from 0 to 18446744073709551615, not \"abc\"". A base plus a count past `u64::MAX` panics instead of saturating. The test prints the range it runs, and the workflow passes `--nocapture` so the log shows it. The workflow now accepts counts matching `^[1-9][0-9]{0,5}$` and a base seed matching `^(0|[1-9][0-9]{0,17})$`, so bash and `u64` agree and the last seed stays in range. I checked it by running the step script with `08`, `99999999999999999999`, `0`, `1e3`, an 18-digit base and an empty base.
+- **Verification:** Verified. `NX_TREE_STRESS_SEED=abc` and `NX_TREE_STRESS_SEEDS=0` now stop with the 'must be a whole number' message. A base of `u64::MAX` with 2 seeds stops with 'is past'. A single seed of `u64::MAX` runs. In bash, the workflow's checks reject `08` and `99999999999999999999`. They accept `0`, an 18-digit base, and a run-id-derived base, and for each the last seed stays in range.
 
-### 🟡 Fixed - RF41 The failure message's rerun hint omits the step count, so the command it gives does not reproduce a late failure from the nightly run
+### ✅ Verified - RF41 The failure message's rerun hint omits the step count, so the command it gives does not reproduce a late failure from the nightly run
 - **Severity:** Low
 - **Confidence:** High
 - **Location:** `ir_instance_tree_stress_tests.rs` `Run::fail` (`rerun with NX_TREE_STRESS_SEED={}`)
@@ -786,8 +792,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
 - **Recommendation:** Put the step count in the hint, for example `rerun with NX_TREE_STRESS_SEED=N
   NX_TREE_STRESS_ITERATIONS=M`, where `M` is the configured count, or the failing step's index plus one.
 - **Fix:** The report now names the step and gives `NX_TREE_STRESS_SEED=N NX_TREE_STRESS_ITERATIONS=K`, where K is the failing step (at least 1), which reproduces it. The workflow's summary step reads both from the line.
+- **Verification:** Verified. The hint now gives `NX_TREE_STRESS_ITERATIONS=<failing step>`, and a rerun with it fails at the same step (seed 0, step 3 above). It also did so for the RF43 revert: seed 13, step 41.
 
-### 🟡 Fixed - RF42 Two new lines break the 120-character limit
+### ✅ Verified - RF42 Two new lines break the 120-character limit
 - **Severity:** Low
 - **Confidence:** High
 - **Location:** `ir_instance_tree_stress_tests.rs:17` (127 characters), `thorough.yml:88` (127 characters); the
@@ -795,13 +802,15 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
 - **Evidence:** AGENTS.md asks for comments wrapped at 120 characters (and a 120-character target generally).
 - **Recommendation:** Rewrap the doc comment and the README paragraph. Split the `echo` on line 88 of the workflow.
 - **Fix:** The doc comment and README paragraph are rewrapped, and the long `echo` lines in the workflow are split. No new line is over 120 characters. The 120+ lines left in `tree.rs` and `environment.rs` are older diagnostic strings.
+- **Verification:** Verified. None of the new or rewrapped lines in the test, the workflow or the README paragraph is over 120 characters. The README's longer lines are elsewhere in the file and are older.
 
-### 🟡 Fixed - RF43 A node whose place or host-written prop changes only in the sign of a zero keeps its old render
+### ✅ Verified - RF43 A node whose place or host-written prop changes only in the sign of a zero keeps its old render
 - **Severity:** Medium
 - **Confidence:** High (found by the reworked stress test, then reproduced)
 - **Location:** `crates/nx-ir-runtime/src/tree.rs` `record_holds` (`node.environment == *environment`), `keep_node`, and `same`
 - **Evidence:** The stress test failed at seed 17, step 22. A `Rows` tap moved a `Boxed` node's key from under `env.z={-0.0}` to under `env.z={0.0}`. The node kept `-0.0`, while a fresh render gives `0.0`. `Environment`'s derived `PartialEq` compares `NxValue`s with `==`, which finds `0.0` equal to `-0.0`. So `record_holds` took the new place for the one already verified and skipped the check. `same`, which compares the descriptor a node holds with the one a visit brings, also used `==` on scalars. So a host-written `<Card v={-0.0}>` after `<Card v={0.0}>` at the same key kept the node, even though its body can tell the two apart. This breaks the scenario "A kept result is not taken where an override supplies a value written otherwise" and the rule that a value written otherwise is a change.
 - **Fix:** Added `Environment::same_written`, which compares root values and entries with floats by their bits (`written_alike`). `record_holds` and `keep_node` use it in place of `==`. `same` now compares floats by bits, as `Across::values` already did. Tests: `a_node_whose_place_now_supplies_a_value_written_otherwise_renders_again` and `a_host_descriptor_with_a_prop_written_otherwise_initializes_the_node_again`; each fails without its half of the fix. `docs/nx-ir-format.md` now says that a prop or place override written otherwise is a change too.
+- **Verification:** Verified. With the `tree.rs` half of abba9f99 reverted, the stress test fails at seed 13, step 41 (`root/9 holds ...`), so the test guards the fix. The fix is complete for the tree. The only `Environment` comparisons in `tree.rs` were the two in `record_holds` and `keep_node`, and both now use `same_written`. The descriptor comparison (`same`) and the normalized-props comparison (`Props::values`) compare floats by their bits. Root changes go through `kept::same_written`, and kept-variant reads already compared by written identity. No other code compares an `Environment` or `NxValue` props with `==`, and the TypeScript runtime has no instance tree. Over-rendering: `written_alike` differs from `==` only for floats. Only the sign of zero and NaN payloads can tell two values apart, and now a NaN with the same bits counts as the same, where before it was always a change. So the fix adds renders only where a body can see the difference. The `nx-api` tree tests (109) pass.
 
 ### Notes on what was checked and found sound
 - The reference uses `initialize_component` with no `TreeCall`, so it shares no kept result, session memo or store
@@ -824,3 +833,31 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   the test checks the kept-result and environment machinery well and the structural, state and handler parts of the
   tree hardly at all. The nightly workflow is sound apart from losing the seed on a runtime panic (RF39) and silent
   fallbacks on bad input (RF40).
+
+## New Findings Discovered During 2026-11-25 01:30 Verification
+
+### 🔴 Open - RF44 The change-set allowance for equal re-renders lets a tree that drops its equality cutoff pass the stress test
+- **Severity:** Low
+- **Confidence:** High (confirmed by experiment)
+- **Location:** `crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs` `Run::check_changes` (`may`) and
+  `Run::check_settled`
+- **Evidence:** A node that holds a new allocation of output equal to the old one may be listed as rendered or left
+  out. `check_settled` counts any new allocation as a render. Neither check asks whether the node needed to render.
+  Experiment: in `InstanceTree::record_holds` the result of the program's check was replaced with `holds: false`, so
+  every record that is checked fails and its node renders again. That removes the equality cutoff and the "a node whose
+  inputs come back equal is left alone" rule. The stress test passed 50 seeds of 100 steps. Five
+  `ir_instance_tree_tests` failed, so the tree tests catch this regression, but the stress test does not. The module
+  doc and README say the change set is checked "both ways", which a reader can take to cover this.
+- **Recommendation:** Narrow the allowance to the nodes that cannot avoid rendering again. One way is a test-only
+  accessor for whether a node's record has an `Unchecked` read (`always_stale`), with the allowance limited to those
+  nodes. Another is to count, for a fixed seed, how many nodes rendered output equal to what they held, and fail when
+  the count grows past a bound. Otherwise, say in the module doc that the stress test does not check that renders are
+  avoided, and that the tree tests cover that.
+
+### Summary of the 2026-11-25 01:30 verification
+- RF35–RF43 are verified. My three experiments from the review now fail with a named seed and step: the state reset,
+  the change set that lists every node, and the injected runtime panic. The rerun commands those failures give
+  reproduce them, and with the RF43 fix reverted the test fails at seed 13, step 41. RF43's fix covers every place in
+  the tree that compares environments or props and adds renders only for values a body can tell apart.
+- One new Low finding, RF44: the stress test does not notice a tree that renders again everything it checks, because
+  of the allowance for equal re-renders. The tree tests do notice.
