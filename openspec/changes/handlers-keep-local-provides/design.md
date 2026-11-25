@@ -85,8 +85,10 @@ around its node, outermost first. These are the first source of a lookup in `doc
 - `{bundle: [...]}` for a bundle applied by a block.
 
 `eval_provide` already builds these entries for stamping. It now builds them before its body and
-keeps them beside its layers in `EnvState`, so a handler takes the list that is current. The list
-for each provide depth is shared, so taking it copies no entries.
+keeps them beside its layers in `EnvState`, one level per provide holding only that provide's
+entries, so pushing a provide copies no entries. The first flagged handler that captures at a level
+joins the entries of the levels up to it into one list, from the nearest level below that already
+holds one, and keeps it there; every later handler at that level shares it.
 
 It does not capture:
 
@@ -232,8 +234,9 @@ it was initialized in, so the runtime can run a parent-bound handler in its pare
 
 ### 9. Cost model
 
-- Making a flagged handler costs nothing more: it takes the list its provides already built. Making
-  an unflagged one is unchanged.
+- Making a flagged handler costs nothing more: it takes the list its level holds, built at the
+  first capture there and not charged, as a host copy is not. Making an unflagged one is
+  unchanged, and a program without a flagged handler never builds a list.
 - Running a handler costs what its body's nodes cost, plus any default, entry-module provide or
   formula evaluated for its reads, under the reuse rules. Pushing its captured overrides costs
   nothing.

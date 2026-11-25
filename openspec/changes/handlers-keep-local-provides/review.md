@@ -115,7 +115,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 
 ## New Findings Discovered During 2026-11-25 08:11 Verification
 
-### 🔴 Open - RF8 Every `envProvide` copies the whole list of the overrides around it, even when no handler captures it
+### 🟡 Fixed - RF8 Every `envProvide` copies the whole list of the overrides around it, even when no handler captures it
 - **Severity:** Low
 - **Evidence:** `eval_provide` (crates/nx-ir-runtime/src/environment.rs) builds
   `outer.iter().chain(entries.iter()).cloned().collect()` and `evalEnvironmentProvide`
@@ -128,6 +128,13 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Keep only each provide's own entries on the stack (or a persistent linked list
   with a cached flattened form) and build the flattened list when a flagged handler first captures
   at that depth, in both runtimes; or state the copy in Decision 2 and the cost section.
+- **Fix:** Both runtimes now push one level per provide holding only its own entries
+  (`Provided` in `environment.rs`, `ProvidedLevel` in `index.ts`), so pushing copies nothing. The
+  first flagged handler captured at a level joins the entries from the nearest level below that
+  already holds its list (or a running handler's whole list) up to the top, and caches it on that
+  level for the handlers after it. A program without a flagged handler never builds a list.
+  Results, op counts and the corpus are unchanged. Decision 2, the cost section and
+  `docs/nx-ir-format.md` say how the list is built.
 
 ## Questions
 - None

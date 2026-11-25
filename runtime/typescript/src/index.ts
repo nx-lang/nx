@@ -4915,10 +4915,22 @@ interface EnvironmentState {
   readonly evaluating: DerivedRecording[];
   /**
    * The `$env` entries of every `envProvide` being evaluated, outermost first, and of the overrides
-   * a running handler captured: one shared list for each depth, holding the entries of that provide
-   * and of every one around it. A handler that reads the environment captures the list on top.
+   * a running handler captured, one level for each. A handler that reads the environment captures
+   * the entries of the levels up to the top as one list, built when one first does and shared by
+   * every handler that captures at that level after it.
    */
-  readonly provided: (readonly NxCanonicalValue[])[];
+  readonly provided: ProvidedLevel[];
+}
+
+/**
+ * One level of `EnvironmentState.provided`: the entries it adds, whether they are the whole list,
+ * as a running handler's captured overrides are, and the list up to it once a handler has captured
+ * there. Pushing a level copies no entries.
+ */
+interface ProvidedLevel {
+  readonly own: readonly NxCanonicalValue[];
+  readonly whole: boolean;
+  around?: readonly NxCanonicalValue[];
 }
 
 /** The last result of a derived result, with each value its evaluation read and that value's token. */
@@ -4940,7 +4952,23 @@ function newEnvironmentState(): EnvironmentState {
 
 /** The overrides a handler made now captures: the list on top of `provided`. Capturing costs nothing. */
 function capturedOverrides(state: EnvironmentState): readonly NxCanonicalValue[] {
-  return state.provided[state.provided.length - 1] ?? [];
+  const levels = state.provided;
+  const top = levels[levels.length - 1];
+  if (top === undefined) {
+    return [];
+  }
+  if (top.around === undefined) {
+    // The levels from the nearest one that holds its list, or the whole list, up to the top, each
+    // one's entries after those of the levels below it.
+    let start = levels.length - 1;
+    while (start > 0 && !levels[start]!.whole && levels[start]!.around === undefined) {
+      start -= 1;
+    }
+    const first = levels[start]!;
+    const below = first.around ?? first.own;
+    top.around = start === levels.length - 1 ? below : [...below, ...levels.slice(start + 1).flatMap((level) => level.own)];
+  }
+  return top.around;
 }
 
 /**
@@ -4970,7 +4998,7 @@ function withCapturedOverrides<T>(
     }
   }
   const depth = state.layers.length;
-  state.provided.push(captured);
+  state.provided.push({ own: captured, whole: true });
   for (const layer of layers) {
     pushEnvironmentLayer(state, layer);
   }
@@ -5711,8 +5739,7 @@ function evalEnvironmentProvide(context: EvalContext, nodeIndex: number, entry: 
   const state = context.evaluation.env;
   const layers = state.layers;
   const depth = layers.length;
-  const outer = state.provided[state.provided.length - 1];
-  state.provided.push(outer === undefined ? entries : [...outer, ...entries]);
+  state.provided.push({ own: entries, whole: false });
   for (const item of evaluated) {
     if ("set" in item) {
       pushEnvironmentLayer(state, { set: true, key: item.set.target.key, path: item.set.path, source: item.set.source, bundle: false });

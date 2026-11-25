@@ -3669,7 +3669,23 @@ function newEnvironmentState() {
 }
 /** The overrides a handler made now captures: the list on top of `provided`. Capturing costs nothing. */
 function capturedOverrides(state) {
-    return state.provided[state.provided.length - 1] ?? [];
+    const levels = state.provided;
+    const top = levels[levels.length - 1];
+    if (top === undefined) {
+        return [];
+    }
+    if (top.around === undefined) {
+        // The levels from the nearest one that holds its list, or the whole list, up to the top, each
+        // one's entries after those of the levels below it.
+        let start = levels.length - 1;
+        while (start > 0 && !levels[start].whole && levels[start].around === undefined) {
+            start -= 1;
+        }
+        const first = levels[start];
+        const below = first.around ?? first.own;
+        top.around = start === levels.length - 1 ? below : [...below, ...levels.slice(start + 1).flatMap((level) => level.own)];
+    }
+    return top.around;
 }
 /**
  * Runs `work` with a handler's captured overrides inside the environment of the call, as the
@@ -3693,7 +3709,7 @@ function withCapturedOverrides(context, nodeIndex, captured, work) {
         }
     }
     const depth = state.layers.length;
-    state.provided.push(captured);
+    state.provided.push({ own: captured, whole: true });
     for (const layer of layers) {
         pushEnvironmentLayer(state, layer);
     }
@@ -4311,8 +4327,7 @@ function evalEnvironmentProvide(context, nodeIndex, entry) {
     const state = context.evaluation.env;
     const layers = state.layers;
     const depth = layers.length;
-    const outer = state.provided[state.provided.length - 1];
-    state.provided.push(outer === undefined ? entries : [...outer, ...entries]);
+    state.provided.push({ own: entries, whole: false });
     for (const item of evaluated) {
         if ("set" in item) {
             pushEnvironmentLayer(state, { set: true, key: item.set.target.key, path: item.set.path, source: item.set.source, bundle: false });

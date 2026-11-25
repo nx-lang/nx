@@ -693,8 +693,8 @@ record it constructs, by the rule that makes an override a formula. A flagged no
 evaluated, captures the overrides of the `envProvide` nodes being evaluated around it, outermost
 first, as `$env` entries: a value evaluated where it was written, a formula as its captured data, a
 bundle as one entry. It captures neither the overrides on the component's descriptor chain nor the
-host's root values, and capturing costs nothing: the handlers under one `envProvide` share the list
-it already built. An unflagged node captures nothing and runs as before. When a handler runs, its
+host's root values, and capturing costs nothing: the handlers under one `envProvide` share one
+list, built when the first of them is made. An unflagged node captures nothing and runs as before. When a handler runs, its
 captured overrides are pushed inside the environment of the call, as the call's own layers, in the
 order they were captured, and are not checked against their types again; a captured formula is
 evaluated at each read that reaches it, in the environment of that read. The rule is lexical: a

@@ -457,6 +457,29 @@ struct Pending {
     patch: bool,
 }
 
+/// One level of [`EnvState::provided`]: the entries it adds, and the list of all the entries up to
+/// it once a handler has captured there. Pushing a level copies no entries.
+#[derive(Debug)]
+pub(crate) struct Provided {
+    /// The level's own entries: a provide's, or a running handler's whole captured list.
+    own: Arc<[Value]>,
+    /// Whether `own` is the whole list, as a running handler's captured overrides are, so the
+    /// levels below it add nothing.
+    whole: bool,
+    /// The list up to this level, built at the first capture there.
+    around: std::cell::OnceCell<Arc<[Value]>>,
+}
+
+impl Provided {
+    fn new(own: Arc<[Value]>, whole: bool) -> Self {
+        Provided {
+            own,
+            whole,
+            around: std::cell::OnceCell::new(),
+        }
+    }
+}
+
 /// The environment state of one evaluation.
 #[derive(Debug, Default)]
 pub(crate) struct EnvState {
@@ -468,10 +491,10 @@ pub(crate) struct EnvState {
     /// How many of `layers` came from the host's environment, below any `envProvide`.
     pub base: usize,
     /// The `$env` entries of every `envProvide` being evaluated, outermost first, and of the
-    /// overrides a running handler captured: one shared list for each depth, holding the entries
-    /// of that provide and of every one around it. A handler that reads the environment captures
-    /// the list on top.
-    pub(crate) provided: Vec<Arc<[Value]>>,
+    /// overrides a running handler captured, one level for each. A handler that reads the
+    /// environment captures the entries of the levels up to the top as one list, built when one
+    /// first does and shared by every handler that captures at that level after it.
+    pub(crate) provided: Vec<Provided>,
     pub roots: HashMap<EnvKey, Value>,
     /// The last result of each derived result the call evaluated, with what it read.
     pub(crate) derived: HashMap<crate::reuse::Derived, crate::reuse::Kept>,
@@ -1470,11 +1493,9 @@ impl<'p> Machine<'p> {
         let depth = {
             let mut state = self.env.borrow_mut();
             let depth = state.layers.len();
-            let around: Arc<[Value]> = match state.provided.last() {
-                Some(outer) => outer.iter().chain(entries.iter()).cloned().collect(),
-                None => Arc::from(entries.as_slice()),
-            };
-            state.provided.push(around);
+            state
+                .provided
+                .push(Provided::new(Arc::from(entries.as_slice()), false));
             for entry in &evaluated {
                 match entry {
                     Evaluated::Set((key, path, source)) => state.push(Layer::Set {
@@ -1534,10 +1555,33 @@ impl<'p> Machine<'p> {
     /// The overrides a handler made now captures: the `$env` entries of the provides being
     /// evaluated around it, outermost first, as one shared list. Capturing costs nothing.
     pub(crate) fn captured_overrides(&self) -> Value {
-        match self.env.borrow().provided.last() {
-            Some(around) => Value::Seq(Arc::clone(around)),
-            None => Value::empty(),
-        }
+        let state = self.env.borrow();
+        let Some(top) = state.provided.last() else {
+            return Value::empty();
+        };
+        let around = top.around.get_or_init(|| {
+            // The levels from the nearest one that holds its list, or the whole list, up to the
+            // top, each one's entries after those of the levels below it.
+            let levels = &state.provided;
+            let start = levels
+                .iter()
+                .rposition(|level| level.whole || level.around.get().is_some())
+                .unwrap_or(0);
+            let Some((first, above)) = levels.get(start..).and_then(<[Provided]>::split_first)
+            else {
+                return Arc::from(Vec::new());
+            };
+            let below = first.around.get().unwrap_or(&first.own);
+            if above.is_empty() {
+                return Arc::clone(below);
+            }
+            below
+                .iter()
+                .chain(above.iter().flat_map(|level| level.own.iter()))
+                .cloned()
+                .collect()
+        });
+        Value::Seq(Arc::clone(around))
     }
 
     /// Runs `work` with a handler's captured overrides inside the environment of the call, as the
@@ -1574,7 +1618,7 @@ impl<'p> Machine<'p> {
         let depth = {
             let mut state = self.env.borrow_mut();
             let depth = state.layers.len();
-            state.provided.push(Arc::clone(items));
+            state.provided.push(Provided::new(Arc::clone(items), true));
             for layer in layers {
                 state.push(layer);
             }
