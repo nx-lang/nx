@@ -836,7 +836,7 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
 
 ## New Findings Discovered During 2026-11-25 01:30 Verification
 
-### 🟡 Fixed - RF44 The change-set allowance for equal re-renders lets a tree that drops its equality cutoff pass the stress test
+### ✅ Verified - RF44 The change-set allowance for equal re-renders lets a tree that drops its equality cutoff pass the stress test
 - **Severity:** Low
 - **Confidence:** High (confirmed by experiment)
 - **Location:** `crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs` `Run::check_changes` (`may`) and
@@ -862,6 +862,23 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   - the host set, cleared or changed the root of a value its component reads directly (`direct_reads`, a generous per-component list).
 
   The check covers equal-output renders that the dispatch's new tokens hid as well. Your experiment (`holds: false` in `record_holds`) now fails at seed 1, step 16 of the default run, and in 12 of 50 seeds of 100 steps. With the experiment reverted, 200 seeds of 100 steps pass. The check does not catch a tree that renders a direct reader of a changed root when the value read comes back equal; the module doc says so.
+- **Verification:** Verified, with two follow-ups (RF45, RF46).
+  - My experiment (`holds: false` in `record_holds`) fails at seed 1, step 16.
+  - A narrower variant also fails at seed 1, step 16 and in other seeds. It forces a render only in the pull loop of
+    `set_environment`, where a check holds.
+  - The tree tests still pass (109).
+  - An extra run of 250 seeds of 100 steps from base 500000 in `NX_TREE_STRESS_ALL` mode found no false failure.
+  - I read `direct_reads` against `PROGRAM`. Each component's direct reads are listed: own-override formula defaults
+    (`Loud`, `SelfRef`, `Field`), the prop default of `Show`, and `gap`'s read of `space` through the bundle. Reads
+    through kept values (`direction`, `accentOf`, `amountOf`) and formula defaults read with no own override are left
+    out, correctly. So the list is a superset, as it must be: a missing name would wrongly fail a correct tree when a
+    root is set or cleared to an equal value.
+  - The place-values, parent and descriptor reasons only excuse renders, so they can only weaken the check. The state
+    reason is the exception, because it is computed wrongly (RF46).
+  - `#[doc(hidden)] pub fn renders_at_every_check` is acceptable. The test lives in another crate, so it needs a public
+    hook, the hook is read-only, and it exposes no internal type. A `test-support` feature would hide it from the API
+    more fully, but it is not needed.
+  - The limit the module doc states is accurate, but it is not the whole limit (RF45).
 
 ### Summary of the 2026-11-25 01:30 verification
 - RF35–RF43 are verified. My three experiments from the review now fail with a named seed and step: the state reset,
@@ -870,3 +887,47 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   the tree that compares environments or props and adds renders only for values a body can tell apart.
 - One new Low finding, RF44: the stress test does not notice a tree that renders again everything it checks, because
   of the allowance for equal re-renders. The tree tests do notice.
+
+## New Findings Discovered During 2026-11-25 01:56 Verification
+
+### 🔴 Open - RF45 The "value at its place" reason excuses a render whenever any value at the place changed, so over-rendering on a real root change mostly goes unseen
+- **Severity:** Low
+- **Confidence:** High (confirmed by experiment)
+- **Location:** `crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs` `Run::had_reason` (`place_values` compared
+  whole), and the module doc's statement of the limit
+- **Evidence:** `had_reason` compares every environment value at the node's place before and after, whatever the
+  component reads. A root change of `locale` or `region` changes `locale`, `label` or `loud` at nearly every place, so
+  every node then has a reason to render. Experiment: `set_environment` was made to render every `Zero` node on every
+  real root change, whether or not its record holds. `Zero` reads only `env.z`. Over 50 seeds of 100 steps in
+  `NX_TREE_STRESS_ALL` mode, about 1400 root changes each rendered `Zero` with equal output, and only 6 seeds failed.
+  Those were the steps where no value at the place changed. The module doc names only "a reader of a changed root
+  whose value read comes back equal" as uncaught. It does not say that a node that does not read a changed value is
+  also excused whenever some value at its place changed.
+- **Recommendation:** Compare only the values the component can read. Reuse the `direct_reads` list, extended with
+  what it reads through kept values (`direction` → `locale`, `accentOf` → `colors`, `mode`, `locale`, `amountOf` →
+  `amount`) as a per-component "reads" list. Excuse a render only when one of those values at the place changed.
+  Otherwise, state the coarser limit in the module doc and the README.
+
+### 🔴 Open - RF46 The "state changed" reason compares the model's state after the tap with itself, so a correct tap render with equal output fails the test
+- **Severity:** Low
+- **Confidence:** High (confirmed with a variant of the program)
+- **Location:** `ir_instance_tree_stress_tests.rs` `Run::had_reason` (`then = &self.model.nodes[key]`) and
+  `Model::tap` (`self.nodes = next`)
+- **Evidence:** `Model::tap` writes the patched state into `self.model.nodes` before `check` runs. So in `had_reason`
+  the "before" state of a tapped node is already the new one, and `!same_written(&then.state, &now.state)` is false
+  after every tap. The reason never fires for the case it exists for: a render the spec requires ("A field the body
+  read causes a render") whose output happens to be equal. No field in today's `PROGRAM` gives equal output after it
+  changes, so nothing fails now (450 seeds pass), but the check is latent. Experiment: `Card`'s label was changed to
+  show `if n > 5 { "big" } else { "small" }` instead of `n`, and the `n`-capturing `env.locale` override was dropped.
+  The unmodified, correct tree then failed at seed 0, step 35, after `tap Inc at root/0`, with "root/0 rendered again
+  with nothing it could read changed". The test was reverted afterwards.
+- **Recommendation:** Keep each node's state from before the step, for example in the `Snapshot` or a
+  `states_before` map taken with it, and compare against that in `had_reason`. Add a field that is read but does not
+  change the output (such as the `big`/`small` label) to `PROGRAM`, so the reason is exercised.
+
+### Summary of the 2026-11-25 01:56 verification
+- RF44 is verified. The test now catches a tree that drops its equality cutoff, without false failures in 450 seeds,
+  and the doc-hidden accessor is an acceptable test hook.
+- Two new Low findings. RF45: the place-values reason is per place, not per read, so over-rendering on root changes is
+  mostly excused, and the stated limit understates this. RF46: the state reason reads the post-tap state, so a correct
+  tap render that gives equal output would fail the test. It is latent with today's program.
