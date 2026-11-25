@@ -3612,3 +3612,166 @@ let root() = { <Page /> }
         .unwrap();
     assert!(renders(&tree, "root/0", "Label", "fr!p"));
 }
+
+// ------------------------------------------------------------------------------------------------
+// A handler runs in its creator's current environment with the overrides it captured
+// ------------------------------------------------------------------------------------------------
+
+/// `Box` renders its content inside an override of its own; `Page` puts a button that reads
+/// `env.mode` in it, and binds a handler for `Card`'s emit on an element with `env.` attributes.
+const HANDLER_PROVIDES: &str = "
+environment mode: string = \"outer\"
+component <Box extends Node content Children:Node+ /> = {
+  <Stack>{ provide env.mode=\"box\" { Children } }</Stack>
+}
+component <Card extends Node emits { Logged { } } /> = {
+  <Button Text=\"Log\" onTapped=<Card.Logged /> />
+}
+component <Page /> = {
+  state { last:string = \"\" }
+  <Stack>
+    <Label Text={\"last \" + last} />
+    { provide env.mode=\"page\" { <Box><Button Text=\"Inner\" onTapped=<State.Update last={env.mode} /> /></Box> } }
+    <Card env.mode=\"card\" onLogged=<State.Update last={env.mode} /> />
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+#[test]
+fn a_handler_in_a_content_child_sees_the_provide_around_it_in_its_creator() {
+    let mut tree = open(HANDLER_PROVIDES);
+    visit_child(&mut tree, "root/box", "Box", "root");
+    tap(&mut tree, "root/box", "Inner").unwrap();
+    assert_eq!(state(&tree, "root"), json(r#"{ "last": "page" }"#));
+}
+
+#[test]
+fn an_emit_reaches_the_handler_with_the_overrides_on_the_childs_element() {
+    let mut tree = open(HANDLER_PROVIDES);
+    visit_child(&mut tree, "root/card", "Card", "root");
+    tap(&mut tree, "root/card", "Log").unwrap();
+    assert_eq!(state(&tree, "root"), json(r#"{ "last": "card" }"#));
+}
+
+/// `App` places `Inner` under an override of `mode` from its state; `Inner`'s render reads no
+/// environment value, and its handler, inside a provide of its own, reads `mode`.
+const KEPT_PLACE: &str = "
+environment mode: string = \"outer\"
+environment gap: string = \"\"
+component <Inner extends Node /> = {
+  state { last:string = \"\" }
+  <Stack>{ provide env.gap=\"g\" { <Button Text=\"Read\" onTapped=<State.Update last={env.mode + env.gap} /> /> } }</Stack>
+}
+component <App /> = {
+  state { mode:string = \"a\" }
+  <Stack>
+    <Label Text={mode} />
+    <Button Text=\"Switch\" onTapped=<State.Update mode=\"b\" /> />
+    <Inner env.mode={mode} />
+  </Stack>
+}
+let root() = { <App /> }
+";
+
+#[test]
+fn a_kept_nodes_handlers_read_its_new_place() {
+    let mut tree = open(KEPT_PLACE);
+    visit_child(&mut tree, "root/inner", "Inner", "root");
+    let held = rendered(&tree, "root/inner");
+    let generation = generation(&tree, "root/inner");
+    tap(&mut tree, "root", "Switch").unwrap();
+    tree.begin();
+    let root = evaluated(&tree, "root");
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/inner", "Inner", "root");
+    tree.finish();
+    assert!(Arc::ptr_eq(&held, &rendered(&tree, "root/inner")));
+    assert_eq!(generation, self::generation(&tree, "root/inner"));
+    tap(&mut tree, "root/inner", "Read").unwrap();
+    assert_eq!(state(&tree, "root/inner"), json(r#"{ "last": "bg" }"#));
+}
+
+/// `Quiet`'s render reads nothing from the environment; its handler reads a captured formula.
+const QUIET_FORMULA: &str = "
+environment space: int = 1
+environment gap: int = 0
+component <Quiet /> = {
+  state { last:string = \"\" }
+  <Stack>{ provide env.gap={env.space * 2} { <Button Text=\"Gap\" onTapped=<State.Update last={\"\" + env.gap} /> /> } }</Stack>
+}
+let root() = { <Quiet /> }
+";
+
+#[test]
+fn a_root_change_reaches_a_captured_formula_without_a_render() {
+    let mut tree = open(QUIET_FORMULA);
+    let held = rendered(&tree, "root");
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(3))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&held, &rendered(&tree, "root")));
+    tap(&mut tree, "root", "Gap").unwrap();
+    assert_eq!(state(&tree, "root"), json(r#"{ "last": "6" }"#));
+}
+
+/// `Frame` renders its content and reads nothing; `Page` puts two buttons in two frames inside
+/// an override from its state, one whose handler reads `env.mode` and one whose handler does not.
+const PROVIDED_FRAMES: &str = "
+environment mode: string = \"outer\"
+component <Frame extends Node content Children:Node+ /> = { <Stack>{Children}</Stack> }
+component <Page /> = {
+  state { mode:string = \"a\" count:int = 0 last:string = \"\" }
+  <Stack>
+    <Label Text={mode + \" \" + last} />
+    <Button Text=\"Switch\" onTapped=<State.Update mode=\"b\" /> />
+    {
+      provide env.mode={mode} {
+        <Frame><Button Text=\"More\" onTapped=<State.Update count={count + 1} /> /></Frame>
+        <Frame><Button Text=\"Read\" onTapped=<State.Update last={env.mode} /> /></Frame>
+      }
+    }
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+fn frames_pass(tree: &mut InstanceTree) {
+    tree.begin();
+    let root = evaluated(tree, "root");
+    tree.visit("root", &root, None, &options()).unwrap();
+    let output = rendered(tree, "root");
+    let mut frames = Vec::new();
+    collect(&output, "Frame", &mut frames);
+    for (index, frame) in frames.iter().enumerate() {
+        tree.visit(
+            &format!("root/frame{index}"),
+            frame,
+            Some("root"),
+            &options(),
+        )
+        .unwrap();
+    }
+    tree.finish();
+}
+
+#[test]
+fn a_provide_whose_value_changes_makes_new_handlers_and_keeps_children_whose_handlers_read_nothing()
+{
+    let mut tree = open(PROVIDED_FRAMES);
+    frames_pass(&mut tree);
+    let (more, read) = (
+        rendered(&tree, "root/frame0"),
+        rendered(&tree, "root/frame1"),
+    );
+    tap(&mut tree, "root", "Switch").unwrap();
+    frames_pass(&mut tree);
+    // The handler that reads no environment compares equal, so its frame keeps its render; the
+    // other captured the old mode, so its frame renders again with the new handler.
+    assert!(Arc::ptr_eq(&more, &rendered(&tree, "root/frame0")));
+    assert!(!Arc::ptr_eq(&read, &rendered(&tree, "root/frame1")));
+    tap(&mut tree, "root/frame1", "Read").unwrap();
+    assert!(renders(&tree, "root", "Label", "b b"));
+}

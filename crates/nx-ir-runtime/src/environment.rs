@@ -457,6 +457,29 @@ struct Pending {
     patch: bool,
 }
 
+/// One level of [`EnvState::provided`]: the entries it adds, and the list of all the entries up to
+/// it once a handler has captured there. Pushing a level copies no entries.
+#[derive(Debug)]
+pub(crate) struct Provided {
+    /// The level's own entries: a provide's, or a running handler's whole captured list.
+    own: Arc<[Value]>,
+    /// Whether `own` is the whole list, as a running handler's captured overrides are, so the
+    /// levels below it add nothing.
+    whole: bool,
+    /// The list up to this level, built at the first capture there.
+    around: std::cell::OnceCell<Arc<[Value]>>,
+}
+
+impl Provided {
+    fn new(own: Arc<[Value]>, whole: bool) -> Self {
+        Provided {
+            own,
+            whole,
+            around: std::cell::OnceCell::new(),
+        }
+    }
+}
+
 /// The environment state of one evaluation.
 #[derive(Debug, Default)]
 pub(crate) struct EnvState {
@@ -467,6 +490,11 @@ pub(crate) struct EnvState {
     pub(crate) next_id: u64,
     /// How many of `layers` came from the host's environment, below any `envProvide`.
     pub base: usize,
+    /// The `$env` entries of every `envProvide` being evaluated, outermost first, and of the
+    /// overrides a running handler captured, one level for each. A handler that reads the
+    /// environment captures the entries of the levels up to the top as one list, built when one
+    /// first does and shared by every handler that captures at that level after it.
+    pub(crate) provided: Vec<Provided>,
     pub roots: HashMap<EnvKey, Value>,
     /// The last result of each derived result the call evaluated, with what it read.
     pub(crate) derived: HashMap<crate::reuse::Derived, crate::reuse::Kept>,
@@ -1461,9 +1489,13 @@ impl<'p> Machine<'p> {
         body: u32,
     ) -> Result<Value> {
         let evaluated = self.eval_overrides(cx, frame, node, overrides)?;
+        let entries = self.entry_values(&evaluated, true);
         let depth = {
             let mut state = self.env.borrow_mut();
             let depth = state.layers.len();
+            state
+                .provided
+                .push(Provided::new(Arc::from(entries.as_slice()), false));
             for entry in &evaluated {
                 match entry {
                     Evaluated::Set((key, path, source)) => state.push(Layer::Set {
@@ -1487,9 +1519,12 @@ impl<'p> Machine<'p> {
             depth
         };
         let result = self.eval(cx, frame, body);
-        self.env.borrow_mut().truncate(depth);
+        {
+            let mut state = self.env.borrow_mut();
+            state.truncate(depth);
+            state.provided.pop();
+        }
         let result = result?;
-        let entries = self.entry_values(&evaluated, true);
         self.stamp(cx, node, result, &entries)
     }
 
@@ -1515,6 +1550,120 @@ impl<'p> Machine<'p> {
             vec![(Arc::from(BUNDLE_ENTRIES), Value::seq(entries))],
             self.origin(cx, node),
         ))
+    }
+
+    /// The overrides a handler made now captures: the `$env` entries of the provides being
+    /// evaluated around it, outermost first, as one shared list. Capturing costs nothing.
+    pub(crate) fn captured_overrides(&self) -> Value {
+        let state = self.env.borrow();
+        let Some(top) = state.provided.last() else {
+            return Value::empty();
+        };
+        let around = top.around.get_or_init(|| {
+            // The levels from the nearest one that holds its list, or the whole list, up to the
+            // top, each one's entries after those of the levels below it.
+            let levels = &state.provided;
+            let start = levels
+                .iter()
+                .rposition(|level| level.whole || level.around.get().is_some())
+                .unwrap_or(0);
+            let Some((first, above)) = levels.get(start..).and_then(<[Provided]>::split_first)
+            else {
+                return Arc::from(Vec::new());
+            };
+            let below = first.around.get().unwrap_or(&first.own);
+            if above.is_empty() {
+                return Arc::clone(below);
+            }
+            below
+                .iter()
+                .chain(above.iter().flat_map(|level| level.own.iter()))
+                .cloned()
+                .collect()
+        });
+        Value::Seq(Arc::clone(around))
+    }
+
+    /// Runs `work` with a handler's captured overrides inside the environment of the call, as the
+    /// overrides of `envProvide` nodes around it would be: the call's own layers, each with an
+    /// identity of its own, a bundle's entries one layer each. Applying them costs nothing, and a
+    /// value is not checked against its type again.
+    pub(crate) fn with_captured_overrides(
+        &self,
+        cx: Cx,
+        node: u32,
+        captured: Option<&Value>,
+        work: impl FnOnce() -> Result<Vec<Value>>,
+    ) -> Result<Vec<Value>> {
+        let Some(Value::Seq(items)) = captured else {
+            return work();
+        };
+        if items.is_empty() {
+            return work();
+        }
+        let mut layers = Vec::with_capacity(items.len());
+        for item in items.iter() {
+            let bundle = field(item, "bundle").is_some();
+            let mut entries = Vec::new();
+            self.entries_of(cx, node, std::slice::from_ref(item), &mut entries)?;
+            for (key, path, source) in entries {
+                layers.push(Layer::Set {
+                    key,
+                    path,
+                    source,
+                    bundle,
+                });
+            }
+        }
+        let depth = {
+            let mut state = self.env.borrow_mut();
+            let depth = state.layers.len();
+            state.provided.push(Provided::new(Arc::clone(items), true));
+            for layer in layers {
+                state.push(layer);
+            }
+            depth
+        };
+        let result = work();
+        let mut state = self.env.borrow_mut();
+        state.truncate(depth);
+        state.provided.pop();
+        result
+    }
+
+    /// Checks that a stored handler's captured overrides are `$env` entries of this program:
+    /// each names an environment value the program declares, and each formula is one of its own.
+    pub(crate) fn check_captured_overrides(
+        &self,
+        cx: Cx,
+        node: u32,
+        captured: &Value,
+    ) -> Result<()> {
+        let Value::Seq(items) = captured else {
+            return Err(self.error(
+                Some(cx),
+                Some(node),
+                "nx-ir-environment",
+                "A handler's captured overrides are not a list.",
+            ));
+        };
+        let mut entries = Vec::new();
+        self.entries_of(cx, node, items, &mut entries)?;
+        for (_, _, source) in &entries {
+            if let Source::Formula(formula) = source {
+                if let Some(reason) = &formula.refused {
+                    return Err(self.error(
+                        Some(cx),
+                        Some(node),
+                        "nx-ir-boundary-type",
+                        format!(
+                            "A formula a handler captured is not one of this program's: {reason}."
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The `$env` or `$entries` entries for evaluated overrides. In `$env` a bundle is one

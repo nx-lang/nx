@@ -2562,6 +2562,7 @@ fn build_action_handler(
             action,
             owner: owner_reference,
             body: Box::new(body?),
+            reads_environment: false,
         }),
     })
 }

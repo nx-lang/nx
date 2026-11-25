@@ -2910,6 +2910,79 @@ test("a handler captures only the slots its node reads, compared in ascending sl
   assertEqual(operationsOf(program, "orderedHandlers"), 32);
 });
 
+// ------------------------------------------------------------------------------------------------
+// Handlers keep the overrides written around them: the corpus's `environment-handlers` program.
+// ------------------------------------------------------------------------------------------------
+
+function handlerEnvironmentProgram(): NxPreparedProgram {
+  return corpusProgram("environment-handlers", "main.nx", [], true);
+}
+
+/** The `last` a tap of the Page button labelled `label` leaves, under the environment `given`. */
+function lastAfterTap(label: string, given = environment(), dispatched = given): NxCanonicalValue {
+  const program = handlerEnvironmentProgram();
+  const page = initializeComponent(program, "Page", {}, { environment: given });
+  const children = fields(page.rendered).children as NxCanonicalValue[];
+  const button = children.map(fields).find((child) => child.label === label || child.$type === label)!;
+  const handler = fields((button.onTapped ?? button.onLogged)!);
+  const action = { $type: button.$type === "Card" ? "Card.Logged" : "Button.Tapped" };
+  const result = dispatchComponentActions(
+    program,
+    page.instance,
+    [{ $type: "ActionHandlerInvocation", token: handler.token as string, action }],
+    { environment: dispatched },
+  );
+  return fields(result.state as NxCanonicalValue).last!;
+}
+
+test("a handler sees the overrides written around it, wherever they are written", () => {
+  assertEqual(lastAfterTap("Block"), "block");
+  assertEqual(lastAfterTap("Attr"), "attr");
+  assertEqual(lastAfterTap("Call"), "call");
+  assertEqual(lastAfterTap("Formula"), "outer!");
+  assertEqual(lastAfterTap("Gap"), "gap 2 2");
+  // Dispatched against the Page, an emit handler sees the override on the child's element.
+  assertEqual(lastAfterTap("Card"), "card");
+});
+
+test("a captured formula follows the environment of the dispatch", () => {
+  assertEqual(lastAfterTap("Gap", environment({ space: 5 })), "gap 10 10");
+  assertEqual(lastAfterTap("Gap", environment({ space: 5 }), environment({ space: 3 })), "gap 6 6");
+  assertEqual(lastAfterTap("Formula", environment({ mode: "root" })), "root!");
+});
+
+/** An image whose one handler carries `flag` after its body, listing `features`. */
+function flaggedHandlerArtifact(flag: number, features: readonly string[]): Uint8Array {
+  const b = new ArtifactBuilder("main.nx");
+  b.record("Button.Tapped", []);
+  b.record("Reset", []);
+  b.component("Button", [], [], -1, { external: true, emits: [["Tapped", b.ref("Button.Tapped")]] });
+  const reset = b.node([nodeKinds.record, ...b.ref("Reset"), ...b.list([]), ...b.content([])]);
+  const handler = b.node([
+    nodeKinds.actionHandler,
+    ...b.ref("Button"),
+    b.str("Tapped"),
+    ...b.ref("Button.Tapped"),
+    0,
+    NX_IR_NONE,
+    NX_IR_NONE,
+    reset,
+    flag,
+  ]);
+  b.fn("root", handler);
+  return b.build({ requiredFeatures: ["update-records-v1", "action-handlers-v1", ...features] });
+}
+
+test("a handler flagged to read the environment needs environment-v3, and only the flag 1", () => {
+  const missing = tryPrepareNxIrModule(flaggedHandlerArtifact(1, []));
+  assertEqual(missing.ok, false);
+  if (!missing.ok) assertEqual(missing.diagnostics.some((diagnostic) => diagnostic.message.includes("environment-v3")), true);
+  const wrong = tryPrepareNxIrModule(flaggedHandlerArtifact(2, ["environment-v3"]));
+  assertEqual(wrong.ok, false);
+  const listed = tryPrepareNxIrModule(flaggedHandlerArtifact(1, ["environment-v3"]));
+  if (!listed.ok) throw new Error(listed.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
+});
+
 for (const [name, run] of tests) {
   try {
     run();

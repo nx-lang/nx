@@ -23,11 +23,11 @@ use nx_ir::{
     kinds, write_nx_ir_image, IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrImageError,
     NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1, NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
-    NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2, NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1,
-    NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1, NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_RANGES_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2, NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3,
+    NX_IR_REQUIRED_FEATURE_FUNCTION_REFERENCE_TYPE_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_OCCURRENCE_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_RANGES_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_program::{ProgramArtifact, ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
@@ -490,6 +490,14 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
         })
     }) {
         features.push(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2.to_string());
+    }
+    // A handler that captures the overrides around it is read by runtimes that know the flag.
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(&expression.kind, CodegenExpressionKind::ActionHandler(handler) if handler.reads_environment)
+        })
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3.to_string());
     }
     features
 }
@@ -2061,10 +2069,11 @@ impl<'a> ModuleEmitter<'a> {
         IrItem::list([IrItem::Int(kinds::node::ARRAY), IrItem::List(Vec::new())])
     }
 
-    /// Emits a handler as `[19, ref, str, ref, slot, ref?, node]`: the component and emit it
-    /// answers, the action record it accepts, the slot of its `action` binding, its owner, and
-    /// its body. The slot is the next integer of the enclosing frame, as a `let` binding's would
-    /// be, and the body reads every other local through the slots it already had.
+    /// Emits a handler as `[19, ref, str, ref, slot, ref?, node, 1?]`: the component and emit it
+    /// answers, the action record it accepts, the slot of its `action` binding, its owner, its
+    /// body, and the environment flag, written only for a handler whose body reads the
+    /// environment. The slot is the next integer of the enclosing frame, as a `let` binding's
+    /// would be, and the body reads every other local through the slots it already had.
     fn action_handler(&mut self, handler: &CodegenActionHandler) -> IrItem {
         let (component_slot, component_name) = self.reference(&handler.component);
         let emit = self.string(&handler.emit);
@@ -2074,7 +2083,7 @@ impl<'a> ModuleEmitter<'a> {
         let body = self.expression(&handler.body);
         self.frame.pop();
         let owner = self.optional_reference(handler.owner.as_ref());
-        IrItem::list([
+        let mut cells = vec![
             IrItem::Int(kinds::node::ACTION_HANDLER),
             IrItem::Int(component_slot),
             IrItem::Int(component_name),
@@ -2084,7 +2093,13 @@ impl<'a> ModuleEmitter<'a> {
             IrItem::Int(slot),
             owner,
             IrItem::Int(body),
-        ])
+        ];
+        // The flag is present only on a handler that reads the environment, so a module without
+        // one emits the handlers it emitted before.
+        if handler.reads_environment {
+            cells.push(IrItem::Int(1));
+        }
+        IrItem::List(cells)
     }
 
     fn literal(&mut self, literal: &Literal) -> IrItem {

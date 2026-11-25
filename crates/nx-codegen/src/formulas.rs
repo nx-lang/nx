@@ -143,13 +143,18 @@ pub(crate) fn environment_reading_values(modules: &[CodegenModule]) -> FxHashSet
 }
 
 /// Sets the formula flag on every override, in a `provide`, an element's `env.` attributes or an
-/// `env.Update`, whose value reads the environment.
+/// `env.Update`, whose value reads the environment, and the environment flag on every action
+/// handler whose body reads it.
 pub(crate) fn mark_formulas(modules: &mut [CodegenModule]) {
     let reading = reading_declarations(modules);
     let mut mark = |expression: &mut CodegenExpression| {
         let overrides = match &mut expression.kind {
             CodegenExpressionKind::Provide { overrides, .. }
             | CodegenExpressionKind::EnvUpdate { overrides, .. } => overrides,
+            CodegenExpressionKind::ActionHandler(handler) => {
+                handler.reads_environment = reads_environment(&handler.body, &reading);
+                return;
+            }
             _ => return,
         };
         for provided in overrides.iter_mut() {

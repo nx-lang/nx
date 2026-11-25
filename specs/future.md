@@ -2313,9 +2313,18 @@ then pass a few hundred times in a row.
 
 ### Limitations of the first version
 
-- **Handlers lose local provides.** An action handler runs in its component's environment, not in
-  the environment of a `provide` block written around the element that holds it. A handler that
-  reads `env.` inside a local `provide` sees the value from outside the block.
+- **A handler captures every override around it, not only the values it reads.** A handler whose
+  body can read the environment captures all the overrides of the provides around it
+  (`handlers-keep-local-provides`). Under a provide whose value changes, it is unequal across
+  renders even for a value it never reads, so the children that see it render again. Narrowing the
+  capture to the values the body can read would keep them.
+- **An emit dispatched through the child applies a self-reading override twice.** In the bare
+  lifecycle API, a host that dispatches an emit against the child, in the child's environment,
+  applies the overrides on the child's descriptor and the parent handler's captured overrides one
+  after the other. An override that reads the value it sets, such as `env.space={env.space * 2}`,
+  then applies twice. Dispatching the parent's token against the parent, as the instance tree does,
+  is exact. The fix is for an instance to carry the environment it was initialized in, so the
+  runtime can run a parent-bound handler in its parent's environment.
 - **A place formula that reads a value the body overrides is never skipped.** When a node's place
   sets a value with a formula, and that formula reads a value the node's own body overrides, the
   value the render saw cannot be compared with a lookup at the place. The instance tree records the

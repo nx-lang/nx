@@ -18,7 +18,7 @@ use nx_ir::{
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, OnceLock};
 
-const KNOWN_FEATURES: [&str; 14] = [
+const KNOWN_FEATURES: [&str; 15] = [
     nx_ir::NX_IR_REQUIRED_FEATURE_CONDITIONAL_PROPERTIES_V1,
     "standard-color-v2",
     nx_ir::NX_IR_REQUIRED_FEATURE_STANDARD_MATH_V1,
@@ -33,6 +33,7 @@ const KNOWN_FEATURES: [&str; 14] = [
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
     nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
     nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2,
+    nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3,
 ];
 
 /// How deeply one type may nest others. A type is a tree of shared nodes that is dropped
@@ -450,6 +451,9 @@ pub(crate) struct HandlerNode {
     pub action_slot: u32,
     pub owner: Option<Ref>,
     pub body: u32,
+    /// Whether the body reads the environment, so the handler captures the overrides of the
+    /// provides around it.
+    pub reads_environment: bool,
 }
 
 #[derive(Debug)]
@@ -1018,6 +1022,14 @@ impl<'a> Decoder<'a> {
                 action_slot: reader.next()?,
                 owner: self.optional_reference(&mut reader)?,
                 body: reader.next()?,
+                reads_environment: if reader.finished() {
+                    false
+                } else {
+                    match reader.next()? {
+                        1 => true,
+                        _ => return Err("an actionHandler's environment flag is not 1".to_string()),
+                    }
+                },
             })),
             node::ENV_READ => Node::EnvRead(self.reference(&mut reader)?),
             node::ENV_PROVIDE => Node::EnvProvide {
@@ -1379,6 +1391,7 @@ impl PreparedModule {
         check_constraint_nodes(&image, &mut diagnostics);
         check_environment_entries(&image, &mut diagnostics);
         check_environment_v2_entries(&image, &mut diagnostics);
+        check_environment_v3_entries(&image, &mut diagnostics);
 
         let strings: Vec<OnceLock<Arc<str>>> =
             (0..image.string_count()).map(|_| OnceLock::new()).collect();
@@ -1769,6 +1782,40 @@ fn check_environment_v2_entries(image: &NxIrImage<'_>, diagnostics: &mut Vec<Dia
         diagnostics.push(malformed(format!(
             "the module holds a formula, a bundle in a provide or a bundle built on another, which requires the feature '{}' the module does not list",
             nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2
+        )));
+    }
+}
+
+/// An action handler that carries the environment flag needs `environment-v3`, so a module that has
+/// one without listing it is refused rather than run with the handler's overrides dropped.
+fn check_environment_v3_entries(image: &NxIrImage<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    use kinds::node;
+    // The handler's cells: the kind, the component (2), the emit, the action (2), the slot, the
+    // owner (2) and the body; a flag is the cell after them.
+    const FLAG: usize = 10;
+    let mut flagged = false;
+    for index in 0..image.entry_count(Table::Nodes) as u32 {
+        let Some(entry) = image.entry(Table::Nodes, index) else {
+            continue;
+        };
+        if entry.get(0).map(i64::from) != Some(node::ACTION_HANDLER) {
+            continue;
+        }
+        match entry.get(FLAG) {
+            None => {}
+            Some(1) => flagged = true,
+            Some(_) => diagnostics.push(malformed(format!(
+                "node {index} is an action handler whose environment flag is not 1"
+            ))),
+        }
+    }
+    let listed = image
+        .required_features()
+        .any(|feature| feature == nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3);
+    if flagged && !listed {
+        diagnostics.push(malformed(format!(
+            "the module holds an action handler that reads the environment, which requires the feature '{}' the module does not list",
+            nx_ir::NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3
         )));
     }
 }

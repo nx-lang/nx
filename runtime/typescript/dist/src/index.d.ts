@@ -42,6 +42,11 @@ export declare const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
  * and an `envUpdate` with a base.
  */
 export declare const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2 = "environment-v2";
+/**
+ * Action handlers that read the environment: a handler node with the environment flag, which
+ * captures the overrides of the provides around it.
+ */
+export declare const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3 = "environment-v3";
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export declare const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
 /**
@@ -661,6 +666,11 @@ export interface ActionHandlerValue {
     readonly body: number;
     /** The frame as it stood when the handler was created: the by-value capture. */
     readonly captured: readonly NxCanonicalValue[];
+    /**
+     * For a handler whose node reads the environment, the overrides of the provides around it when
+     * it was made, as `$env` entries, outermost first; `undefined` for any other.
+     */
+    readonly environment: readonly NxCanonicalValue[] | undefined;
 }
 /**
  * A component instance: what dispatch needs to run a batch against a component that initialization

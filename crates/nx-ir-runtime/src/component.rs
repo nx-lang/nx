@@ -264,9 +264,15 @@ impl Rebinding {
                 }
             }
         }
-        let replacement = captured.map(|captured| {
+        // A handler held inside a captured override is replaced as one in a captured slot is.
+        let environment = match &handler.environment {
+            Some(value) => self.value(value, depth, meter, stack)?,
+            None => None,
+        };
+        let replacement = (captured.is_some() || environment.is_some()).then(|| {
             Arc::new(Handler {
-                captured,
+                captured: captured.unwrap_or_else(|| handler.captured.clone()),
+                environment: environment.or_else(|| handler.environment.clone()),
                 ..Handler::clone(handler)
             })
         });
@@ -954,10 +960,13 @@ impl<'p> Machine<'p> {
             declaration,
             depth: 0,
         };
-        let results = match self.eval(cx, &mut frame, node.body)? {
-            Value::Seq(items) => items.to_vec(),
-            other => vec![other],
-        };
+        let results =
+            self.with_captured_overrides(cx, handler.node, handler.environment.as_ref(), || {
+                Ok(match self.eval(cx, &mut frame, node.body)? {
+                    Value::Seq(items) => items.to_vec(),
+                    other => vec![other],
+                })
+            })?;
         if results.is_empty() {
             return fail(
                 "nx-ir-handler-result",
@@ -1985,6 +1994,7 @@ mod rebinding_tests {
             action_name: Arc::from("Card.Logged"),
             owner: Some(Arc::from("main::Page")),
             captured: Vec::new(),
+            environment: None,
         })
     }
 
@@ -2003,6 +2013,45 @@ mod rebinding_tests {
         let mut rebinding = Rebinding::default();
         assert!(rebinding.pair(&one, &new));
         assert!(rebinding.pair(&two, &new));
+    }
+
+    #[test]
+    fn a_handler_held_in_captured_overrides_is_replaced() {
+        let (old, new, kept) = (handler(1), handler(1), handler(3));
+        let entry = |held: &Arc<Handler>| {
+            Value::seq(vec![Value::record(
+                None,
+                vec![
+                    (Arc::from("value"), Value::Str(Arc::from("main::mode"))),
+                    (Arc::from("path"), Value::empty()),
+                    (Arc::from("to"), Value::Handler(Arc::clone(held))),
+                ],
+            )])
+        };
+        let holder = Arc::new(Handler {
+            node: 2,
+            captured: vec![Some(Value::Handler(Arc::clone(&kept)))],
+            environment: Some(entry(&old)),
+            ..Handler::clone(&handler(2))
+        });
+        let mut rebinding = Rebinding::default();
+        assert!(rebinding.pair(&old, &new));
+        let stack = Stack::begin(NX_DEFAULT_MAX_STACK_BYTES);
+        let replaced = rebinding
+            .handler(&holder, 0, &Meter::free(), &stack)
+            .unwrap()
+            .expect("the holder is replaced");
+        let Some(Value::Seq(entries)) = &replaced.environment else {
+            panic!("{:?}", replaced.environment)
+        };
+        let Value::Record(record) = &entries[0] else {
+            panic!("{entries:?}")
+        };
+        assert!(matches!(record.get("to"), Some(Value::Handler(held)) if Arc::ptr_eq(held, &new)));
+        // The slots, which hold nothing replaced, are kept as they were.
+        assert!(
+            matches!(&replaced.captured[..], [Some(Value::Handler(held))] if Arc::ptr_eq(held, &kept))
+        );
     }
 
     #[test]
