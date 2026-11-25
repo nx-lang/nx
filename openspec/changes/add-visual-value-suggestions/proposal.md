@@ -33,9 +33,9 @@ values first.
   its own declaration.
 - **A named-values popover in Visual.** A field whose property has suggestions shows a quiet
   named-values button, as Figma shows its variable button, while the property is under the pointer or
-  selected; it and Ctrl+Space open a popover that lists the suggestions by group, each with its
-  preview, filtered as the reader types, the current one marked and the default first (Ctrl+Space,
-  or Option+Esc on a Mac). Choosing one
+  selected; it, Ctrl+Space and Option+Esc (on a Mac, where the system may take Ctrl+Space) open a
+  popover that lists the suggestions by group, each with its preview, filtered as the reader types,
+  the current one marked and the default first. Choosing one
   writes its name; on an unset property it adds the property.
 - **Tokens read as tokens.** A value written as an `env.` read or a member chain, such as
   `{env.color.accent}` or `{standardPalette.blue600}`, reads as a token, with a swatch when its

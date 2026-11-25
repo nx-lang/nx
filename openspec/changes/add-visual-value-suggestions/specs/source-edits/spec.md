@@ -2,7 +2,8 @@
 
 ### Requirement: A value is set in the spelling its place takes
 For `setValue`, the target SHALL be a whole value written as a literal, a bare or qualified union
-case, a name, or an element: the value of an attribute, an item of a braced sequence, or the value of
+case, a name, an element, or a color constructor call the color-tooling capability recognizes, such
+as `{c.oklch(0.6, 0.2, 250)}`: the value of an attribute, an item of a braced sequence, or the value of
 a `let` without parameters. A name is a reference, or a member access whose innermost object is a
 reference or `env`, such as `blue`, `standardPalette.blue600` or `env.color.text.muted`, with no
 call, index or operator in it; a qualified case such as `Size.small` is a case, not a name. The
@@ -32,12 +33,15 @@ written around a name: `padding={env.space.md}` set to the number `12` SHALL rea
 literal or case target SHALL keep its braces, as before. A name that breaks the rule above SHALL be
 refused as `invalidValue`.
 
-A `name` value SHALL replace any target this requirement admits, a hex color literal and an
-element included, as its whole text, its content included. A `color` value SHALL keep its current
-meaning on a color literal, a color constructor call or a color element (the color-tooling
-capability's edit, which keeps the written form), and on a name target SHALL be written as the color
-literal it carries, as at an unbraced place. Any other value on a hex color literal SHALL be refused
-as `invalidValue`, as today.
+A `name` value SHALL replace any target this requirement admits, a hex color literal, a color
+constructor call and an element included, as its whole text, its content included, braced as an
+unbraced place needs. A `color` value SHALL keep its current meaning on a hex literal, a color
+constructor call or a color element: the color-tooling capability's edit of the written channels,
+which keeps the written form and its braces, and which takes precedence over the brace-dropping rule
+above. On a name target a `color` value SHALL be written as the color literal it carries, as at an
+unbraced place. A `color` value on any other literal or on a case, a constructor call it cannot
+edit, or any value other than `color` or `name` on a hex literal or a constructor call, SHALL be
+refused as `invalidValue`, as today.
 
 The service SHALL NOT check the value against the place's type, nor that a name resolves; a value of
 the wrong type, or a name the module cannot see, SHALL be written and then reported by the type

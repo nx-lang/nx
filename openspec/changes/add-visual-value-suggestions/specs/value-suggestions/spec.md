@@ -71,10 +71,11 @@ a diagnostic:
   spelled by its name;
 - each top-level parameterless `let` value a module the document imports makes visible to it,
   spelled as the document refers to it: through the import's alias when it has one, through the
-  alias a selective import gives the name (`import { standardPalette as sp } from "@nx/design"`
-  gives `sp`), and bare otherwise; a selective import SHALL bring only the names it lists;
+  qualified alias a selective import gives the name (`import { standardPalette as
+  d.standardPalette } from "@nx/design"` gives `d.standardPalette`), and bare otherwise; a selective import SHALL bring only the names it lists;
 - a name that is ambiguous for the module, or that a nearer declaration shadows, SHALL be left out
-  under that spelling;
+  under that spelling; a top-level name that a parameter or state field of a component or function
+  shadows SHALL list that declaration in `self`, so it is not offered inside it;
 - for each of the above whose type is a record, each of its fields, spelled with a `.` and the field
   name after the value's name, and recursively each field of a field whose type is a record, at most
   four fields deep. A field that is optional, a sequence, or of a union type SHALL be suggested only
@@ -113,6 +114,11 @@ local `let`s, and values of modules the document does not import SHALL NOT be su
 - **WHEN** a document imports two modules that each export `let accent: Color` and a property is
   typed `Color`
 - **THEN** the suggestions SHALL NOT include a bare `accent`
+
+#### Scenario: A parameter shadows a top-level value
+- **WHEN** a document declares `let tint = #e11d48` and `component <Badge tint: Color /> = { … }`
+- **THEN** the suggestion `tint` without a scope SHALL list `Badge` in `self`, and the scoped `tint`
+  SHALL have `Badge` as its scope
 
 #### Scenario: A component's own property
 - **WHEN** `component <Badge tint: Color /> = { <Dot fill={tint} /> }` and `Dot.fill` is typed
