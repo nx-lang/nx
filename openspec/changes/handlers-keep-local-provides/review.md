@@ -115,7 +115,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 
 ## New Findings Discovered During 2026-11-25 08:11 Verification
 
-### 🟡 Fixed - RF8 Every `envProvide` copies the whole list of the overrides around it, even when no handler captures it
+### ✅ Verified - RF8 Every `envProvide` copies the whole list of the overrides around it, even when no handler captures it
 - **Severity:** Low
 - **Evidence:** `eval_provide` (crates/nx-ir-runtime/src/environment.rs) builds
   `outer.iter().chain(entries.iter()).cloned().collect()` and `evalEnvironmentProvide`
@@ -135,6 +135,32 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   level for the handlers after it. A program without a flagged handler never builds a list.
   Results, op counts and the corpus are unchanged. Decision 2, the cost section and
   `docs/nx-ir-format.md` say how the list is built.
+- **Verification:** Checked at e2f4dd4a by the independent verifier. A provide now pushes only its own
+  entries (an `Arc` of them in Rust, the array itself in TypeScript), so no per-provide copy of the
+  levels around it remains. Each push makes a new level with an empty cache, so a popped and
+  re-pushed level never sees a stale list, and a level's cache stays valid while it is on the stack
+  because the levels below it don't change. The scan for the nearest cached or whole level is the
+  same in both runtimes. A temporary probe (removed) dispatched 13 handlers in both runtimes with
+  equal results and operation counts, and in Rust the same results after a store and restore:
+  two-level and four-level nesting with formulas reading captured outer overrides (`10`, `d32`), a
+  formula `env.` attribute on the holding element, a bundle under an outer provide, an outer handler
+  before and after inner ones (the cached list reused), an inner handler before an outer one, a
+  provide inside a `for` inside a provide, and a `provide` inside a running handler's body. The
+  sharing test `handlers_under_one_provide_share_their_stored_overrides` passes. A first capture at
+  a level still copies the levels above the nearest cached one, uncharged, which the cost section
+  now states; a program with no flagged handler builds no list. One slip: the fix left a 124-character
+  line in the reflowed paragraph of `docs/nx-ir-format.md` (RF9).
+
+## New Findings Discovered During 2026-11-25 08:32 Verification
+
+### 🟡 Fixed - RF9 The RF8 fix left an over-long line in docs/nx-ir-format.md
+- **Severity:** Low
+- **Evidence:** docs/nx-ir-format.md, *Handlers and the environment*: the edited sentence "list, built
+  when the first of them is made. An unflagged node captures nothing …" makes one line of 124
+  characters in a paragraph that wraps at 100.
+- **Recommendation:** Reflow the paragraph.
+- **Fix:** Reflowed the paragraph to 100 characters, with no change to the wording. The independent
+  verifier made this fix, so it is not independently verified.
 
 ## Questions
 - None
@@ -145,5 +171,5 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   five places from the proposal. The gaps are tests of paths that have their own code (bundles,
   equality and its cost, rebinding through overrides), plus a clippy failure and small doc and
   format slips.
-- Independent verification confirms all seven fixes; one new low-severity finding (RF8, an
-  uncharged copy of the override list at every provide) remains open.
+- Independent verification confirms all seven fixes and the RF8 fix. RF9, a line-width slip from
+  the RF8 fix, was fixed during verification and is not independently verified.
