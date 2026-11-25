@@ -32,6 +32,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   and count.
 - **Fix:** Added a `Bundle` button to the `environment-handlers` `Page`, inside `provide env with dense with { mode="bundle" }` where `dense` sets `space=2` and the formula `gap={env.space * 3}`, and a ninth lifecycle batch that taps it (`bundle 6 2`). Both runtimes pass the corpus with the regenerated counts; the README describes the case.
 - **Verification:** The corpus `Page` lifecycle's ninth batch renders `bundle 6 2`, the result the environment page gives for `dense with { … }`: `mode` from the step, `gap` from the bundle's formula reading the bundle's `space`. `node test/corpus.test.mjs` and `ir_corpus` pass with equal counts, so the bundle replay path (`entries_of` / `bundleEntriesOf`, bundle flag) is pinned in both runtimes.
+- **Independent verification:** Re-checked at d0c2444f: the `Bundle` button sits inside `provide env with dense with { mode="bundle" }`, the ninth `Page` batch renders `bundle 6 2`, and `node test/corpus.test.mjs` and `codegen_parity` (which runs the corpus) pass, so both runtimes give that result at 149 operations. A temporary probe also ran `provide env.space=7 { provide env with dense { … } }` in both runtimes: `62`, 69 operations each, so the bundle's formula reads the bundle's own `space`, not the outer one.
 
 ### ✅ Verified - RF2 Equality of flagged handlers, and its cost, is untested in both runtimes
 - **Severity:** Medium
@@ -47,6 +48,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   results and counts are pinned in both runtimes.
 - **Fix:** Added corpus entrypoints `equalHandlers` and `unequalHandlers` (two buttons from `pinger`, whose handler reads `env.mode` inside `provide env.mode={label}`) and the control `quietHandlers`, whose handler reads nothing. Results are `true` and `false`, and the counts are 30, 30 and 25: the 5 more are the two lists, their pair of entries and that pair's three fields, as the nx-ir-format scenario says. Both runtimes pass with those counts.
 - **Verification:** Results `true` and `false`, counts 30, 30 and 25 in both runtimes. The 5-operation gap over `quietHandlers` is the override comparison of the nx-ir-format scenario, so a runtime that skipped or mis-costed it would fail. The `false` of `unequalHandlers` also follows from the descriptors' `$env`, which always mirrors the handler's capture; the counts, not that result, are what pin the handler comparison. The tree test still covers unequal handlers across renders.
+- **Independent verification:** Re-checked: `equalHandlers`, `unequalHandlers` and `quietHandlers` give `true`, `false`, `true` at 30, 30 and 25 operations in both runtimes. Under a budget `records_equal` compares every field without stopping, so the unequal case also walks the handler's override lists, and the 5-operation gap pins that comparison and its cost in both runtimes. As noted before, the `false` alone would also come from the descriptors' `$env`; NX cannot take a handler out of a descriptor (`.onTapped` is `unknown-member`), so a direct result test is not possible from source, and the Rust tree test covers the result.
 
 ### ✅ Verified - RF3 A new test uses `.err().expect(...)`, which fails CI's clippy (`clippy::err_expect`)
 - **Severity:** Low
@@ -56,6 +58,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Use `.expect_err("refused")`.
 - **Fix:** Changed to `.expect_err("refused")`. `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all --check` pass.
 - **Verification:** Line 5023 now uses `expect_err`; `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all --check` pass.
+- **Independent verification:** Re-checked: line 5023 uses `.expect_err("refused")`; `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all --check` pass at d0c2444f.
 
 ### ✅ Verified - RF4 The stress test's module doc comment now has a line far past the line width
 - **Severity:** Low
@@ -65,6 +68,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Reflow the paragraph.
 - **Fix:** Reflowed the paragraph to the width of the rest of the comment.
 - **Verification:** No `//!` line in the file is past 100 characters.
+- **Independent verification:** Re-checked: no `//!` line of ir_instance_tree_stress_tests.rs is over 100 characters.
 
 ### ✅ Verified - RF5 The website's new "In an action handler" section runs into the next heading
 - **Severity:** Low
@@ -74,6 +78,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Add the blank line.
 - **Fix:** Added the blank line before `## Root values from the host`.
 - **Verification:** A blank line now comes before the heading.
+- **Independent verification:** Re-checked: a blank line precedes `## Root values from the host`.
 
 ### ✅ Verified - RF6 The NX example in docs/nx-ir-format.md exceeds the NX line-length target
 - **Severity:** Low
@@ -82,6 +87,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Split the `for` over lines, as the website's copy of the example does.
 - **Fix:** Split the `for` over lines, as the website's copy has it.
 - **Verification:** The example's lines are all within 120 characters.
+- **Independent verification:** Re-checked: no line in the NX blocks of docs/nx-ir-format.md is over 120 characters.
 
 ### ✅ Verified - RF7 Rebinding a handler held inside a captured override has no test
 - **Severity:** Low
@@ -93,10 +99,35 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   an old handler is replaced by one holding the new handler, and its slots are kept.
 - **Fix:** Added `a_handler_held_in_captured_overrides_is_replaced` to `rebinding_tests` (crates/nx-ir-runtime/src/component.rs): a handler whose captured overrides hold an old handler is replaced by one that holds the new handler, and its captured slot keeps its handler.
 - **Verification:** The test passes, and it fails to compile without `Handler::environment` and the walk, so it exercises the new code; the replaced handler holds the new handler and keeps its slot's handler by pointer.
+- **Independent verification:** Re-checked: `a_handler_held_in_captured_overrides_is_replaced` passes. With the override walk in `Rebinding::handler` removed, the holder's slot holds no replaced handler, so the method returns `None` and the test's `expect` fails: the test exercises the walk, not only the field.
 
 ## Verification Notes
 - Verified at 2789be7e. The session had no tool for spawning subagents, so one agent ran the review,
   the fixes and this verification; none of it wrote the original change. No new findings.
+- Independently re-verified at d0c2444f by a separate agent that did not write the change, the review
+  or the fixes. All seven fixes hold. Temporary probes (removed) checked, in both runtimes with equal
+  results and operation counts: a captured formula reading a captured outer override
+  (`provide env.space=5 { provide env.gap={env.space * 2} { … } }` gives `10`, 66 operations), a
+  formula `env.` attribute on the element holding the handler (`3`, 68), and bundles (`62`, 69). In
+  Rust, a stored instance restored and dispatched gives the same results for the nested and bundle
+  cases, and in the tree a flagged handler under an unchanged provide compares equal across a parent
+  render, so its child keeps its render. RF8 is new; it was not fixed.
+
+## New Findings Discovered During 2026-11-25 08:11 Verification
+
+### 🔴 Open - RF8 Every `envProvide` copies the whole list of the overrides around it, even when no handler captures it
+- **Severity:** Low
+- **Evidence:** `eval_provide` (crates/nx-ir-runtime/src/environment.rs) builds
+  `outer.iter().chain(entries.iter()).cloned().collect()` and `evalEnvironmentProvide`
+  (runtime/typescript/src/index.ts) builds `[...outer, ...entries]` each time a provide is evaluated,
+  in every program, whether or not a flagged handler is beneath it. The copy is not charged. A
+  provide inside a recursive function or component body copies one entry more per level, so a
+  recursion of depth d copies O(d²) entries; a provide in a loop inside k other provides copies k+1
+  entries per iteration. Design Decision 2 says "taking it copies no entries", which holds for the
+  capture but not for building the list. Results and counts are not affected.
+- **Recommendation:** Keep only each provide's own entries on the stack (or a persistent linked list
+  with a cached flattened form) and build the flattened list when a flagged handler first captures
+  at that depth, in both runtimes; or state the copy in Decision 2 and the cost section.
 
 ## Questions
 - None
@@ -107,3 +138,5 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   five places from the proposal. The gaps are tests of paths that have their own code (bundles,
   equality and its cost, rebinding through overrides), plus a clippy failure and small doc and
   format slips.
+- Independent verification confirms all seven fixes; one new low-severity finding (RF8, an
+  uncharged copy of the override list at every provide) remains open.
