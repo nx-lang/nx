@@ -33,6 +33,6 @@
     "main.nx::smallFloat": 5,
     "main.nx::stringFirst": 8,
     "main.nx::total": 6,
-    "main.nx::widened": 21
+    "main.nx::widened": 19
   }
 }

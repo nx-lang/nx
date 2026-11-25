@@ -1,0 +1,156 @@
+module main.nx fingerprint 112762604960138090
+requires environment-v1 environment-v2
+entrypoints functions [sized darkAccent lightAccent frenchAccent redAccent darkTone spaceOne tripledOne defaultTwice valueTwice valueOverride modeOverride unrelatedOverride branchNotTaken equalOverride fieldOverride bundleReads formulaTwice formulaOverride chain dive deepRead deepFresh] components []
+
+union Mode
+  case light constant
+  case dark constant
+
+record Colors
+  accent: string required
+  surface: string required
+
+environment colorMode: Mode =
+  Mode.light
+
+environment highContrast: boolean =
+  false
+
+environment locale: string =
+  "en-US"
+
+environment color: Colors =
+  if env.colorMode is
+    Mode.light =>
+      <Colors accent="blue" surface="white" />
+    Mode.dark =>
+      <Colors accent="navy" surface="black" />
+
+environment tone: string =
+  if env.highContrast then
+    if env.colorMode is
+      Mode.light =>
+        "ink"
+      Mode.dark =>
+        "chalk"
+  else
+    "soft"
+
+environment space: int =
+  4
+
+environment gap: int =
+  0
+
+environment scale: int =
+  1
+
+environment ring: int =
+  0
+
+value palette: string+ =
+  ["red", "green", "blue"]
+
+value tripled: int =
+  (env.space mul 3)
+
+function sized(scale: int): object =
+  <env.Update
+    env.scale=(scale add 1)
+    env.ring=(scale mul 10)
+  />
+
+function darkAccent(): string =
+  provide env.colorMode=Mode.dark {
+    env.color.accent
+  }
+
+function lightAccent(): string =
+  provide env.colorMode=Mode.light {
+    env.color.accent
+  }
+
+function frenchAccent(): string =
+  provide env.locale="fr-FR" {
+    env.color.accent
+  }
+
+function redAccent(): string =
+  provide env.color.accent="red" {
+    env.color.accent
+  }
+
+function darkTone(): string =
+  provide env.colorMode=Mode.dark {
+    env.tone
+  }
+
+function spaceOne(): int =
+  provide env.space=1 {
+    env.gap
+  }
+
+function tripledOne(): int =
+  provide env.space=1 {
+    tripled
+  }
+
+function defaultTwice(): string+ =
+  [env.color.accent, env.color.surface]
+
+function valueTwice(): string+ =
+  [palette, palette]
+
+function valueOverride(): int+ =
+  [tripled, tripled, tripledOne()]
+
+function modeOverride(): string+ =
+  [env.color.accent, darkAccent()]
+
+function unrelatedOverride(): string+ =
+  [env.color.accent, frenchAccent()]
+
+function branchNotTaken(): string+ =
+  [env.tone, darkTone()]
+
+function equalOverride(): string+ =
+  [env.color.accent, lightAccent()]
+
+function fieldOverride(): string+ =
+  [env.color.accent, redAccent()]
+
+function bundleReads(): int+ =
+  [env.ring, env.scale, env.ring, env.scale]
+
+function formulaTwice(): int+ =
+  provide env.gap:=(env.space mul 2) {
+    [env.gap, env.gap]
+  }
+
+function formulaOverride(): int+ =
+  provide env.gap:=(env.space mul 2) {
+    [env.gap, spaceOne()]
+  }
+
+function chain(n: int): int =
+  if (n eq 0) then
+    1
+  else
+    (chain((n sub 1)) add 1)
+
+environment deep: int =
+  chain(10)
+
+function dive(n: int): int =
+  if (n eq 0) then
+    env.deep
+  else
+    dive((n sub 1))
+
+function deepRead(): int+ =
+  [env.deep, dive(95)]
+
+function deepFresh(): int =
+  dive(95)
+
+provide sized(env.scale)

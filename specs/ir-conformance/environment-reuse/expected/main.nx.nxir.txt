@@ -1,0 +1,156 @@
+module main.nx fingerprint 112762604960138090
+requires environment-v1 environment-v2
+entrypoints functions [sized darkAccent lightAccent frenchAccent redAccent darkTone spaceOne tripledOne defaultTwice valueTwice valueOverride modeOverride unrelatedOverride branchNotTaken equalOverride fieldOverride bundleReads formulaTwice formulaOverride chain dive deepRead deepFresh] components []
+
+union Mode @5:1-5:25
+  case light constant
+  case dark constant
+
+record Colors @6:1-6:47
+  accent: string required
+  surface: string required
+
+environment colorMode: Mode @8:1-8:36 =
+  Mode.light
+
+environment highContrast: boolean @9:1-9:42 =
+  false
+
+environment locale: string @10:1-10:37 =
+  "en-US"
+
+environment color: Colors @11:1-16:2 =
+  if env.colorMode is
+    Mode.light =>
+      <Colors accent="blue" surface="white" />
+    Mode.dark =>
+      <Colors accent="navy" surface="black" />
+
+environment tone: string @18:1-20:2 =
+  if env.highContrast then
+    if env.colorMode is
+      Mode.light =>
+        "ink"
+      Mode.dark =>
+        "chalk"
+  else
+    "soft"
+
+environment space: int @21:1-21:27 =
+  4
+
+environment gap: int @22:1-22:25 =
+  0
+
+environment scale: int @23:1-23:27 =
+  1
+
+environment ring: int @24:1-24:26 =
+  0
+
+value palette: string+ @27:1-27:48 =
+  ["red", "green", "blue"]
+
+value tripled: int @29:1-29:37 =
+  (env.space mul 3)
+
+function sized(scale: int): object @32:1-32:87 =
+  <env.Update
+    env.scale=(scale add 1)
+    env.ring=(scale mul 10)
+  />
+
+function darkAccent(): string @36:1-36:79 =
+  provide env.colorMode=Mode.dark {
+    env.color.accent
+  }
+
+function lightAccent(): string @37:1-37:81 =
+  provide env.colorMode=Mode.light {
+    env.color.accent
+  }
+
+function frenchAccent(): string @38:1-38:81 =
+  provide env.locale="fr-FR" {
+    env.color.accent
+  }
+
+function redAccent(): string @39:1-39:82 =
+  provide env.color.accent="red" {
+    env.color.accent
+  }
+
+function darkTone(): string @40:1-40:69 =
+  provide env.colorMode=Mode.dark {
+    env.tone
+  }
+
+function spaceOne(): int @41:1-41:58 =
+  provide env.space=1 {
+    env.gap
+  }
+
+function tripledOne(): int @42:1-42:60 =
+  provide env.space=1 {
+    tripled
+  }
+
+function defaultTwice(): string+ @45:1-45:69 =
+  [env.color.accent, env.color.surface]
+
+function valueTwice(): string+ @47:1-47:48 =
+  [palette, palette]
+
+function valueOverride(): int+ @49:1-49:61 =
+  [tripled, tripled, tripledOne()]
+
+function modeOverride(): string+ @51:1-51:64 =
+  [env.color.accent, darkAccent()]
+
+function unrelatedOverride(): string+ @53:1-53:71 =
+  [env.color.accent, frenchAccent()]
+
+function branchNotTaken(): string+ @55:1-55:56 =
+  [env.tone, darkTone()]
+
+function equalOverride(): string+ @57:1-57:66 =
+  [env.color.accent, lightAccent()]
+
+function fieldOverride(): string+ @59:1-59:64 =
+  [env.color.accent, redAccent()]
+
+function bundleReads(): int+ @61:1-61:68 =
+  [env.ring, env.scale, env.ring, env.scale]
+
+function formulaTwice(): int+ @63:1-63:83 =
+  provide env.gap:=(env.space mul 2) {
+    [env.gap, env.gap]
+  }
+
+function formulaOverride(): int+ @65:1-65:89 =
+  provide env.gap:=(env.space mul 2) {
+    [env.gap, spaceOne()]
+  }
+
+function chain(n: int): int @68:1-68:70 =
+  if (n eq 0) then
+    1
+  else
+    (chain((n sub 1)) add 1)
+
+environment deep: int @69:1-69:38 =
+  chain(10)
+
+function dive(n: int): int @70:1-70:71 =
+  if (n eq 0) then
+    env.deep
+  else
+    dive((n sub 1))
+
+function deepRead(): int+ @73:1-73:45 =
+  [env.deep, dive(95)]
+
+function deepFresh(): int @75:1-75:36 =
+  dive(95)
+
+provide sized(env.scale)

@@ -35,7 +35,15 @@ and a descriptor whose `$env` carries a formula. `environment-inline-provide` ho
 bundles passed as component props: a default one read twice in the body, once in a section set to
 dark mode, and one the host passes. `environment-values-at-read` reads top-level values that read
 the environment (one in another module, one through another value, a record) under overrides, and
-names one in an override. `environment-cycle` holds a case that fails with `nx-ir-environment-cycle`
+names one in an override. `environment-reuse` pins the derived results one call reuses: a default
+and a top-level value read twice, a top-level value under a new override of what it reads, a
+default under a new override of a value it read, of a value it did not read and of a value it read
+to the value it had, a default that read a value only on a branch it did not take, a field override
+applied to a reused default, an entry-module bundle that reads a value it sets read for both
+values, a formula read twice and again under a new override of what it reads, and a default reused
+at a call depth where evaluating it fails, with the case that evaluates it there. Each result is
+what evaluating every source afresh gives, and each count shows what was evaluated once.
+`environment-cycle` holds a case that fails with `nx-ir-environment-cycle`
 through a function the static check cannot follow; it is kept apart because generated JavaScript
 refuses a call of a function-typed value, and would skip the other program's entrypoints with it.
 

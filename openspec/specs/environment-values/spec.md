@@ -362,7 +362,10 @@ it is written, with the values they had there. The element's other attributes an
 `provide` block's body, SHALL be evaluated inside the overrides. Whether a value reads the
 environment SHALL be decided from its static read set, so a value that reads one only on some
 branches is a formula. A runtime MAY compute once, where it is written, a value whose static read
-set is empty, since it gives the same value at every read.
+set is empty, since it gives the same value at every read. A runtime MAY also, in place of computing
+a default, an entry-module provide or an override's formula again, reuse a result it computed
+earlier, as the reactivity capability defines; the read SHALL then give the value computing it
+there would give.
 
 #### Scenario: An override cascades through a default
 - **WHEN** `color`'s default is `if env.colorMode is { light => lightColors dark => darkColors }`

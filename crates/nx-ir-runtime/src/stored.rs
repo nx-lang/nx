@@ -9,7 +9,7 @@
 //! <para>A handler is stored as the node it is and what it captured. Everything else a handler
 //! knows is read from the node again when the instance is restored.</para>
 
-use crate::component::InstanceData;
+use crate::component::{InstanceData, Render};
 use crate::error::{fail, Result};
 use crate::eval::{Cx, Machine};
 use crate::module::{DeclarationKind, Field, Node};
@@ -173,6 +173,7 @@ impl Stored {
             .collect();
         let state = writer.fields(&instance.state);
         let handlers = instance
+            .render
             .handlers
             .iter()
             .map(|handler| writer.handler(handler))
@@ -180,7 +181,7 @@ impl Stored {
         Self {
             program: instance.program.to_vec(),
             component: Arc::clone(&instance.component),
-            generation: instance.generation,
+            generation: instance.render.generation,
             values: writer.values,
             props,
             handler_props,
@@ -219,9 +220,11 @@ impl Stored {
                 .zip(handler_values)
                 .collect(),
             state: reader.fields(&self.state)?,
-            handlers: handlers(&mut self.handlers.iter().copied())?,
-            generation: self.generation,
-            reads: Arc::from(Vec::new()),
+            render: Arc::new(Render {
+                handlers: handlers(&mut self.handlers.iter().copied())?,
+                generation: self.generation,
+                reads: None,
+            }),
         })
     }
 }

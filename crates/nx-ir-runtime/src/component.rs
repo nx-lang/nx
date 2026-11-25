@@ -6,6 +6,7 @@ use crate::eval::{
     NX_DEFAULT_MAX_STACK_BYTES,
 };
 use crate::input::Measure;
+use crate::kept::{Input, Session};
 use crate::module::{ComponentDecl, DeclarationKind, Node};
 use crate::normalize::{require_record, Labeled, Path};
 use crate::program::{Program, ProgramData};
@@ -33,14 +34,42 @@ pub(crate) struct InstanceData {
     /// The handlers the parent bound, by property name (`onTapped`). Never in the body's scope.
     pub handler_props: HandlerProps,
     pub state: Fields,
-    /// The handlers in the most recent rendered output, in the order their tokens number them.
+    /// The render behind the instance's rendered output, shared by every instance that keeps it.
+    pub render: Arc<Render>,
+}
+
+/// One render of a component's body: what its output's tokens name, and what it read.
+///
+/// <para>An instance whose dispatch or new props left its output as it was shares the render of
+/// the instance before it, so the instance tree finds it the same render: its handlers, its
+/// generation and its tokens. The props, the handlers bound for its emits and the state are the
+/// instance's own, outside the render.</para>
+#[derive(Debug)]
+pub(crate) struct Render {
+    /// The handlers in the rendered output, in the order their tokens number them.
     pub handlers: Vec<Arc<Handler>>,
     /// The render generation the tokens belong to.
     pub generation: u64,
-    /// The environment values the render read, by qualified name, each with the value it found
-    /// beneath the overrides the body itself wrote, or `None` where reading it there failed, so
-    /// it counts as changed on every visit. An instance restored from storage has none.
-    pub reads: Arc<[(Arc<str>, Option<Value>)]>,
+    /// The props and state fields the render read, in memory only: `None` for an instance
+    /// restored from storage, which counts as having read every one.
+    pub reads: Option<RenderReads>,
+}
+
+/// The props and state fields a render read, by name: a `slot` node of the body evaluated, a
+/// slot an override formula the body wrote captured, and, for props only, a slot a handler the
+/// body bound reads. A content parameter is one prop. A handler's state slots are not reads: in
+/// the instance tree every handler runs against its owner with the state live.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderReads {
+    pub props: Vec<Arc<str>>,
+    pub state: Vec<Arc<str>>,
+}
+
+impl RenderReads {
+    /// Whether the render read the state field `name`.
+    pub(crate) fn read_state(&self, name: &str) -> bool {
+        self.state.iter().any(|read| &**read == name)
+    }
 }
 
 /// A component instance: what dispatch needs to run a batch against a component that
@@ -57,11 +86,6 @@ pub struct ComponentInstance {
 }
 
 impl ComponentInstance {
-    /// The environment values the render behind this instance read, with what each found.
-    pub(crate) fn reads(&self) -> &Arc<[(Arc<str>, Option<Value>)]> {
-        &self.data.reads
-    }
-
     /// The name of the component the instance is of.
     pub fn component(&self) -> &str {
         &self.data.component
@@ -69,7 +93,7 @@ impl ComponentInstance {
 
     /// The render generation the instance's handler tokens belong to.
     pub fn generation(&self) -> u64 {
-        self.data.generation
+        self.data.render.generation
     }
 
     /// Whether the handler this instance holds under `token` is the handler `other` holds under
@@ -106,8 +130,42 @@ impl ComponentInstance {
 impl ComponentInstance {
     /// Whether this is the very instance `other` is, not one that holds the same things: a token
     /// names the same handler in both only then.
+    ///
+    /// <para>It is the render that is compared: an instance that took new state or new props and
+    /// kept its rendered output shares the render of the one before, so its tokens name the same
+    /// handlers.</para>
     pub(crate) fn is(&self, other: &ComponentInstance) -> bool {
-        Arc::ptr_eq(&self.data, &other.data)
+        Arc::ptr_eq(&self.data.render, &other.data.render)
+    }
+
+    /// What the render behind the instance read of its props and state; `None` when unknown.
+    pub(crate) fn render_reads(&self) -> Option<&RenderReads> {
+        self.data.render.reads.as_ref()
+    }
+
+    /// The instance's normalized props.
+    pub(crate) fn props(&self) -> &Fields {
+        &self.data.props
+    }
+
+    /// The handlers the parent bound on the instance for its emits.
+    pub(crate) fn handler_props(&self) -> &HandlerProps {
+        &self.data.handler_props
+    }
+
+    /// This instance with other props and handlers bound for its emits, keeping its render.
+    pub(crate) fn with_props(&self, props: Fields, handler_props: HandlerProps) -> Self {
+        let data = &*self.data;
+        ComponentInstance {
+            data: Arc::new(InstanceData {
+                program: Arc::clone(&data.program),
+                component: Arc::clone(&data.component),
+                props,
+                handler_props,
+                state: data.state.clone(),
+                render: Arc::clone(&data.render),
+            }),
+        }
     }
 
     /// The handler the instance's rendered output holds under `token`.
@@ -124,10 +182,14 @@ impl ComponentInstance {
     pub(crate) fn token_of(&self, handler: &Arc<Handler>) -> Option<String> {
         let number = self
             .data
+            .render
             .handlers
             .iter()
             .position(|held| Arc::ptr_eq(held, handler))?;
-        Some(token_text(self.data.generation, number.saturating_add(1)))
+        Some(token_text(
+            self.data.render.generation,
+            number.saturating_add(1),
+        ))
     }
 
     /// The handler a parent bound on the instance under `property` (`onTapped`).
@@ -324,10 +386,10 @@ impl ComponentInstance {
             }
         }
         let mut handlers = None;
-        for (index, handler) in data.handlers.iter().enumerate() {
+        for (index, handler) in data.render.handlers.iter().enumerate() {
             if let Some(handler) = rebinding.handler(handler, 1, meter, stack)? {
                 if let Some(entry) = handlers
-                    .get_or_insert_with(|| data.handlers.clone())
+                    .get_or_insert_with(|| data.render.handlers.clone())
                     .get_mut(index)
                 {
                     *entry = handler;
@@ -344,9 +406,16 @@ impl ComponentInstance {
                 props: props.unwrap_or_else(|| data.props.clone()),
                 handler_props: handler_props.unwrap_or_else(|| data.handler_props.clone()),
                 state: state.unwrap_or_else(|| data.state.clone()),
-                handlers: handlers.unwrap_or_else(|| data.handlers.clone()),
-                generation: data.generation,
-                reads: Arc::clone(&data.reads),
+                // A render none of whose handlers is replaced is the same render: its tokens
+                // name what they named.
+                render: match handlers {
+                    None => Arc::clone(&data.render),
+                    Some(handlers) => Arc::new(Render {
+                        handlers,
+                        generation: data.render.generation,
+                        reads: data.render.reads.clone(),
+                    }),
+                },
             }),
         }))
     }
@@ -401,6 +470,13 @@ impl Serialize for ComponentInstance {
 impl InstanceData {
     /// The handler a token of this instance's rendered output names.
     fn handler(&self, token: &str) -> Option<&Arc<Handler>> {
+        self.render.handler(token)
+    }
+}
+
+impl Render {
+    /// The handler a token of this render's output names.
+    fn handler(&self, token: &str) -> Option<&Arc<Handler>> {
         let number = token
             .strip_prefix('h')?
             .strip_prefix(self.generation.to_string().as_str())?
@@ -442,6 +518,79 @@ pub struct ComponentDispatchResult {
     pub effects: Vec<NxValue>,
     pub state: BTreeMap<String, NxValue>,
     pub instance: ComponentInstance,
+}
+
+/// What the instance tree's dispatch returns: as [`ComponentDispatchResult`], with no rendered
+/// output when the dispatch kept the instance's render.
+#[derive(Debug, Clone)]
+pub(crate) struct TrackedDispatch {
+    pub rendered: Option<NxValue>,
+    pub effects: Vec<NxValue>,
+    pub state: BTreeMap<String, NxValue>,
+    pub instance: ComponentInstance,
+}
+
+/// A component's props normalized, and the handlers bound for its emits, ready to initialize it
+/// from.
+#[derive(Debug, Clone)]
+pub(crate) struct NormalizedProps {
+    pub props: Fields,
+    pub handler_props: HandlerProps,
+    /// The direct inputs of normalizing them, in a call the instance tree made: what the
+    /// defaults read.
+    pub record: Vec<Input>,
+}
+
+/// What a call the instance tree makes brings beside its options.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TreeCall<'a, 's> {
+    /// The tree's kept results.
+    pub session: &'a Session<'s>,
+    /// The operations a record check spent at the node ahead of the call, under the same
+    /// budget: the call starts with what the check left and reports them as its own.
+    pub spent: u64,
+    /// The direct inputs of normalizing the props the call starts from, when it does not
+    /// normalize them itself.
+    pub seed: &'a [Input],
+}
+
+/// A render's record in a call the instance tree makes: its direct inputs in the order it read
+/// them, normalizing its props first, and those of normalizing its props alone.
+#[derive(Debug, Default)]
+pub(crate) struct RenderRecord {
+    pub inputs: Vec<Input>,
+    pub props: Vec<Input>,
+}
+
+/// The props an initialization starts from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum InitProps<'a> {
+    /// As the host gives them: normalized by the initialization.
+    Host(&'a BTreeMap<String, NxValue>),
+    /// Normalized already, by [`Program::normalize_component_props`].
+    Normalized(&'a NormalizedProps),
+}
+
+/// What a render read of its props and state, from the slots it read: the props first, then the
+/// state, in the order the component declares them.
+fn render_reads(component: &ComponentDecl, read: &[bool]) -> RenderReads {
+    let was_read = |slot: usize| read.get(slot).copied().unwrap_or(false);
+    RenderReads {
+        props: component
+            .props
+            .iter()
+            .enumerate()
+            .filter(|(slot, _)| was_read(*slot))
+            .map(|(_, field)| Arc::clone(&field.name))
+            .collect(),
+        state: component
+            .state
+            .iter()
+            .enumerate()
+            .filter(|(offset, _)| was_read(component.props.len().saturating_add(*offset)))
+            .map(|(_, field)| Arc::clone(&field.name))
+            .collect(),
+    }
 }
 
 /// The property a parent binds a handler for `emit` under: `onTapped` for `Tapped`.
@@ -523,7 +672,81 @@ fn resolve_parent_handlers(
     }
 }
 
+/// Props normalized, with the frame normalizing bound them in.
+struct Normalized {
+    props: Fields,
+    handler_props: HandlerProps,
+    frame: Frame,
+}
+
 impl<'p> Machine<'p> {
+    /// Normalizes host-supplied props of the component `index` of the entry module: handler
+    /// records resolved through `parent`, handlers bound for emits split off, and every prop
+    /// checked with its default evaluated, into a frame that holds them in their slots.
+    fn normalize_props(
+        &self,
+        index: u32,
+        name: &str,
+        component: &ComponentDecl,
+        props: &BTreeMap<String, NxValue>,
+        parent: Option<&ComponentInstance>,
+    ) -> Result<Normalized> {
+        let path = Labeled(name, " props");
+        let props = crate::environment::without_env(props);
+        let supplied = Value::record(None, fields_from_host(&props, &self.stack)?);
+        let resolved = resolve_parent_handlers(
+            &supplied,
+            parent.map(|parent| &*parent.data),
+            &Path::Root(&path),
+            0,
+            &self.stack,
+        )?;
+        let resolved = match resolved {
+            Value::Record(record) => record.fields.clone(),
+            _ => Vec::new(),
+        };
+        let (fields, handler_props) = self.split_handler_properties(0, index, resolved, &path)?;
+        let mut frame = Vec::new();
+        let props = self.normalize_fields(
+            entry_cx(index),
+            &component.props,
+            &fields,
+            &mut frame,
+            &Path::Root(&path),
+            false,
+        )?;
+        Ok(Normalized {
+            props,
+            handler_props,
+            frame,
+        })
+    }
+
+    /// Whether a state field a render read was patched to another value: each field in
+    /// `patched` the render read compared once, its value in `before` against its value in
+    /// `after`, as a host would see it written. A render whose reads are unknown read every one.
+    fn read_field_changed(
+        &self,
+        reads: Option<&RenderReads>,
+        patched: &[Arc<str>],
+        before: &Fields,
+        after: &Fields,
+        meter: &Meter<'_, 'p>,
+    ) -> Result<bool> {
+        let empty = Value::empty();
+        for field in patched {
+            if reads.is_some_and(|reads| !reads.read_state(field)) {
+                continue;
+            }
+            let old = get_field(before, field).unwrap_or(&empty);
+            let new = get_field(after, field).unwrap_or(&empty);
+            if !crate::kept::same_written(old, new, self.tracks_origins(), meter, &self.stack)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn component(&self, name: &str) -> Result<(u32, &'p Arc<str>, &'p ComponentDecl)> {
         let entry = &self.program.entry;
         match entry.entrypoint(&entry.component_entrypoints, name) {
@@ -884,6 +1107,18 @@ impl Program {
         input: impl FnOnce(&mut Measure),
         body: impl FnOnce(&Machine<'_>) -> Result<T>,
     ) -> Result<T> {
+        self.call_in(options, None, input, body)
+    }
+
+    /// [`call`](Self::call) in a call the instance tree makes, with its kept results and what a
+    /// check spent ahead of it, when it gives them.
+    fn call_in<T>(
+        &self,
+        options: &RuntimeOptions,
+        tree: Option<TreeCall<'_, '_>>,
+        input: impl FnOnce(&mut Measure),
+        body: impl FnOnce(&Machine<'_>) -> Result<T>,
+    ) -> Result<T> {
         let usage = options.usage.as_deref();
         if let Some(usage) = usage {
             usage.clear();
@@ -909,7 +1144,14 @@ impl Program {
                 }
             }
         };
-        let machine = Machine::new(&self.data, options);
+        let machine = match tree {
+            Some(tree) => {
+                let machine = Machine::with_session(&self.data, options, tree.session);
+                machine.take_on(tree.spent);
+                machine
+            }
+            None => Machine::new(&self.data, options),
+        };
         let result = machine.begin_environment().and_then(|()| body(&machine));
         if let Some(usage) = usage {
             usage.record(machine.used(), input_size);
@@ -1060,10 +1302,47 @@ impl Program {
         init: &ComponentInit<'_>,
         options: &RuntimeOptions,
     ) -> Result<ComponentInitResult> {
-        self.call(
+        self.initialize(name, InitProps::Host(props), init, options, None)
+            .map(|(result, _)| result)
+    }
+
+    /// The instance tree's initialization: from props as the host gives them or as
+    /// [`normalize_component_props`](Self::normalize_component_props) normalized them, with the
+    /// tree's kept results. Returns the render's record too.
+    pub(crate) fn initialize_tracked(
+        &self,
+        name: &str,
+        props: InitProps<'_>,
+        init: &ComponentInit<'_>,
+        options: &RuntimeOptions,
+        tree: TreeCall<'_, '_>,
+    ) -> Result<(ComponentInitResult, RenderRecord)> {
+        let tree = match props {
+            InitProps::Normalized(normalized) => TreeCall {
+                seed: &normalized.record,
+                ..tree
+            },
+            InitProps::Host(_) => tree,
+        };
+        self.initialize(name, props, init, options, Some(tree))
+            .map(|(result, record)| (result, record.unwrap_or_default()))
+    }
+
+    fn initialize(
+        &self,
+        name: &str,
+        props: InitProps<'_>,
+        init: &ComponentInit<'_>,
+        options: &RuntimeOptions,
+        tree: Option<TreeCall<'_, '_>>,
+    ) -> Result<(ComponentInitResult, Option<RenderRecord>)> {
+        self.call_in(
             options,
+            tree,
             |input| {
-                input.record(props);
+                if let InitProps::Host(props) = props {
+                    input.record(props);
+                }
                 if let Some(state) = init.state {
                     input.record(state);
                 }
@@ -1079,32 +1358,38 @@ impl Program {
                 if let Some(parent) = init.parent {
                     belongs(&self.data, &parent.data.program, &parent.data.component)?;
                 }
-                let path = Labeled(name, " props");
-                let props = crate::environment::without_env(props);
-                let supplied = Value::record(None, fields_from_host(&props, &machine.stack)?);
-                let resolved = resolve_parent_handlers(
-                    &supplied,
-                    init.parent.map(|parent| &*parent.data),
-                    &Path::Root(&path),
-                    0,
-                    &machine.stack,
-                )?;
-                let resolved = match resolved {
-                    Value::Record(record) => record.fields.clone(),
-                    _ => Vec::new(),
-                };
-                let (fields, handler_props) =
-                    machine.split_handler_properties(0, index, resolved, &path)?;
                 let cx = entry_cx(index);
-                let mut frame = Vec::new();
-                let props = machine.normalize_fields(
-                    cx,
-                    &component.props,
-                    &fields,
-                    &mut frame,
-                    &Path::Root(&path),
-                    false,
-                )?;
+                // What the props' defaults read is the render's.
+                machine.begin_render_track(tree.map(|tree| tree.seed).unwrap_or_default());
+                let (props, handler_props, mut frame) = match props {
+                    InitProps::Host(props) => {
+                        let normalized =
+                            machine.normalize_props(index, name, component, props, init.parent)?;
+                        (normalized.props, normalized.handler_props, normalized.frame)
+                    }
+                    InitProps::Normalized(normalized) => {
+                        let mut frame: Frame = Vec::with_capacity(
+                            component.props.len().saturating_add(component.state.len()),
+                        );
+                        for field in component.props.iter() {
+                            frame.push(Some(
+                                get_field(&normalized.props, &field.name)
+                                    .cloned()
+                                    .unwrap_or_else(Value::empty),
+                            ));
+                        }
+                        (
+                            normalized.props.clone(),
+                            normalized.handler_props.clone(),
+                            frame,
+                        )
+                    }
+                };
+                let track = machine.suspend_render_track();
+                let props_record = track
+                    .as_ref()
+                    .map(|track| track.inputs().to_vec())
+                    .unwrap_or_default();
                 let state_path = Labeled(name, " state");
                 let state = match init.state {
                     None => machine.normalize_fields(
@@ -1124,27 +1409,75 @@ impl Program {
                         true,
                     )?,
                 };
+                machine.resume_render_track(track);
                 let mut tokens = Tokens::new(1);
                 let output = machine.meter(cx, None);
-                machine.record_environment_reads();
+                machine.begin_render(&frame, component.props.len(), component.state.len());
                 let value = machine.eval(cx, &mut frame, body)?;
-                let reads = machine.take_environment_reads();
+                let (read, record) = machine.end_render();
                 let rendered = machine.report(&value, Some(&mut tokens), &output)?;
-                Ok(ComponentInitResult {
-                    rendered,
-                    state: fields_to_host(&state, &output, &machine.stack)?,
-                    instance: ComponentInstance {
-                        data: Arc::new(InstanceData {
-                            program: Arc::clone(&self.data.images),
-                            component: Arc::clone(declared),
-                            props,
-                            handler_props,
-                            state,
-                            handlers: tokens.handlers,
-                            generation: 1,
-                            reads: Arc::from(reads),
-                        }),
+                Ok((
+                    ComponentInitResult {
+                        rendered,
+                        state: fields_to_host(&state, &output, &machine.stack)?,
+                        instance: ComponentInstance {
+                            data: Arc::new(InstanceData {
+                                program: Arc::clone(&self.data.images),
+                                component: Arc::clone(declared),
+                                props,
+                                handler_props,
+                                state,
+                                render: Arc::new(Render {
+                                    handlers: tokens.handlers,
+                                    generation: 1,
+                                    reads: Some(render_reads(component, &read)),
+                                }),
+                            }),
+                        },
                     },
+                    record.map(|inputs| RenderRecord {
+                        inputs,
+                        props: props_record,
+                    }),
+                ))
+            },
+        )
+    }
+
+    /// Normalizes the props of a descriptor of `name` without rendering, charged as
+    /// initialization charges normalizing them: handler records resolved through `parent`,
+    /// handlers bound for emits split off, each prop checked and each default evaluated, with
+    /// what the defaults read recorded. The instance tree compares what a node's render read of
+    /// them with what it holds, and initializes the node from them when they differ.
+    pub(crate) fn normalize_component_props(
+        &self,
+        name: &str,
+        props: &BTreeMap<String, NxValue>,
+        parent: Option<&ComponentInstance>,
+        options: &RuntimeOptions,
+        tree: TreeCall<'_, '_>,
+    ) -> Result<NormalizedProps> {
+        self.call_in(
+            options,
+            Some(tree),
+            |input| {
+                input.record(props);
+            },
+            |machine| {
+                let (index, _, component) = machine.component(name)?;
+                if let Some(parent) = parent {
+                    belongs(&self.data, &parent.data.program, &parent.data.component)?;
+                }
+                machine.begin_render_track(&[]);
+                let normalized = machine.normalize_props(index, name, component, props, parent)?;
+                let record = machine
+                    .suspend_render_track()
+                    .map(crate::reuse::Track::into_inputs)
+                    .unwrap_or_default();
+                Ok(NormalizedProps {
+                    props: normalized.props,
+                    handler_props: normalized.handler_props,
+                    record,
                 })
             },
         )
@@ -1223,8 +1556,45 @@ impl Program {
         batch: &[NxValue],
         options: &RuntimeOptions,
     ) -> Result<ComponentDispatchResult> {
-        self.call(
+        let (result, _) = self.dispatch(instance, batch, None, options)?;
+        Ok(ComponentDispatchResult {
+            rendered: result.rendered.unwrap_or(NxValue::Null),
+            effects: result.effects,
+            state: result.state,
+            instance: result.instance,
+        })
+    }
+
+    /// The instance tree's dispatch: the batch run as
+    /// [`dispatch_component_actions`](Self::dispatch_component_actions) runs it, with the tree's
+    /// kept results in `session`, and the body rendered only when the tree needs it. That is
+    /// when `must_render`, because the node's other records do not hold, or when a state field
+    /// the last render read was patched to another value, each field compared once, its value
+    /// at the end against its value at the start, charged as `diff` charges a field. Otherwise
+    /// nothing is rendered or written for the output, and the instance keeps its render. A
+    /// render's record starts with the tree's `seed`, what normalizing the instance's props read.
+    pub(crate) fn dispatch_tracked(
+        &self,
+        instance: &ComponentInstance,
+        batch: &[NxValue],
+        must_render: bool,
+        options: &RuntimeOptions,
+        tree: TreeCall<'_, '_>,
+    ) -> Result<(TrackedDispatch, Vec<Input>)> {
+        self.dispatch(instance, batch, Some((must_render, tree)), options)
+            .map(|(result, record)| (result, record.unwrap_or_default()))
+    }
+
+    fn dispatch(
+        &self,
+        instance: &ComponentInstance,
+        batch: &[NxValue],
+        tree: Option<(bool, TreeCall<'_, '_>)>,
+        options: &RuntimeOptions,
+    ) -> Result<(TrackedDispatch, Option<Vec<Input>>)> {
+        self.call_in(
             options,
+            tree.map(|(_, tree)| tree),
             |input| {
                 input.values(batch);
             },
@@ -1247,6 +1617,8 @@ impl Program {
                 let mut working = instance.state.clone();
                 let mut effects = Vec::new();
                 let mut depths = Depths::default();
+                // The state fields a patch of the batch supplied.
+                let mut patched: Vec<Arc<str>> = Vec::new();
 
                 for (position, entry) in batch.iter().enumerate() {
                     let path = Position("dispatch entry ", position, "");
@@ -1284,6 +1656,11 @@ impl Program {
                                             machine.is_update_record_for(&result, state_key)
                                         }) =>
                                 {
+                                    for (field, _) in &patch.fields {
+                                        if !patched.contains(field) {
+                                            patched.push(Arc::clone(field));
+                                        }
+                                    }
                                     working = machine.patch_state(
                                         index,
                                         name,
@@ -1336,6 +1713,47 @@ impl Program {
                     }
                 }
 
+                let output = machine.meter(entry_cx(index), None);
+                let render = match tree {
+                    None => true,
+                    Some((must_render, _)) => {
+                        must_render
+                            || machine.read_field_changed(
+                                instance.render.reads.as_ref(),
+                                &patched,
+                                &instance.state,
+                                &working,
+                                &output,
+                            )?
+                    }
+                };
+                let effects_to_host = |effects: &[Value]| {
+                    effects
+                        .iter()
+                        .map(|effect| to_host(effect, None, &output, &machine.stack))
+                        .collect::<Result<Vec<_>>>()
+                };
+                if !render {
+                    return Ok((
+                        TrackedDispatch {
+                            rendered: None,
+                            effects: effects_to_host(&effects)?,
+                            state: fields_to_host(&working, &output, &machine.stack)?,
+                            instance: ComponentInstance {
+                                data: Arc::new(InstanceData {
+                                    program: Arc::clone(&instance.program),
+                                    component: Arc::clone(&instance.component),
+                                    props: instance.props.clone(),
+                                    handler_props: instance.handler_props.clone(),
+                                    state: working,
+                                    render: Arc::clone(&instance.render),
+                                }),
+                            },
+                        },
+                        None,
+                    ));
+                }
+
                 // The body sees the declared props and the state, as it did at initialization. A
                 // field the instance carries no entry for is an empty optional.
                 let mut frame: Frame =
@@ -1354,33 +1772,35 @@ impl Program {
                             .unwrap_or_else(Value::empty),
                     ));
                 }
-                let generation = instance.generation.saturating_add(1);
+                let generation = instance.render.generation.saturating_add(1);
                 let mut tokens = Tokens::new(generation);
-                let output = machine.meter(entry_cx(index), None);
-                machine.record_environment_reads();
+                machine.begin_render_track(tree.map(|(_, tree)| tree.seed).unwrap_or_default());
+                machine.begin_render(&frame, component.props.len(), component.state.len());
                 let value = machine.eval(entry_cx(index), &mut frame, body)?;
-                let reads = machine.take_environment_reads();
+                let (read, record) = machine.end_render();
                 let rendered = machine.report(&value, Some(&mut tokens), &output)?;
-                Ok(ComponentDispatchResult {
-                    rendered,
-                    effects: effects
-                        .iter()
-                        .map(|effect| to_host(effect, None, &output, &machine.stack))
-                        .collect::<Result<_>>()?,
-                    state: fields_to_host(&working, &output, &machine.stack)?,
-                    instance: ComponentInstance {
-                        data: Arc::new(InstanceData {
-                            program: Arc::clone(&instance.program),
-                            component: Arc::clone(&instance.component),
-                            props: instance.props.clone(),
-                            handler_props: instance.handler_props.clone(),
-                            state: working,
-                            handlers: tokens.handlers,
-                            generation,
-                            reads: Arc::from(reads),
-                        }),
+                Ok((
+                    TrackedDispatch {
+                        rendered: Some(rendered),
+                        effects: effects_to_host(&effects)?,
+                        state: fields_to_host(&working, &output, &machine.stack)?,
+                        instance: ComponentInstance {
+                            data: Arc::new(InstanceData {
+                                program: Arc::clone(&instance.program),
+                                component: Arc::clone(&instance.component),
+                                props: instance.props.clone(),
+                                handler_props: instance.handler_props.clone(),
+                                state: working,
+                                render: Arc::new(Render {
+                                    handlers: tokens.handlers,
+                                    generation,
+                                    reads: Some(render_reads(component, &read)),
+                                }),
+                            }),
+                        },
                     },
-                })
+                    record,
+                ))
             },
         )
     }

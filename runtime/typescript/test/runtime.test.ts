@@ -2858,6 +2858,58 @@ test("root values and overrides are named and checked at the boundary", () => {
   assertEqual(assertThrows(() => evaluateFunction(program, "mode", [], { environment: {} as never }), "environment option").diagnostics[0]!.code, "nx-ir-options");
 });
 
+/** What `function` of a corpus program costs, read from the usage report under an ample budget. */
+function operationsOf(program: NxPreparedProgram, name: string, given = environment()): number {
+  const usage: { operations?: number } = {};
+  evaluateFunction(program, name, [], { usage, maxOperations: 1e12, environment: given });
+  return usage.operations!;
+}
+
+test("a derived result is reused within one call while what it read is unchanged", () => {
+  const program = corpusProgram("environment-reuse", "main.nx");
+  const value = (name: string) => evaluateFunction(program, name, []);
+  // Reuse changes no result.
+  assertEqual(value("defaultTwice"), ["blue", "white"]);
+  assertEqual(value("modeOverride"), ["blue", "navy"]);
+  assertEqual(value("fieldOverride"), ["blue", "red"]);
+  assertEqual(value("bundleReads"), [20, 2, 20, 2]);
+  assertEqual(value("valueOverride"), [12, 12, 3]);
+  assertEqual(value("formulaOverride"), [8, 2]);
+  // An override of `locale`, which `color`'s default does not read, reuses it; one of `colorMode`,
+  // even to the value it had, evaluates it again. The two entrypoints differ only in that.
+  const unrelated = operationsOf(program, "unrelatedOverride");
+  assertEqual(operationsOf(program, "equalOverride") > unrelated, true);
+  assertEqual(operationsOf(program, "modeOverride") > unrelated, true);
+  // `tone` reads `colorMode` only when `highContrast` is on: only then does the override of
+  // `colorMode` evaluate it again.
+  assertEqual(
+    operationsOf(program, "branchNotTaken", environment({ highContrast: true })) > operationsOf(program, "branchNotTaken"),
+    true,
+  );
+  // Results do not survive the call.
+  assertEqual(operationsOf(program, "defaultTwice"), operationsOf(program, "defaultTwice"));
+});
+
+test("a default reused deep down succeeds where evaluating it there passes the call depth", () => {
+  const program = corpusProgram("environment-reuse", "main.nx");
+  assertEqual(evaluateFunction(program, "deepRead", []), [11, 11]);
+  const error = assertThrows(() => evaluateFunction(program, "deepFresh", []), "");
+  assertEqual(error.diagnostics[0]!.code, "nx-ir-resource-limit");
+});
+
+test("a handler captures only the slots its node reads, compared in ascending slot index", () => {
+  const program = corpusProgram("evaluation-cost", "main.nx");
+  // `noted` reads `a` and not `note` or `extra`: two handlers that differ only in those are equal.
+  assertEqual(evaluateFunction(program, "notedHandlers", []), true);
+  // The two calls of `noted` each pass one more argument than `button` takes, a literal and its
+  // check, and the comparison pays for `a` alone: four more than `comparedHandlers`.
+  assertEqual(operationsOf(program, "notedHandlers"), operationsOf(program, "comparedHandlers") + 4);
+  // `tallied` reads `a` in slot 0 and `xs` in slot 1; `a` differs and the comparison stops there,
+  // where comparing `xs` first would have paid for its three items too.
+  assertEqual(evaluateFunction(program, "orderedHandlers", []), false);
+  assertEqual(operationsOf(program, "orderedHandlers"), 32);
+});
+
 for (const [name, run] of tests) {
   try {
     run();

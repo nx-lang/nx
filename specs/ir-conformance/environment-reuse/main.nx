@@ -1,0 +1,75 @@
+// Derived results reused within one call: a default, a top-level value, an entry-module provide and
+// a formula are evaluated again only when a value their last evaluation read would now be found
+// from another override.
+
+type Mode = light | dark
+type Colors = { accent:string surface:string }
+
+environment colorMode: Mode = light
+environment highContrast: boolean = false
+environment locale: string = "en-US"
+environment color: Colors = {
+  if env.colorMode is {
+    light => <Colors accent="blue" surface="white" />
+    dark => <Colors accent="navy" surface="black" />
+  }
+}
+/// Reads `colorMode` only when `highContrast` is true.
+environment tone: string = {
+  if env.highContrast { if env.colorMode is { light => "ink" dark => "chalk" } } else { "soft" }
+}
+environment space: int = 4
+environment gap: int = 0
+environment scale: int = 1
+environment ring: int = 0
+
+/// A value that reads no environment.
+let palette: string+ = { "red" "green" "blue" }
+/// A value that reads one.
+let tripled: int = { env.space * 3 }
+
+/// A bundle that sets `scale` and `ring` from the `scale` it reads.
+let sized(scale: int): env.Update = <env.Update scale={scale + 1} ring={scale * 10} />
+
+provide env with sized(env.scale)
+
+let darkAccent(): string = { provide env.colorMode=dark { env.color.accent } }
+let lightAccent(): string = { provide env.colorMode=light { env.color.accent } }
+let frenchAccent(): string = { provide env.locale="fr-FR" { env.color.accent } }
+let redAccent(): string = { provide env.color.accent="red" { env.color.accent } }
+let darkTone(): string = { provide env.colorMode=dark { env.tone } }
+let spaceOne(): int = { provide env.space=1 { env.gap } }
+let tripledOne(): int = { provide env.space=1 { tripled } }
+
+/// `color`'s default is evaluated once for both reads.
+let defaultTwice(): string+ = { env.color.accent env.color.surface }
+/// `palette` is evaluated once for both references.
+let valueTwice(): string+ = { palette palette }
+/// `tripled` is evaluated again under a new `space`.
+let valueOverride(): int+ = { tripled tripled tripledOne() }
+/// A new `colorMode` evaluates `color`'s default again.
+let modeOverride(): string+ = { env.color.accent darkAccent() }
+/// A new `locale`, which `color`'s default does not read, reuses it.
+let unrelatedOverride(): string+ = { env.color.accent frenchAccent() }
+/// `tone` read `colorMode` on no branch it took, so a new `colorMode` reuses it.
+let branchNotTaken(): string+ = { env.tone darkTone() }
+/// A new override of `colorMode` to the value it had still evaluates `color`'s default again.
+let equalOverride(): string+ = { env.color.accent lightAccent() }
+/// A field override is applied to the reused default.
+let fieldOverride(): string+ = { env.color.accent redAccent() }
+/// The entry module's bundle reads `scale`, which it sets: it is kept for each value read.
+let bundleReads(): int+ = { env.ring env.scale env.ring env.scale }
+/// A formula is evaluated once while what it reads is unchanged.
+let formulaTwice(): int+ = { provide env.gap={env.space * 2} { env.gap env.gap } }
+/// And again under a new `space`.
+let formulaOverride(): int+ = { provide env.gap={env.space * 2} { env.gap spaceOne() } }
+
+/// `chain` nests calls `n` deep.
+let chain(n:int): int = { if n == 0 { 1 } else { chain(n - 1) + 1 } }
+environment deep: int = { chain(10) }
+let dive(n:int): int = { if n == 0 { env.deep } else { dive(n - 1) } }
+/// `deep`'s default is evaluated at the first read, near the top, and reused at the read 95 calls
+/// down, where evaluating it would pass the call depth limit.
+let deepRead(): int+ = { env.deep dive(95) }
+/// The read 95 calls down alone evaluates it there, and fails.
+let deepFresh(): int = { dive(95) }

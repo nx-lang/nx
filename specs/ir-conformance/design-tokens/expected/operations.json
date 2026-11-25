@@ -1,15 +1,15 @@
 {
   "counts": {
-    "main.nx::colors": 18508,
-    "main.nx::colors#dark": 26734,
-    "main.nx::componentFollowsCore": 38495,
-    "main.nx::contrast": 369096,
-    "main.nx::contrast#dark": 533597,
-    "main.nx::graysInSrgb": 18441,
-    "main.nx::paletteInDisplayP3": 92185,
-    "main.nx::paletteSurvivesCss": 92955,
-    "main.nx::scalesOrdered": 3519,
-    "main.nx::scalesOrdered#dark": 3520,
-    "main.nx::textFollowsFont": 1506
+    "main.nx::colors": 1988,
+    "main.nx::colors#dark": 1954,
+    "main.nx::componentFollowsCore": 2261,
+    "main.nx::contrast": 2501,
+    "main.nx::contrast#dark": 2467,
+    "main.nx::graysInSrgb": 1921,
+    "main.nx::paletteInDisplayP3": 2977,
+    "main.nx::paletteSurvivesCss": 3747,
+    "main.nx::scalesOrdered": 590,
+    "main.nx::scalesOrdered#dark": 591,
+    "main.nx::textFollowsFont": 246
   }
 }

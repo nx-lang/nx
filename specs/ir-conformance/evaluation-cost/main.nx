@@ -9,6 +9,7 @@ type Opt = { a:int = 1 b?:int c?:string }
 
 external component <Button emits { Tapped { } } />
 action Ping = { n:int }
+action Counted = { n:int xs:int+ }
 
 let numbers = { 1 2 3 }
 let others = { 9 2 3 }
@@ -46,7 +47,8 @@ let content() = <list><item /><item />{for i in 0..3 { <item index={i} /> }}</li
 let concat() = { accents + accents }
 // A parameter default is evaluated, and charged, each time a call leaves it out.
 let defaults() = { greet() }
-// A value's initializer is evaluated, and charged, each time it is referenced.
+// A value's initializer is evaluated, and charged, once in a call: the second reference reuses it
+// and costs only its own node.
 let valueReference() = { answer + answer }
 // A value is checked against a type where it meets one: the two fields of the record as it is
 // built, the record and its fields again as the argument of `sum`, and the declared result.
@@ -59,6 +61,14 @@ let comparedLists() = { numbers == others }
 // Two handlers made by one node compare what they captured, slot by slot, up to the first slot
 // that differs: `a` here, so `b`, which differs too, costs nothing.
 let comparedHandlers() = { button(9, 9) == button(1, 2) }
+// A handler captures only the slots its node reads, which `note` and `extra` are not, so two
+// handlers that differ only in them are equal, and the comparison pays for `a` alone.
+let noted(a:int, note:string, extra:int) = <Button onTapped=<Ping n={a} /> />
+let notedHandlers() = { noted(1, "x", 1) == noted(1, "y", 2) }
+// Captured slots are compared in ascending slot index: `a`, the lower slot, differs, so the
+// comparison stops before the list in the higher one.
+let tallied(a:int, xs:int+) = <Button onTapped=<Counted n={a} xs={xs} /> />
+let orderedHandlers() = { tallied(1, numbers) == tallied(2, numbers) }
 // Comparing two strings pays for the code units of the shorter: 84 here, one operation's worth.
 let comparedText() = { accents + accents == accents + accents }
 // A value is written for the host once for each place it is reached from: `both` holds one

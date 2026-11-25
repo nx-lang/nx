@@ -19,6 +19,7 @@ use std::sync::Arc;
 const CONTROLS: &str = "
 abstract external component <Node />
 external component <Label extends Node Text?:string />
+external component <Num extends Node Value?:float64 />
 external component <Button extends Node Text?:string emits { Tapped { } } />
 external component <Stack extends Node content Children?:Node+ />
 ";
@@ -208,6 +209,7 @@ const CONTENT: &str = "
 component <Box extends Node content Children:Node+ /> = {
   state { opened:int = 0 }
   <Stack>
+    <Label Text={\"opened \" + opened} />
     <Button Text=\"Open\" onTapped=<State.Update opened={opened + 1} /> />
     {Children}
   </Stack>
@@ -567,6 +569,7 @@ component <Card extends Node title:string emits { Logged { text:string } } /> = 
   state { logs:int = 0 }
   <Stack>
     <Label Text={title} />
+    <Label Text={\"logs \" + logs} />
     <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
   </Stack>
 }
@@ -669,7 +672,10 @@ fn an_equal_descriptor_from_a_parent_initialized_again_keeps_the_child() {
         "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Stack>
+    <Label Text={\"logs \" + logs} />
+    <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  </Stack>
 }
 component <Page tag:string /> = {
   state { last:string = \"\" }
@@ -739,23 +745,28 @@ fn a_visible_handler_with_another_capture_is_a_changed_descriptor() {
 
 /// `Page` puts a button of its own in a `Panel`'s content and binds a handler for the `Panel`'s
 /// emit; the `Panel` binds one for its `Card`'s emit, which captures the `Panel`'s content. The
-/// Page's `Same` button renders it again with nothing changed.
+/// Page's `Same` button renders it again with nothing changed that the Panel is handed.
 const PANEL: &str = "
 component <Card extends Node emits { Logged { text:string } } /> = {
   state { logs:int = 0 }
-  <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  <Stack>
+    <Label Text={\"logs \" + logs} />
+    <Button Text=\"Log\" onTapped={<State.Update logs={logs + 1} /> <Card.Logged text=\"hi\" />} />
+  </Stack>
 }
 component <Panel extends Node content Children:Node+ emits { Noted { text:string } } /> = {
   state { notes:int = 0 }
   <Stack>
+    <Label Text={\"notes \" + notes} />
     {Children}
     <Card onLogged={<State.Update notes={notes + 1} /> <Panel.Noted text={action.text} />} />
   </Stack>
 }
 component <Page /> = {
-  state { mode:string = \"a\" taps:int = 0 last:string = \"\" }
+  state { mode:string = \"a\" taps:int = 0 last:string = \"\" same:int = 0 }
   <Stack>
-    <Button Text=\"Same\" onTapped=<State.Update mode=\"a\" /> />
+    <Label Text={\"same \" + same} />
+    <Button Text=\"Same\" onTapped=<State.Update same={same + 1} /> />
     <Panel onNoted=<State.Update last={action.text} />>
       <Button Text=\"More\" onTapped=<State.Update taps={taps + 1} /> />
     </Panel>
@@ -807,7 +818,7 @@ fn a_kept_child_and_the_node_under_it_are_rebound_and_their_tokens_stay_valid() 
     assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 1 }"#));
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 0, "last": "hi" }"#)
+        json(r#"{ "mode": "a", "taps": 0, "last": "hi", "same": 1 }"#)
     );
 }
 
@@ -822,7 +833,7 @@ fn a_handler_handed_through_a_kept_child_runs_against_its_owner() {
     tap(&mut tree, "root/panel", "More").unwrap();
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 1, "last": "" }"#)
+        json(r#"{ "mode": "a", "taps": 1, "last": "", "same": 1 }"#)
     );
     assert_eq!(state(&tree, "root/panel"), json(r#"{ "notes": 0 }"#));
     assert!(Arc::ptr_eq(&panel, &rendered(&tree, "root/panel")));
@@ -906,7 +917,7 @@ fn a_pass_that_fails_after_a_rebinding_leaves_the_tree_as_it_was() {
     tap(&mut tree, "root/panel", "More").unwrap();
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 1, "last": "" }"#)
+        json(r#"{ "mode": "a", "taps": 1, "last": "", "same": 1 }"#)
     );
 }
 
@@ -955,9 +966,9 @@ let root() = { <Page /> }",
 
 #[test]
 fn a_kept_child_dispatched_against_before_its_parent_rendered_is_rebound_with_what_is_under_it() {
-    // The Page's handler for the Panel's emit sets what it holds already, so the Page renders
-    // again with nothing changed.
-    let mut tree = linked(&PANEL.replace("last={action.text}", "mode=\"a\""));
+    // The Page's handler for the Panel's emit patches only what the Page shows, so the Page
+    // renders again with nothing changed that the Panel is handed.
+    let mut tree = linked(&PANEL.replace("last={action.text}", "same={same + 1}"));
     panel_pass(&mut tree);
     // The Card's emit reaches the Panel, whose own emit reaches the Page: all three render, and
     // the Card was initialized through the instance the Panel held before.
@@ -1004,7 +1015,7 @@ fn a_node_visited_before_its_ancestor_is_rebound_counts_as_visited() {
     tap(&mut tree, "root/panel/card", "Log").unwrap();
     assert_eq!(
         state(&tree, "root"),
-        json(r#"{ "mode": "a", "taps": 0, "last": "hi" }"#)
+        json(r#"{ "mode": "a", "taps": 0, "last": "hi", "same": 1 }"#)
     );
 }
 
@@ -1249,12 +1260,18 @@ fn a_node_visited_before_its_parent_rendered_again_does_not_count_as_visited() {
 const SETTLED: &str = "
 component <Leaf extends Node /> = {
   state { taps:int = 0 }
-  <Button Text=\"Leaf\" onTapped=<State.Update taps={taps + 1} /> />
+  <Stack>
+    <Label Text={\"\" + taps} />
+    <Button Text=\"Leaf\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
 }
 component <Middle extends Node /> = { <Stack><Label Text=\"middle\" /><Leaf /></Stack> }
 component <Side extends Node /> = {
   state { taps:int = 0 }
-  <Button Text=\"Side\" onTapped=<State.Update taps={taps + 1} /> />
+  <Stack>
+    <Label Text={\"\" + taps} />
+    <Button Text=\"Side\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
 }
 component <Top /> = { <Stack><Middle /><Side /></Stack> }
 let root() = { <Top /> }
@@ -1528,7 +1545,10 @@ component <Child extends Node emits { A { } B { } } /> = {
 }
 component <Page /> = {
   state { a:int = 0 b:int = 0 }
-  <Child onA=<State.Update a={a + 1} /> onB=<State.Update b={b + a} /> />
+  <Stack>
+    <Label Text={\"\" + a + \",\" + b} />
+    <Child onA=<State.Update a={a + 1} /> onB=<State.Update b={b + a} /> />
+  </Stack>
 }
 let root() = { <Page /> }",
     );
@@ -1551,6 +1571,7 @@ component <Card extends Node emits { Logged { text:string } } /> = {
 component <Page /> = {
   state { last:string = \"\" taps:int = 0 }
   <Stack>
+    <Label Text={last + \" \" + taps} />
     <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
     <Card onLogged=<State.Update last={last + action.text} /> />
   </Stack>
@@ -1657,10 +1678,12 @@ let root() = { <Top /> }",
     assert_eq!(state(&tree, "root"), json(r#"{ "picked": "deeper" }"#));
     assert!(renders(&tree, "root", "Label", "picked deeper"));
     assert!(renders(&tree, "root/middle", "Label", "passed 1"));
-    // Each of the three was dispatched against once.
-    for key in ["root", "root/middle", "root/middle/leaf"] {
+    // Each of the three was dispatched against once. The leaf's handler patched nothing it
+    // read, so it kept its render; the other two rendered again.
+    for key in ["root", "root/middle"] {
         assert_eq!(generation(&tree, key), 2, "{key}");
     }
+    assert_eq!(generation(&tree, "root/middle/leaf"), 1);
     // What no component handled is the host's, named after the component that produced it.
     assert_eq!(
         effects,
@@ -1686,7 +1709,7 @@ let root() = { <Top /> }",
     assert_eq!(state(&tree, "root/middle"), json(r#"{ "passed": 1 }"#));
     assert!(Arc::ptr_eq(&middle, &rendered(&tree, "root/middle")));
     assert_eq!(generation(&tree, "root/middle"), 2);
-    assert_eq!(generation(&tree, "root/middle/leaf"), 2);
+    assert_eq!(generation(&tree, "root/middle/leaf"), 1);
     let effects = tap(&mut tree, "root/middle/leaf", "Pick").unwrap();
     assert_eq!(effects.len(), 1);
     assert_eq!(state(&tree, "root/middle"), json(r#"{ "passed": 2 }"#));
@@ -2124,8 +2147,8 @@ fn a_body_that_cascades_its_own_override_is_left_alone_by_an_equal_visit() {
     assert!(renders(&tree, "root/reader", "Label", "night"));
 }
 
-/// A read whose default fails beneath the body's own override still renders, and the node then
-/// renders again on every visit, since what it read cannot be checked there.
+/// A read whose default fails beneath the body's own override still renders. The record holds
+/// what the default read under the override, so an equal visit keeps the render.
 #[test]
 fn a_read_that_fails_beneath_the_bodys_override_still_renders() {
     let mut tree = open(
@@ -2143,8 +2166,14 @@ let root() = { <Card /> }
     let root = evaluated(&tree, "root");
     tree.begin();
     tree.visit("root", &root, None, &options()).unwrap();
-    assert!(renders(&tree, "root", "Label", "5"));
-    assert!(!Arc::ptr_eq(&card, &rendered(&tree, "root")));
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root")));
+    // The body overrides `divisor` itself, so the root's `divisor` reaches nothing it read.
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("divisor", NxValue::Int(5))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root")));
 }
 
 #[test]
@@ -2298,4 +2327,1288 @@ fn a_formula_of_another_build_is_refused_at_the_read() {
         .unwrap_err();
     assert_eq!(error.code(), "nx-ir-boundary-type", "{error}");
     assert!(error.to_string().contains("another build"), "{error}");
+}
+
+// ------------------------------------------------------------------------------------------------
+// Results reused within a render
+// ------------------------------------------------------------------------------------------------
+
+/// `Footer` evaluates `accent` for its state's default, before the render records its reads, and
+/// the body reuses it: the reads `accent` made are replayed into the render's record.
+const REUSED_READER: &str = "
+type Mode = light | dark
+environment colorMode: Mode = light
+let accent: string = { if env.colorMode is { light => \"blue\" dark => \"navy\" } }
+component <Footer /> = {
+  state { seen:string = {accent} }
+  <Label Text={accent} />
+}
+let root() = <Footer />
+";
+
+#[test]
+fn a_reader_through_a_reused_result_renders_again_when_what_it_read_changes() {
+    let mut tree = open(REUSED_READER);
+    assert!(renders(&tree, "root", "Label", "blue"));
+    tree.set_environment(roots(&[("colorMode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root", "Label", "navy"));
+    assert!(!tree.is_settled("root"));
+}
+
+// ------------------------------------------------------------------------------------------------
+// The tree keeps derived results across renders
+// ------------------------------------------------------------------------------------------------
+
+/// A budget no evaluation here reaches, set so that calls count their operations.
+const AMPLE: u64 = 1 << 40;
+
+/// What `run` gives and the operations its last lifecycle call reported, or zero when it made
+/// none.
+fn measured<T>(run: impl FnOnce(&RuntimeOptions) -> T) -> (T, u64) {
+    let usage = Arc::new(nx_ir_runtime::Usage::new());
+    let reported = RuntimeOptions {
+        max_operations: Some(AMPLE),
+        usage: Some(Arc::clone(&usage)),
+        ..options()
+    };
+    let value = run(&reported);
+    (value, usage.operations().unwrap_or(0))
+}
+
+/// How many derived results a call that used `operations` evaluated: each one here calls
+/// `weight`, which costs thousands of operations while the rest of a render costs a few dozen.
+fn weighed(tree: &InstanceTree, operations: u64) -> u64 {
+    let (_, weight) = measured(|options| {
+        tree.program()
+            .evaluate_function("weighOnce", &[], options)
+            .unwrap()
+    });
+    (operations + weight / 2) / weight
+}
+
+/// Dispatches a tap on the button `text` of the node at `key`, and how many derived results the
+/// call evaluated.
+fn weighed_tap(tree: &mut InstanceTree, key: &str, text: &str) -> u64 {
+    let token = token(tree, key, text);
+    let (result, operations) = measured(|options| tree.dispatch(key, &token, tapped(), options));
+    result.unwrap_or_else(|error| panic!("{key}: {error}"));
+    weighed(tree, operations)
+}
+
+/// `color` and `standardPalette` each weigh one `weight()`. `color` reads `colorMode` and uses
+/// `standardPalette`, and `button` uses `color`.
+const THEME: &str = "
+type Mode = light | dark
+type Colors = { accent:string }
+let count(xs?:int+): int = { 1 }
+let weight(): int = { count(for i in 0..2000 { i }) }
+let weighOnce(): int = { weight() }
+environment colorMode: Mode = light
+environment divisor: int = 1
+let standardPalette: string = { if weight() == 1 { \"std\" } else { \"\" } }
+environment color: Colors = {
+  if weight() == 1 {
+    if env.colorMode is {
+      light => <Colors accent={standardPalette + \" blue\"} />
+      dark => <Colors accent={standardPalette + \" navy\"} />
+    }
+  } else { <Colors accent=\"\" /> }
+}
+environment button: Colors = { <Colors accent={\"button \" + env.color.accent} /> }
+component <Card extends Node /> = {
+  state { taps:int = 0 }
+  <Stack>
+    <Label Text={env.color.accent + \" \" + taps} />
+    <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
+}
+component <Divided extends Node /> = {
+  <Label Text={env.color.accent + \" \" + (10 / env.divisor)} />
+}
+component <Plain extends Node /> = { <Label Text={env.button.accent} /> }
+component <Dark extends Node /> = {
+  <Stack>{ provide env.colorMode=dark { <Label Text={env.button.accent} /> } }</Stack>
+}
+component <Sections /> = {
+  <Stack>
+    <Card />
+    <Stack env.colorMode=light><Card /></Stack>
+    <Stack env.colorMode=dark><Card /></Stack>
+  </Stack>
+}
+component <Buttons /> = { <Stack><Plain /><Dark /></Stack> }
+let root() = { <Card /> }
+let divided() = { <Divided /> }
+let sections() = { <Sections /> }
+let buttons() = { <Buttons /> }
+";
+
+#[test]
+fn a_render_after_a_dispatch_reuses_the_palette() {
+    let mut tree = open(THEME);
+    let instance = tree.instance("root").unwrap().clone();
+    let held = token(&tree, "root", "Tap");
+    assert_eq!(weighed_tap(&mut tree, "root", "Tap"), 0);
+    assert!(renders(&tree, "root", "Label", "std blue 1"));
+    // The same render through the bare lifecycle evaluates `color` and `standardPalette` afresh.
+    let invocation = json(&format!(
+        r#"{{ "$type": "ActionHandlerInvocation", "token": "{held}", "action": {{ "$type": "Button.Tapped" }} }}"#
+    ));
+    let (bare, operations) = measured(|options| {
+        tree.program()
+            .dispatch_component_actions(&instance, &[invocation], options)
+    });
+    assert!(find(&bare.unwrap().rendered, "Label", Some("std blue 1")).is_some());
+    assert_eq!(weighed(&tree, operations), 2);
+}
+
+#[test]
+fn a_kept_result_survives_passes_that_render_nothing() {
+    let mut tree = open(THEME);
+    tree.finish();
+    assert_eq!(weighed_tap(&mut tree, "root", "Tap"), 0);
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    let output = rendered(&tree, "root");
+    tree.visit("root", &root, None, &options()).unwrap();
+    tree.finish();
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root")));
+    assert_eq!(weighed_tap(&mut tree, "root", "Tap"), 0);
+    assert!(renders(&tree, "root", "Label", "std blue 2"));
+}
+
+#[test]
+fn a_root_change_makes_kept_results_that_read_it_stale() {
+    let mut tree = open(THEME);
+    tree.finish();
+    let (_, weight) = measured(|options| {
+        tree.program()
+            .evaluate_function("weighOnce", &[], options)
+            .unwrap()
+    });
+    let dark = roots(&[("colorMode", "dark")]);
+    // `color` is evaluated afresh, and must be: half a weight is not enough for any call.
+    let short = RuntimeOptions {
+        max_operations: Some(weight / 2),
+        ..options()
+    };
+    let error = tree.set_environment(dark.clone(), &short).unwrap_err();
+    assert_eq!(error.code(), "nx-ir-resource-limit", "{error}");
+    assert!(renders(&tree, "root", "Label", "std blue 0"));
+    // `standardPalette` read nothing that changed, so one weight and a half is enough.
+    let enough = RuntimeOptions {
+        max_operations: Some(weight * 3 / 2),
+        ..options()
+    };
+    tree.set_environment(dark, &enough).unwrap();
+    assert!(renders(&tree, "root", "Label", "std navy 0"));
+    assert_eq!(weighed_tap(&mut tree, "root", "Tap"), 0);
+    assert!(renders(&tree, "root", "Label", "std navy 1"));
+}
+
+/// The visits of a pass over the `Sections` at `root`: its three cards, in order.
+fn sections_pass(tree: &mut InstanceTree) -> [u64; 3] {
+    let root = evaluated(tree, "sections");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    let output = rendered(tree, "root");
+    let mut cards = Vec::new();
+    collect(&output, "Card", &mut cards);
+    let mut evaluated = [0; 3];
+    for (index, card) in cards.into_iter().enumerate() {
+        let key = format!("root/{index}");
+        let (_, operations) =
+            measured(|options| tree.visit(&key, card, Some("root"), options).unwrap());
+        evaluated[index] = weighed(tree, operations);
+    }
+    tree.finish();
+    evaluated
+}
+
+#[test]
+fn a_result_kept_where_nothing_overrides_is_not_used_under_an_override() {
+    let mut tree = linked(THEME);
+    // The first card evaluates `color` and the palette; the light section's evaluates `color`
+    // again, since `colorMode` is supplied by an override there, and so does the dark section's.
+    assert_eq!(sections_pass(&mut tree), [2, 1, 1]);
+    assert!(renders(&tree, "root/0", "Label", "std blue 0"));
+    assert!(renders(&tree, "root/1", "Label", "std blue 0"));
+    assert!(renders(&tree, "root/2", "Label", "std navy 0"));
+}
+
+#[test]
+fn light_and_dark_sections_keep_a_variant_each() {
+    let mut tree = linked(THEME);
+    sections_pass(&mut tree);
+    for key in ["root/0", "root/1", "root/2"] {
+        assert_eq!(weighed_tap(&mut tree, key, "Tap"), 0, "{key}");
+    }
+    assert!(renders(&tree, "root/1", "Label", "std blue 1"));
+    assert!(renders(&tree, "root/2", "Label", "std navy 1"));
+}
+
+#[test]
+fn a_render_that_overrides_a_value_a_kept_result_read_below_an_edge_evaluates_it_again() {
+    let mut tree = linked(THEME);
+    let root = evaluated(&tree, "buttons");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/plain", "Plain", "root");
+    assert!(renders(&tree, "root/plain", "Label", "button std blue"));
+    let output = rendered(&tree, "root");
+    let dark = find(&output, "Dark", None).unwrap().clone();
+    let (_, operations) = measured(|options| {
+        tree.visit("root/dark", &dark, Some("root"), options)
+            .unwrap()
+    });
+    // `button` and `color` are evaluated again under the body's own `colorMode`; the palette is
+    // reused.
+    assert_eq!(weighed(&tree, operations), 1);
+    assert!(renders(&tree, "root/dark", "Label", "button std navy"));
+}
+
+#[test]
+fn a_failed_change_leaves_the_kept_results_as_they_were() {
+    let mut tree = linked(THEME);
+    let root = evaluated(&tree, "divided");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    tree.finish();
+    tree.take_changes();
+    let output = rendered(&tree, "root");
+    // The record checks `color` first, so the change evaluates it again in the dark mode, and
+    // then the render divides by zero.
+    let failing = nx_ir_runtime::Environment::root([
+        ("colorMode", NxValue::String("dark".to_string())),
+        ("divisor", NxValue::Int(0)),
+    ]);
+    assert!(tree.set_environment(failing, &options()).is_err());
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root")));
+    assert!(tree.take_changes().is_empty());
+    assert!(tree.is_settled("root"));
+    // The light variant is still the one the node used, at the revision it had.
+    let (_, operations) = measured(|options| {
+        tree.set_environment(
+            nx_ir_runtime::Environment::root([("divisor", NxValue::Int(2))]),
+            options,
+        )
+        .unwrap()
+    });
+    assert_eq!(weighed(&tree, operations), 0);
+    assert!(renders(&tree, "root", "Label", "std blue 5"));
+    // New roots replace the old ones, so `divisor` is back to its default.
+    tree.set_environment(roots(&[("colorMode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root", "Label", "std navy 10"));
+}
+
+// ------------------------------------------------------------------------------------------------
+// A change notifies only the computations that read it
+// ------------------------------------------------------------------------------------------------
+
+/// `direction` reads `locale`, `summary` reads `detail` only while `flag` is true, and `amount` is
+/// `1` or `1.0` by `exact`.
+const KEPT: &str = "
+external component <Field extends Node Value?:object />
+environment locale: string = \"en-US\"
+environment colorMode: string = \"light\"
+environment flag: boolean = true
+environment divisor: int = 1
+environment exact: boolean = true
+environment detail: int = { 10 / env.divisor }
+let direction: string = { if env.locale == \"ar\" { \"rtl\" } else { \"ltr\" } }
+let summary: string = { if env.flag { \"on \" + env.detail } else { \"off\" } }
+let held(value:object): object = { value }
+let amount: object = { if env.exact { held(1) } else { held(1.0) } }
+component <Direction extends Node /> = { <Label Text={direction} /> }
+component <Mode extends Node /> = { <Label Text={env.colorMode} /> }
+component <Summary extends Node /> = { <Label Text={summary} /> }
+component <Amount extends Node /> = { <Field Value={amount} /> }
+component <Page /> = { <Stack><Direction /><Mode /><Summary /><Amount /></Stack> }
+let root() = { <Page /> }
+";
+
+const KEPT_CHILDREN: [&str; 4] = ["Direction", "Mode", "Summary", "Amount"];
+
+fn kept_tree() -> InstanceTree {
+    let mut tree = open(KEPT);
+    for component in KEPT_CHILDREN {
+        visit_child(&mut tree, &format!("root/{component}"), component, "root");
+    }
+    tree.finish();
+    tree.take_changes();
+    tree
+}
+
+#[test]
+fn a_used_result_is_evaluated_again_before_its_edge_is_judged() {
+    let mut tree = kept_tree();
+    let output = rendered(&tree, "root/Direction");
+    tree.set_environment(roots(&[("locale", "en-GB")]), &options())
+        .unwrap();
+    // `direction` was evaluated again to `ltr`, so the node that used it is left alone.
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root/Direction")));
+    assert!(tree.is_settled("root/Direction"));
+    assert!(tree.take_changes().is_empty());
+    tree.set_environment(roots(&[("locale", "ar")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/Direction", "Label", "rtl"));
+    assert_eq!(tree.take_changes().rendered, ["root/Direction"]);
+}
+
+#[test]
+fn an_input_only_a_branch_no_longer_taken_read_is_not_checked() {
+    let mut tree = kept_tree();
+    assert!(renders(&tree, "root/Summary", "Label", "on 10"));
+    // `detail` would divide by zero now, but `summary` reads it no longer.
+    let change = nx_ir_runtime::Environment::root([
+        ("flag", NxValue::Bool(false)),
+        ("divisor", NxValue::Int(0)),
+    ]);
+    tree.set_environment(change, &options()).unwrap();
+    assert!(renders(&tree, "root/Summary", "Label", "off"));
+}
+
+#[test]
+fn a_result_evaluated_again_to_a_value_written_otherwise_is_a_change() {
+    let mut tree = kept_tree();
+    let output = rendered(&tree, "root/Amount");
+    assert_eq!(
+        field(find(&output, "Field", None).unwrap(), "Value"),
+        Some(&NxValue::Int(1))
+    );
+    let change = nx_ir_runtime::Environment::root([("exact", NxValue::Bool(false))]);
+    tree.set_environment(change, &options()).unwrap();
+    let output = rendered(&tree, "root/Amount");
+    assert_eq!(
+        field(find(&output, "Field", None).unwrap(), "Value"),
+        Some(&NxValue::Float(1.0))
+    );
+    assert_eq!(tree.take_changes().rendered, ["root/Amount"]);
+}
+
+/// What tells the results that read only `locale` were not checked is weak from outside: they
+/// are not evaluated either way, so the test holds the nodes that use them to their output.
+#[test]
+fn unrelated_kept_results_are_not_checked() {
+    let mut tree = kept_tree();
+    let held: BTreeMap<&str, Arc<NxValue>> = KEPT_CHILDREN
+        .iter()
+        .map(|component| (*component, rendered(&tree, &format!("root/{component}"))))
+        .collect();
+    tree.set_environment(roots(&[("colorMode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/Mode", "Label", "dark"));
+    for component in ["Direction", "Summary", "Amount"] {
+        let key = format!("root/{component}");
+        assert!(
+            Arc::ptr_eq(&held[component], &rendered(&tree, &key)),
+            "{key}"
+        );
+        assert!(tree.is_settled(&key), "{key}");
+    }
+    assert_eq!(tree.take_changes().rendered, ["root/Mode"]);
+}
+
+// ------------------------------------------------------------------------------------------------
+// A dispatch renders again only when a state field the render read changed
+// ------------------------------------------------------------------------------------------------
+
+const TOGGLE: &str = "
+environment space: int = 4
+environment gap: int = 0
+component <Toggle /> = {
+  state { on:boolean = false pressedAt:int = 0 seen:int = 0 }
+  <Stack>
+    <Label Text={if on { \"on\" } else { \"off\" }} />
+    <Button Text=\"Press\" onTapped=<State.Update pressedAt={pressedAt + 1} /> />
+    <Button Text=\"Seen\" onTapped=<State.Update seen={pressedAt} /> />
+    <Button Text=\"Flip\" onTapped=<State.Update on={!on} /> />
+    <Button Text=\"Same\" onTapped=<State.Update on={on} /> />
+  </Stack>
+}
+component <Gap extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Scaled /> = {
+  state { scale:int = 2 }
+  <Stack env.gap={env.space * scale}>
+    <Gap />
+    <Button Text=\"Grow\" onTapped=<State.Update scale={scale + 1} /> />
+  </Stack>
+}
+let root() = { <Toggle /> }
+let scaled() = { <Scaled /> }
+";
+
+#[test]
+fn a_field_only_handlers_read_causes_no_render() {
+    let mut tree = open(TOGGLE);
+    tree.finish();
+    tree.take_changes();
+    let output = rendered(&tree, "root");
+    let press = token(&tree, "root", "Press");
+    tap(&mut tree, "root", "Press").unwrap();
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root")));
+    assert_eq!(generation(&tree, "root"), 1);
+    assert!(tree.is_settled("root"));
+    assert!(tree.take_changes().is_empty());
+    // The token read before the dispatch still dispatches, and a handler sees the new field.
+    tree.dispatch("root", &press, tapped(), &options()).unwrap();
+    tap(&mut tree, "root", "Seen").unwrap();
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "on": false, "pressedAt": 2, "seen": 2 }"#)
+    );
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root")));
+}
+
+#[test]
+fn a_field_the_body_read_causes_a_render() {
+    let mut tree = open(TOGGLE);
+    tree.finish();
+    tree.take_changes();
+    let flip = token(&tree, "root", "Flip");
+    tap(&mut tree, "root", "Flip").unwrap();
+    assert!(renders(&tree, "root", "Label", "on"));
+    assert_eq!(generation(&tree, "root"), 2);
+    assert_ne!(flip, token(&tree, "root", "Flip"));
+    assert!(!tree.is_settled("root"));
+    assert_eq!(
+        tree.take_changes(),
+        nx_ir_runtime::TreeChanges {
+            rendered: vec!["root".to_string()],
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn a_field_patched_to_the_value_it_had_causes_no_render() {
+    let mut tree = open(TOGGLE);
+    let output = rendered(&tree, "root");
+    tap(&mut tree, "root", "Same").unwrap();
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root")));
+    assert_eq!(generation(&tree, "root"), 1);
+}
+
+#[test]
+fn a_field_captured_by_an_override_formula_causes_a_render() {
+    let mut tree = linked(TOGGLE);
+    let root = evaluated(&tree, "scaled");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/gap", "Gap", "root");
+    tree.finish();
+    assert!(renders(&tree, "root/gap", "Label", "8"));
+    tap(&mut tree, "root", "Grow").unwrap();
+    assert_eq!(generation(&tree, "root"), 2);
+    visit_child(&mut tree, "root/gap", "Gap", "root");
+    assert!(renders(&tree, "root/gap", "Label", "12"));
+}
+
+#[test]
+fn the_bare_lifecycle_renders_on_every_dispatch() {
+    let tree = linked(TOGGLE);
+    let program = tree.program();
+    let initialized = program
+        .initialize_component(
+            "Toggle",
+            &BTreeMap::new(),
+            &ComponentInit::default(),
+            &options(),
+        )
+        .unwrap();
+    let press = {
+        let button = find(&initialized.rendered, "Button", Some("Press")).unwrap();
+        match field(button, "onTapped").and_then(|handler| field(handler, "token")) {
+            Some(NxValue::String(token)) => token.clone(),
+            other => panic!("no token: {other:?}"),
+        }
+    };
+    let invocation = json(&format!(
+        r#"{{ "$type": "ActionHandlerInvocation", "token": "{press}", "action": {{ "$type": "Button.Tapped" }} }}"#
+    ));
+    let dispatched = program
+        .dispatch_component_actions(&initialized.instance, &[invocation], &options())
+        .unwrap();
+    assert_eq!(dispatched.instance.generation(), 2);
+    assert_ne!(dispatched.rendered, initialized.rendered);
+}
+
+// ------------------------------------------------------------------------------------------------
+// A node handed a new descriptor renders again only when a prop it read changed
+// ------------------------------------------------------------------------------------------------
+
+/// `Page` hands `tip` to a prop `Badge` ignores, one `Hinted`'s handler reads, the `label` that
+/// `Titled`'s `title` defaults to, and the `scale` of `Row`'s formula; `Note` hands `note` to a
+/// `Holder` that ignores it and holds a button patching `Page`.
+const PROPS: &str = "
+environment space: int = 4
+environment gap: int = 0
+component <Badge extends Node label:string tooltip:string = \"\" /> = {
+  state { taps:int = 0 }
+  <Stack>
+    <Label Text={label + \" \" + taps} />
+    <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
+}
+component <Hinted extends Node label:string tooltip:string = \"\" /> = {
+  state { last:string = \"\" }
+  <Stack>
+    <Label Text={label + \" \" + last} />
+    <Button Text=\"Hint\" onTapped=<State.Update last={tooltip} /> />
+  </Stack>
+}
+component <Titled extends Node label:string title:string = {label} /> = { <Label Text={title} /> }
+component <Cell extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Row extends Node scale:int /> = { <Stack env.gap={env.space * scale}><Cell /></Stack> }
+component <Holder extends Node note:string = \"\" content Children:Node+ /> = {
+  <Stack>{Children}</Stack>
+}
+component <Page /> = {
+  state { tip:string = \"a\" size:int = 2 note:string = \"x\" taps:int = 0 }
+  <Stack>
+    <Label Text={\"taps \" + taps} />
+    <Badge label=\"B\" tooltip={tip} />
+    <Hinted label=\"H\" tooltip={tip} />
+    <Titled label={tip} />
+    <Row scale={size} />
+    <Holder note={note}><Button Text=\"More\" onTapped=<State.Update taps={taps + 1} /> /></Holder>
+    <Button Text=\"Tip\" onTapped=<State.Update tip={tip + \"a\"} size={size + 1} /> />
+    <Button Text=\"Note\" onTapped=<State.Update note={note + \"x\"} /> />
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+const PROPS_CHILDREN: [&str; 5] = ["Badge", "Hinted", "Titled", "Row", "Holder"];
+
+/// A pass over the Page at `root`, each of its children and the Row's Cell.
+fn props_pass(tree: &mut InstanceTree) {
+    let root = evaluated(tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    for component in PROPS_CHILDREN {
+        visit_child(tree, &format!("root/{component}"), component, "root");
+    }
+    visit_child(tree, "root/Row/cell", "Cell", "root/Row");
+    tree.finish();
+}
+
+fn props_tree() -> (InstanceTree, BTreeMap<&'static str, Arc<NxValue>>) {
+    let mut tree = linked(PROPS);
+    props_pass(&mut tree);
+    tree.take_changes();
+    let held = PROPS_CHILDREN
+        .iter()
+        .map(|component| (*component, rendered(&tree, &format!("root/{component}"))))
+        .collect();
+    (tree, held)
+}
+
+#[test]
+fn a_prop_the_body_ignores_does_not_render() {
+    let (mut tree, held) = props_tree();
+    tap(&mut tree, "root", "Tip").unwrap();
+    props_pass(&mut tree);
+    assert!(Arc::ptr_eq(&held["Badge"], &rendered(&tree, "root/Badge")));
+    assert_eq!(generation(&tree, "root/Badge"), 1);
+    assert!(tree.is_settled("root/Badge"));
+    // The instance holds the new `tooltip`, which a later render is given.
+    let instance = serde_json::to_string(tree.instance("root/Badge").unwrap()).unwrap();
+    assert!(instance.contains("\"aa\""), "{instance}");
+    tap(&mut tree, "root/Badge", "Tap").unwrap();
+    assert!(renders(&tree, "root/Badge", "Label", "B 1"));
+    let instance = serde_json::to_string(tree.instance("root/Badge").unwrap()).unwrap();
+    assert!(instance.contains("\"aa\""), "{instance}");
+}
+
+#[test]
+fn a_prop_a_handler_reads_renders() {
+    let (mut tree, held) = props_tree();
+    tap(&mut tree, "root", "Tip").unwrap();
+    props_pass(&mut tree);
+    assert!(!Arc::ptr_eq(
+        &held["Hinted"],
+        &rendered(&tree, "root/Hinted")
+    ));
+    tap(&mut tree, "root/Hinted", "Hint").unwrap();
+    assert!(renders(&tree, "root/Hinted", "Label", "H aa"));
+}
+
+#[test]
+fn a_prop_an_override_formula_captures_renders() {
+    let (mut tree, held) = props_tree();
+    assert!(renders(&tree, "root/Row/cell", "Label", "8"));
+    tap(&mut tree, "root", "Tip").unwrap();
+    props_pass(&mut tree);
+    assert!(!Arc::ptr_eq(&held["Row"], &rendered(&tree, "root/Row")));
+    assert!(renders(&tree, "root/Row/cell", "Label", "12"));
+}
+
+#[test]
+fn a_prop_whose_default_reads_a_changed_prop_renders() {
+    let (mut tree, _) = props_tree();
+    assert!(renders(&tree, "root/Titled", "Label", "a"));
+    tap(&mut tree, "root", "Tip").unwrap();
+    props_pass(&mut tree);
+    assert!(renders(&tree, "root/Titled", "Label", "aa"));
+}
+
+#[test]
+fn a_kept_render_under_a_new_parent_instance_is_rebound() {
+    let (mut tree, held) = props_tree();
+    tap(&mut tree, "root", "Note").unwrap();
+    props_pass(&mut tree);
+    let holder = rendered(&tree, "root/Holder");
+    assert_eq!(
+        field(&holder, "Children"),
+        field(&held["Holder"], "Children")
+    );
+    assert_eq!(generation(&tree, "root/Holder"), 1);
+    assert!(tree.is_settled("root/Holder"));
+    tap(&mut tree, "root/Holder", "More").unwrap();
+    assert_eq!(
+        state(&tree, "root"),
+        json(r#"{ "tip": "a", "size": 2, "note": "xx", "taps": 1 }"#)
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// The tree reports a change set to the host
+// ------------------------------------------------------------------------------------------------
+
+fn changes(rendered: &[&str], added: &[&str], removed: &[&str]) -> nx_ir_runtime::TreeChanges {
+    let owned = |keys: &[&str]| keys.iter().map(|key| key.to_string()).collect();
+    nx_ir_runtime::TreeChanges {
+        rendered: owned(rendered),
+        added: owned(added),
+        removed: owned(removed),
+    }
+}
+
+#[test]
+fn a_dispatch_reports_the_node_it_rendered() {
+    let mut tree = open(COUNTER);
+    assert_eq!(tree.take_changes(), changes(&[], &["root"], &[]));
+    tap(&mut tree, "root", "Tap").unwrap();
+    tap(&mut tree, "root", "Tap").unwrap();
+    assert_eq!(tree.take_changes(), changes(&["root"], &[], &[]));
+    assert!(tree.take_changes().is_empty());
+}
+
+#[test]
+fn a_pass_reports_what_it_created_and_dropped() {
+    let mut tree = open(SHOWN);
+    visit_child(&mut tree, "root/counter", "Counter", "root");
+    tree.finish();
+    tree.take_changes();
+    tap(&mut tree, "root", "Toggle").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    tree.finish();
+    assert_eq!(
+        tree.take_changes(),
+        changes(&["root"], &[], &["root/counter"])
+    );
+    tap(&mut tree, "root", "Toggle").unwrap();
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    visit_child(&mut tree, "root/counter", "Counter", "root");
+    tree.finish();
+    assert_eq!(
+        tree.take_changes(),
+        changes(&["root"], &["root/counter"], &[])
+    );
+}
+
+#[test]
+fn a_dispatch_that_renders_nothing_reports_nothing() {
+    let mut tree = open(TOGGLE);
+    tree.take_changes();
+    tap(&mut tree, "root", "Press").unwrap();
+    assert!(tree.take_changes().is_empty());
+}
+
+#[test]
+fn a_node_replaced_at_its_key_is_removed_and_added() {
+    let mut tree = open(COUNTER);
+    tree.finish();
+    tree.take_changes();
+    let timer = evaluated(&tree, "timer");
+    tree.begin();
+    tree.visit("root", &timer, None, &options()).unwrap();
+    tree.finish();
+    assert_eq!(tree.take_changes(), changes(&[], &["root"], &["root"]));
+    // A node added and removed before the host takes the set is in no list.
+    tree.begin();
+    tree.visit("root", &timer, None, &options()).unwrap();
+    tree.visit("root/extra", &timer, None, &options()).unwrap();
+    assert!(tree.remove("root/extra"));
+    tree.finish();
+    assert!(tree.take_changes().is_empty());
+}
+
+#[test]
+fn a_dropped_subtree_lists_every_node_in_it() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tree.take_changes();
+    // The Page renders again, and a pass that walks it no longer finds the Panel.
+    tap(&mut tree, "root", "Same").unwrap();
+    let root = evaluated(&tree, "root");
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    tree.finish();
+    assert_eq!(
+        tree.take_changes(),
+        changes(&["root"], &[], &["root/panel", "root/panel/card"])
+    );
+    // Removing a node by key lists it too.
+    assert!(tree.remove("root"));
+    assert_eq!(tree.take_changes(), changes(&[], &[], &["root"]));
+}
+
+#[test]
+fn a_rebound_node_is_reported_as_rendered() {
+    let mut tree = linked(PANEL);
+    panel_pass(&mut tree);
+    tree.take_changes();
+    tap(&mut tree, "root", "Same").unwrap();
+    panel_pass(&mut tree);
+    let reported = tree.take_changes();
+    assert!(
+        reported.added.is_empty() && reported.removed.is_empty(),
+        "{reported:?}"
+    );
+    assert!(
+        reported.rendered.contains(&"root".to_string()),
+        "{reported:?}"
+    );
+    assert!(
+        reported.rendered.contains(&"root/panel".to_string()),
+        "{reported:?}"
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// A record holds every read a fresh render would depend on
+// ------------------------------------------------------------------------------------------------
+
+/// The cards of a pass over what `function` renders at `root`, visited at `root/0`, `root/1` and
+/// so on in the order the output holds them.
+fn cards_pass(tree: &mut InstanceTree, function: &str, component: &str) {
+    let root = evaluated(tree, function);
+    tree.begin();
+    tree.visit("root", &root, None, &options()).unwrap();
+    let output = rendered(tree, "root");
+    let mut cards = Vec::new();
+    collect(&output, component, &mut cards);
+    for (index, card) in cards.into_iter().enumerate() {
+        tree.visit(&format!("root/{index}"), card, Some("root"), &options())
+            .unwrap();
+    }
+    tree.finish();
+}
+
+/// The `Value` of the first `Num` the node at `key` rendered.
+fn number(tree: &InstanceTree, key: &str) -> NxValue {
+    let output = rendered(tree, key);
+    field(find(&output, "Num", None).expect("a Num"), "Value")
+        .cloned()
+        .unwrap_or(NxValue::Null)
+}
+
+const ZEROS: &str = "
+type Box = { v:float64 }
+environment z: float64 = 1.0
+environment boxed: Box = { <Box v={env.z} /> }
+component <Card extends Node /> = { <Num Value={env.boxed.v} /> }
+component <Page /> = {
+  <Stack>
+    <Stack env.z={0.0}><Card /></Stack>
+    <Stack env.z={-0.0}><Card /></Stack>
+  </Stack>
+}
+let root() = { <Page /> }
+";
+
+#[test]
+fn a_kept_result_is_not_taken_where_an_override_supplies_a_value_written_otherwise() {
+    let mut tree = linked(ZEROS);
+    cards_pass(&mut tree, "root", "Card");
+    let NxValue::Float(first) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    let NxValue::Float(second) = number(&tree, "root/1") else {
+        panic!("a float");
+    };
+    assert!(first == 0.0 && first.is_sign_positive());
+    assert!(second == 0.0 && second.is_sign_negative());
+}
+
+#[test]
+fn a_node_whose_place_now_supplies_a_value_written_otherwise_renders_again() {
+    // The first card's place moves from `env.z={-0.0}` to `env.z={0.0}` when `neg` flips: the
+    // same descriptor of the same component at the same key, under an override written otherwise.
+    let source = "
+type Box = { v:float64 }
+environment z: float64 = 1.0
+environment boxed: Box = { <Box v={env.z} /> }
+component <Card extends Node /> = { <Num Value={env.boxed.v} /> }
+component <Page /> = {
+  state { neg:boolean = true }
+  <Stack>
+    { if neg { <Stack env.z={-0.0}><Card /></Stack> } else { <Stack env.z={0.0}><Card /></Stack> } }
+    <Button Text=\"Flip\" onTapped=<State.Update neg={!neg} /> />
+  </Stack>
+}
+let root() = { <Page /> }
+";
+    let mut tree = linked(source);
+    cards_pass(&mut tree, "root", "Card");
+    let NxValue::Float(before) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    assert!(before == 0.0 && before.is_sign_negative());
+    tree.take_changes();
+    tap(&mut tree, "root", "Flip").unwrap();
+    cards_pass(&mut tree, "root", "Card");
+    let NxValue::Float(after) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    assert!(after == 0.0 && after.is_sign_positive());
+    assert_eq!(tree.take_changes().rendered, ["root", "root/0"]);
+}
+
+#[test]
+fn a_host_descriptor_with_a_prop_written_otherwise_initializes_the_node_again() {
+    let mut tree = linked("component <Card extends Node v:float64 /> = { <Num Value={v} /> }");
+    let card = |v: f64| NxValue::Record {
+        type_name: Some("Card".to_string()),
+        properties: BTreeMap::from([("v".to_string(), NxValue::Float(v))]),
+    };
+    for v in [0.0, -0.0] {
+        tree.begin();
+        tree.visit("root", &card(v), None, &options()).unwrap();
+        tree.finish();
+        let NxValue::Float(shown) = number(&tree, "root") else {
+            panic!("a float");
+        };
+        assert_eq!(shown.to_bits(), v.to_bits());
+    }
+}
+
+#[test]
+fn a_root_value_changed_to_one_written_otherwise_is_a_change() {
+    let source = "
+environment z: float64 = 1.0
+component <Card extends Node /> = { <Num Value={env.z} /> }
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+";
+    let start = nx_ir_runtime::Environment::root([("z", NxValue::Float(0.0))]);
+    let mut tree = InstanceTree::with_environment(program(&format!("{CONTROLS}{source}")), start);
+    cards_pass(&mut tree, "root", "Card");
+    tree.take_changes();
+    let change = nx_ir_runtime::Environment::root([("z", NxValue::Float(-0.0))]);
+    tree.set_environment(change, &options()).unwrap();
+    let NxValue::Float(now) = number(&tree, "root/0") else {
+        panic!("a float");
+    };
+    assert!(now == 0.0 && now.is_sign_negative());
+    assert_eq!(tree.take_changes().rendered, ["root/0"]);
+}
+
+#[test]
+fn a_read_through_a_bundle_formula_entry_follows_the_values_the_formula_reads() {
+    let mut tree = linked(
+        "
+environment space: int = 4
+environment gap: int = 0
+provide env with <env.Update gap={env.space * 2} />
+component <Card extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "8"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(10))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "20"));
+}
+
+#[test]
+fn a_read_through_a_formula_the_body_provides_follows_the_values_the_formula_reads() {
+    let mut tree = linked(
+        "
+environment space: int = 4
+environment gap: int = 0
+component <Card extends Node /> = {
+  <Stack>{ provide env.gap={env.space * 2} { <Label Text={\"\" + env.gap} /> } }</Stack>
+}
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "8"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(10))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "20"));
+}
+
+#[test]
+fn a_source_read_beneath_the_bodys_override_follows_the_other_values_it_reads() {
+    let mut tree = linked(
+        "
+environment locale: string = \"en\"
+environment mode: string = \"light\"
+environment loud: string = { env.mode + \"!\" + env.locale }
+component <Card extends Node /> = {
+  <Stack>{ provide env.mode=\"dark\" { <Label Text={env.loud} /> } }</Stack>
+}
+component <Page /> = { <Stack><Card /></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "dark!en"));
+    let card = rendered(&tree, "root/0");
+    // The body overrides `mode`, so the root's `mode` reaches nothing it read.
+    tree.set_environment(roots(&[("mode", "night")]), &options())
+        .unwrap();
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root/0")));
+    tree.set_environment(roots(&[("locale", "fr")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "dark!fr"));
+}
+
+/// `color` reads `locale` and then `colorMode`, so a variant kept under the dark section is
+/// stale at the light card's place at its first read, and only its second tells it is not this
+/// place's.
+const TWO_VARIANTS: &str = "
+type Mode = light | dark
+type Colors = { accent:string }
+environment locale: string = \"en\"
+environment colorMode: Mode = light
+environment color: Colors = {
+  if env.locale == \"zz\" { <Colors accent=\"zz\" /> } else {
+    if env.colorMode is { light => <Colors accent=\"blue\" /> dark => <Colors accent=\"navy\" /> }
+  }
+}
+component <Card extends Node /> = { <Label Text={env.color.accent} /> }
+component <DarkFirst /> = { <Stack><Stack env.colorMode=dark><Card /></Stack><Card /></Stack> }
+component <LightFirst /> = { <Stack><Card /><Stack env.colorMode=dark><Card /></Stack></Stack> }
+let darkFirst() = { <DarkFirst /> }
+let lightFirst() = { <LightFirst /> }
+";
+
+#[test]
+fn an_equal_result_stops_a_change_whichever_variant_is_checked_first() {
+    for function in ["darkFirst", "lightFirst"] {
+        for reversed in [false, true] {
+            let mut tree = linked(TWO_VARIANTS);
+            let root = evaluated(&tree, function);
+            tree.begin();
+            tree.visit("root", &root, None, &options()).unwrap();
+            let output = rendered(&tree, "root");
+            let mut cards = Vec::new();
+            collect(&output, "Card", &mut cards);
+            // Keys that sort against the order the cards are kept in, and with it.
+            for (index, card) in cards.into_iter().enumerate() {
+                let key = if reversed { 1 - index } else { index };
+                tree.visit(&format!("root/{key}"), card, Some("root"), &options())
+                    .unwrap();
+            }
+            tree.finish();
+            tree.take_changes();
+            let held = [rendered(&tree, "root/0"), rendered(&tree, "root/1")];
+            tree.set_environment(roots(&[("locale", "fr")]), &options())
+                .unwrap();
+            for (index, held) in held.iter().enumerate() {
+                let key = format!("root/{index}");
+                assert!(
+                    Arc::ptr_eq(held, &rendered(&tree, &key)),
+                    "{function} {reversed} {key}"
+                );
+            }
+            assert!(tree.take_changes().is_empty(), "{function} {reversed}");
+        }
+    }
+}
+
+#[test]
+fn a_kept_result_evaluated_again_during_a_check_is_charged_to_the_render_that_follows() {
+    let mut tree = open(THEME);
+    tree.finish();
+    // The check evaluates `color` again in the dark mode, and the render takes it.
+    let (_, operations) = measured(|options| {
+        tree.set_environment(roots(&[("colorMode", "dark")]), options)
+            .unwrap()
+    });
+    assert_eq!(weighed(&tree, operations), 1);
+    assert!(renders(&tree, "root", "Label", "std navy 0"));
+    // As a fresh render of the same card does.
+    let start = roots(&[("colorMode", "dark")]);
+    let mut fresh = InstanceTree::with_environment(program(&format!("{CONTROLS}{THEME}")), start);
+    let card = evaluated(&fresh, "root");
+    let (_, fresh_operations) =
+        measured(|options| fresh.visit("root", &card, None, options).unwrap());
+    assert_eq!(weighed(&fresh, fresh_operations), 2);
+}
+
+#[test]
+fn a_check_that_holds_is_reported_as_a_call_of_its_own() {
+    let mut tree = kept_tree();
+    let output = rendered(&tree, "root/Direction");
+    // `direction` is evaluated again during the check and gives `ltr`, so no render follows.
+    let (_, operations) = measured(|options| {
+        tree.set_environment(roots(&[("locale", "en-GB")]), options)
+            .unwrap()
+    });
+    assert!(Arc::ptr_eq(&output, &rendered(&tree, "root/Direction")));
+    assert!(operations > 0);
+}
+
+/// A parent's render fills in the defaults of the descriptors it writes, so a node's own render
+/// evaluates a prop default only for a descriptor a host wrote without the prop.
+const DEFAULTED: &str = "
+environment mode: string = \"light\"
+component <Shown extends Node label:string = { env.mode } /> = {
+  state { taps:int = 0 }
+  <Stack>
+    <Label Text={label} />
+    <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
+  </Stack>
+}
+component <Page /> = { <Stack><Shown env.mode=\"dark\" /></Stack> }
+let root() = { <Page /> }
+";
+
+/// A descriptor of `Shown` as a host writes it, with the `$env` given.
+fn shown(env: Option<&NxValue>, label: Option<&str>) -> NxValue {
+    let mut properties = BTreeMap::new();
+    if let Some(env) = env {
+        properties.insert("$env".to_string(), env.clone());
+    }
+    if let Some(label) = label {
+        properties.insert("label".to_string(), NxValue::String(label.to_string()));
+    }
+    NxValue::Record {
+        type_name: Some("Shown".to_string()),
+        properties,
+    }
+}
+
+#[test]
+fn a_prop_default_that_reads_the_environment_follows_a_root_change() {
+    let mut tree = linked(DEFAULTED);
+    tree.visit("host", &shown(None, None), None, &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "light"));
+    tree.set_environment(roots(&[("mode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dark"));
+    // A dispatch renders from the props the instance holds, and keeps what their defaults read.
+    tap(&mut tree, "host", "Tap").unwrap();
+    tree.set_environment(roots(&[("mode", "dim")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dim"));
+}
+
+#[test]
+fn a_prop_default_that_reads_the_environment_follows_a_new_place() {
+    let mut tree = open(DEFAULTED);
+    let output = rendered(&tree, "root");
+    let env = field(find(&output, "Shown", None).unwrap(), "$env")
+        .expect("an $env")
+        .clone();
+    tree.visit("host", &shown(None, None), None, &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "light"));
+    // The same descriptor under a new `$env`: what the default read differs there.
+    tree.visit("host", &shown(Some(&env), None), None, &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dark"));
+}
+
+#[test]
+fn a_prop_default_a_new_descriptor_falls_back_on_joins_the_record() {
+    let mut tree = linked(DEFAULTED);
+    tree.visit("host", &shown(None, Some("light")), None, &options())
+        .unwrap();
+    let held = rendered(&tree, "host");
+    // The descriptor loses its `label`, whose default gives the same `light`: the node keeps its
+    // render, and what the default read now counts.
+    tree.visit("host", &shown(None, None), None, &options())
+        .unwrap();
+    assert!(Arc::ptr_eq(&held, &rendered(&tree, "host")));
+    tree.set_environment(roots(&[("mode", "dark")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "host", "Label", "dark"));
+}
+
+/// `locale` at the card's place is a formula that reads `mode`, which the body overrides, so what
+/// a source the body evaluates finds for `locale` is not what a lookup at the place gives.
+fn place_formula_tree(card: &str, region: &str) -> InstanceTree {
+    let source = format!(
+        "
+environment mode: string = \"light\"
+environment region: string = \"fixed\"
+environment locale: string = \"x\"
+environment loud: string = {{ env.mode + \"!\" + env.locale }}
+component <Card extends Node /> = {{ {card} }}
+component <Page /> = {{
+  <Stack env.locale={{ if env.mode == \"dark\" {{ env.region }} else {{ \"fixed\" }} }}><Card /></Stack>
+}}
+let root() = {{ <Page /> }}
+"
+    );
+    let start = roots(&[("region", region)]);
+    let mut tree = InstanceTree::with_environment(program(&format!("{CONTROLS}{source}")), start);
+    cards_pass(&mut tree, "root", "Card");
+    tree
+}
+
+#[test]
+fn a_place_formula_read_under_the_bodys_override_follows_what_the_formula_reads() {
+    for (card, before, after) in [
+        (
+            "provide env.mode=\"dark\" { <Label Text={env.loud} /> }",
+            "dark!fixed",
+            "dark!us",
+        ),
+        (
+            "provide env.mode=\"dark\" { <Label Text={env.locale} /> }",
+            "fixed",
+            "us",
+        ),
+    ] {
+        let mut tree = place_formula_tree(card, "fixed");
+        assert!(renders(&tree, "root/0", "Label", before), "{card}");
+        tree.set_environment(roots(&[("region", "us")]), &options())
+            .unwrap();
+        cards_pass(&mut tree, "root", "Card");
+        assert!(renders(&tree, "root/0", "Label", after), "{card}");
+        let fresh = place_formula_tree(card, "us");
+        assert_eq!(
+            rendered(&tree, "root/0"),
+            rendered(&fresh, "root/0"),
+            "{card}"
+        );
+    }
+}
+
+#[test]
+fn a_formula_the_body_provides_that_reads_its_own_value_follows_what_is_beneath_it() {
+    let mut tree = linked(
+        "
+environment x: int = 1
+component <Card extends Node /> = {
+  <Stack>{ provide env.x={env.x + 1} { <Label Text={\"\" + env.x} /> } }</Stack>
+}
+component <Page /> = { <Stack><Card /><Stack env.x={5}><Card /></Stack></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "2"));
+    assert!(renders(&tree, "root/1", "Label", "6"));
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("x", NxValue::Int(10))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "11"));
+    assert!(renders(&tree, "root/1", "Label", "6"));
+}
+
+#[test]
+fn a_field_the_body_provides_from_a_formula_follows_what_the_formula_reads_under_a_place_override()
+{
+    let mut tree = linked(
+        "
+type Colors = { accent:string tone:string }
+environment locale: string = \"en\"
+environment colors: Colors = { <Colors accent=\"a\" tone=\"t\" /> }
+component <Card extends Node /> = {
+  <Stack>{
+    provide env.colors.accent={env.locale} { <Label Text={env.colors.accent + env.colors.tone} /> }
+  }</Stack>
+}
+component <Page /> = { <Stack><Stack env.colors.tone=\"p\"><Card /></Stack></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "enp"));
+    tree.set_environment(roots(&[("locale", "fr")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "frp"));
+}
+
+#[test]
+fn a_place_formula_that_gives_the_same_value_stops_a_change() {
+    let mut tree = linked(
+        "
+environment space: int = 1
+environment gap: int = 0
+component <Card extends Node /> = { <Label Text={\"\" + env.gap} /> }
+component <Page /> = {
+  <Stack><Stack env.gap={if env.space > 0 { 1 } else { 0 }}><Card /></Stack></Stack>
+}
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    tree.take_changes();
+    let card = rendered(&tree, "root/0");
+    assert!(renders(&tree, "root/0", "Label", "1"));
+    // `gap` is still `1` at the card's place, so the override-supplied read holds.
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(5))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&card, &rendered(&tree, "root/0")));
+    assert!(tree.take_changes().is_empty());
+    tree.set_environment(
+        nx_ir_runtime::Environment::root([("space", NxValue::Int(0))]),
+        &options(),
+    )
+    .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "0"));
+}
+
+#[test]
+fn a_field_the_body_provides_from_a_kept_value_follows_it_under_a_place_override() {
+    let mut tree = linked(
+        "
+type Colors = { accent:string tone:string }
+environment locale: string = \"en\"
+environment colors: Colors = { <Colors accent=\"a\" tone=\"t\" /> }
+let accent: string = { env.locale + \"!\" }
+component <Card extends Node /> = {
+  <Stack>{
+    provide env.colors.accent={accent} { <Label Text={env.colors.accent + env.colors.tone} /> }
+  }</Stack>
+}
+component <Page /> = { <Stack><Stack env.colors.tone=\"p\"><Card /></Stack></Stack> }
+let root() = { <Page /> }
+",
+    );
+    cards_pass(&mut tree, "root", "Card");
+    assert!(renders(&tree, "root/0", "Label", "en!p"));
+    tree.set_environment(roots(&[("locale", "fr")]), &options())
+        .unwrap();
+    assert!(renders(&tree, "root/0", "Label", "fr!p"));
 }

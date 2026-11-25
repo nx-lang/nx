@@ -1,0 +1,5 @@
+{
+  "main.nx::deepFresh#atDepth": {
+    "code": "nx-ir-resource-limit"
+  }
+}

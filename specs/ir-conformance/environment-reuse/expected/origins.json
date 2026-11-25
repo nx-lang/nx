@@ -1,0 +1,16 @@
+{
+  "main.nx::branchNotTaken": [],
+  "main.nx::branchNotTaken#highContrast": [],
+  "main.nx::bundleReads": [],
+  "main.nx::deepRead": [],
+  "main.nx::defaultTwice": [],
+  "main.nx::defaultTwice#rootDark": [],
+  "main.nx::equalOverride": [],
+  "main.nx::fieldOverride": [],
+  "main.nx::formulaOverride": [],
+  "main.nx::formulaTwice": [],
+  "main.nx::modeOverride": [],
+  "main.nx::unrelatedOverride": [],
+  "main.nx::valueOverride": [],
+  "main.nx::valueTwice": []
+}

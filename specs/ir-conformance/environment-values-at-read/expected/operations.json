@@ -1,7 +1,7 @@
 {
   "counts": {
     "main.nx::defaulted": 15,
-    "main.nx::direct": 22,
+    "main.nx::direct": 18,
     "main.nx::element": 14,
     "main.nx::imported": 8,
     "main.nx::named": 11,
