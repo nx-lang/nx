@@ -1079,7 +1079,7 @@ export const styles = `
   visibility: hidden;
   color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
 }
-.source .named-values > svg { width: 1.15em; height: 1.15em; }
+.source .named-values > svg { width: 1em; height: 1em; }
 .source .row-anchor.with-named > .row-menu { left: 3ch; }
 .source .property-menu.with-named:has(> .row-menu.selected) { width: 5.6ch; }
 .source .property-menu.with-named > .row-menu { left: 3ch; }
