@@ -853,6 +853,15 @@ pub(super) fn static_color(
 }
 
 /// The preview of a color, as a source node's swatch reads it.
+/// A parameter or state field: its name, type, whether it is optional, its default and its doc.
+type ScopedField<'a> = (
+    &'a nx_hir::Name,
+    &'a TypeRef,
+    bool,
+    Option<ExprId>,
+    Option<&'a nx_hir::Doc>,
+);
+
 fn color_preview(
     value: Result<nx_value::NxValue, nx_value::color::Error>,
 ) -> Option<SourcePreview> {
@@ -1292,13 +1301,7 @@ impl TreeBuilder<'_> {
                 identity.to_string(),
                 nx_hir::LocalDefinitionId::new(index as u32),
             );
-            let fields: Vec<(
-                &nx_hir::Name,
-                &TypeRef,
-                bool,
-                Option<ExprId>,
-                Option<&nx_hir::Doc>,
-            )> = match item {
+            let fields: Vec<ScopedField<'_>> = match item {
                 Item::Component(component) => component
                     .props
                     .iter()

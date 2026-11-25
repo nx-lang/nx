@@ -183,13 +183,19 @@ export function suggestionNamed(tree: SourceTree, name: string): SourceSuggestio
 }
 
 /**
- * The text a preview reads as: a color's hex, or its CSS with its numbers cut to three decimals
- * when it has none; a string quoted; a number, boolean or case as written.
+ * The text a preview reads as: a color's hex, or, when it has none, its CSS with its numbers cut
+ * to three decimals and an opaque alpha left out; a string quoted; a number, boolean or case as
+ * written.
  */
 export function previewText(preview: SourcePreview): string {
   switch (preview.kind) {
     case "color":
-      return preview.hex ?? preview.value.replace(/-?\d+\.\d{4,}/g, (number) => String(Number(Number(number).toFixed(3))));
+      return (
+        preview.hex ??
+        preview.value
+          .replace(/-?\d+\.\d{4,}/g, (number) => String(Number(Number(number).toFixed(3))))
+          .replace(/\s*\/\s*1\)$/, ")")
+      );
     case "string":
       return JSON.stringify(preview.value);
     default:

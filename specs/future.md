@@ -2413,3 +2413,35 @@ and `toGamut`. Left for later:
   fields as percentages. The stored value stays 0 to 1, which is why `color.nx` writes the range
   inline instead of naming it `Percentage`. Note that `Length.percent` in the drawn-UI proposal
   stores 50 for 50%, so the literal's meaning has to be settled per target type.
+
+## Value Suggestions In Visual: What `add-visual-value-suggestions` Left For Later
+
+A property offers the named values of its declared type (`suggestions` on the source tree, the
+viewer's named-values popover). Left for later:
+
+- **Modules not yet imported.** A property typed `Spacing` in a document that does not import
+  `@nx/design` offers nothing from it; a later version could list a library's values with the import
+  the choice would add.
+- **Local bindings.** `let` bindings inside a body and `for` bindings are not offered, only
+  top-level values, parameters and state fields.
+- **List items.** An item of a list (`stops={ … }`) has no suggestion key of its own; only whole
+  property and `let` values do.
+- **Previews that follow `provide`s.** A preview reads defaults statically. The value a name has
+  under the main module's `provide`, the host's root values or an enclosing section's override is
+  what a running preview session knows, so a later version could ask it.
+- **Element-typed properties.** A property typed by an element, function or sequence type has no
+  key, so a shared `let card = <Card … />` is not offered for it.
+- **Peer files in the workspace.** The language service gives a workspace document no peer
+  bindings, even with a filesystem root, so the `peer` group stays empty there and a sibling file's
+  value is offered only through an import (the spec's peer scenario holds for programs whose peers
+  are bound). Peer binding in the language service would fill it.
+- **A silent name collision between workspace imports.** Two unaliased imports of workspace files
+  that both export `accent` give no diagnostic; the first wins. Suggestions leave such a name out,
+  but the compiler should report it as it does for libraries.
+- **Qualified type names in the viewer and value text.** The viewer and the canonical value
+  formatter resolve a type spelled through an import alias (`design.Radius`) by its last part, which
+  picks the wrong declaration when two modules declare the same name. The source tree could carry
+  each property's resolved type declaration instead.
+- **Visual at phone width in the playground.** At a 390-pixel viewport the playground's NX pane
+  gives `<nx-viewer>` about 62 pixels, so Visual is unreadable on a phone. This predates value
+  suggestions (every example shows it); the pane's layout, not the viewer, needs the fix.

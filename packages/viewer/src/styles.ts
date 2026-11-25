@@ -1134,6 +1134,9 @@ export const styles = `
 .popover .named-quiet { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
 .popover .named-default .named-name { font-family: inherit; font-size: 13px; }
 .popover .named-preview {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
   font-family: var(--nx-viewer-source-font-family, var(--mono));

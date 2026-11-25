@@ -99,10 +99,11 @@ local `let`s, and values of modules the document does not import SHALL NOT be su
 - **WHEN** a document writes `import "@nx/design" as d` and a property is typed `Color`
 - **THEN** the suggestions SHALL include `d.standardPalette.blue600` and `env.color.accent`
 
-#### Scenario: A peer file's value
-- **WHEN** a program's `brand.nx` declares `let brandRed = #e11d48` and its `main.nx`, without
-  importing `brand.nx`, writes a `Color` property
-- **THEN** the suggestions for that property SHALL include `brandRed`
+#### Scenario: Another file's value
+- **WHEN** a program's `brand.nx` declares `let brandRed = #e11d48` and its `main.nx` writes
+  `import "./brand.nx"` and a `Color` property
+- **THEN** the suggestions for that property SHALL include `brandRed` in the group labeled
+  `./brand.nx`
 
 #### Scenario: A selective import
 - **WHEN** a document writes `import { standardPalette as d.standardPalette } from "@nx/design"`
@@ -183,7 +184,8 @@ program, by following, at most 16 steps:
 It SHALL stop with a preview at a string, number or boolean literal (`string`, `number` with the
 literal's text, `boolean`), at a bare case (`case` with its name), or at a color the color-tooling
 discovery recognizes (`color`, with the same swatch text and outside-sRGB mark a source node's color
-carries), and SHALL give no preview at anything else. Color discovery SHALL resolve a constructor
+carries, and, for a color inside sRGB, the hex literal that writes it), and SHALL give no preview at
+anything else. Color discovery SHALL resolve a constructor
 through the imports of the module that writes it, as `palette.nx`'s `c.oklch(…)`. A preview SHALL
 NOT follow main-module `provide`s, host root values or overrides, and SHALL NOT run NX functions.
 

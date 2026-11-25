@@ -12,7 +12,8 @@
     "test": "node --no-warnings --experimental-transform-types --test --test-force-exit \"worker/*.test.mjs\" \"headers.test.mjs\" \"src/**/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
     "check-examples": "node --no-warnings --experimental-transform-types scripts/check-examples.mjs",
     "test:inspector-browser": "node scripts/check-inspector-browser.mjs",
-    "test:graphics-browser": "node scripts/check-graphics-browser.mjs"
+    "test:graphics-browser": "node scripts/check-graphics-browser.mjs",
+    "test:named-values-browser": "node scripts/check-named-values-browser.mjs"
   },
   "dependencies": {
     "@fontsource/geist": "^5.3.0",
