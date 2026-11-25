@@ -2316,17 +2316,11 @@ then pass a few hundred times in a row.
 - **Handlers lose local provides.** An action handler runs in its component's environment, not in
   the environment of a `provide` block written around the element that holds it. A handler that
   reads `env.` inside a local `provide` sees the value from outside the block.
-- **A cascaded read can cause one extra render.** When a body overrides a value and then reads
-  another value whose default reads it, the instance tree records the second value as read beneath
-  the body's overrides. A root change to the overridden value leaves the node alone, which is
-  right, but the recorded value is then stale, so the next equal visit renders the node once more
-  for nothing. A precise check would track which sources of the value lie outside the body's
-  overrides.
-- **A read that fails beneath a body's overrides is never skipped.** When the instance tree cannot
-  read a cascaded value without the body's own overrides (its default fails there, say), it keeps
-  the read as unknown, so the node renders again on every visit and on every root change to a
-  value it reads, for as long as its body keeps that pattern. The same precise check would let it
-  be skipped.
+- **A place formula that reads a value the body overrides is never skipped.** When a node's place
+  sets a value with a formula, and that formula reads a value the node's own body overrides, the
+  value the render saw cannot be compared with a lookup at the place. The instance tree records the
+  read as unchecked, so the node renders again on every visit (`add-tracked-reactivity`). Every
+  other cascaded read records its direct inputs and is skipped precisely.
 - **Restored instances have no recorded reads.** An instance restored from saved state has no read
   list until it renders once, so a root value change does not reach it before then.
 - **Generated path overrides are not checked.** Generated code applies `env.size.width=…` without
