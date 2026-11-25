@@ -44,6 +44,11 @@ export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1 = "environment-v1";
  * and an `envUpdate` with a base.
  */
 export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2 = "environment-v2";
+/**
+ * Action handlers that read the environment: a handler node with the environment flag, which
+ * captures the overrides of the provides around it.
+ */
+export const NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3 = "environment-v3";
 /** The bit a flagged list's count cell sets when each element is followed by a flag cell. */
 const NX_IR_FLAGGED = 0x8000_0000;
 const knownFeatures = new Set([
@@ -61,6 +66,7 @@ const knownFeatures = new Set([
     NX_IR_REQUIRED_FEATURE_CONSTRAINTS_V1,
     NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V1,
     NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V2,
+    NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3,
 ]);
 /** The reserved identity of the NX prelude, the module every NX module sees without an import. */
 export const NX_PRELUDE_MODULE_IDENTITY = "@nx/prelude.nx";
@@ -925,7 +931,8 @@ const layouts = {
         ["ref", "str", { list: PROPERTY }, { list: NODES }],
         ["int", "str", { list: PROPERTY }, { list: NODES }],
         ["ref", { list: PROPERTY }, { list: NODES }],
-        ["ref", "str", "ref", "int", "optRef", "node"],
+        // The environment flag is left out for a handler whose body reads no environment.
+        ["ref", "str", "ref", "int", "optRef", "node", { trailing: ["int"] }],
         ["node", "textType"],
         ["node", { list: PROPERTY }],
         // A range loop has a `for`'s layout; only what its iterable evaluates to differs.
@@ -1061,6 +1068,16 @@ class TableReader {
         this.#validateEnvironmentFeature(table, kind);
         if (table === "nodes" && (kind === nodeKinds.envProvide || kind === nodeKinds.envUpdate)) {
             this.#validateEnvironmentFormulaFeature(entry, kind, what);
+        }
+        // A handler's cells: the kind, the component (2), the emit, the action (2), the slot, the
+        // owner (2) and the body; the environment flag is the cell after them.
+        if (table === "nodes" && kind === nodeKinds.actionHandler && entry.length > 10) {
+            if (entry[10] !== 1) {
+                this.#fail(`${what} has an environment flag that is not 1.`);
+            }
+            else if (!this.#image.requiredFeatures.includes(NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3)) {
+                this.#fail(`${what} is an action handler that reads the environment, which requires the feature '${NX_IR_REQUIRED_FEATURE_ENVIRONMENT_V3}' the module does not list.`);
+            }
         }
         if (table === "types" && kind === typeKinds.constrained) {
             this.#validateConstrained(entry, what);
@@ -3208,9 +3225,11 @@ function capturedSlots(context, nodeIndex) {
     return captured;
 }
 /**
- * `[19, ref, str, ref, slot, ref?, node]`: the component and emit the handler answers, the action
- * record it accepts, the slot of its `action` binding, its owner, and its body. Nothing is
- * evaluated here beyond copying the frame, which is the by-value capture the interpreter takes.
+ * `[19, ref, str, ref, slot, ref?, node, 1?]`: the component and emit the handler answers, the
+ * action record it accepts, the slot of its `action` binding, its owner, its body and the
+ * environment flag. Nothing is evaluated here beyond copying the frame, which is the by-value
+ * capture the interpreter takes, and, for a flagged handler, taking the list of the overrides of
+ * the provides around it.
  */
 function evalActionHandler(context, nodeIndex, entry) {
     const image = context.linked.module.artifact;
@@ -3230,6 +3249,7 @@ function evalActionHandler(context, nodeIndex, entry) {
         owner: owner === undefined ? undefined : `${owner.linked.module.identity}::${owner.declaration.name}`,
         body: entry[9],
         captured: capturedSlots(context, nodeIndex),
+        environment: entry.length > 10 ? capturedOverrides(context.evaluation.env) : undefined,
     };
     madeHandlers.add(handler);
     return internal(handler);
@@ -3645,7 +3665,45 @@ function environmentByHostName(index, name) {
 }
 /** A new environment state, with no layers, roots or kept results. */
 function newEnvironmentState() {
-    return { layers: [], base: 0, roots: new Map(), nextId: 0, derived: new Map(), evaluating: [] };
+    return { layers: [], base: 0, roots: new Map(), nextId: 0, derived: new Map(), evaluating: [], provided: [] };
+}
+/** The overrides a handler made now captures: the list on top of `provided`. Capturing costs nothing. */
+function capturedOverrides(state) {
+    return state.provided[state.provided.length - 1] ?? [];
+}
+/**
+ * Runs `work` with a handler's captured overrides inside the environment of the call, as the
+ * overrides of `envProvide` nodes around it would be: the call's own layers, each with an identity
+ * of its own, a bundle's entries one layer each. Applying them costs nothing, and a value is not
+ * checked against its type again.
+ */
+function withCapturedOverrides(context, nodeIndex, captured, work) {
+    if (captured === undefined || captured.length === 0) {
+        return work();
+    }
+    const state = context.evaluation.env;
+    const index = environmentIndex(context.program);
+    const layers = [];
+    for (const item of captured) {
+        const bundle = isObject(item) && item.bundle !== undefined;
+        const entries = [];
+        bundleEntriesOf(context, nodeIndex, [item], index, entries);
+        for (const { target, path, source } of entries) {
+            layers.push({ set: true, key: target.key, path, source, bundle });
+        }
+    }
+    const depth = state.layers.length;
+    state.provided.push(captured);
+    for (const layer of layers) {
+        pushEnvironmentLayer(state, layer);
+    }
+    try {
+        return work();
+    }
+    finally {
+        state.layers.length = depth;
+        state.provided.pop();
+    }
 }
 /** Pushes `layer`, giving it the next identity of the call. */
 function pushEnvironmentLayer(state, layer) {
@@ -4249,9 +4307,12 @@ function evalEnvironmentOverrides(context, nodeIndex, entry, at) {
  */
 function evalEnvironmentProvide(context, nodeIndex, entry) {
     const { evaluated, next } = evalEnvironmentOverrides(context, nodeIndex, entry, 1);
+    const entries = environmentEntryValues(evaluated, true);
     const state = context.evaluation.env;
     const layers = state.layers;
     const depth = layers.length;
+    const outer = state.provided[state.provided.length - 1];
+    state.provided.push(outer === undefined ? entries : [...outer, ...entries]);
     for (const item of evaluated) {
         if ("set" in item) {
             pushEnvironmentLayer(state, { set: true, key: item.set.target.key, path: item.set.path, source: item.set.source, bundle: false });
@@ -4268,8 +4329,9 @@ function evalEnvironmentProvide(context, nodeIndex, entry) {
     }
     finally {
         layers.length = depth;
+        state.provided.pop();
     }
-    return stampEnvironment(context, nodeIndex, result, environmentEntryValues(evaluated, true), environmentIndex(context.program));
+    return stampEnvironment(context, nodeIndex, result, entries, environmentIndex(context.program));
 }
 /** An `envUpdate` node: the base's entries, then the overrides, evaluated, as one bundle value. */
 function evalEnvironmentBundle(context, nodeIndex, entry) {
@@ -4621,14 +4683,15 @@ function invokeHandler(program, handler, action, live, evaluation) {
         });
     }
     frame[handler.actionSlot] = normalizedAction;
-    const result = evalNode(handler.body, {
+    const context = {
         program,
         linked: handler.linked,
         declaration: handler.declaration,
         frame,
         evaluation,
         depth: 0,
-    });
+    };
+    const result = withCapturedOverrides(context, handler.body, handler.environment, () => evalNode(handler.body, context));
     const results = Array.isArray(result) ? result.slice() : [result];
     if (results.length === 0) {
         fail("nx-ir-handler-result", `Handler ${label} returned an empty list; a handler returns an action, an update record, or a list of them.`);
@@ -4959,6 +5022,11 @@ function handlersEqual(left, right, context, nodeIndex) {
                 break;
             }
         }
+    }
+    // Handlers of one node are flagged alike, so both hold overrides or neither does.
+    if (equal) {
+        const [mine, theirs] = [left.environment, right.environment];
+        equal = mine === undefined || theirs === undefined ? mine === theirs : valuesEqual(mine, theirs, context, nodeIndex);
     }
     return equal;
 }
