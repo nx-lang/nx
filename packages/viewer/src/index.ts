@@ -321,7 +321,7 @@ function hexagon(document: Document): SVGSVGElement {
   const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   dot.setAttribute("cx", "8");
   dot.setAttribute("cy", "8");
-  dot.setAttribute("r", "1.6");
+  dot.setAttribute("r", "1.1");
   dot.setAttribute("fill", "currentColor");
   dot.setAttribute("stroke", "none");
   svg.append(outline, dot);
