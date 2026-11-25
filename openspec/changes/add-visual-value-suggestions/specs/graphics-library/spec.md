@@ -4,12 +4,13 @@
 The graphics library SHALL type these properties with `@nx/design`'s value types, keeping each
 property's constraint, default and optionality: `Stroke.width` as `BorderWidth`, `Text.fontSize` as
 `FontSize`, `Text.fontFamily` as `FontFamily`, `Rectangle.rx` and `Rectangle.ry` as `Radius`, and
-every `opacity` property and parameter as `Opacity`, which gives the two helper parameters written
-`opacity: float64 = 1` the `[0,1]` constraint their docs already state. `@nx/graphics` SHALL import `@nx/design` for
-them and stay free of diagnostics. `Text.fontWeight` and the geometric radii of circles, ellipses,
+every `opacity` property and parameter as `Opacity`, which also gives the two internal helpers'
+`opacity: float64 = 1` parameters the `[0,1]` constraint their docs state. `@nx/graphics` SHALL
+import `@nx/design` under an alias, `import "@nx/design" as design`, writing `design.BorderWidth`
+and the rest, so that none of `@nx/design`'s names joins its own, and SHALL stay free of
+diagnostics. `Text.fontWeight` and the geometric radii of circles, ellipses,
 regular polygons and stars SHALL keep their `float64` types. Since the aliases are transparent, every
-program that type checks against the library today, other than one passing an opacity outside
-`[0,1]` to those helpers, SHALL still type check, and evaluate and render
+program that type checks against the library today SHALL still type check, and evaluate and render
 the same.
 
 #### Scenario: A plain number still fits

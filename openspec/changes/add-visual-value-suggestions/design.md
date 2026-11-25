@@ -40,8 +40,11 @@ What exists:
 ### Suggestions travel with the source tree
 
 `sourceTree` takes `suggestions: true`, and the answer carries one list, `suggestions`, for the
-whole document. Each property in the declaration table, and each value declaration, carries a
-`suggestionKey` when it has suggestions; the viewer shows the entries with that key.
+whole document. Each property in the declaration table (record, component and case properties, and
+state fields), and each parameterless `let` this document declares, carries a `suggestionKey` when
+it has suggestions; the viewer shows the entries with that key. A declaration listed only because a
+suggestion starts from it brings no keys of its own, so the list has a fixed point. `scope` and
+`self` name declarations by their table index.
 
 The set of candidates depends only on the module's imports and, for parameters and state, on the
 enclosing top-level declaration, never on which property is asked about. So one list per document,
@@ -93,9 +96,14 @@ Groups, in this order:
 2. **The enclosing declaration**: the parameters, and a component's state fields, of the top-level
    component or function the value is written in, with their record fields. Labeled with its name.
 3. **This document**: its top-level parameterless `let` values, with their record fields.
-4. **Each imported module**, in import order: its exported `let` values (and a library's internal
-   ones from a module of the same library), spelled through the import's alias when it has one.
-   Labeled with the import as written, such as `@nx/design` or `./brand.nx`.
+4. **Each peer file**: other files of the same library, and other root modules of the same
+   program, whose non-private values the module sees without an import (declaration-visibility).
+5. **Each imported module**, in import order: the `let` values it makes visible, spelled through the
+   import's alias, or a selective import's qualified alias, when it has one. Labeled with the import
+   as written, such as `@nx/design` or `./brand.nx`.
+
+A name is offered only under a spelling the module's top-level scope resolves without a
+diagnostic, so ambiguous and shadowed names are left out.
 
 Within a group, entries follow declaration order, and fields follow their record's field order, so
 scales read small to large as the library writes them (`none`, `xxs`, … `xxxl`).
@@ -104,10 +112,11 @@ Fields are followed through records only: not through optional fields, sequences
 elements' content, and at most four levels deep, so a recursive type cannot loop. An intermediate
 record is itself an entry when its type matches (a `TextColors` property gets `env.color.text`).
 
-A value never suggests itself or a value built from its own declaration: inside `let brand = …` no
-`brand.*` entry is offered, and inside `environment color = …` no `env.color.*`. Since the list is
-one per document, such an entry is marked `self` with its declaration's key and the viewer leaves it
-out inside that declaration. Functions, element
+A value is not offered where choosing it would make a cycle: inside `let brand = …` no `brand.*`
+entry, inside `environment color = …` no `env.color.*`, and inside `environment font = …` no
+`env.text.*`, since `text`'s default reads `env.font`. Since the list is one per document, each entry
+lists in `self` the declarations it reads, directly or transitively, as hover's environment-read
+list follows them, and the viewer leaves it out inside those. Functions, element
 functions, components and `env.Update` bundles are not values for this purpose.
 
 ### Previews are found statically
@@ -118,7 +127,11 @@ follow the name to its declaration's value or default; follow a reference to ano
 default when the construction leaves it out); and take, for an `if env.x is { … }` or a match on an
 environment value whose own default is a bare case, the arm for that case. Stop at a literal (a
 number, string, boolean or bare case), or at a color the color-tooling discovery recognizes, and
-give that. Stop with no preview at anything else, or after 16 steps.
+give that. Stop with no preview at anything else, or after 16 steps. Color discovery today runs while
+the requested document's nodes are built; it is factored so it works on any module's syntax and
+resolves constructors through that module's imports (`palette.nx` writes `c.oklch(…)`). A preview
+color uses the node's existing swatch text and outside-sRGB mark, so the viewer draws swatches one
+way.
 
 `env.color.accent` previews as `standardPalette.blue600` followed to `c.oklch(0.546, 0.245,
 262.881)`, in the light arm because `colorMode` defaults to `light`. A preview is the default
@@ -132,16 +145,19 @@ cost each tree. Rejected.
 ### Picking writes `{name}`; a token is replaced through its value
 
 A new `sourceEdit` value kind, `{ kind: "name", name: "env.space.md" }`, is accepted by `setValue`
-and `addProperty`. It is spelled as a braced value in an unbraced attribute, `padding={env.space.md}`,
-and bare inside braces, as a sequence item or as a `let` value. Each dot-separated part must be an
-identifier. As for other values, the service does not check the type or that the name resolves; the
+and `addProperty`. It is spelled braced at an unbraced place, an attribute or a `let` value
+(`padding={env.space.md}`, `let accent: Color = {blue}`), since the grammar takes no dotted name
+there and reads a bare one as a case, and bare inside braces or as a sequence item. Each
+dot-separated part must be an identifier and not a keyword, and `env` needs a member. As for other values, the service does not check the type or that the name resolves; the
 type checker reports a wrong one as it would a hand edit.
 
 `setValue` today targets only a literal or a bare case. A token must be replaceable by another token
 and by a literal, and an element value such as `fill=<Paint.color color=#2563eb />` by a token, so
 the target widens to any whole value written as a literal, a case, a name (a reference or a member
 chain on one, `env.` reads included) or an element. Undo is the host editor's, so replacing an
-element is recoverable.
+element is recoverable. Today a hex literal takes only a `color` value, and a `color` value on a
+constructor call or color element edits its channels in place; both stay, and a `name` replaces any
+of them whole, while a `color` over a name writes a hex literal.
 
 In the viewer, a token reads as `{blue}` does today, now also for `env.` reads and member chains. A
 click on a token opens the named-values popover, so swapping tokens is one click and one choice. Its
@@ -149,13 +165,19 @@ click on a token opens the named-values popover, so swapping tokens is one click
 picker, case popover) on the token's preview, and committing writes that literal over the token,
 which is Figma's "detach". The default row (as in the choices list) leaves the property out.
 
+For a color, color-tooling never rewrites a wide color as sRGB, and the palette is OKLCH. So Replace
+with value is offered for a color token only when its preview is inside sRGB, and writes hex rounded
+to 8 bits, as the picker's hex is. A wide token keeps its name; the reader can pick another or write
+it in Source. Writing the exact `oklch(…)` form would need `@nx/color` in scope and is a follow-up.
+
 ### The button and the keyboard
 
 A quiet named-values button follows a field's value, before its `⋯`, shown while the property is
 under the pointer or selected or its editor is open, and on unset properties too: Figma's model,
 where the variable button appears beside a field on hover. It is not a Tab stop, so Tab still moves
 field to field. Ctrl+Space, the usual "suggest" key, opens the popover from a selected property or an
-open field. The host draws the icon by name (`named-values`), with a built-in fallback, as row
+open field, and so does Alt+Escape, since macOS may take Ctrl+Space for switching input sources (VS
+Code offers Option+Esc there for the same reason). The host draws the icon by name (`named-values`), with a built-in fallback, as row
 icons work.
 
 The popover is a combobox: a search field over a list with group headings, each row reading the
@@ -171,7 +193,9 @@ none, so the feature would look different on each kind of field. Rejected in fav
 ### `@nx/graphics` names the design types
 
 Suggestions need declared types, and graphics is what the playground's Visual examples edit. So
-graphics properties take `@nx/design`'s aliases where the meaning matches: `Stroke.width:
+graphics properties take `@nx/design`'s aliases, through `import "@nx/design" as design` so that
+`@nx/design`'s `Color`, `Shadow` and the rest don't join graphics' own names, where the meaning
+matches: `Stroke.width:
 BorderWidth`, `Text.fontSize: FontSize`, `Text.fontFamily: FontFamily`, `Rectangle.rx` and `ry:
 Radius`, and every `opacity: Opacity`. Constraints and defaults stay the same. `Text.fontWeight` stays
 `float64` (the graphics spec keeps it so), and geometric radii (`Circle.radius`, `Star.outerRadius`)
@@ -187,6 +211,13 @@ it imports `@nx/design` itself, since imports are not transitive.
   switch to a query (the alternative above) if a list passes 500 entries.
 - **Previews can mislead** under a theme or in a dark section. → The footer says previews are
   defaults, and the hover card of a token shows its declaration and doc.
+- **Two `Color`s in scope.** A program that imports `@nx/graphics` and `@nx/design` without aliases
+  sees two exported `Color` aliases (of the same type) and gets an ambiguous-name diagnostic on use.
+  → The tutorial imports one under an alias; making the two re-exports count as one name is a
+  separate fix.
+- **A user alias of a token type gets only its own values.** `padding: ButtonGap` with
+  `type ButtonGap = Spacing` is not offered `env.space.*`. That keeps a narrower role narrow; if
+  readers miss the base role's values, add them as a quieter group later.
 - **Matching by alias misses untyped values.** `let gap = 12` is not offered for `Spacing`. →
   Documented; the style guide asks for declared token types.
 - **`@nx/graphics` gains a dependency.** It is unstable and the aliases are transparent, so no

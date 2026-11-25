@@ -15,20 +15,29 @@ requirement says below, and SHALL spell the value by its kind:
 - a boolean as `true` or `false`;
 - a case as its bare name, when the name is an identifier other than `true` and `false`; a case
   written qualified, as `{ Size.small }`, SHALL keep its qualifier.
-- a name, `{ kind: "name", name }`, as its dot-separated parts, each an identifier other than `true`
-  and `false` and the first `env` or a name, written in braces, as `padding={env.space.md}`, at an
-  unbraced attribute value, and bare inside braces, as a sequence item or as a `let` value.
+- a name, `{ kind: "name", name }`, as written: one or more dot-separated identifiers, none of them
+  `true`, `false` or a keyword, with at least two parts when the first is `env`. It SHALL be written
+  in braces at an unbraced place, an attribute value or a `let` value, as `padding={env.space.md}`
+  and `let accent: Color = {blue}`, since a bare name there reads as a case, and bare inside braces
+  or as a sequence item.
 
 A signed number SHALL be written only where the grammar takes one, an unbraced attribute value or
 `let` value, and a case only at an unbraced place or as a qualified case; elsewhere, in a sequence
 item or inside braces, where `-` reads as an operator and a bare name as a reference, the service
 SHALL refuse the value as `invalidValue`.
 
-When the target is a name or an element that is an attribute's whole value and the new value is not
-a name, the service SHALL write the value as at an unbraced attribute value, dropping braces written
-around a name: `padding={env.space.md}` set to the number `12` SHALL read `padding=12`. A literal or
-case target SHALL keep its braces, as before. A name whose parts are not all identifiers SHALL be refused as
-`invalidValue`. Replacing an element SHALL replace its whole text, its content included.
+When the target is a name or an element that is the whole value of an attribute or a `let` and the
+new value is not a name, the service SHALL write the value as at an unbraced place, dropping braces
+written around a name: `padding={env.space.md}` set to the number `12` SHALL read `padding=12`. A
+literal or case target SHALL keep its braces, as before. A name that breaks the rule above SHALL be
+refused as `invalidValue`.
+
+A `name` value SHALL replace any target this requirement admits, a hex color literal and an
+element included, as its whole text, its content included. A `color` value SHALL keep its current
+meaning on a color literal, a color constructor call or a color element (the color-tooling
+capability's edit, which keeps the written form), and on a name target SHALL be written as the color
+literal it carries, as at an unbraced place. Any other value on a hex color literal SHALL be refused
+as `invalidValue`, as today.
 
 The service SHALL NOT check the value against the place's type, nor that a name resolves; a value of
 the wrong type, or a name the module cannot see, SHALL be written and then reported by the type
@@ -78,13 +87,26 @@ checker as a hand edit would be.
 
 #### Scenario: A name in a sequence and a `let`
 - **WHEN** a client sets the second item of `let gaps: Spacing+ = { 4 8 }` to the name `env.space.md`,
-  and the value of `let gap: Spacing = 4` to the name `env.space.sm`
-- **THEN** they SHALL read `let gaps: Spacing+ = { 4 env.space.md }` and
-  `let gap: Spacing = env.space.sm`
+  the value of `let gap: Spacing = 4` to the name `env.space.sm`, and the value of
+  `let accent: Color = #2563eb` to the name `blue`
+- **THEN** they SHALL read `let gaps: Spacing+ = { 4 env.space.md }`,
+  `let gap: Spacing = {env.space.sm}` and `let accent: Color = {blue}`
 
-#### Scenario: A name that cannot be written
-- **WHEN** a client sets a value to the name `env.space.2xl`
-- **THEN** the answer SHALL hold no edits and the refusal `invalidValue`
+#### Scenario: A literal replaces a name at a `let`
+- **WHEN** a client sets the value of `let gap: Spacing = {env.space.sm}` to the number `4`
+- **THEN** it SHALL read `let gap: Spacing = 4`
+
+#### Scenario: A hex color bound to a token
+- **WHEN** a client sets the value of `background=#ffffff` to the name `env.color.surface`
+- **THEN** the attribute SHALL read `background={env.color.surface}`
+
+#### Scenario: A color over a token
+- **WHEN** a client sets the value of `background={env.color.surface}` to the color `#fafafa`
+- **THEN** the attribute SHALL read `background=#fafafa`
+
+#### Scenario: Names that cannot be written
+- **WHEN** a client sets a value to the name `env.space.2xl`, to `env`, or to `if.x`
+- **THEN** each answer SHALL hold no edits and the refusal `invalidValue`
 
 #### Scenario: An expression is still refused
 - **WHEN** a client sets the value of `count={total + 1}` to the name `limit`

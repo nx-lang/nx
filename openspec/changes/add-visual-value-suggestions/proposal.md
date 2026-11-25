@@ -28,25 +28,28 @@ values first.
   gets values of that type. A property typed by a bare primitive (`float64`, `string`) gets none.
 - **What is reachable.** Environment values the module can see and their record fields, then the
   enclosing component's or function's parameters and state, then this document's top-level `let`
-  values, then each imported module's, each with their record fields. A value is not offered inside
+  values, then those of other files of its library or program, then each imported module's, each
+  with their record fields, spelled as the module resolves them. A value is not offered inside
   its own declaration.
 - **A named-values popover in Visual.** A field whose property has suggestions shows a quiet
   named-values button, as Figma shows its variable button, while the property is under the pointer or
   selected; it and Ctrl+Space open a popover that lists the suggestions by group, each with its
-  preview, filtered as the reader types, the current one marked and the default first. Choosing one
+  preview, filtered as the reader types, the current one marked and the default first (Ctrl+Space,
+  or Option+Esc on a Mac). Choosing one
   writes its name; on an unset property it adds the property.
 - **Tokens read as tokens.** A value written as an `env.` read or a member chain, such as
   `{env.color.accent}` or `{standardPalette.blue600}`, reads as a token, with a swatch when its
   preview is a color, as a reference to a `let` does today. A click on a token opens the popover. Its
-  menu adds Replace with value, which opens the property's own editor on the token's preview.
+  menu adds Replace with value, which opens the property's own editor on the token's preview (for a
+  color, only inside sRGB, written as hex).
 - **Source edits write names.** `sourceEdit` takes a new typed value, `name`, for `setValue` and
-  `addProperty`, spelled `{env.space.md}` in an attribute and bare where braces or a `let` already
-  allow it. `setValue` can now replace a value written as a name or an element, so a token can be
-  swapped for another token or for a literal.
+  `addProperty`, spelled in braces at an attribute or `let` value (`padding={env.space.md}`) and bare
+  inside braces. `setValue` can now replace a value written as a name or an element, and a name can
+  replace a hex color, so a token can be swapped for another token or for a literal.
 - **`@nx/graphics` names the design value types.** `Stroke.width` becomes `BorderWidth`,
   `Text.fontSize` `FontSize`, `Text.fontFamily` `FontFamily`, `Rectangle.rx` and `ry` `Radius`, and
   every `opacity` `Opacity`, with the same constraints and defaults, so graphics properties get
-  token suggestions. `@nx/graphics` then depends on `@nx/design`.
+  token suggestions. `@nx/graphics` then imports `@nx/design` under an alias.
 - **The playground asks for suggestions** in Visual.
 
 ## Capabilities
@@ -54,10 +57,13 @@ values first.
 ### New Capabilities
 
 - `value-suggestions`: which named values the language service suggests for a property or `let`,
-  how they are matched, ordered, spelled and previewed, and how the source tree carries them.
+  and how they are matched, ordered, spelled and previewed.
 
 ### Modified Capabilities
 
+- `source-tree`: the `suggestions` option, the answer's `suggestions` list and the `suggestionKey`
+  fields of the declaration table.
+- `color-tooling`: replacing a color token with its value writes hex only for an sRGB color.
 - `source-edits`: the `name` value kind, and `setValue` on a value written as a name or an element.
 - `viewer`: the named-values popover, and tokens for `env.` reads and member chains.
 - `graphics-library`: graphics properties typed by `@nx/design` value types.
@@ -68,7 +74,7 @@ values first.
 - **Language service** (`crates/nx-language-service`): a suggestion pass over the analysis that
   answers `sourceTree`, using the type checker's scope and alias information; `name` values and the
   wider `setValue` target in `source_edit.rs`. No compiler, IR or runtime change.
-- **Protocol and TypeScript** (`packages/language-protocol`, `language-core`, the wasm and Node
+- **Protocol and TypeScript** (`packages/language-protocol` request and answer shapes, `language-core`, the wasm and Node
   snapshots, the HTTP handler and client): the option, the answer's `suggestions`, the property
   `suggestionKey` and the `name` edit value, with Rust and TypeScript parity tests.
 - **Viewer** (`packages/viewer`): the button, the popover, the token reading and Replace with value.

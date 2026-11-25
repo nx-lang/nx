@@ -11,8 +11,9 @@ the same way.
 A property that offers named values SHALL show a quiet named-values button after its value and
 before its `⋯`, written or unset, while the property is under the pointer, selected or open in an
 editor, drawn with the host's `named-values` icon or the viewer's own when the host draws none. The
-button SHALL NOT be a Tab stop. A click on it, and Ctrl+Space with the property selected or its
-field open, SHALL open the named-values popover; a click on it while the popover is open SHALL close
+button SHALL NOT be a Tab stop. A click on it, and Ctrl+Space or Alt+Escape (Option+Esc on a Mac,
+where the system may take Ctrl+Space) with the property selected or its field open, SHALL open the
+named-values popover; a click on it while the popover is open SHALL close
 it.
 
 The popover SHALL open over the reading, placed by the value, and move nothing. It SHALL hold a
@@ -37,8 +38,9 @@ row announced.
   `env.space.xxxl`, each with its number, and no `env.radius` row
 
 #### Scenario: Colors with their swatches
-- **WHEN** a Circle's `fill` is typed `Paint` and its `Paint.color`'s `color` is typed `Color`, and
-  the reader opens the popover of that `Color` in Circle's inspector
+- **WHEN** a document imports `@nx/graphics` and `@nx/design`, a Circle writes
+  `fill=<Paint.color color=#2563eb/>`, whose case field `color` is typed `Color`, and the reader
+  opens the popover of that `Color` in Circle's inspector
 - **THEN** the rows under `Environment` SHALL include `env.color.accent` with a swatch, and the rows
   under `@nx/design` SHALL include `standardPalette.blue600` with a swatch
 
@@ -73,7 +75,8 @@ does. Replace with value in a token's menu SHALL open the property's own editor 
 field, its color's parts or popover, or its case popover) holding the token's preview, as if the
 value were written so; committing it SHALL fire `nx-edit` setting that value over the token, and
 cancelling SHALL leave the token. A token without a preview, or with one the property's editor does
-not take, SHALL NOT offer Replace with value.
+not take, SHALL NOT offer Replace with value; for a color, the color-tooling capability decides,
+offering it only for a color inside sRGB.
 
 #### Scenario: Binding a padding to a token
 - **WHEN** the reader opens the popover of `padding=8` and chooses `env.space.md`
@@ -89,6 +92,10 @@ not take, SHALL NOT offer Replace with value.
 - **WHEN** a Card writes `background={env.color.surface}` and the reader clicks the token
 - **THEN** the popover SHALL open with `env.color.surface` marked, and choosing
   `env.color.surfaceMuted` SHALL fire `nx-edit` setting that name
+
+#### Scenario: A wide color token keeps its name
+- **WHEN** a Card writes `fill={standardPalette.green500}`, whose preview is outside sRGB, and the reader opens the token's menu
+- **THEN** the menu SHALL offer Go to where it applies and Show in Source, and no Replace with value
 
 #### Scenario: Back to a plain number
 - **WHEN** a Card writes `padding={env.space.md}`, whose preview is `12`, and the reader chooses
