@@ -153,7 +153,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 
 ## New Findings Discovered During 2026-11-25 08:32 Verification
 
-### 🟡 Fixed - RF9 The RF8 fix left an over-long line in docs/nx-ir-format.md
+### ✅ Verified - RF9 The RF8 fix left an over-long line in docs/nx-ir-format.md
 - **Severity:** Low
 - **Evidence:** docs/nx-ir-format.md, *Handlers and the environment*: the edited sentence "list, built
   when the first of them is made. An unflagged node captures nothing …" makes one line of 124
@@ -161,6 +161,8 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Reflow the paragraph.
 - **Fix:** Reflowed the paragraph to 100 characters, with no change to the wording. The independent
   verifier made this fix, so it is not independently verified.
+- **Verification:** Checked separately from the fixer: every reflowed line is at most 100
+  characters and the wording is unchanged.
 
 ## Questions
 - None
