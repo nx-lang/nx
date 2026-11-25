@@ -108,6 +108,19 @@ checker as a hand edit would be.
 - **WHEN** a client sets the value of `background={env.color.surface}` to the color `#fafafa`
 - **THEN** the attribute SHALL read `background=#fafafa`
 
+#### Scenario: A color constructor bound to a token
+- **WHEN** a client sets the value of `fill={c.oklch(0.6, 0.2, 250)}` to the name `env.color.accent`
+- **THEN** the attribute SHALL read `fill={env.color.accent}`
+
+#### Scenario: A color on a color element keeps the element
+- **WHEN** a client sets the value of `tint=<Color.srgb r=0.2 g=0.4 b=0.8 />` to the color `#336699`
+- **THEN** the attribute SHALL stay a `<Color.srgb … />` element, with only its channel fields
+  changed as the color-tooling capability edits them
+
+#### Scenario: A color on a number is refused
+- **WHEN** a client sets the value of `padding=8` to the color `#ffffff`
+- **THEN** the answer SHALL hold no edits and the refusal `invalidValue`
+
 #### Scenario: Names that cannot be written
 - **WHEN** a client sets a value to the name `env.space.2xl`, to `env`, or to `if.x`
 - **THEN** each answer SHALL hold no edits and the refusal `invalidValue`

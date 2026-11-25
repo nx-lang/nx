@@ -61,6 +61,8 @@ unbraced-literal-forms, module-imports, declaration-visibility, graphics-library
 - **Fix:** setValue now says a `name` replaces a hex literal, constructor call or color element whole; a `color` value keeps today's channel edit on calls and elements; a `color` over a name writes a hex literal; other values on a hex literal stay refused. New scenarios cover `background=#ffffff` → `env.color.surface` and `{env.color.surface}` → `#fafafa`. Task 2.2 and design.md are updated.
 - **Verification:** Mostly done: the hex coupling, `color` channel edits and `color` over a name are now stated, with scenarios. But the delta's target list is still "a literal, a bare or qualified union case, a name, or an element", and a name excludes calls, so a color constructor call (`fill={c.oklch(…)}`, a `SourceRole::Call` node that `edit_tree` already routes to `set_constructor_color`) is not a `setValue` target. "A `name` value SHALL replace any target this requirement admits" therefore does not cover a constructor call, while the Fix note, design.md ("a `name` replaces any of them whole") and task 2.2 say it does. Admit a color constructor call that is a whole value as a target (for `color` and `name` values only), and add a scenario such as `fill={c.oklch(0.5, 0.2, 260)}` → name `env.color.accent`. Also say which rule wins for a `color` value on a color element: the brace-dropping paragraph says a non-name value over an element is written as at an unbraced place, while the next paragraph keeps the channel edit; and state that a `color` value on a non-hex literal or a case stays `invalidValue`, as the code refuses it today.
 - **Fix:** (second pass) Color constructor calls are added to the setValue target list. A `name` replaces a hex literal, call or element whole. A `color` value's channel edit keeps the written form and its braces and takes precedence over brace dropping. A `color` on another literal or a case, an uneditable call, or any other value on a hex literal or call is refused as `invalidValue`.
+- **Verification:** (second pass) The requirement text is now right. Color constructor calls are targets, a `name` replaces a hex literal, a call or an element whole, the `color` channel edit takes precedence over brace dropping, and the refusals are stated. Task 2.2 and design.md agree. What's still missing is the scenarios: the delta has none for a constructor-call target. Task 2.3 derives its tests from the scenarios, so the new behavior has no test. Add two scenarios: `fill={c.oklch(0.6, 0.2, 250)}` set to the name `env.color.accent` reads `fill={env.color.accent}`, and a `color` value on `fill=<Paint.color color=#2563eb/>` edits the channel in place and leaves the element. A third, for a `color` value on a number literal giving `invalidValue`, would cover the refusal.
+- **Fix:** (third pass) Added scenarios: `fill={c.oklch(…)}` → name `env.color.accent`; a `color` on a `<Color.srgb r g b/>` element edits its channels in place and keeps the element; a `color` on `padding=8` is refused. Also reworded value-suggestions' opening so parameters resolve in their declaration's body (RF16 nit).
 
 ### ✅ Verified - RF3 Replace with value on a color token conflicts with color-tooling, and most palette tokens can't take it
 - **Severity:** Medium
@@ -82,7 +84,7 @@ unbraced-literal-forms, module-imports, declaration-visibility, graphics-library
 - **Fix:** New color-tooling ADDED requirement: Replace with value on a color token opens only when the preview is inside sRGB and writes hex rounded to 8 bits. A wide token offers no replacement, so a wide color is never rewritten as sRGB. There are scenarios for a gray token and for a wide green, and the viewer has a `standardPalette.green500` scenario. design.md explains why; writing the exact `oklch(…)` form is noted as a follow-up.
 - **Verification:** The color-tooling delta adds the requirement, with scenarios for a gray token and a wide one; the viewer has the `standardPalette.green500` scenario, and "Choosing a named value writes its name" defers colors to color-tooling. `gray200` is `c.oklch(0.92, 0.004, 286.32)` (inside sRGB) and `green500` is `c.oklch(0.723, 0.219, 149.579)` (outside), so the examples hold. The delta frames this as an explicit replacement, not a picker edit of a computed expression, so it doesn't contradict "Picker edits preserve authored structure and alpha".
 
-### 🟡 Fixed - RF4 The reachable set misses names visible without an import and doesn't handle selective imports or ambiguous imported names
+### ✅ Verified - RF4 The reachable set misses names visible without an import and doesn't handle selective imports or ambiguous imported names
 - **Severity:** Medium
 - **Confidence:** High
 - **Evidence:**
@@ -105,6 +107,7 @@ unbraced-literal-forms, module-imports, declaration-visibility, graphics-library
 - **Fix:** Reachability is now "names the top-level scope resolves without a diagnostic". A `peer` group was added for same-library and same-program files. Selective imports use their qualified alias and bring only the names they list. Ambiguous and shadowed names are left out. New scenarios cover peer, selective import and ambiguous name. Groups, design and task 1.3 are updated.
 - **Verification:** Reachability, the `peer` group, ambiguous and shadowed names, and the scenarios are in place. But the selective-import bullet gives the example `import { standardPalette as sp } from "@nx/design"` gives `sp`, which module-imports rejects: a selective alias must be a single-dot qualified name ending in the imported name (`Prefix.standardPalette`). The scenario uses the valid `as d.standardPalette`, so the bullet contradicts it. Change the example to `import { standardPalette as d.standardPalette } from "@nx/design"`, spelled `d.standardPalette`.
 - **Fix:** (second pass) The selective-import bullet now uses the valid qualified alias `import { standardPalette as d.standardPalette }` → `d.standardPalette`, matching the scenario.
+- **Verification:** (second pass) The selective-import bullet now reads `import { standardPalette as d.standardPalette } from "@nx/design"` → `d.standardPalette`. That is valid under module-imports' single-dot alias rule and matches the "A selective import" scenario.
 
 ### ✅ Verified - RF5 Giving every value declaration entry a key, while also requiring each suggestion's declaration in the table, has no fixed point
 - **Severity:** Medium
@@ -261,7 +264,7 @@ unbraced-literal-forms, module-imports, declaration-visibility, graphics-library
 
 ## New Findings Discovered During 2026-11-25 06:35 Verification
 
-### 🟡 Fixed - RF16 A parameter or state field that shadows a top-level name inside its declaration is still offered under the shadowed spelling
+### ✅ Verified - RF16 A parameter or state field that shadows a top-level name inside its declaration is still offered under the shadowed spelling
 - **Severity:** Low
 - **Confidence:** Medium
 - **Evidence:** The RF4 fix says "a name ... that a nearer declaration shadows, SHALL be left out under that
@@ -276,8 +279,9 @@ unbraced-literal-forms, module-imports, declaration-visibility, graphics-library
   an entry without a `scope` lists in `self` (or in a new field) each top-level declaration whose
   parameters or state shadow its first name part, so that the viewer leaves it out there. Add a scenario.
 - **Fix:** A top-level name shadowed by a parameter or state field lists that declaration in `self`. A new scenario covers `let tint` with `<Badge tint: Color/>`, and task 1.3 matches.
+- **Verification:** value-suggestions now says that a top-level name a parameter or state field shadows lists that declaration in `self`, and the scenario "A parameter shadows a top-level value" expects the unscoped `tint` to list `Badge` and the scoped `tint` to carry `Badge` as its scope. Task 1.3 matches. The viewer's existing `self` filter then leaves the shadowed entry out inside `Badge`, with no change to the entry shape. A small leftover: the requirement's lead-in still says every entry is "a name the module's top-level scope resolves", which parameters aren't, but the bullets make the intent clear.
 
-### 🟡 Fixed - RF17 The proposal's sentence on the Mac shortcut is garbled
+### ✅ Verified - RF17 The proposal's sentence on the Mac shortcut is garbled
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** proposal.md: "it and Ctrl+Space open a popover that lists the suggestions by group, ...
@@ -286,6 +290,7 @@ unbraced-literal-forms, module-imports, declaration-visibility, graphics-library
 - **Recommendation:** Reword as "it, Ctrl+Space and Alt+Escape (Option+Esc on a Mac) open a popover
   that ...".
 - **Fix:** The proposal sentence is rewritten: the button, Ctrl+Space and Option+Esc (on a Mac) open the popover.
+- **Verification:** proposal.md now reads "it, Ctrl+Space and Option+Esc (on a Mac, where the system may take Ctrl+Space) open a popover ... the current one marked and the default first." It is no longer garbled or duplicated. It names the Mac spelling only, where the viewer delta binds Alt+Escape on every platform, which is fine for a summary.
 
 ## Questions
 _Answers (fix pass): ButtonGap keeps only its own values, by design, noted as a risk in design.md. A union case's element has its union's type (value-suggestions). Previews do not see through `with`: it is not in the follow list, so such values get no preview._

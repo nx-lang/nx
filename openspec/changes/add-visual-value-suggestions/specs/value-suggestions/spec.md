@@ -58,8 +58,8 @@ alias of it, not those of `Spacing`.
 
 ### Requirement: Suggestions are the named values the document can reach
 The suggestions SHALL be these named values, where each matches a key some property or value
-declaration of the answer carries, and each is a name the module's top-level scope resolves without
-a diagnostic:
+declaration of the answer carries, and each is a name that resolves without a diagnostic where it
+is offered (the module's top level, or for a parameter or state field, its declaration's body):
 
 - each environment value the module can see, as `env.` reads it, spelled `env.name`; one whose name
   is ambiguous for the module SHALL be left out;
