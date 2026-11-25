@@ -17,6 +17,18 @@
 //! and a later change commits to it.</para>
 
 use crate::source_edit::SourceEditValue;
+pub use suggestions::{
+    SourcePreview, SourcePreviewKind, SourceSuggestion, SourceSuggestionGroup,
+    SourceSuggestionGroupKind,
+};
+
+#[path = "suggestions.rs"]
+mod suggestions;
+
+#[cfg(test)]
+pub(crate) fn relative_path_for_tests(from: &str, target: &str) -> String {
+    suggestions::relative_path(from, target)
+}
 use crate::visualizers::{ProgramVisualizers, ResolvedVisualizer};
 use crate::{
     is_unresolved_type, type_ref_display, DeclarationOrigin, DocumentScope, DocumentUri,
@@ -51,6 +63,10 @@ pub struct SourceTree {
     /// The host visualizer modules the request named that the snapshot does not hold.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_visualizer_modules: Vec<String>,
+    /// The named values the document can reach that fit a suggestion key of the answer, when the
+    /// request asked for suggestions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suggestions: Vec<SourceSuggestion>,
 }
 
 /// What a source-tree request asks for beyond the tree itself.
@@ -61,6 +77,10 @@ pub struct SourceTreeOptions {
     /// declaration's resolved visualizer to its table entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visualizers: Option<SourceTreeVisualizers>,
+    /// List the named values the document can reach, and give each property and value
+    /// declaration of the table the key that selects its suggestions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suggestions: bool,
 }
 
 /// The visualizer declarations a source-tree request asks to have resolved.
@@ -273,6 +293,10 @@ pub struct SourceDeclaration {
     /// The interval an alias's or a value's constrained type admits, through aliases too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<SourceBounds>,
+    /// For a parameterless `let` this document declares, the key of the suggestions that fit its
+    /// value; present only when the request asked for suggestions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestion_key: Option<String>,
 }
 
 /// The interval a constrained numeric type admits. An integer's exclusive ends are given as the
@@ -451,6 +475,10 @@ pub struct SourceProperty {
     /// an optional; absent when the type is not constrained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<SourceBounds>,
+    /// The key of the suggestions that fit the property; present only when the request asked for
+    /// suggestions and the type has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestion_key: Option<String>,
 }
 
 /// One case of a union.
@@ -519,6 +547,11 @@ impl WorkspaceSnapshot {
             builder.attach_visualizers(&visualizers);
             missing_visualizer_modules = visualizers.missing;
         }
+        let suggestions = if options.suggestions {
+            builder.attach_suggestions()
+        } else {
+            Vec::new()
+        };
         let (mut nodes, declarations) = builder.finish();
         for at in 0..nodes.len() {
             let canonical = nodes[at]
@@ -583,6 +616,7 @@ impl WorkspaceSnapshot {
             nodes,
             declarations,
             missing_visualizer_modules,
+            suggestions,
         })
     }
 }
@@ -1347,23 +1381,10 @@ impl<'a> TreeBuilder<'a> {
                             }
                         })
                         .collect();
-                    if let Some(mut args) = args {
-                        if let Some(op) = nx_value::color::NAMES
-                            .iter()
-                            .position(|candidate| *candidate == name)
-                        {
-                            if matches!(
-                                name.as_str(),
-                                "srgb" | "rgba" | "displayP3" | "oklab" | "oklch"
-                            ) && args.len() == 3
-                            {
-                                args.push(nx_value::NxValue::Float(1.0));
-                            }
-                            set_swatch(
-                                &mut self.nodes[index],
-                                nx_value::color::evaluate(op as u32, &args),
-                            );
-                        }
+                    if let Some(color) =
+                        args.and_then(|args| suggestions::static_color(&name, args))
+                    {
+                        set_swatch(&mut self.nodes[index], color);
                     }
                 }
             }
@@ -2125,6 +2146,7 @@ impl<'a> TreeBuilder<'a> {
             value_range: None,
             visualizer: None,
             bounds: None,
+            suggestion_key: None,
         });
 
         let chain = base_chain(&workspace, origin);
@@ -3049,6 +3071,7 @@ fn property(
         doc: scope.render_doc(module, parts.doc),
         flags,
         bounds: type_bounds(workspace, module, parts.ty, 0),
+        suggestion_key: None,
     }
 }
 
@@ -3317,11 +3340,25 @@ fn spell(node: SyntaxNode<'_>) -> String {
 
 /// Gives a node the swatch for a statically known color, or the reason it is not a color.
 fn set_swatch(node: &mut SourceNode, value: Result<nx_value::NxValue, nx_value::color::Error>) {
-    match value.and_then(|value| nx_value::color::read(&value)) {
-        Ok(color) => {
-            node.color = Some(nx_value::color::swatch(color));
-            node.color_outside_srgb = nx_value::color::outside_srgb(color);
+    match swatch(value) {
+        Ok((color, outside)) => {
+            node.color = Some(color);
+            node.color_outside_srgb = outside;
         }
-        Err(error) => node.color_error = Some(format!("{}: {}", error.code, error.message)),
+        Err(error) => node.color_error = Some(error),
+    }
+}
+
+/// The swatch text of a statically known color and whether it is outside sRGB, or the reason it
+/// is not a color.
+fn swatch(
+    value: Result<nx_value::NxValue, nx_value::color::Error>,
+) -> Result<(String, bool), String> {
+    match value.and_then(|value| nx_value::color::read(&value)) {
+        Ok(color) => Ok((
+            nx_value::color::swatch(color),
+            nx_value::color::outside_srgb(color),
+        )),
+        Err(error) => Err(format!("{}: {}", error.code, error.message)),
     }
 }

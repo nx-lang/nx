@@ -76,6 +76,12 @@ pub enum SourceEditValue {
         /// The case's name.
         name: String,
     },
+    /// A name: a reference or a member access on one, such as `env.space.md`, written in braces
+    /// where a bare name would read as a case.
+    Name {
+        /// The name, its parts joined by `.`.
+        name: String,
+    },
 }
 
 /// One replacement in a document's text.
@@ -147,9 +153,12 @@ fn edit_tree(source: &str, tree: &SourceTree, key: &str, edit: &SourceEdit) -> S
         return SourceEditAnswer::refused(SourceEditRefusal::UnknownNode);
     };
     let result = match edit {
+        // A color on a color written as a constructor call or a color element edits its channels.
         SourceEdit::SetValue {
             value: SourceEditValue::Color { text },
-        } if matches!(tree.nodes[at].role, SourceRole::Call | SourceRole::Element) => {
+        } if tree.nodes[at].role == SourceRole::Call
+            || (tree.nodes[at].role == SourceRole::Element && tree.nodes[at].color.is_some()) =>
+        {
             set_constructor_color(source, tree, at, text)
         }
         SourceEdit::SetValue { value } => set_value(source, tree, at, value).map(Vec::from_iter),
@@ -245,9 +254,42 @@ pub(crate) fn is_whole_value(tree: &SourceTree, at: usize) -> bool {
     }
 }
 
+/// Whether the node at `at` is a name: a reference, or a member access whose innermost object is a
+/// reference, with nothing else in it.
+fn is_name(tree: &SourceTree, at: usize) -> bool {
+    let node = &tree.nodes[at];
+    match node.role {
+        SourceRole::Reference => true,
+        SourceRole::Member => {
+            let children = tree
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, child)| child.parent == Some(at as u32))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            matches!(children.as_slice(), [object] if tree.nodes[*object].key == format!("{}.object", node.key) && is_name(tree, *object))
+        }
+        _ => false,
+    }
+}
+
+/// The braces written around the single value at `start..end`, as the bytes of the `{` and the
+/// byte after the `}`, when only blank space is between them and it.
+fn enclosing_braces(source: &str, start: usize, end: usize) -> Option<(usize, usize)> {
+    let before = source[..start].trim_end();
+    let after = source[end..].trim_start();
+    if !before.ends_with('{') || !after.starts_with('}') {
+        return None;
+    }
+    let open = before.len() - 1;
+    let close = source.len() - after.len() + 1;
+    Some((open, close))
+}
+
 fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue) -> Replacement {
     let node = &tree.nodes[at];
-    if !matches!(node.role, SourceRole::Literal | SourceRole::Case) || !is_whole_value(tree, at) {
+    if !is_whole_value(tree, at) {
         return Err(SourceEditRefusal::NotEditable);
     }
     let (start, end) = byte_span(node);
@@ -256,12 +298,69 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
     let Some(written) = source.get(start..end) else {
         return Err(SourceEditRefusal::NotEditable);
     };
-    if written.starts_with('#') != matches!(value, SourceEditValue::Color { .. }) {
+    let owner = parent(tree, node).map(|owner| owner.role);
+    let braced = node.flags.contains(&SourceFlag::Braced);
+    // An attribute's or a `let`'s value is an unbraced place; an item of a sequence is not.
+    let place_unbraced = matches!(owner, Some(SourceRole::Attribute | SourceRole::Declaration));
+    let unbraced = place_unbraced && !braced;
+    let is_name_value = matches!(value, SourceEditValue::Name { .. });
+    // A name is written in braces where a bare name would read as a case.
+    let spelled = |text: String| {
+        if is_name_value && unbraced {
+            format!("{{{text}}}")
+        } else {
+            text
+        }
+    };
+
+    match node.role {
+        SourceRole::Literal | SourceRole::Case => {}
+        // A name, an element, or a color constructor call is replaced whole.
+        SourceRole::Reference | SourceRole::Member | SourceRole::Element | SourceRole::Call => {
+            let replaceable = match node.role {
+                SourceRole::Call => node.color.is_some() || node.color_error.is_some(),
+                SourceRole::Element => true,
+                _ => is_name(tree, at),
+            };
+            if !replaceable {
+                return Err(SourceEditRefusal::NotEditable);
+            }
+            if node.role == SourceRole::Call && !is_name_value {
+                return Err(SourceEditRefusal::InvalidValue);
+            }
+            let text = spell_value(value)?;
+            if is_name_value {
+                return Ok(Some((start, end, spelled(text))));
+            }
+            // Any other value is written as at the place: braces around a name or an element at
+            // an attribute or a `let` go, so `padding={env.space.md}` set to 12 reads `padding=12`.
+            if place_unbraced {
+                if braced {
+                    let Some((open, close)) = enclosing_braces(source, start, end) else {
+                        return Err(SourceEditRefusal::NotEditable);
+                    };
+                    return Ok(Some((open, close, text)));
+                }
+                return Ok(Some((start, end, text)));
+            }
+            // In a sequence, a minus reads as an operator and a bare name as a reference.
+            let signed = matches!(value, SourceEditValue::Number { text } if text.starts_with('-'));
+            if signed || matches!(value, SourceEditValue::Case { .. }) {
+                return Err(SourceEditRefusal::InvalidValue);
+            }
+            return Ok(Some((start, end, text)));
+        }
+        _ => return Err(SourceEditRefusal::NotEditable),
+    }
+
+    if !is_name_value && written.starts_with('#') != matches!(value, SourceEditValue::Color { .. })
+    {
         return Err(SourceEditRefusal::InvalidValue);
     }
     let text = spell_value(value)?;
-    let owner = parent(tree, node).map(|owner| owner.role);
-    let braced = node.flags.contains(&SourceFlag::Braced);
+    if is_name_value {
+        return Ok(Some((start, end, spelled(text))));
+    }
     // A case written qualified, `{ Status.open }`, keeps its qualifier.
     if node.role == SourceRole::Case {
         if let Some(dot) = written.rfind('.') {
@@ -273,13 +372,63 @@ fn set_value(source: &str, tree: &SourceTree, at: usize, value: &SourceEditValue
     }
     // Only a value written unbraced after `=` takes a minus sign or a bare case name: in braces or
     // in a list, `-3` is an operator and `large` a reference to a name.
-    let unbraced =
-        matches!(owner, Some(SourceRole::Attribute | SourceRole::Declaration)) && !braced;
     let signed = matches!(value, SourceEditValue::Number { text } if text.starts_with('-'));
     if !unbraced && (signed || matches!(value, SourceEditValue::Case { .. })) {
         return Err(SourceEditRefusal::InvalidValue);
     }
     Ok(Some((start, end, text)))
+}
+
+/// The words NX reserves, which no part of a name may be.
+const KEYWORDS: &[&str] = &[
+    "abstract",
+    "action",
+    "as",
+    "component",
+    "else",
+    "emits",
+    "environment",
+    "export",
+    "extends",
+    "external",
+    "false",
+    "for",
+    "from",
+    "if",
+    "import",
+    "in",
+    "is",
+    "let",
+    "match",
+    "null",
+    "private",
+    "provide",
+    "raw",
+    "state",
+    "true",
+    "type",
+    "visualizer",
+    "where",
+    "with",
+];
+
+/// Whether `name` is a name a value may be written as: dot-separated identifiers, none of them a
+/// keyword, and more than `env` alone.
+fn is_writable_name(name: &str) -> bool {
+    let parts = name.split('.').collect::<Vec<_>>();
+    parts
+        .iter()
+        .all(|part| is_identifier(part) && !KEYWORDS.contains(part))
+        && !(parts[0] == "env" && parts.len() < 2)
+}
+
+/// A value spelled for an attribute's or a `let`'s unbraced place: a name in braces.
+pub(crate) fn spell_unbraced(value: &SourceEditValue) -> Result<String, SourceEditRefusal> {
+    let text = spell_value(value)?;
+    Ok(match value {
+        SourceEditValue::Name { .. } => format!("{{{text}}}"),
+        _ => text,
+    })
 }
 
 /// Spells a value as NX source, or refuses one that cannot be spelled.
@@ -312,6 +461,13 @@ pub(crate) fn spell_value(value: &SourceEditValue) -> Result<String, SourceEditR
         SourceEditValue::Boolean { value } => Ok(if *value { "true" } else { "false" }.to_string()),
         SourceEditValue::Case { name } => {
             if is_identifier(name) && name != "true" && name != "false" {
+                Ok(name.clone())
+            } else {
+                Err(SourceEditRefusal::InvalidValue)
+            }
+        }
+        SourceEditValue::Name { name } => {
+            if is_writable_name(name) {
                 Ok(name.clone())
             } else {
                 Err(SourceEditRefusal::InvalidValue)
@@ -764,7 +920,7 @@ fn add_property(
         })
         .collect::<Vec<_>>();
     // An attribute's value is spelled as `setValue` spells it there.
-    let attribute = format!("{name}={}", spell_value(value)?);
+    let attribute = format!("{name}={}", spell_unbraced(value)?);
     let (element_start, _) = byte_span(node);
     let bytes = source.as_bytes();
     let line_start = |at: usize| source[..at].rfind('\n').map_or(0, |line| line + 1);

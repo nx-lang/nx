@@ -839,7 +839,7 @@ fn adding_to_a_union_cases_element() {
 // --- References ---------------------------------------------------------------------------------
 
 #[test]
-fn a_reference_is_not_editable() {
+fn a_literal_replaces_a_reference_and_drops_its_braces() {
     let source = ADDING.replace(r##"color="#5a3a22""##, "color={accent}");
     let snapshot = snapshot_for(&source);
     let uri = DocumentUri::from(URI);
@@ -849,14 +849,8 @@ fn a_reference_is_not_editable() {
         .iter()
         .find(|node| node.key.starts_with("theme.value.color.value"))
         .expect("the reference's node");
-    let answer = edit(&source, &reference.key, string("#5a3a22"));
-    assert_eq!(
-        answer.refused,
-        Some(SourceEditRefusal::NotEditable),
-        "{}",
-        reference.key
-    );
-    assert!(answer.edits.is_empty());
+    let after = edited(&source, &reference.key, string("#5a3a22"));
+    assert_eq!(after, ADDING);
 }
 
 const FLOW: &str = r#"type Step = { id:string label?:string }
@@ -1750,4 +1744,193 @@ let plain = <c.Color.srgb r=1 g=0 b=0 />
         );
         assert!(answer.refused.is_some(), "{key}");
     }
+}
+
+// -----------------------------------------------------------------------------------------------
+// Names
+// -----------------------------------------------------------------------------------------------
+
+const TOKENS: &str = r#"import "@nx/design"
+import "@nx/color" as c
+
+type Paint = | color { color: Color }
+let blue: Color = #2563eb
+let total = 4
+let limit = 8
+component <Box padding: Spacing = 0 fill: Color = #ffffff background: Color = #ffffff tint: Color = #ffffff paint: Paint? count: int = 0 /> = { <div /> }
+let a() = <Box padding=8 />
+let b() = <Box fill={env.color.accent} />
+let d() = <Box padding={env.space.md} />
+let e() = <Box paint=<Paint.color color=#2563eb /> />
+let gaps: Spacing+ = { 4 8 }
+let gap: Spacing = 4
+let accent: Color = #2563eb
+let tight: Spacing = {env.space.sm}
+let f() = <Box background=#ffffff />
+let g() = <Box background={env.color.surface} />
+let h() = <Box fill={c.oklch(0.6, 0.2, 250)} />
+let i() = <Box tint=<c.Color.srgb r=0.2 g=0.4 b=0.8 /> />
+let j() = <Box count={total + 1} />
+"#;
+
+fn name(name: &str) -> SourceEdit {
+    SourceEdit::SetValue {
+        value: SourceEditValue::Name {
+            name: name.to_string(),
+        },
+    }
+}
+
+fn color_value(text: &str) -> SourceEdit {
+    SourceEdit::SetValue {
+        value: SourceEditValue::Color {
+            text: text.to_string(),
+        },
+    }
+}
+
+/// `TOKENS` after `change` at `key`, with only the line holding the change returned.
+fn token_line(key: &str, change: SourceEdit, line_start: &str) -> String {
+    let after = edited(TOKENS, key, change);
+    after
+        .lines()
+        .find(|line| line.starts_with(line_start))
+        .unwrap_or_else(|| panic!("{line_start} in\n{after}"))
+        .to_string()
+}
+
+#[test]
+fn a_name_at_an_attribute_is_braced() {
+    assert_eq!(
+        token_line("a.body.padding.value", name("env.space.md"), "let a()"),
+        "let a() = <Box padding={env.space.md} />"
+    );
+}
+
+#[test]
+fn a_name_replaces_a_name() {
+    assert_eq!(
+        token_line(
+            "b.body.fill.value",
+            name("standardPalette.red600"),
+            "let b()"
+        ),
+        "let b() = <Box fill={standardPalette.red600} />"
+    );
+}
+
+#[test]
+fn a_literal_replaces_a_name_and_drops_its_braces() {
+    assert_eq!(
+        token_line("d.body.padding.value", number("12"), "let d()"),
+        "let d() = <Box padding=12 />"
+    );
+    assert_eq!(
+        token_line("tight.value", number("4"), "let tight"),
+        "let tight: Spacing = 4"
+    );
+}
+
+#[test]
+fn a_name_replaces_an_element() {
+    assert_eq!(
+        token_line("e.body.paint.value", name("blue"), "let e()"),
+        "let e() = <Box paint={blue} />"
+    );
+}
+
+#[test]
+fn a_name_in_a_sequence_and_at_a_let() {
+    assert_eq!(
+        token_line("gaps.value[1]", name("env.space.md"), "let gaps"),
+        "let gaps: Spacing+ = { 4 env.space.md }"
+    );
+    assert_eq!(
+        token_line("gap.value", name("env.space.sm"), "let gap:"),
+        "let gap: Spacing = {env.space.sm}"
+    );
+    assert_eq!(
+        token_line("accent.value", name("blue"), "let accent"),
+        "let accent: Color = {blue}"
+    );
+}
+
+#[test]
+fn a_hex_color_is_bound_to_a_token_and_back() {
+    assert_eq!(
+        token_line(
+            "f.body.background.value",
+            name("env.color.surface"),
+            "let f()"
+        ),
+        "let f() = <Box background={env.color.surface} />"
+    );
+    assert_eq!(
+        token_line("g.body.background.value", color_value("#fafafa"), "let g()"),
+        "let g() = <Box background=#fafafa />"
+    );
+}
+
+#[test]
+fn a_color_constructor_is_bound_to_a_token() {
+    assert_eq!(
+        token_line("h.body.fill.value", name("env.color.accent"), "let h()"),
+        "let h() = <Box fill={env.color.accent} />"
+    );
+}
+
+#[test]
+fn a_color_on_a_color_element_keeps_the_element() {
+    let line = token_line("i.body.tint.value", color_value("#336699"), "let i()");
+    assert!(
+        line.starts_with("let i() = <Box tint=<c.Color.srgb "),
+        "{line}"
+    );
+    assert_ne!(
+        line,
+        "let i() = <Box tint=<c.Color.srgb r=0.2 g=0.4 b=0.8 /> />"
+    );
+}
+
+#[test]
+fn a_color_on_a_number_is_refused() {
+    let answer = edit(TOKENS, "a.body.padding.value", color_value("#ffffff"));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::InvalidValue));
+}
+
+#[test]
+fn names_that_cannot_be_written_are_refused() {
+    for bad in ["env.space.2xl", "env", "if.x", "a..b", "true", ""] {
+        let answer = edit(TOKENS, "a.body.padding.value", name(bad));
+        assert_eq!(
+            answer.refused,
+            Some(SourceEditRefusal::InvalidValue),
+            "{bad}"
+        );
+        assert!(answer.edits.is_empty());
+    }
+}
+
+#[test]
+fn an_expression_is_still_refused() {
+    let answer = edit(TOKENS, "j.body.count.value", name("limit"));
+    assert_eq!(answer.refused, Some(SourceEditRefusal::NotEditable));
+}
+
+#[test]
+fn a_name_is_added_as_a_property_in_braces() {
+    let after = edited(
+        TOKENS,
+        "a.body",
+        SourceEdit::AddProperty {
+            name: "fill".to_string(),
+            value: SourceEditValue::Name {
+                name: "env.color.accent".to_string(),
+            },
+        },
+    );
+    assert!(
+        after.contains("let a() = <Box padding=8 fill={env.color.accent} />"),
+        "{after}"
+    );
 }

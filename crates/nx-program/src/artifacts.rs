@@ -2891,22 +2891,28 @@ fn apply_graph_imports(
                         &mut imported_visible_names,
                     );
                 }
+                // The written import stays the one a later repeat is reported against.
+                seen_import_targets.insert(target_identity.clone(), first_import_span);
                 continue;
             }
-            let first_import_location =
-                line_col_for_span(source_file.source.as_ref(), first_import_span)
-                    .map(|(line, column)| {
-                        format!("; first imported at line {}, column {}", line, column)
-                    })
-                    .unwrap_or_default();
-            module.add_diagnostic(LoweringDiagnostic {
-                message: format!(
-                    "Module or library '{}' is imported more than once in this file{}",
-                    target_identity, first_import_location
-                ),
-                span: import.span,
-            });
-            continue;
+            // A written import after a synthesized one, such as `import "@nx/color" as c` in a
+            // module whose hex literal synthesized `@nx/color` first, is the author's only import.
+            if first_import_span.start() != first_import_span.end() {
+                let first_import_location =
+                    line_col_for_span(source_file.source.as_ref(), first_import_span)
+                        .map(|(line, column)| {
+                            format!("; first imported at line {}, column {}", line, column)
+                        })
+                        .unwrap_or_default();
+                module.add_diagnostic(LoweringDiagnostic {
+                    message: format!(
+                        "Module or library '{}' is imported more than once in this file{}",
+                        target_identity, first_import_location
+                    ),
+                    span: import.span,
+                });
+                continue;
+            }
         }
 
         if let Some(target_index) = identity_to_index.get(&target_identity).copied() {

@@ -1483,6 +1483,7 @@ fn with_visualizers(snapshot: &WorkspaceSnapshot, modules: &[&str]) -> SourceTre
                     include_unreferenced_declarations: false,
                     modules: modules.iter().map(|module| module.to_string()).collect(),
                 }),
+                ..SourceTreeOptions::default()
             },
         )
         .expect("source tree")
@@ -1576,6 +1577,7 @@ let items = { <Step id="a" title="A" /> <Choice value="b" label="B" /> <Note tex
             &DocumentUri::from(URI),
             &SourceTreeOptions {
                 visualizers: Some(SourceTreeVisualizers::default()),
+                ..SourceTreeOptions::default()
             },
         )
         .expect("source tree");
@@ -1607,6 +1609,7 @@ let items = { <Size width=1 height=2 /> <Spot x=1 y=2 /> <Plain a=1 /> }
             &DocumentUri::from(URI),
             &SourceTreeOptions {
                 visualizers: Some(SourceTreeVisualizers::default()),
+                ..SourceTreeOptions::default()
             },
         )
         .expect("source tree");
@@ -2453,6 +2456,7 @@ fn unreferenced_library_previews_are_opt_in_and_helper_icons_are_library_owned()
                     include_unreferenced_declarations: true,
                     ..SourceTreeVisualizers::default()
                 }),
+                ..SourceTreeOptions::default()
             },
         )
         .unwrap();
@@ -2504,6 +2508,7 @@ fn inherited_preview_targets_built_inside_an_imported_helper_are_included() {
                     include_unreferenced_declarations: true,
                     ..SourceTreeVisualizers::default()
                 }),
+                ..SourceTreeOptions::default()
             },
         )
         .unwrap();
@@ -2543,6 +2548,7 @@ visualizer g.Rectangle = <ElementVisualizer icon="host-rect"/>"#,
                     include_unreferenced_declarations: true,
                     modules: vec!["tenant/host.nx".into()],
                 }),
+                ..SourceTreeOptions::default()
             },
         )
         .unwrap();
@@ -2774,6 +2780,7 @@ fn every_graphics_property_has_a_label() {
                     include_unreferenced_declarations: true,
                     ..SourceTreeVisualizers::default()
                 }),
+                ..SourceTreeOptions::default()
             },
         )
         .unwrap();

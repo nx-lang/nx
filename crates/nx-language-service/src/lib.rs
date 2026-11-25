@@ -11,15 +11,18 @@ mod source_edit_tests;
 mod source_tree;
 #[cfg(test)]
 mod source_tree_tests;
+#[cfg(test)]
+mod suggestions_tests;
 mod visualizers;
 mod with;
 
 pub use source_edit::{SourceEdit, SourceEditAnswer, SourceEditRefusal, SourceEditValue, TextEdit};
 pub use source_tree::{
     SourceBounds, SourceCase, SourceChoice, SourceDeclaration, SourceDeclarationKind,
-    SourceEditorHints, SourceFlag, SourceNode, SourceNumber, SourcePreviewVisualizer,
-    SourceProperty, SourcePropertyVisualizer, SourceRole, SourceTree, SourceTreeOptions,
-    SourceTreeVisualizers, SourceVisualizer,
+    SourceEditorHints, SourceFlag, SourceNode, SourceNumber, SourcePreview, SourcePreviewKind,
+    SourcePreviewVisualizer, SourceProperty, SourcePropertyVisualizer, SourceRole,
+    SourceSuggestion, SourceSuggestionGroup, SourceSuggestionGroupKind, SourceTree,
+    SourceTreeOptions, SourceTreeVisualizers, SourceVisualizer,
 };
 
 use nx_hir::{
