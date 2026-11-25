@@ -34,11 +34,12 @@
 //! <para>The program mixes the risky features: element overrides and `provide` blocks, an
 //! entry-module bundle with a formula entry, formulas the body provides (one reading its own
 //! value), field overrides, override formulas that capture a prop or a state field, a prop default
-//! that reads `env`, handlers that read the environment inside a provide in a content child, kept top-level values that read `env`, light and dark sections, values a host
-//! can write differently that compare equal, host roots for formula-declared values, refused root
-//! values, renders and emit handlers that fail on some values, patches that write the value a
-//! field holds, emits bound and unbound, two emits in one handler, a handler in a content child,
-//! and nodes that appear, leave and are replaced by another component at their key. It does not
+//! that reads `env`, handlers that read the environment inside a provide in a content child, kept
+//! top-level values that read `env`, light and dark sections, values a host can write differently
+//! that compare equal, host roots for formula-declared values, refused root values, renders and
+//! emit handlers that fail on some values, patches that write the value a field holds, emits bound
+//! and unbound, two emits in one handler, a handler in a content child, and nodes that appear,
+//! leave and are replaced by another component at their key. It does not
 //! cover a handler passed as a prop other than an emit's, `remove` under a node that is left
 //! unvisited, a pass that visits only part of the tree, or operation limits.</para>
 //!

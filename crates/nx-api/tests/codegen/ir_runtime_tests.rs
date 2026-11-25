@@ -5019,9 +5019,8 @@ fn a_flagged_handler_without_environment_v3_is_refused() {
     model
         .required_features
         .retain(|feature| feature != "environment-v3");
-    let error = PreparedModule::prepare(nx_ir::write_nx_ir_image(&model).unwrap())
-        .err()
-        .expect("refused");
+    let error =
+        PreparedModule::prepare(nx_ir::write_nx_ir_image(&model).unwrap()).expect_err("refused");
     assert!(error.to_string().contains("environment-v3"), "{error}");
 
     // A flag cell that is not `1` is malformed whatever the module lists.

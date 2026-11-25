@@ -705,7 +705,13 @@ ordinary value computed where the child writes the action:
 
 ```nx
 component <LocaleList items?:string+ emits { Picked { item:string locale:string } } /> = {
-  <Stack>{ for item in items { <Button label={item} onTapped=<LocaleList.Picked item={item} locale={env.locale} /> /> } }</Stack>
+  <Stack>
+    {
+      for item in items {
+        <Button label={item} onTapped=<LocaleList.Picked item={item} locale={env.locale} /> />
+      }
+    }
+  </Stack>
 }
 // In the parent: action.locale is the child's value, env.locale the parent's own.
 <LocaleList onPicked=<State.Update picked={action.locale + " " + env.locale} /> />

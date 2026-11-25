@@ -99,6 +99,15 @@
                 "action": "Button.Tapped",
                 "token": "h2-8"
               }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-9"
+              }
             }
           ]
         }
@@ -200,6 +209,15 @@
                 "$type": "ActionHandler",
                 "action": "Button.Tapped",
                 "token": "h3-8"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-9"
               }
             }
           ]
@@ -303,6 +321,15 @@
                 "action": "Button.Tapped",
                 "token": "h4-8"
               }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-9"
+              }
             }
           ]
         }
@@ -404,6 +431,15 @@
                 "$type": "ActionHandler",
                 "action": "Button.Tapped",
                 "token": "h5-8"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-9"
               }
             }
           ]
@@ -507,6 +543,15 @@
                 "action": "Button.Tapped",
                 "token": "h6-8"
               }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-9"
+              }
             }
           ]
         }
@@ -608,6 +653,15 @@
                 "$type": "ActionHandler",
                 "action": "Button.Tapped",
                 "token": "h7-8"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h7-9"
               }
             }
           ]
@@ -711,6 +765,15 @@
                 "action": "Button.Tapped",
                 "token": "h8-8"
               }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h8-9"
+              }
             }
           ]
         }
@@ -813,6 +876,126 @@
                 "action": "Button.Tapped",
                 "token": "h9-8"
               }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h9-9"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": "bundle 6 2"
+            },
+            {
+              "$type": "Button",
+              "label": "Block",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Attr",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Call",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-3"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Formula",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-4"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Gap",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-5"
+              }
+            },
+            {
+              "$env": [
+                {
+                  "path": [],
+                  "to": "page",
+                  "value": "main.nx::mode"
+                }
+              ],
+              "$type": "Box",
+              "children": [
+                {
+                  "$type": "Button",
+                  "label": "Inner",
+                  "onTapped": {
+                    "$type": "ActionHandler",
+                    "action": "Button.Tapped",
+                    "token": "h10-6"
+                  }
+                }
+              ]
+            },
+            {
+              "$env": [
+                {
+                  "path": [],
+                  "to": "card",
+                  "value": "main.nx::mode"
+                }
+              ],
+              "$type": "Card",
+              "onLogged": {
+                "$type": "ActionHandler",
+                "action": "Card.Logged",
+                "token": "h10-7"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Count",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-8"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Bundle",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h10-9"
+              }
             }
           ]
         }
@@ -914,11 +1097,23 @@
             "action": "Button.Tapped",
             "token": "h1-8"
           }
+        },
+        {
+          "$type": "Button",
+          "label": "Bundle",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-9"
+          }
         }
       ]
     }
   },
+  "main.nx::equalHandlers": true,
+  "main.nx::quietHandlers": true,
   "main.nx::root": {
     "$type": "Page"
-  }
+  },
+  "main.nx::unequalHandlers": false
 }

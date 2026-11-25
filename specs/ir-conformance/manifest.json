@@ -55,6 +55,7 @@
         "constraints",
         "conversions",
         "design-tokens",
+        "environment-handlers",
         "environment-reuse",
         "evaluation-cost",
         "expressions",
@@ -358,6 +359,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-handlers",
         "environment-inline-provide",
         "environment-reuse",
         "environment-values-at-read",
@@ -674,6 +676,7 @@
         "design-tokens-theme",
         "environment",
         "environment-formulas",
+        "environment-handlers",
         "environment-inline-provide",
         "environment-reuse"
       ],

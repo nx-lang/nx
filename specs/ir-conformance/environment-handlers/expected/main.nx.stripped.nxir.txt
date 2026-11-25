@@ -1,6 +1,6 @@
-module main.nx fingerprint 10002802473806967495
+module main.nx fingerprint 10892287437187059472
 requires update-records-v1 action-handlers-v1 environment-v1 environment-v2 environment-v3
-entrypoints functions [current root] components [Node Label Button Stack Box Card Page]
+entrypoints functions [current pinger equalHandlers unequalHandlers quietPinger quietHandlers root] components [Node Label Button Stack Box Card Page]
 
 component Node abstract external
 
@@ -35,6 +35,42 @@ environment gap: int =
 
 function current() =
   env.mode
+
+value dense: object =
+  <env.Update
+    env.space=2
+    env.gap:=(env.space mul 3)
+  />
+
+record Ping
+  mode: string required
+
+function pinger(label: string) =
+  provide env.mode=label {
+    <Button label="Ping"
+      onTapped=handler Button.Tapped action@1:Button.Tapped reads env =>
+        <Ping mode=env.mode />
+    >
+    </Button>
+  }
+
+function equalHandlers() =
+  (pinger("a") eq pinger("a"))
+
+function unequalHandlers() =
+  (pinger("a") eq pinger("b"))
+
+function quietPinger(label: string) =
+  provide env.mode=label {
+    <Button label="Ping"
+      onTapped=handler Button.Tapped action@1:Button.Tapped =>
+        <Ping mode="x" />
+    >
+    </Button>
+  }
+
+function quietHandlers() =
+  (quietPinger("a") eq quietPinger("a"))
 
 component Box
   props
@@ -120,6 +156,19 @@ component Page state Page.State
         <Button label="Count"
           onTapped=handler Button.Tapped action@9:Button.Tapped owner Page =>
             <Page.State.Update count=(count add 1) />
+        >
+        </Button>
+      }
+      provide env with (
+        dense
+        with
+        <env.Update
+          env.mode="bundle"
+        />
+      ) {
+        <Button label="Bundle"
+          onTapped=handler Button.Tapped action@10:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=((((env.mode concat " ") concat text<int>(env.gap)) concat " ") concat text<int>(env.space)) />
         >
         </Button>
       }

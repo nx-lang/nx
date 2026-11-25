@@ -1,22 +1,22 @@
-module main.nx fingerprint 10002802473806967495
+module main.nx fingerprint 10892287437187059472
 requires update-records-v1 action-handlers-v1 environment-v1 environment-v2 environment-v3
-entrypoints functions [current root] components [Node Label Button Stack Box Card Page]
+entrypoints functions [current pinger equalHandlers unequalHandlers quietPinger quietHandlers root] components [Node Label Button Stack Box Card Page]
 
-component Node abstract external @6:1-6:37
+component Node abstract external @7:1-7:37
 
-component Label external @7:1-7:54
+component Label external @8:1-8:54
   props
     text: string required
 
-component Button external @8:1-8:77
+component Button external @9:1-9:77
   props
     label: string required
   emits
     Tapped = Button.Tapped
 
-record Button.Tapped @8:62-8:72
+record Button.Tapped @9:62-9:72
 
-component Stack @9:1-9:90
+component Stack @10:1-10:90
   props
     content children: Node+ required
   body =
@@ -24,19 +24,55 @@ component Stack @9:1-9:90
       children
     </column>
 
-environment mode: string @11:1-11:35 =
+environment mode: string @12:1-12:35 =
   "outer"
 
-environment space: int @12:1-12:27 =
+environment space: int @13:1-13:27 =
   1
 
-environment gap: int @13:1-13:25 =
+environment gap: int @14:1-14:25 =
   0
 
-function current() @15:1-15:29 =
+function current() @16:1-16:29 =
   env.mode
 
-component Box @18:1-20:2
+value dense: object @19:1-19:67 =
+  <env.Update
+    env.space=2
+    env.gap:=(env.space mul 3)
+  />
+
+record Ping @21:1-21:30
+  mode: string required
+
+function pinger(label: string) @24:1-24:118 =
+  provide env.mode=label {
+    <Button label="Ping"
+      onTapped=handler Button.Tapped action@1:Button.Tapped reads env =>
+        <Ping mode=env.mode />
+    >
+    </Button>
+  }
+
+function equalHandlers() @29:1-29:53 =
+  (pinger("a") eq pinger("a"))
+
+function unequalHandlers() @30:1-30:55 =
+  (pinger("a") eq pinger("b"))
+
+function quietPinger(label: string) @35:1-35:116 =
+  provide env.mode=label {
+    <Button label="Ping"
+      onTapped=handler Button.Tapped action@1:Button.Tapped =>
+        <Ping mode="x" />
+    >
+    </Button>
+  }
+
+function quietHandlers() @36:1-36:63 =
+  (quietPinger("a") eq quietPinger("a"))
+
+component Box @39:1-41:2
   props
     content children: Node+ required
   body =
@@ -46,7 +82,7 @@ component Box @18:1-20:2
       }
     </column>
 
-component Card @22:1-24:2
+component Card @43:1-45:2
   emits
     Logged = Card.Logged
   body =
@@ -56,9 +92,9 @@ component Card @22:1-24:2
     >
     </Button>
 
-record Card.Logged @22:38-22:48
+record Card.Logged @43:38-43:48
 
-component Page state Page.State @26:1-43:2
+component Page state Page.State @47:1-69:2
   state
     last: string = ""
     count: int = 0
@@ -123,15 +159,28 @@ component Page state Page.State @26:1-43:2
         >
         </Button>
       }
+      provide env with (
+        dense
+        with
+        <env.Update
+          env.mode="bundle"
+        />
+      ) {
+        <Button label="Bundle"
+          onTapped=handler Button.Tapped action@10:Button.Tapped owner Page reads env =>
+            <Page.State.Update last=((((env.mode concat " ") concat text<int>(env.gap)) concat " ") concat text<int>(env.space)) />
+        >
+        </Button>
+      }
     </Stack>
 
-function root() @45:1-45:26 =
+function root() @71:1-71:26 =
   <Page />
 
-record Page.State @26:1-43:2
+record Page.State @47:1-69:2
   last: string required
   count: int required
 
-record Page.State.Update update of Page.State @26:1-43:2
+record Page.State.Update update of Page.State @47:1-69:2
   last: string
   count: int

@@ -46,9 +46,10 @@ what evaluating every source afresh gives, and each count shows what was evaluat
 `environment-handlers` dispatches a `Page` whose handlers read the environment where they are
 written: inside a `provide` block, on an element with `env.` attributes, through a function call,
 under two formulas, in content a `Box` places inside an override of its own (which the handler does
-not see), and for a `Card` emit dispatched by the parent's token. One more handler reads nothing
-inside a provide, so it captures nothing and its count is what it was before handlers captured
-overrides.
+not see), for a `Card` emit dispatched by the parent's token, and under a bundle with a formula
+entry. One more handler reads nothing inside a provide, so it captures nothing and its count is what
+it was before handlers captured overrides. `equalHandlers` and `unequalHandlers` compare two handlers
+of one node made under equal and under different overrides.
 `environment-cycle` holds a case that fails with `nx-ir-environment-cycle`
 through a function the static check cannot follow; it is kept apart because generated JavaScript
 refuses a call of a function-typed value, and would skip the other program's entrypoints with it.

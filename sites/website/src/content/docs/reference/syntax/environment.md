@@ -288,6 +288,7 @@ placed it, so its handler reads `"fr-FR"` and puts it in the action. The parent'
 written in `Chooser`'s body, outside `Section`'s override, so its own `env.locale` is `"en-US"`.
 `action.locale` is a plain string, computed when the child's handler built the action: an action's
 fields are ordinary values, not overrides computed at a later read.
+
 ## Root values from the host
 
 A host sets root values by name when it evaluates a program, and they are checked against the

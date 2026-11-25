@@ -2016,6 +2016,45 @@ mod rebinding_tests {
     }
 
     #[test]
+    fn a_handler_held_in_captured_overrides_is_replaced() {
+        let (old, new, kept) = (handler(1), handler(1), handler(3));
+        let entry = |held: &Arc<Handler>| {
+            Value::seq(vec![Value::record(
+                None,
+                vec![
+                    (Arc::from("value"), Value::Str(Arc::from("main::mode"))),
+                    (Arc::from("path"), Value::empty()),
+                    (Arc::from("to"), Value::Handler(Arc::clone(held))),
+                ],
+            )])
+        };
+        let holder = Arc::new(Handler {
+            node: 2,
+            captured: vec![Some(Value::Handler(Arc::clone(&kept)))],
+            environment: Some(entry(&old)),
+            ..Handler::clone(&handler(2))
+        });
+        let mut rebinding = Rebinding::default();
+        assert!(rebinding.pair(&old, &new));
+        let stack = Stack::begin(NX_DEFAULT_MAX_STACK_BYTES);
+        let replaced = rebinding
+            .handler(&holder, 0, &Meter::free(), &stack)
+            .unwrap()
+            .expect("the holder is replaced");
+        let Some(Value::Seq(entries)) = &replaced.environment else {
+            panic!("{:?}", replaced.environment)
+        };
+        let Value::Record(record) = &entries[0] else {
+            panic!("{entries:?}")
+        };
+        assert!(matches!(record.get("to"), Some(Value::Handler(held)) if Arc::ptr_eq(held, &new)));
+        // The slots, which hold nothing replaced, are kept as they were.
+        assert!(
+            matches!(&replaced.captured[..], [Some(Value::Handler(held))] if Arc::ptr_eq(held, &kept))
+        );
+    }
+
+    #[test]
     fn a_kept_handler_and_a_replaced_one_do_not_mix() {
         let (old, new) = (handler(1), handler(1));
         let mut rebinding = Rebinding::default();

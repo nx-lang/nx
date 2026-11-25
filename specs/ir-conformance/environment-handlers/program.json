@@ -7,6 +7,18 @@
     {
       "module": "main.nx",
       "function": "root"
+    },
+    {
+      "module": "main.nx",
+      "function": "equalHandlers"
+    },
+    {
+      "module": "main.nx",
+      "function": "unequalHandlers"
+    },
+    {
+      "module": "main.nx",
+      "function": "quietHandlers"
     }
   ],
   "lifecycles": [
@@ -81,6 +93,15 @@
           {
             "$type": "ActionHandlerInvocation",
             "token": "h8-8",
+            "action": {
+              "$type": "Button.Tapped"
+            }
+          }
+        ],
+        [
+          {
+            "$type": "ActionHandlerInvocation",
+            "token": "h9-9",
             "action": {
               "$type": "Button.Tapped"
             }

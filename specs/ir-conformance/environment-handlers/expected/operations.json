@@ -2,17 +2,21 @@
   "counts": {
     "main.nx::Page": {
       "batches": [
-        119,
-        119,
-        121,
-        124,
-        132,
-        119,
-        119,
-        121
+        136,
+        136,
+        138,
+        141,
+        149,
+        136,
+        136,
+        138,
+        149
       ],
-      "initial": 118
+      "initial": 135
     },
-    "main.nx::root": 2
+    "main.nx::equalHandlers": 30,
+    "main.nx::quietHandlers": 25,
+    "main.nx::root": 2,
+    "main.nx::unequalHandlers": 30
   }
 }
