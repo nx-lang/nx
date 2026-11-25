@@ -3,7 +3,7 @@
   "image": "image.png",
   "profile": "graphics-core-v4",
   "renderer": "skia-0.153.3-cpu-aa-unhinted-linear-subpixel-no-baseline-snap",
-  "revision": "1e8e53e4bfd10ca64709594b8ddc4da1d2d04ea503225d7ed1d180e588b6af92",
+  "revision": "b176a5af9166c979ba46450d4051170124c6521606130730f7179b9fa3d9a5f9",
   "scene": {
     "config": {
       "fonts": [
@@ -27,7 +27,7 @@
       "width": 400.0
     },
     "profile": "graphics-core-v4",
-    "revision": "1e8e53e4bfd10ca64709594b8ddc4da1d2d04ea503225d7ed1d180e588b6af92",
+    "revision": "b176a5af9166c979ba46450d4051170124c6521606130730f7179b9fa3d9a5f9",
     "root": {
       "accessibility": null,
       "children": [
@@ -113,9 +113,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 19174,
+            "end": 19204,
             "module": "@nx/graphics/graphics.nx",
-            "start": 18782
+            "start": 18812
           },
           "stroke": null,
           "text": null,
@@ -243,9 +243,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 22175,
+            "end": 22205,
             "module": "@nx/graphics/graphics.nx",
-            "start": 21381
+            "start": 21411
           },
           "stroke": null,
           "text": null,
@@ -355,9 +355,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 30413,
+            "end": 30443,
             "module": "@nx/graphics/graphics.nx",
-            "start": 29523
+            "start": 29553
           },
           "stroke": null,
           "text": null,
@@ -550,9 +550,9 @@
             }
           ],
           "provenance": {
-            "end": 33849,
+            "end": 33879,
             "module": "@nx/graphics/graphics.nx",
-            "start": 33559
+            "start": 33589
           },
           "stroke": {
             "cap": "butt",
@@ -1033,9 +1033,9 @@
             "ClosePath"
           ],
           "provenance": {
-            "end": 37892,
+            "end": 37922,
             "module": "@nx/graphics/graphics.nx",
-            "start": 36792
+            "start": 36822
           },
           "stroke": null,
           "text": null,
