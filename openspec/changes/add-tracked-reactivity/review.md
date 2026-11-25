@@ -890,7 +890,7 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
 
 ## New Findings Discovered During 2026-11-25 01:56 Verification
 
-### 🔴 Open - RF45 The "value at its place" reason excuses a render whenever any value at the place changed, so over-rendering on a real root change mostly goes unseen
+### 🟡 Fixed - RF45 The "value at its place" reason excuses a render whenever any value at the place changed, so over-rendering on a real root change mostly goes unseen
 - **Severity:** Low
 - **Confidence:** High (confirmed by experiment)
 - **Location:** `crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs` `Run::had_reason` (`place_values` compared
@@ -907,8 +907,9 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
   what it reads through kept values (`direction` → `locale`, `accentOf` → `colors`, `mode`, `locale`, `amountOf` →
   `amount`) as a per-component "reads" list. Excuse a render only when one of those values at the place changed.
   Otherwise, state the coarser limit in the module doc and the README.
+- **Fix:** The place reason now compares only the environment values a component may depend on (`place_reads`). These come from a hand-written per-component `read_names` list: environment values and kept top-level values, wherever the render reads them. The list is closed over what the formula defaults (`label`, `loud`, `colors`, `boxed`), the entry bundle's `gap` and the kept values (`direction`, `accentOf`, `amountOf`) read in turn. It may list more than a render reads, never less. Your experiment (every `Zero` re-rendered on every root change) now fails the default run at seed 0, step 26, and 49 of 50 seeds of 100 steps in `NX_TREE_STRESS_ALL` mode. With the experiment reverted, 200 seeds of 100 steps pass. The module doc now states the remaining limit: a render is excused when a value the node may depend on changed in a part the node does not use, and when a direct reader of a changed root reads an equal value.
 
-### 🔴 Open - RF46 The "state changed" reason compares the model's state after the tap with itself, so a correct tap render with equal output fails the test
+### 🟡 Fixed - RF46 The "state changed" reason compares the model's state after the tap with itself, so a correct tap render with equal output fails the test
 - **Severity:** Low
 - **Confidence:** High (confirmed with a variant of the program)
 - **Location:** `ir_instance_tree_stress_tests.rs` `Run::had_reason` (`then = &self.model.nodes[key]`) and
@@ -924,6 +925,7 @@ nightly workflow (a1829b88: `.github/workflows/thorough.yml`, the `crates/nx-ir-
 - **Recommendation:** Keep each node's state from before the step, for example in the `Snapshot` or a
   `states_before` map taken with it, and compare against that in `had_reason`. Add a field that is read but does not
   change the output (such as the `big`/`small` label) to `PROGRAM`, so the reason is exercised.
+- **Fix:** `Run` now keeps each node's state from before the step (`states_before`, taken with the snapshot), and `had_reason` compares against it. `Show` gains a field, `level`, that its body reads as `if level > 5 { "big" } else { "small" }`, with a `Level` button, so a tap renders equal output and the reason is exercised. Comparing against the model's post-tap state, as before, now fails the default run at seed 1, step 30. Your `Card` big/small variant passes the default run and 60 seeds of 100 steps; it was reverted.
 
 ### Summary of the 2026-11-25 01:56 verification
 - RF44 is verified. The test now catches a tree that drops its equality cutoff, without false failures in 450 seeds,

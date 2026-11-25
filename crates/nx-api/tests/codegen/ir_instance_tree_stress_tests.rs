@@ -22,11 +22,14 @@
 //! the node stayed and its output changed in any way, in value or in what a token names. A node
 //! that rendered output equal to what it held, its tokens aside, must have had a reason to: its
 //! record holds a read it cannot check (`renders_at_every_check`), the node above it rendered, its
-//! state or the host's descriptor changed, a value at its place is written otherwise, or a root
-//! its component reads directly was set, cleared or changed. That catches a tree that renders
-//! where a record holds, though not one that renders a reader of a changed root whose value read
-//! comes back equal. After a tap or a root change, before the pass, a node is unsettled exactly
-//! when it or a node under it rendered.</para>
+//! state or the host's descriptor changed, an environment value its component may depend on is
+//! written otherwise at its place, or a root its component reads directly was set, cleared or
+//! changed. The values a component may depend on are listed by hand, more than it reads rather
+//! than fewer, so a render is caught only where none of them changed. That catches a tree that
+//! renders where a record holds, or renders a node that reads nothing that changed; it does not
+//! catch one that renders a node whose value read changed in a part the node does not use, or a
+//! reader of a changed root whose value read comes back equal. After a tap or a root change,
+//! before the pass, a node is unsettled exactly when it or a node under it rendered.</para>
 //!
 //! <para>The program mixes the risky features: element overrides and `provide` blocks, an
 //! entry-module bundle with a formula entry, formulas the body provides (one reading its own
@@ -98,9 +101,11 @@ component <Dir extends Node /> = {
   <Label Text={direction + \" \" + env.label + \" \" + (12 / (env.space - 5))} />
 }
 component <Show extends Node text:string = { env.label } /> = {
-  state { taps:int = 0 hidden:int = 0 }
+  state { taps:int = 0 hidden:int = 0 level:int = 0 }
   <Stack>
     <Label Text={text + \" \" + taps} />
+    <Label Text={if level > 5 { \"big\" } else { \"small\" }} />
+    <Button Text=\"Level\" onTapped=<State.Update level={level + 1} /> />
     <Button Text=\"Tap\" onTapped=<State.Update taps={taps + 1} /> />
     <Button Text=\"Same\" onTapped=<State.Update taps={taps} /> />
     <Button Text=\"Hide\" onTapped=<State.Update hidden={hidden + 1} /> />
@@ -289,6 +294,52 @@ fn direct_reads(component: &str) -> &'static [&'static str] {
     }
 }
 
+/// The names a component's render may read, environment values and the kept top-level values
+/// alike, wherever it reads them: in its body, its prop defaults and its own overrides. A list
+/// may say more than a render reads, never less.
+fn read_names(component: &str) -> &'static [&'static str] {
+    match component {
+        "Dir" => &["direction", "label", "space"],
+        "Show" => &["label", "space"],
+        "Zero" => &["z"],
+        "Boxed" => &["boxed"],
+        "Card" => &["accentOf", "direction", "gap", "loud", "locale"],
+        "Amount" => &["amountOf"],
+        "Loud" => &["mode", "loud", "colors"],
+        "SelfRef" => &["space", "gap", "label"],
+        "Field" => &["locale", "colors"],
+        "Page" => &["mode", "locale", "space"],
+        _ => &[],
+    }
+}
+
+/// The environment values a component's render may depend on: those it reads, and those the
+/// formula defaults, the entry bundle's formula and the kept top-level values it reads read in
+/// turn.
+fn place_reads(component: &str) -> BTreeSet<&'static str> {
+    let through = |name: &str| -> &'static [&'static str] {
+        match name {
+            "label" => &["space", "locale"],
+            "loud" => &["mode", "locale", "region"],
+            "colors" => &["mode"],
+            "boxed" => &["z"],
+            "gap" => &["space"],
+            "direction" => &["locale"],
+            "accentOf" => &["colors", "direction"],
+            "amountOf" => &["amount"],
+            _ => &[],
+        }
+    };
+    let mut found = BTreeSet::new();
+    let mut pending: Vec<&'static str> = read_names(component).to_vec();
+    while let Some(name) = pending.pop() {
+        if found.insert(name) {
+            pending.extend(through(name));
+        }
+    }
+    found
+}
+
 /// The descriptor a host passes at `host`, if any.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Host {
@@ -464,6 +515,13 @@ fn at_or_under(key: &str, other: &str) -> bool {
 
 fn parent_key(key: &str) -> Option<&str> {
     key.rsplit_once('/').map(|(parent, _)| parent)
+}
+
+fn field_of(value: &NxValue, name: &str) -> Option<NxValue> {
+    match value {
+        NxValue::Record { properties, .. } => properties.get(name).cloned(),
+        _ => None,
+    }
 }
 
 fn tapped() -> NxValue {
@@ -669,8 +727,9 @@ struct Run {
     differing: Option<BTreeMap<String, String>>,
     roots: Vec<(String, NxValue)>,
     host: Host,
-    /// The host descriptor and the roots before the step.
+    /// The host descriptor, the roots and each node's state before the step.
     host_before: Host,
+    states_before: BTreeMap<String, BTreeMap<String, NxValue>>,
     roots_before: Vec<(String, NxValue)>,
     steps: Rc<RefCell<Vec<String>>>,
 }
@@ -893,7 +952,8 @@ impl Run {
 
     /// Whether the node at `key` had a reason to render in the step: the node above it rendered
     /// (so its descriptor may name other handlers), the host gave another descriptor, its state
-    /// changed, some environment value at its place is now written otherwise, or the host set,
+    /// changed since before the step, an environment value it may depend on (`place_reads`) is
+    /// now written otherwise at its place, or the host set,
     /// cleared or changed the root of a value its component reads directly, which is a change to
     /// that read even where the value read is the same. A render with none of these is one no
     /// record needs: a read through a kept result that comes back equal stops at the cutoff.
@@ -918,13 +978,20 @@ impl Run {
         let root_changed = direct_reads(&now.component)
             .iter()
             .any(|name| after.get(*name) != earlier.get(*name));
+        let state_before = self.states_before.get(key).unwrap_or(&then.state);
+        let place_changed = || {
+            let (earlier, later) = (
+                self.place_values(&then.environment),
+                self.place_values(&now.environment),
+            );
+            place_reads(&now.component)
+                .into_iter()
+                .any(|name| !same_written(&field_of(&earlier, name), &field_of(&later, name)))
+        };
         parent_rendered
             || root_changed
-            || !same_written(&then.state, &now.state)
-            || !same_written(
-                &self.place_values(&then.environment),
-                &self.place_values(&now.environment),
-            )
+            || !same_written(state_before, &now.state)
+            || place_changed()
     }
 
     /// Every environment value at a place, as the bare lifecycle evaluates them there.
@@ -1008,6 +1075,12 @@ impl Run {
         let before = self.snapshot();
         self.host_before = self.host;
         self.roots_before = self.roots.clone();
+        self.states_before = self
+            .model
+            .nodes
+            .iter()
+            .map(|(key, node)| (key.clone(), node.state.clone()))
+            .collect();
         match random.below(7) {
             0 | 1 => {
                 let mut roots = Vec::new();
@@ -1110,6 +1183,7 @@ fn run_seed(
         roots: Vec::new(),
         host: Host::Show,
         host_before: Host::Show,
+        states_before: BTreeMap::new(),
         roots_before: Vec::new(),
         steps: Rc::clone(steps),
     };
