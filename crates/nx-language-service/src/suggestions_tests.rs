@@ -600,16 +600,30 @@ fn without_the_option_nothing_changes() {
 }
 
 #[test]
-fn probe() {
-    let src = "import \"@nx/design\"\nimport \"@nx/color\" as c\ncomponent <Box padding: Spacing = 0 fill: Color = #fff tint: Color = #fff /> = { <div /> }\nlet root() = <Box padding={env.space.md} fill={standardPalette.blue600} tint={c.oklch(0.6, 0.2, 250)} />\nlet g: Spacing = {env.space.sm}\n";
-    let t = snapshot_of(&[(URI, src)])
-        .source_tree(&DocumentUri::from(URI))
-        .unwrap();
-    for (i, n) in t.nodes.iter().enumerate() {
-        println!(
-            "{i} {:?} {} p={:?} name={:?} v={:?} f={:?} {}..{}",
-            n.role, n.key, n.parent, n.name, n.value, n.flags, n.range.start_byte, n.range.end_byte
-        );
-    }
-    panic!();
+fn graphics_properties_use_the_design_aliases() {
+    let tree = tree(
+        r#"import "@nx/graphics" as g
+import "@nx/design"
+
+let root() = <g.Group>
+  <g.Rectangle width=10 height=10 rx=2 stroke=<g.Stroke paint=none width=1 /> />
+  <g.Text text="Hi" fontSize=12 />
+</g.Group>
+"#,
+    );
+    let border = "@nx/design/types.nx#BorderWidth";
+    assert_eq!(key_of(&tree, "Stroke", "width").as_deref(), Some(border));
+    assert_eq!(
+        key_of(&tree, "Rectangle", "rx").as_deref(),
+        Some("@nx/design/types.nx#Radius")
+    );
+    assert_eq!(
+        key_of(&tree, "Text", "fontSize").as_deref(),
+        Some("@nx/design/types.nx#FontSize")
+    );
+    let widths = names(&tree, border);
+    assert!(
+        widths.contains(&"env.borderWidth.thin".to_string()),
+        "{widths:?}"
+    );
 }

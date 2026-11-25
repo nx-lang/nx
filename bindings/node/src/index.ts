@@ -657,11 +657,21 @@ export class NxLanguageSnapshot {
    * @throws NxEvaluationError when `uri` names no document in the snapshot.
    * @throws NxDisposedResourceError when this snapshot has already been disposed.
    */
-  public sourceTree(uri: string, options?: { visualizers?: SourceTreeVisualizersOption }): SourceTree {
+  public sourceTree(
+    uri: string,
+    options?: { visualizers?: SourceTreeVisualizersOption; suggestions?: boolean }
+  ): SourceTree {
+    const native: { visualizers?: SourceTreeVisualizersOption; suggestions?: boolean } = {};
+    if (options?.visualizers !== undefined) {
+      native.visualizers = options.visualizers;
+    }
+    if (options?.suggestions === true) {
+      native.suggestions = true;
+    }
     const json = invokeNative(() =>
       getLanguageSnapshotNative(this).sourceTree(
         uri,
-        options?.visualizers === undefined ? undefined : JSON.stringify({ visualizers: options.visualizers })
+        Object.keys(native).length === 0 ? undefined : JSON.stringify(native)
       )
     );
     return parseResultJson(json) as SourceTree;

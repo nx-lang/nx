@@ -43,6 +43,8 @@ export interface AnswerRequest {
   position: TextPosition | undefined;
   /** What a source-tree query asks to have resolved besides the tree. */
   visualizers?: SourceTreeVisualizersOption | undefined;
+  /** Whether a source-tree query asks for value suggestions. */
+  suggestions?: boolean | undefined;
   /** The key of the node a source-edit query edits. */
   key?: string | undefined;
   /** The edit a source-edit query makes. */
@@ -156,9 +158,12 @@ export function answerQuery(
       return snapshot.documentSymbols(request.uri) as DocumentSymbol[];
     case "sourceTree":
       return withVersion(
-        (request.visualizers === undefined
+        (request.visualizers === undefined && request.suggestions !== true
           ? snapshot.sourceTree(request.uri)
-          : snapshot.sourceTree(request.uri, { visualizers: request.visualizers })) as SourceTree
+          : snapshot.sourceTree(request.uri, {
+              ...(request.visualizers === undefined ? {} : { visualizers: request.visualizers }),
+              ...(request.suggestions === true ? { suggestions: true } : {}),
+            })) as SourceTree
       );
     case "sourceEdit":
       return snapshot.sourceEdit(request.uri, request.key ?? "", request.edit as SourceEdit) as SourceEditAnswer;

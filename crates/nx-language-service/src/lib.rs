@@ -1346,9 +1346,12 @@ impl WorkspaceSnapshot {
         // it, written or implicit (a synthesized implicit import is among the module's imports),
         // or a visible library that depends on it. No build context is needed for either.
         let visible_libraries = self.build_context.visible_libraries();
-        let standard_libraries = nx_program::standard_libraries()
+        // A standard library that another one imports is indexed too, so a type such as
+        // `@nx/graphics`'s `design.Radius` resolves to `@nx/design`'s declaration.
+        let standards = nx_program::standard_libraries();
+        let mut reached = standards
             .iter()
-            .filter(|standard| {
+            .map(|standard| {
                 modules.iter().any(|module| {
                     module
                         .imports
@@ -1361,7 +1364,37 @@ impl WorkspaceSnapshot {
                         .any(|root| root.to_str() == Some(standard.root))
                 })
             })
-            .map(|standard| Arc::clone(standard.artifact()))
+            .collect::<Vec<_>>();
+        loop {
+            let mut grew = false;
+            for index in 0..standards.len() {
+                if reached[index] {
+                    continue;
+                }
+                let root = standards[index].root;
+                let imported = standards.iter().zip(&reached).any(|(other, reached)| {
+                    *reached
+                        && other.artifact().modules.iter().any(|module| {
+                            module
+                                .imports
+                                .iter()
+                                .any(|import| import.library_path.trim() == root)
+                        })
+                });
+                if imported {
+                    reached[index] = true;
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        let standard_libraries = standards
+            .iter()
+            .zip(&reached)
+            .filter(|(_, reached)| **reached)
+            .map(|(standard, _)| Arc::clone(standard.artifact()))
             .collect::<Vec<_>>();
 
         let mut declarations = WorkspaceDeclarations::default();
