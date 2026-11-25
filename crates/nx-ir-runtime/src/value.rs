@@ -88,6 +88,9 @@ pub(crate) struct Handler {
     pub owner: Option<Arc<str>>,
     /// The frame as it stood when the handler was created: the by-value capture.
     pub captured: Vec<Option<Value>>,
+    /// For a handler whose node reads the environment, the overrides of the provides around it
+    /// when it was made, as a list of `$env` entries, outermost first; `None` for any other.
+    pub environment: Option<Value>,
 }
 
 impl Value {
@@ -381,6 +384,14 @@ pub(crate) fn handlers_equal(
             }
         }
     }
+    // Handlers of one node are flagged alike, so both hold overrides or neither does.
+    if equal {
+        equal = match (&left.environment, &right.environment) {
+            (Some(left), Some(right)) => values_equal(left, right, meter, stack)?,
+            (None, None) => true,
+            _ => false,
+        };
+    }
     Ok(equal)
 }
 
@@ -471,7 +482,12 @@ impl Depths {
                 }
             }
             Value::Handler(handler) => {
-                for item in handler.captured.iter().flatten() {
+                for item in handler
+                    .captured
+                    .iter()
+                    .flatten()
+                    .chain(&handler.environment)
+                {
                     below = below.max(self.levels_of(item, deeper, stack)?);
                 }
             }
@@ -824,6 +840,7 @@ mod tests {
                 action_name: Arc::from("C.E"),
                 owner: None,
                 captured: vec![Some(value)],
+                environment: None,
             })
         };
         let (first, second) = (capturing(chain(200)), capturing(chain(200)));

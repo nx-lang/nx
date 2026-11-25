@@ -1,0 +1,22 @@
+{
+  "counts": {
+    "main.nx::Page": {
+      "batches": [
+        136,
+        136,
+        138,
+        141,
+        149,
+        136,
+        136,
+        138,
+        149
+      ],
+      "initial": 135
+    },
+    "main.nx::equalHandlers": 30,
+    "main.nx::quietHandlers": 25,
+    "main.nx::root": 2,
+    "main.nx::unequalHandlers": 30
+  }
+}

@@ -1878,7 +1878,8 @@ impl<'p> Machine<'p> {
                 captured.resize(length, None);
             }
         }
-        self.handler(cx, node, handler, captured)
+        let environment = handler.reads_environment.then(|| self.captured_overrides());
+        self.handler(cx, node, handler, captured, environment)
             .map(|handler| Value::Handler(Arc::new(handler)))
     }
 
@@ -1911,6 +1912,7 @@ impl<'p> Machine<'p> {
         node: u32,
         handler: &HandlerNode,
         captured: Frame,
+        environment: Option<Value>,
     ) -> Result<Handler> {
         let (_, _, action) = self.resolve(cx, node, &handler.action)?;
         self.resolve(cx, node, &handler.component)?;
@@ -1937,6 +1939,7 @@ impl<'p> Machine<'p> {
             action_name: Arc::clone(&action.name),
             owner,
             captured,
+            environment,
         })
     }
 

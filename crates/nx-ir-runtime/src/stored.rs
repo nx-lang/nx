@@ -6,8 +6,9 @@
 //! nests no deeper for a value that does, and reading it back cannot recurse; the same order
 //! makes a cycle impossible to write down.</para>
 //!
-//! <para>A handler is stored as the node it is and what it captured. Everything else a handler
-//! knows is read from the node again when the instance is restored.</para>
+//! <para>A handler is stored as the node it is and what it captured: its slots and, for a handler
+//! that reads the environment, the overrides around it. Everything else a handler knows is read
+//! from the node again when the instance is restored.</para>
 
 use crate::component::{InstanceData, Render};
 use crate::error::{fail, Result};
@@ -75,6 +76,9 @@ enum StoredValue {
         declaration: Arc<str>,
         node: u32,
         captured: Vec<Option<u32>>,
+        /// The list of overrides a handler that reads the environment captured.
+        #[serde(default)]
+        environment: Option<u32>,
     },
 }
 
@@ -142,6 +146,7 @@ impl Writer {
                     .iter()
                     .map(|slot| slot.as_ref().map(|value| self.value(value)))
                     .collect(),
+                environment: handler.environment.as_ref().map(|value| self.value(value)),
             },
         };
         let index = self.values.len() as u32;
@@ -306,16 +311,19 @@ impl Reader<'_, '_> {
                 declaration,
                 node,
                 captured,
+                environment,
             } => {
                 let captured = captured
                     .into_iter()
                     .map(|slot| slot.map(|index| child(self, index)).transpose())
                     .collect::<Result<_>>()?;
+                let environment = environment.map(|index| child(self, index)).transpose()?;
                 Value::Handler(Arc::new(self.read_handler(
                     &module,
                     &declaration,
                     node,
                     captured,
+                    environment,
                 )?))
             }
         };
@@ -339,6 +347,7 @@ impl Reader<'_, '_> {
         declaration_name: &str,
         node: u32,
         captured: Vec<Option<Value>>,
+        environment: Option<Value>,
     ) -> Result<Handler> {
         let program = self.machine.program;
         let Some(module) = program.by_identity.get(module_identity).copied() else {
@@ -363,8 +372,27 @@ impl Reader<'_, '_> {
             declaration,
             depth: 0,
         };
+        // A handler of a node that reads the environment holds the overrides it captured, and
+        // they are `$env` entries of this program; any other holds none.
+        match (&environment, handler.reads_environment) {
+            (Some(environment), true) => self
+                .machine
+                .check_captured_overrides(cx, node, environment)
+                .or_else(refuse)?,
+            (None, false) => {}
+            (Some(_), false) => {
+                return refuse(format_args!(
+                    "node {node} reads no environment and its handler holds overrides"
+                ))
+            }
+            (None, true) => {
+                return refuse(format_args!(
+                    "node {node} reads the environment and its handler holds no overrides"
+                ))
+            }
+        }
         self.machine
-            .handler(cx, node, handler, captured)
+            .handler(cx, node, handler, captured, environment)
             .or_else(refuse)
     }
 

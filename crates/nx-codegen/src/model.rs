@@ -548,6 +548,9 @@ pub struct CodegenActionHandler {
     pub owner: Option<CodegenReference>,
     /// The body, with `action` bound as a local of the enclosing frame.
     pub body: Box<CodegenExpression>,
+    /// Whether the body's static read set is not empty, so the handler captures the overrides of
+    /// the provides around it. Set by `formulas::mark_formulas`.
+    pub reads_environment: bool,
 }
 
 /// One authored-order arm in a match-style `if is` expression.

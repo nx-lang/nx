@@ -1,0 +1,71 @@
+// Action handlers and environment values: a handler sees the overrides written around it, in the
+// body that makes it. The handlers sit inside a `provide` block, on an element with `env.`
+// attributes, behind a function call, under two formulas, in content another component places
+// inside an override of its own, on a child's emit, and under a bundle with a formula entry; one
+// more reads no environment at all, so it captures nothing and costs what it did before. The
+// `*Handlers` entrypoints compare two handlers of one node made under overrides.
+abstract external component <Node />
+external component <Label extends Node text:string />
+external component <Button extends Node label:string emits { Tapped { } } />
+component <Stack extends Node content children:Node+ /> = { <column>{children}</column> }
+
+environment mode: string = "outer"
+environment space: int = 1
+environment gap: int = 0
+
+let current() = { env.mode }
+
+// A bundle whose `gap` reads the `space` it sets.
+let dense: env.Update = <env.Update space=2 gap={env.space * 3} />
+
+action Ping = { mode:string }
+
+// A handler that reads the environment, made inside an override from `label`.
+let pinger(label:string) = { provide env.mode={label} { <Button label="Ping" onTapped=<Ping mode={env.mode} /> /> } }
+
+// Two buttons from `pinger`: a descriptor's fields are all compared, its `$env` and then its
+// handler, whose captured overrides are compared as two lists after its slots (it has none). Equal
+// overrides compare equal; different ones cost the same, since each list holds one entry.
+let equalHandlers() = { pinger("a") == pinger("a") }
+let unequalHandlers() = { pinger("a") == pinger("b") }
+
+// The same comparison for a handler that reads no environment, which captured no overrides: what
+// `equalHandlers` costs beyond it, 5, is the two lists, their one pair of entries and that pair's
+// three fields.
+let quietPinger(label:string) = { provide env.mode={label} { <Button label="Ping" onTapped=<Ping mode="x" /> /> } }
+let quietHandlers() = { quietPinger("a") == quietPinger("a") }
+
+// Puts its content inside an override of its own, which the content's handlers do not see.
+component <Box extends Node content children:Node+ /> = {
+  <column>{ provide env.mode="box" { children } }</column>
+}
+
+component <Card extends Node emits { Logged { } } /> = {
+  <Button label="Log" onTapped=<Card.Logged /> />
+}
+
+component <Page /> = {
+  state { last:string = "" count:int = 0 }
+  <Stack>
+    <Label text={last} />
+    { provide env.mode="block" { <Button label="Block" onTapped=<State.Update last={env.mode} /> /> } }
+    <Button env.mode="attr" label="Attr" onTapped=<State.Update last={env.mode} /> />
+    <Button env.mode="call" label="Call" onTapped=<State.Update last={current()} /> />
+    { provide env.mode={env.mode + "!"} { <Button label="Formula" onTapped=<State.Update last={env.mode} /> /> } }
+    {
+      provide env.gap={env.space * 2} {
+        <Button label="Gap" onTapped=<State.Update last={"gap " + env.gap + " " + env.gap} /> />
+      }
+    }
+    { provide env.mode="page" { <Box><Button label="Inner" onTapped=<State.Update last={env.mode} /> /></Box> } }
+    <Card env.mode="card" onLogged=<State.Update last={env.mode} /> />
+    { provide env.mode="plain" { <Button label="Count" onTapped=<State.Update count={count + 1} /> /> } }
+    {
+      provide env with dense with { mode="bundle" } {
+        <Button label="Bundle" onTapped=<State.Update last={env.mode + " " + env.gap + " " + env.space} /> />
+      }
+    }
+  </Stack>
+}
+
+let root() = { <Page /> }

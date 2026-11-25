@@ -151,7 +151,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 16 | unionCase | `[16, ref, str, [[str, node]...], [node...]]` | Constructs a case of the union the reference names. The string is the case name. A constant case evaluates to its bare name. |
 | 17 | element | `[17, id, str, [[str, node]...], [node...]]` | An intrinsic element with a module-local id, a tag, properties and content children. |
 | 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
-| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<State.Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the slots the node and the nodes beneath it read; the body runs when a host dispatches the action. See *Action handlers*. |
+| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node, 1?]` | An action handler, `onTapped=<State.Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), the body, and an optional environment flag `1`, present when the body can read an environment value. Evaluating the node captures the slots the node and the nodes beneath it read, and a flagged node also the overrides of the `envProvide` nodes around it; the body runs when a host dispatches the action. A flag requires `environment-v3`, and a flag cell other than `1` is malformed. See *Action handlers*. |
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
 | 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, in source order like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
 | 22 | forRange | `[22, slot, str, slot?, str?, node, node]` | A `for` whose iterable evaluates to a `Range` record, with the layout of a `for`. The body runs once per integer from the range's `start` upward, stopping before `end` or after it when `endInclusive` is true, with the item bound to that integer and the index, when present, to its position from zero. An empty or reversed range runs the body no times. Yields the list of body values. Requires `ranges-v1`. |
@@ -533,7 +533,9 @@ declares an `environment` value, has a `provides` declaration, or contains an `e
 `envProvide` or `envUpdate` node lists `environment-v1`. One that also holds a formula override, a
 bundle override in an `envProvide`, or an `envUpdate` with a base lists `environment-v2` as well;
 a runtime refuses such a module that does not list it, rather than evaluating a formula where it is
-written. Constructing a range needs no feature: that is an
+written. One that holds an `actionHandler` with the environment flag lists `environment-v3`; a
+runtime refuses such a module that does not list it, rather than running the handler without the
+overrides around it. Constructing a range needs no feature: that is an
 ordinary record construction, and only iterating one is a node a runtime may not know. A `seq` type
 needs none either: it is a type kind, not a node, so a module that declares `string?` fields and
 never tests, steps through or falls back from one lists nothing. A runtime that does not know a
@@ -685,6 +687,44 @@ in the child's table. Initialization may also be given a complete state to use i
 initial one, which is how a host re-renders an instance with new props and the state it holds;
 the runtime has no other "update props" operation and needs none.
 
+**Handlers and the environment.** The compiler flags a handler node when its body can read an
+environment value: directly, through a function it calls, or through a default of a component or
+record it constructs, by the rule that makes an override a formula. A flagged node, when it is
+evaluated, captures the overrides of the `envProvide` nodes being evaluated around it, outermost
+first, as `$env` entries: a value evaluated where it was written, a formula as its captured data, a
+bundle as one entry. It captures neither the overrides on the component's descriptor chain nor the
+host's root values, and capturing costs nothing: the handlers under one `envProvide` share one list,
+built when the first of them is made. An unflagged node captures nothing and runs as before. When a
+handler runs, its captured overrides are pushed inside the environment of the call, as the call's
+own layers, in the order they were captured, and are not checked against their types again; a
+captured formula is evaluated at each read that reaches it, in the environment of that read. The
+rule is lexical: a handler sees the overrides where it is written, not where it is placed, so a
+handler in content another component places inside a `provide` of its own does not see that
+`provide`. A child that wants its parent to see a value of its environment passes it in an action
+field, which is an ordinary value computed where the child writes the action:
+
+```nx
+component <LocaleList items?:string+ emits { Picked { item:string locale:string } } /> = {
+  <Stack>
+    {
+      for item in items {
+        <Button label={item} onTapped=<LocaleList.Picked item={item} locale={env.locale} /> />
+      }
+    }
+  </Stack>
+}
+// In the parent: action.locale is the child's value, env.locale the parent's own.
+<LocaleList onPicked=<State.Update picked={action.locale + " " + env.locale} /> />
+```
+
+A dispatch runs each handler in the environment the host gives for the call, so a host gives the
+environment of the instance that created the handler. For an emit, the exact route is to dispatch
+the parent's `on<Emit>` token against the parent's instance, as the instance tree does. A host that
+dispatches the emit against the child, in the child's environment, applies the overrides on the
+child's descriptor and the handler's captured ones one after the other: the same for an override
+that sets a value, but twice for one that reads the value it sets, such as
+`env.space={env.space * 2}`.
+
 ## Environment values
 
 An environment value is read with `envRead` and set for a part of the output with `envProvide`. A
@@ -754,6 +794,8 @@ for it is charged node by node each time it is evaluated; one whose earlier resu
 nothing more. Capturing a formula costs one operation. An `envProvide` costs one operation, and its
 override values and body are charged as any other children. Adding the overrides to one component
 descriptor costs one operation. The lookup itself costs nothing beyond the nodes it evaluates.
+A handler's captured overrides cost nothing to capture or to push when it runs; its reads are
+charged as any other reads (*Action handlers*).
 
 ### Reusing derived results
 
@@ -873,7 +915,7 @@ operations:
 | An item is placed in a sequence a node builds | 1 per item | As the item is placed, after the child that produced it. The sequences are the value of an `array`, `for` or `forRange` node and the content list of a `record`, `unionCase`, `element` or `component` node. A child whose value is a sequence places each of its items; an empty one places none. A `for` over one item rather than a sequence yields its body's value and places nothing. A call that binds a sequence to a content parameter builds the list anew: each item of the argument costs 1, empty or not, or 1 for each item it contributes when it is itself a sequence of several. |
 | A `concat` produces a string | 1 per 64 UTF-16 code units, rounded down | After both operands, before the string exists. |
 | A value is checked against a declared type | 1 per value that is not a sequence | Before the value is checked. A sequence type costs nothing itself: each item is checked, and a one-item sequence at a type that is not a sequence type is read as its item. A record, or a union case with fields, is one and then each of its field values, defaults included; a field left out with no default is not checked. A value at the type `object` is one value whatever it holds. |
-| Two values are compared | 1 per pair, and 1 more per 64 UTF-16 code units of text read | Before the pair is compared. Two sequences of one length compare their items in order, and two handlers of one node their captured values slot by slot in ascending slot index, each up to and including the first pair that differs. Two records of one type are lined up by field name: a name both hold compares the pair of its values, and a name only one holds costs 1, all of them compared and counted whether or not an earlier one differed. The text read is the shorter of two strings, the shorter of two records' type names, and every field name of two records of one type, for each record that holds it. |
+| Two values are compared | 1 per pair, and 1 more per 64 UTF-16 code units of text read | Before the pair is compared. Two sequences of one length compare their items in order, and two handlers of one node their captured values slot by slot in ascending slot index, then, for a node with the environment flag, their captured overrides as two sequences, each up to and including the first pair that differs. Two records of one type are lined up by field name: a name both hold compares the pair of its values, and a name only one holds costs 1, all of them compared and counted whether or not an earlier one differed. The text read is the shorter of two strings, the shorter of two records' type names, and every field name of two records of one type, for each record that holds it. |
 | A value is written for the host | 1 per value, and 1 more per 64 UTF-16 code units of text written | Before the value is written. Every value is one, because every value takes a place in what is written: a sequence, the empty value included, and then its items; a record and then its field values. The text written is a string, a record's type name, and each of its field names. A function value and an action handler are one each, and only a value the runtime made is one of them: a record a host passes with the type name or the internal marking of one is a record, entered and paid for like any other, and so is the `nx.int` record canonical JSON spells a large integer with. |
 
 The first three are what a program does. The last three are the walks a runtime makes over a value,
@@ -896,7 +938,9 @@ scrutinee is the empty value, or both are records and the pattern names a type: 
 by emptiness or by the type name and compare nothing. A record holds a field when it stores a
 value for it, so an optional field that was left out or is empty is not compared, and a field an
 update record clears is. A handler captures the slots its node reads, as they stood when it was
-made, and only those are compared.
+made, and only those are compared; for two handlers of a flagged node, the two lists of captured
+overrides are then compared as two sequences are, entry by entry, up to and including the first
+pair that differs.
 A value is written when a call returns it: a function's result, a descriptor, rendered output, each
 effect, and component state. A value reached from several places is written once for each, and a
 `null` inside a value the host passed at `object` is the empty value: one value where it is

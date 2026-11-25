@@ -231,6 +231,64 @@ override: under it, a read of `W` would evaluate `W`'s default, then the overrid
 with nothing left to give it. An override placed by another body can still close such a path while
 the program runs, and the read then fails with the runtime error `nx-ir-environment-cycle`.
 
+## In an action handler
+
+An action handler reads the environment where it is written: the overrides around it, the
+component's place and the host's root values, as a read in the same spot of the body would.
+
+```nx
+environment mode: string = "outer"
+
+component <Page /> = {
+  state { last: string = "" }
+  <Stack>
+    { provide env.mode="block" { <Button label="Block" onTapped=<State.Update last={env.mode} /> /> } }
+    <Button env.mode="attr" label="Attr" onTapped=<State.Update last={env.mode} /> />
+  </Stack>
+}
+```
+
+A tap on *Block* sets `last` to `"block"`, and one on *Attr* to `"attr"`. An override whose value
+reads the environment is still computed at the read, when the handler runs, in the environment of
+that moment.
+
+A handler sees where it is written, not where it is placed. A handler written in a parent's body
+and passed to a child as content or as an `on…` property doesn't see the overrides inside the
+child. A child that wants its parent to know a value of its environment passes it in a field of
+the action it emits:
+
+```nx
+environment locale: string = "en-US"
+
+component <LocaleList items?: string+ emits { Picked { item: string locale: string } } /> = {
+  <Stack>
+    {
+      for item in items {
+        <Button label={item} onTapped=<LocaleList.Picked item={item} locale={env.locale} /> />
+      }
+    }
+  </Stack>
+}
+
+// Puts its content inside an override of its own.
+component <Section content children: Element+ /> = {
+  <Stack>{ provide env.locale="fr-FR" { children } }</Stack>
+}
+
+component <Chooser /> = {
+  state { picked: string = "" }
+  <Section>
+    <LocaleList items={"a"} onPicked=<State.Update picked={action.locale + " " + env.locale} /> />
+  </Section>
+}
+```
+
+A tap on the row sets `picked` to `"fr-FR en-US"`. `LocaleList`'s body runs where `Section`
+placed it, so its handler reads `"fr-FR"` and puts it in the action. The parent's handler was
+written in `Chooser`'s body, outside `Section`'s override, so its own `env.locale` is `"en-US"`.
+`action.locale` is a plain string, computed when the child's handler built the action: an action's
+fields are ordinary values, not overrides computed at a later read.
+
 ## Root values from the host
 
 A host sets root values by name when it evaluates a program, and they are checked against the
