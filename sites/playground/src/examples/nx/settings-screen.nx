@@ -1,8 +1,10 @@
 // A workspace settings screen, the kind of page a XAML or JSX file holds. It has three parts: a
 // small design system declared as external components, the data the screen shows, and the screen
-// itself, a component whose state follows what the person changes before they save.
+// itself, a component whose state follows what the person changes before they save. Spacing comes
+// from the design tokens in @nx/design (env.space), and the danger zone is drawn in dark mode.
 
 import "@nx/visualizer"
+import "@nx/design"
 
 /// Text a person reads: a title, a label, a message. It is what a translator translates.
 type uitext = string
@@ -10,14 +12,13 @@ type uitext = string
 type Tone = neutral | success | warning | danger
 type ButtonKind = primary | secondary | destructive | link
 type TextStyle = title | heading | body | caption
-type Gap = none | small | medium | large
 
 abstract external component <View />
 
 external component <Page extends View title:uitext subtitle?:uitext content children:View+ />
-external component <Section extends View title:uitext description?:uitext content children:View+ />
-external component <Stack extends View gap:Gap = medium content children:View+ />
-external component <Row extends View gap:Gap = small content children:View+ />
+external component <Section extends View title:uitext description?:uitext padding:Spacing = 16 fill?:Color content children:View+ />
+external component <Stack extends View gap:Spacing = 12 content children:View+ />
+external component <Row extends View gap:Spacing = 8 content children:View+ />
 external component <Text extends View style:TextStyle = body tone:Tone = neutral content text:uitext />
 external component <Badge extends View label:uitext tone:Tone = neutral />
 external component <Avatar extends View name:string imageUrl?:string />
@@ -157,9 +158,9 @@ let planSummary(plan:Plan, seats:int, used:int): uitext = {
 
 /// One person in the members list, with what an admin can do to them.
 let <MemberRow member:Member canRemove:boolean /> =
-  <Row gap=medium>
+  <Row gap={env.space.md}>
     <Avatar name={member.name} />
-    <Stack gap=none>
+    <Stack gap={env.space.none}>
       <Text>{member.name}</Text>
       <Text style=caption>{member.email}</Text>
     </Stack>
@@ -186,7 +187,7 @@ component <WorkspaceSettings workspace:Workspace emits { Saved MemberRemoved } /
       <Banner tone=warning title="Every seat is in use" body="Add seats before you invite anyone else." />
     }
 
-    <Section title="General" description="How this workspace appears to the people in it.">
+    <Section title="General" description="How this workspace appears to the people in it." padding={env.space.lg}>
       <TextField
         label="Name"
         value={name}
@@ -219,7 +220,7 @@ component <WorkspaceSettings workspace:Workspace emits { Saved MemberRemoved } /
     </Section>
 
     <Section title="Members" description="Everyone who can open this workspace.">
-      <Stack gap=small>
+      <Stack gap={env.space.sm}>
         for member in workspace.members {
           <MemberRow member={member} canRemove={member.role != Role.owner} />
           if requireTwoFactor && !member.twoFactor {
@@ -232,21 +233,26 @@ component <WorkspaceSettings workspace:Workspace emits { Saved MemberRemoved } /
 
     <Divider />
 
-    <Row>
+    <Row gap={env.space.sm}>
       <Button
         label="Save changes"
         kind=primary
         disabled={name == ""}
         onTapped=<Saved name={name} slug={slug} requireTwoFactor={requireTwoFactor} />
       />
-      if confirmingDelete {
-        <Text tone=danger>This deletes the workspace for everyone.</Text>
-        <Button label="Yes, delete it" kind=destructive />
-        <Button label="Cancel" kind=link onTapped=<State.Update confirmingDelete={false} /> />
-      } else {
-        <Button label="Delete workspace" kind=destructive onTapped=<State.Update confirmingDelete={true} /> />
-      }
     </Row>
+
+    <Section env.colorMode=dark title="Danger zone" padding={env.space.lg} fill={env.color.surface}>
+      <Row gap={env.space.sm}>
+        if confirmingDelete {
+          <Text tone=danger>This deletes the workspace for everyone.</Text>
+          <Button label="Yes, delete it" kind=destructive />
+          <Button label="Cancel" kind=link onTapped=<State.Update confirmingDelete={false} /> />
+        } else {
+          <Button label="Delete workspace" kind=destructive onTapped=<State.Update confirmingDelete={true} /> />
+        }
+      </Row>
+    </Section>
   </Page>
 }
 

@@ -12,6 +12,7 @@
       value="hive5-tools"
     />}
     description="How this workspace appears to the people in it."
+    padding=16.0
     title="General"
   /> <Section
     children={<Toggle
@@ -20,63 +21,65 @@
       on=false
       onToggled=<ActionHandler action="Toggle.Toggled" token="h1-3" />
     />}
+    padding=16.0
     title="Security"
   /> <Section
     children={<Stack
       children={<Row
         children={<Avatar name="Ada Lovelace" /> <Stack
           children={<Text style=body text="Ada Lovelace" tone=neutral /> <Text style=caption text="ada@example.com" tone=neutral />}
-          gap=none
+          gap=0.0
         /> <Badge label="Owner" tone=success /> <Text style=caption text="Today" tone=neutral />}
-        gap=medium
+        gap=12.0
       /> <Row
         children={<Avatar name="Grace Hopper" /> <Stack
           children={<Text style=body text="Grace Hopper" tone=neutral /> <Text style=caption text="grace@example.com" tone=neutral />}
-          gap=none
+          gap=0.0
         /> <Badge label="Admin" tone=warning /> <Text style=caption text="Yesterday" tone=neutral /> <Button
           disabled=false
           kind=destructive
           label="Remove"
           onTapped=<ActionHandler action="Button.Tapped" token="h1-4" />
         />}
-        gap=medium
+        gap=12.0
       /> <Row
         children={<Avatar name="Barbara Liskov" /> <Stack
           children={<Text style=body text="Barbara Liskov" tone=neutral /> <Text style=caption text="barbara@example.com" tone=neutral />}
-          gap=none
+          gap=0.0
         /> <Badge label="Member" tone=neutral /> <Badge label="No two-factor" tone=danger /> <Text style=caption text="3 days ago" tone=neutral /> <Button
           disabled=false
           kind=destructive
           label="Remove"
           onTapped=<ActionHandler action="Button.Tapped" token="h1-5" />
         />}
-        gap=medium
+        gap=12.0
       /> <Row
         children={<Avatar name="Margaret Hamilton" /> <Stack
           children={<Text style=body text="Margaret Hamilton" tone=neutral /> <Text style=caption text="margaret@example.com" tone=neutral />}
-          gap=none
+          gap=0.0
         /> <Badge label="Member" tone=neutral /> <Text style=caption text="Never signed in" tone=neutral /> <Button
           disabled=false
           kind=destructive
           label="Remove"
           onTapped=<ActionHandler action="Button.Tapped" token="h1-6" />
         />}
-        gap=medium
+        gap=12.0
       /> <Row
         children={<Avatar name="Katherine Johnson" /> <Stack
           children={<Text style=body text="Katherine Johnson" tone=neutral /> <Text style=caption text="katherine@example.com" tone=neutral />}
-          gap=none
+          gap=0.0
         /> <Badge label="Guest" tone=neutral /> <Badge label="No two-factor" tone=danger /> <Text style=caption text="Last month" tone=neutral /> <Button
           disabled=false
           kind=destructive
           label="Remove"
           onTapped=<ActionHandler action="Button.Tapped" token="h1-7" />
         />}
-        gap=medium
+        gap=12.0
       />}
-      gap=small
+      gap=8.0
     /> <Button disabled=false kind=primary label="Invite people" />}
     description="Everyone who can open this workspace."
+    padding=16.0
     title="Members"
   /> <Divider /> <Row
     children={<Button
@@ -84,13 +87,21 @@
       kind=primary
       label="Save changes"
       onTapped=<ActionHandler action="Button.Tapped" token="h1-8" />
-    /> <Button
-      disabled=false
-      kind=destructive
-      label="Delete workspace"
-      onTapped=<ActionHandler action="Button.Tapped" token="h1-9" />
     />}
-    gap=small
+    gap=8.0
+  /> <Section
+    children={<Row
+      children={<Button
+        disabled=false
+        kind=destructive
+        label="Delete workspace"
+        onTapped=<ActionHandler action="Button.Tapped" token="h1-9" />
+      />}
+      gap=8.0
+    />}
+    fill=<Color.oklch alpha=1.0 c=0.006 h=285.885 l=0.21 />
+    padding=16.0
+    title="Danger zone"
   />}
   subtitle="Team plan, 5 of 5 seats in use"
   title="Workspace settings"
