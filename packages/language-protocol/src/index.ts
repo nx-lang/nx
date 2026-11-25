@@ -694,6 +694,11 @@ export interface SourcePreview {
   value: string;
   /** Present, and `true`, for a color outside sRGB. */
   outsideSrgb?: boolean;
+  /**
+   * For a color inside sRGB, the hex literal that writes it: `#rrggbb`, with two more digits when
+   * it is not opaque.
+   */
+  hex?: string;
 }
 
 // ---------------------------------------------------------------------------------------------

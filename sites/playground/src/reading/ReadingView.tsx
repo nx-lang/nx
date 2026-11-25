@@ -75,8 +75,10 @@ function loadIcons(): Promise<NxViewerIcons> {
     const drawn = new Map<string, Element | undefined>();
     return (name: string) => {
       if (!drawn.has(name)) {
-        // Lucide names its icons in kebab case and exports them in Pascal case.
-        const exported = name.replace(/(^|-)([a-z0-9])/g, (_match, _dash: string, letter: string) => letter.toUpperCase());
+        // Lucide names its icons in kebab case and exports them in Pascal case. The viewer's
+        // named-values button is drawn as Lucide's hexagon.
+        const lucide = name === "named-values" ? "hexagon" : name;
+        const exported = lucide.replace(/(^|-)([a-z0-9])/g, (_match, _dash: string, letter: string) => letter.toUpperCase());
         const node = (icons as Record<string, Parameters<typeof createElement>[0] | undefined>)[exported];
         drawn.set(name, node === undefined ? undefined : createElement(node));
       }

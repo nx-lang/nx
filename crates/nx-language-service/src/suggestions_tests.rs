@@ -527,6 +527,19 @@ let root() = <Box />
         Some((SourcePreviewKind::Number, "12".to_string()))
     );
     assert_eq!(preview("wide", SPACING), None);
+    // A color inside sRGB carries the hex that writes it; one outside carries none.
+    let hex = |name: &str| {
+        suggestion(&tree, COLOR, name)
+            .preview
+            .as_ref()
+            .and_then(|preview| preview.hex.clone())
+    };
+    assert_eq!(hex("standardPalette.blue600").as_deref(), Some("#155dfc"));
+    assert_eq!(hex("standardPalette.green500"), None);
+    assert!(suggestion(&tree, COLOR, "standardPalette.green500")
+        .preview
+        .as_ref()
+        .is_some_and(|preview| preview.outside_srgb));
     assert_eq!(
         preview("gap", SPACING),
         Some((SourcePreviewKind::Number, "4".to_string()))

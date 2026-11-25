@@ -1062,4 +1062,103 @@ export const styles = `
 .source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
 .source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
 .body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
+/* A property's named-values button: a quiet hexagon just past its value, before its menu, under the
+   pointer, while selected or open, from a point that takes no room, so it moves nothing. */
+.source .named-values {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin-left: 0.5ch;
+  display: inline-flex;
+  align-items: center;
+  height: 1lh;
+  padding: 0 0.3ch;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  visibility: hidden;
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+}
+.source .named-values > svg { width: 0.95em; height: 0.95em; }
+.source .row-anchor.with-named > .row-menu { left: 2.4ch; }
+.source .named-anchor { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
+.source .sheet-row:hover > :is(.sheet-value, .sheet-below) > .row-anchor > .named-values,
+.source .sheet-row.selected > :is(.sheet-value, .sheet-below) > .row-anchor > .named-values,
+.source .sheet-row:has(> .sheet-value .editing) > .sheet-value > .row-anchor > .named-values,
+.source .sheet-row:focus-within > .sheet-value > .row-anchor > .named-values,
+.source [data-role="declaration"]:hover > .named-anchor > .named-values,
+.source [data-role="declaration"].selected > .named-anchor > .named-values,
+.source .named-values.open { visibility: visible; }
+.source .named-values:hover, .source .named-values.open {
+  color: var(--nx-viewer-foreground, CanvasText);
+  background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
+}
+.source .reference-token { cursor: pointer; }
+/* While a token is replaced by a value, its braces and swatch give way to the value's editor. */
+.source .sheet-value:has(> .replacing.editing) > :is(.value-brace, .swatch) { display: none; }
+/* The named-values popover: a search field over the values by group, each with its preview. */
+.popover.named { width: 22rem; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.popover.named[hidden] { display: none; }
+.popover.named > .popover-filter { width: auto; margin: 6px 6px 0; }
+.popover .named-list { max-height: 18em; overflow: auto; overscroll-behavior: contain; padding: 2px 0 4px; }
+.popover .named-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px 2px;
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-size: 11px;
+}
+.popover .named-group[hidden], .popover .named-row[hidden], .popover .named-rule[hidden] { display: none; }
+.popover .named-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 1px 10px 1px 24px;
+  margin: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+}
+.popover .named-row.active { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.popover .named-row.current::before { content: "\\2713"; position: absolute; left: 8px; }
+.popover .named-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+}
+.popover .named-quiet { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.popover .named-default .named-name { font-family: inherit; font-size: 13px; }
+.popover .named-preview {
+  white-space: nowrap;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.popover .named-preview .swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  vertical-align: -0.05em;
+}
+.popover .named-preview .swatch.outside-srgb {
+  background-image: linear-gradient(225deg, light-dark(#000, #fff) 0 28%, transparent 28%);
+}
+.popover .named-rule { height: 1px; margin: 3px 8px; background: var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f)); }
+.popover .named-empty { padding: 8px 10px; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
+.popover .named-empty[hidden] { display: none; }
+.popover .named-foot {
+  padding: 4px 10px;
+  border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
+  font-size: 11.5px;
+}
 `;

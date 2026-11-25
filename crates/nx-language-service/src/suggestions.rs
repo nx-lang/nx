@@ -98,6 +98,10 @@ pub struct SourcePreview {
     /// Whether a color is outside sRGB.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub outside_srgb: bool,
+    /// A color inside sRGB as the hex literal that writes it: `#rrggbb`, with two more digits when
+    /// it is not opaque. Absent for any other value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hex: Option<String>,
 }
 
 /// The kind of a preview.
@@ -681,6 +685,7 @@ impl Previewer<'_> {
                 kind,
                 value,
                 outside_srgb: false,
+                hex: None,
             })
         };
         match lowered.expr(id) {
@@ -851,11 +856,25 @@ pub(super) fn static_color(
 fn color_preview(
     value: Result<nx_value::NxValue, nx_value::color::Error>,
 ) -> Option<SourcePreview> {
+    let color = value
+        .as_ref()
+        .ok()
+        .and_then(|value| nx_value::color::read(value).ok());
     let (value, outside_srgb) = swatch(value).ok()?;
+    let hex = color.filter(|_| !outside_srgb).map(|color| {
+        let [r, g, b, a] = nx_value::color::to_gamut(color, nx_value::color::Space::Srgb)
+            .map(|x| (x.clamp(0.0, 1.0) * 255.0).round() as u8);
+        if a == 255 {
+            format!("#{r:02x}{g:02x}{b:02x}")
+        } else {
+            format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+        }
+    });
     Some(SourcePreview {
         kind: SourcePreviewKind::Color,
         value,
         outside_srgb,
+        hex,
     })
 }
 

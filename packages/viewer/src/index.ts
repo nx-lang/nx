@@ -19,6 +19,7 @@ import {
   isNumericLiteral,
   isRemovable,
   isWholeValue,
+  editorOfType,
   removalOf,
   runProblem,
   unwrittenProperties,
@@ -46,6 +47,21 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import { ItemMap, itemListOf, mappedKey, needsOne, type ItemList } from "./move.js";
 import { derivedLabel } from "./labels.js";
+import {
+  attributePlace,
+  filterWords,
+  importAliases,
+  letPlace,
+  nameAt,
+  nameHolds,
+  nameParts,
+  nameRoot,
+  namedValues,
+  previewText,
+  suggestionNamed,
+  unsetPlace,
+  type NamedPlace
+} from "./named.js";
 import { defaultFolded, hexParts, readingRuns, renderSource, topLevelLet, uiTextType, type NxViewerColor, type NxViewerIcons, type ReadingRun } from "./source.js";
 import { styles } from "./styles.js";
 import { elementProperties, indexTree, nodeOf, type TreeIndex } from "./tree.js";
@@ -271,6 +287,44 @@ interface EditSession {
   colorPart?: "hex" | "opacity";
   colorFrom?: string;
   closed: boolean;
+}
+
+/** The named-values popover open on a place. */
+interface NamedSession {
+  readonly place: NamedPlace;
+  /** What opened it, which it is placed by and marks open. */
+  readonly anchor: HTMLElement;
+  readonly button: HTMLElement | undefined;
+  readonly input: HTMLInputElement;
+  /** Its rows, the default's first when there is one. */
+  readonly rows: readonly HTMLElement[];
+  active: HTMLElement | undefined;
+}
+
+/** Whether `event` is Ctrl+Space, or Alt+Escape (Option+Esc), which open a property's named values. */
+function isNamedKey(event: KeyboardEvent): boolean {
+  return (event.ctrlKey && !event.altKey && !event.metaKey && (event.key === " " || event.code === "Space")) || (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "Escape");
+}
+
+/** The hexagon the named-values button shows when the host draws no `named-values` icon. */
+function hexagon(document: Document): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.4");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const outline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  outline.setAttribute("d", "M8 1.8 13.4 4.9v6.2L8 14.2 2.6 11.1V4.9z");
+  const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  dot.setAttribute("cx", "8");
+  dot.setAttribute("cy", "8");
+  dot.setAttribute("r", "1.6");
+  dot.setAttribute("fill", "currentColor");
+  dot.setAttribute("stroke", "none");
+  svg.append(outline, dot);
+  return svg;
 }
 
 /** An editor open when the reading was drawn again, to open again on the same value. */
@@ -504,6 +558,14 @@ export class NxViewerElement extends ElementBase {
   readonly #tools: HTMLSpanElement;
   /** The menu of a row's actions. */
   readonly #menu: HTMLDivElement;
+  /** The named-values popover open, if one is. */
+  #named: NamedSession | undefined;
+  /** The place whose named-values popover a press on its button just closed, which the click leaves closed. */
+  #namedClosedOnPress: string | undefined;
+  /** Each place drawn that offers named values, by its row's key. */
+  #namedPlaces = new Map<string, NamedPlace>();
+  /** The names chosen for places, by their keys, shown muted until the host's tree. */
+  #pendingNames = new Map<string, string>();
   /** Whether the open editor holds an entry that differs from its value, as `nx-draft` last said. */
   #draftChanged = false;
   /** Why the open editor cannot take its entry, under it while it cannot. */
@@ -558,6 +620,15 @@ export class NxViewerElement extends ElementBase {
       );
     if (this.#menuKey !== undefined && !onMark && !event.composedPath().includes(this.#menu)) {
       this.#closeMenu(false);
+    }
+    // A press outside the named-values popover closes it; one on its own button leaves the click
+    // that follows to close it, not open it again.
+    const named = this.#named;
+    if (named !== undefined && !event.composedPath().includes(this.#popover)) {
+      if (named.button !== undefined && event.composedPath().includes(named.button)) {
+        this.#namedClosedOnPress = named.place.key;
+      }
+      this.#closeNamed(false);
     }
     // A press on the tools is theirs: a case's chevron closes its popover itself.
     const path = event.composedPath();
@@ -625,7 +696,13 @@ export class NxViewerElement extends ElementBase {
     this.#popover = document.createElement("div");
     this.#popover.className = "popover";
     this.#popover.hidden = true;
-    this.#popover.addEventListener("keydown", (event) => this.#onPopoverKey(event));
+    this.#popover.addEventListener("keydown", (event) => (this.#named === undefined ? this.#onPopoverKey(event) : this.#onNamedKey(event)));
+    this.#popover.addEventListener("pointermove", (event) => {
+      const row = (event.target as Element).closest?.(".named-row") as HTMLElement | null;
+      if (this.#named !== undefined && row !== null && row !== this.#named.active) {
+        this.#setNamedActive(this.#named, row, false);
+      }
+    });
     // Choosing with the pointer keeps the focus in the popover's field.
     this.#popover.addEventListener("pointerdown", (event) => {
       if (!(event.target instanceof HTMLInputElement)) {
@@ -633,6 +710,14 @@ export class NxViewerElement extends ElementBase {
       }
     });
     this.#popover.addEventListener("click", (event) => {
+      const named = this.#named;
+      if (named !== undefined) {
+        const row = (event.target as Element).closest?.(".named-row") as HTMLElement | null;
+        if (row !== null) {
+          this.#chooseNamed(named, row);
+        }
+        return;
+      }
       const option = (event.target as Element).closest?.(".option") as HTMLElement | null;
       const session = this.#session;
       if (option === null || session === undefined) {
@@ -646,6 +731,12 @@ export class NxViewerElement extends ElementBase {
     });
     this.#popover.addEventListener("focusout", (event) => {
       const next = event.relatedTarget as Node | null;
+      if (this.#named !== undefined) {
+        if (next !== null && !this.#popover.contains(next)) {
+          this.#closeNamed(false);
+        }
+        return;
+      }
       const session = this.#session;
       if (session !== undefined && session.field === undefined && next !== null && !this.#popover.contains(next)) {
         this.#closeElsewhere(session);
@@ -965,6 +1056,7 @@ export class NxViewerElement extends ElementBase {
     // A new tree says what each edit made of the source, or that it made nothing.
     this.#pending.clear();
     this.#removed.clear();
+    this.#pendingNames.clear();
     this.#render();
     if (!sameDetails(beforeDetails, this.#detailsState)) {
       this.#reportDetails();
@@ -1223,7 +1315,9 @@ export class NxViewerElement extends ElementBase {
     this.#targets = new Map();
     this.#moreKeys = [];
     this.#moreCards.clear();
+    this.#namedPlaces.clear();
     this.#closeMenu(false);
+    this.#closeNamed(false);
     if (tree === undefined) {
       // A host that gives the next tree soon, at once or once it has it, keeps the height; one that
       // leaves the reading empty lets it go.
@@ -1273,6 +1367,7 @@ export class NxViewerElement extends ElementBase {
       this.#markEditable();
     }
     this.#fillUnwritten(index);
+    this.#showPendingNames();
     this.#markScrubbable();
     this.#fitTitles();
     // Keep the selection across a new tree when the node is still there. A fold asked for since,
@@ -1819,7 +1914,30 @@ export class NxViewerElement extends ElementBase {
       const anchor = this.ownerDocument.createElement("span");
       anchor.className = "row-anchor";
       anchor.append(mark);
+      // A property that offers named values has their button first, before its menu.
+      const place = this.#offeredPlace(row.dataset["key"]!);
+      if (place !== undefined && row.classList.contains("prop-field")) {
+        anchor.prepend(this.#namedButton(place, index.tree.nodes[index.byKey.get(place.key)!]?.name ?? "the property"));
+        anchor.classList.add("with-named");
+      }
       holder.append(anchor);
+    }
+    // A `let` whose type offers named values has their button just past its value.
+    for (const node of index.tree.nodes) {
+      if (node.role !== "declaration" || node.parent !== undefined) {
+        continue;
+      }
+      const place = this.#offeredPlace(node.key);
+      const drawn = place === undefined ? undefined : this.#rendered.get(`${node.key}.value`);
+      if (place === undefined || drawn === undefined || !this.#body.contains(drawn) || drawn.closest(".sheet-row") !== null) {
+        continue;
+      }
+      const anchor = this.ownerDocument.createElement("span");
+      anchor.className = "named-anchor";
+      anchor.append(this.#namedButton(place, node.name ?? "the value"));
+      // After the brace that closes a braced value, so the button follows all of it.
+      const after = drawn.nextElementSibling?.matches(".value-brace") === true ? drawn.nextElementSibling : drawn;
+      after.after(anchor);
     }
     // A property written on a line has the same menu, right after it while it is selected, taking
     // room there, so it shows where the reader clicked.
@@ -1978,7 +2096,7 @@ export class NxViewerElement extends ElementBase {
    * committed, and a case or a boolean has no entry to go live with.
    */
   #goLive(target: EditTarget, value: string, delay: number): void {
-    if (!this.#editable || target.adding === true || (target.kind !== "number" && target.kind !== "text" && target.kind !== "run" && target.kind !== "color")) {
+    if (!this.#editable || target.adding === true || target.detach === true || (target.kind !== "number" && target.kind !== "text" && target.kind !== "run" && target.kind !== "color")) {
       return;
     }
     let live = this.#live;
@@ -2430,6 +2548,16 @@ export class NxViewerElement extends ElementBase {
     event.stopPropagation();
     const field = session.field!;
     const target = session.target;
+    // Ctrl+Space or Alt+Escape trades the field for its property's named values.
+    if (isNamedKey(event)) {
+      const key = this.#placeKeyOf(target);
+      if (key !== undefined && this.#namedPlaces.has(key)) {
+        event.preventDefault();
+        this.#cancel(session, false);
+        this.#openNamed(key);
+      }
+      return;
+    }
     // The choices listed with the field: Alt+Down lists them and Alt+Up hides them; listed, the
     // arrows walk them, and otherwise a number's arrows step it.
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (session.choices?.length ?? 0) > 0) {
@@ -2502,7 +2630,7 @@ export class NxViewerElement extends ElementBase {
     if (target.kind === "number" || session.colorPart !== undefined) {
       value = value.trim();
     }
-    if (value === this.#currentOf(target)) {
+    if (value === this.#currentOf(target) && target.detach !== true) {
       this.#revertLive(target.key);
       this.#endSession(session, how === "key");
       session.host!.replaceChildren(...session.restore!);
@@ -2517,7 +2645,7 @@ export class NxViewerElement extends ElementBase {
       return false;
     }
     this.#endSession(session, how === "key");
-    if (value === this.#currentOf(target)) {
+    if (value === this.#currentOf(target) && target.detach !== true) {
       session.host!.replaceChildren(...session.restore!);
     } else {
       this.#commitValue(target, value);
@@ -2531,7 +2659,7 @@ export class NxViewerElement extends ElementBase {
    */
   #closeElsewhere(session: EditSession): void {
     const value = session.target.kind === "color" ? (this.#draftOf(session) ?? "").trim() : undefined;
-    if (value !== undefined && value !== this.#currentOf(session.target) && this.#problemOf(session.target, value) === undefined) {
+    if (value !== undefined && (value !== this.#currentOf(session.target) || session.target.detach === true) && this.#problemOf(session.target, value) === undefined) {
       this.#endSession(session, false);
       this.#commitValue(session.target, value);
       return;
@@ -2607,7 +2735,7 @@ export class NxViewerElement extends ElementBase {
       this.#fire(NX_EDIT_EVENT, { key: live.key, edit: editOf(live.target, value) });
       return;
     }
-    if (value === this.#currentOf(target)) {
+    if (value === this.#currentOf(target) && target.detach !== true) {
       return;
     }
     this.#pending.set(target.key, value);
@@ -3307,7 +3435,7 @@ export class NxViewerElement extends ElementBase {
       const raw = this.#draftOf(session) ?? "";
       const value = raw.trim();
       // A popover left as it was leaves the value as it is.
-      if (value === this.#currentOf(target)) {
+      if (value === this.#currentOf(target) && target.detach !== true) {
         this.#cancel(session, true);
       } else if (this.#problemOf(target, value) !== undefined) {
         this.#validate(session, true);
@@ -4047,6 +4175,16 @@ export class NxViewerElement extends ElementBase {
       // No editor takes its type, as a record's: Enter or a double-click opens the element in Source.
       field.dataset["opens"] = "true";
     }
+    // A property left out that offers named values has their button past its value's place.
+    const place = this.#editable ? unsetPlace(index, at, property) : undefined;
+    if (place !== undefined && namedValues(index.tree, place).length > 0) {
+      this.#namedPlaces.set(place.key, place);
+      field.dataset["namedKey"] = place.key;
+      const anchor = document.createElement("span");
+      anchor.className = "row-anchor with-named";
+      anchor.append(this.#namedButton(place, property.name));
+      cell.append(anchor);
+    }
     field.setAttribute("aria-label", `${property.name}, not written${property.default === undefined ? "" : `, default ${property.default}`}`);
   }
 
@@ -4183,6 +4321,10 @@ export class NxViewerElement extends ElementBase {
       if (goal !== undefined) {
         item("goto", `Go to ${goal.name}`);
       }
+      const replacement = this.#replacementOf(key);
+      if (replacement !== undefined) {
+        item("replace", "Replace with value", [document.createTextNode(replacement.value)]);
+      }
       const removal = this.#removed.has(key) ? undefined : removalOf(index, at);
       if (removal === "reset") {
         item("remove", "Reset to default", this.#defaultShownFor(at));
@@ -4273,8 +4415,11 @@ export class NxViewerElement extends ElementBase {
       return undefined;
     }
     const values = this.#index!.children[at] ?? [];
-    const value = values.length === 1 ? tree.nodes[values[0]!]! : undefined;
-    if (value?.role !== "reference" || value.name === undefined) {
+    const valueAt = values.length === 1 ? values[0]! : undefined;
+    const name = valueAt === undefined ? undefined : nameAt(this.#index!, valueAt);
+    const rootAt = name === undefined ? undefined : nameRoot(this.#index!, valueAt!);
+    const value = rootAt === undefined ? undefined : tree.nodes[rootAt]!;
+    if (value?.role !== "reference" || name === undefined) {
       return undefined;
     }
     const declaration = tree.nodes[topLevelLet(tree, value)];
@@ -4283,7 +4428,7 @@ export class NxViewerElement extends ElementBase {
     }
     const drawn = (key: string): boolean => this.#drawnAt(key) !== undefined;
     const key = drawn(`${declaration.key}.value`) ? `${declaration.key}.value` : declaration.key;
-    return drawn(key) ? { key, name: value.name } : undefined;
+    return drawn(key) ? { key, name } : undefined;
   }
 
   /** The element the reading draws the node with `key` as, if it draws it. */
@@ -4331,9 +4476,480 @@ export class NxViewerElement extends ElementBase {
         }
         break;
       }
+      case "replace":
+        this.#replaceWithValue(key);
+        break;
       default:
         this.#openSelected(true, true);
     }
+  }
+
+  // ---- Named values ---------------------------------------------------------------------------
+
+  /**
+   * The place the node with `key` is, an attribute or a `let`, when it offers named values; it is
+   * remembered for the button, the keys and a click on its token.
+   */
+  #offeredPlace(key: string): NamedPlace | undefined {
+    const index = this.#index;
+    const at = index?.byKey.get(key);
+    if (!this.#editable || index === undefined || at === undefined) {
+      return undefined;
+    }
+    const node = index.tree.nodes[at]!;
+    const place = node.role === "attribute" ? attributePlace(index, at) : node.role === "declaration" ? letPlace(index, at) : undefined;
+    if (place === undefined || namedValues(index.tree, place).length === 0) {
+      return undefined;
+    }
+    this.#namedPlaces.set(place.key, place);
+    return place;
+  }
+
+  /** The quiet button that opens `place`'s named values, named for the property `label`. */
+  #namedButton(place: NamedPlace, label: string): HTMLElement {
+    const document = this.ownerDocument;
+    const button = document.createElement("span");
+    button.className = "named-values";
+    button.setAttribute("role", "button");
+    button.setAttribute("aria-haspopup", "listbox");
+    button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-label", `Named values for ${label}`);
+    button.title = "Named values";
+    button.dataset["namedKey"] = place.key;
+    const icon = this.#icons?.("named-values");
+    button.append(icon === undefined ? hexagon(document) : icon.cloneNode(true));
+    return button;
+  }
+
+  /** The key of the place whose value `target` edits: its attribute's, its `let`'s, or a property left out. */
+  #placeKeyOf(target: EditTarget): string | undefined {
+    if (target.adding === true) {
+      return target.property === undefined ? undefined : `${target.property.element}.${target.property.name}`;
+    }
+    const tree = this.#index?.tree;
+    const parent = tree?.nodes[target.at]?.parent;
+    const owner = parent === undefined ? undefined : tree!.nodes[parent];
+    return owner?.role === "attribute" || owner?.role === "declaration" ? owner.key : undefined;
+  }
+
+  /** The named-values button drawn for the place with `key`, if one is. */
+  #namedButtonOf(key: string): HTMLElement | undefined {
+    return [...this.#body.querySelectorAll<HTMLElement>(".named-values")].find((button) => button.dataset["namedKey"] === key);
+  }
+
+  /** Opens the named-values popover of the place with `key`, placed by its value, its current name marked. */
+  #openNamed(key: string): void {
+    const index = this.#index;
+    const place = this.#namedPlaces.get(key);
+    if (!this.#editable || index === undefined || place === undefined) {
+      return;
+    }
+    if (this.#session !== undefined) {
+      this.#cancel(this.#session, false);
+    }
+    this.#closeMenu(false);
+    this.#closeCard();
+    this.#closeNamed(false);
+    if (!place.adding && this.#selection !== key) {
+      this.#select(key, true, false);
+    }
+    const button = this.#namedButtonOf(key);
+    const valueKey = place.value === undefined ? undefined : index.tree.nodes[place.value]!.key;
+    const anchor =
+      button?.closest<HTMLElement>(".sheet-value") ?? (valueKey === undefined ? undefined : this.#rendered.get(valueKey)) ?? button;
+    if (anchor === undefined) {
+      return;
+    }
+    const document = this.ownerDocument;
+    const label = place.property?.name ?? index.tree.nodes[index.byKey.get(key) ?? -1]?.name ?? "value";
+    const input = document.createElement("input");
+    input.className = "popover-filter";
+    input.placeholder = "Search named values";
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-label", `${derivedLabel(label)}: named values`);
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-controls", "nx-viewer-named");
+    const list = document.createElement("div");
+    list.className = "named-list";
+    list.id = "nx-viewer-named";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Named values");
+    const current = this.#pendingNames.get(key) ?? place.current;
+    const rows: HTMLElement[] = [];
+    const row = (classes: string, name: Node[], preview: Node[], selected: boolean): HTMLElement => {
+      const option = document.createElement("div");
+      option.className = `named-row ${classes}`.trim();
+      option.id = `nx-viewer-named-${rows.length}`;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", String(selected));
+      option.classList.toggle("current", selected);
+      const named = document.createElement("span");
+      named.className = "named-name";
+      named.append(...name);
+      const shown = document.createElement("span");
+      shown.className = "named-preview";
+      shown.append(...preview);
+      option.append(named, shown);
+      rows.push(option);
+      return option;
+    };
+    if (place.default !== undefined) {
+      const written = place.default.trim();
+      const swatch = isHexColor(written) ? [this.#swatchOf(written, false)] : [];
+      const option = row("named-default", [document.createTextNode("Default")], [...swatch, document.createTextNode(written)], current === undefined && place.adding);
+      option.dataset["default"] = "true";
+      const rule = document.createElement("div");
+      rule.className = "named-rule";
+      rule.setAttribute("role", "presentation");
+      list.append(option, rule);
+    }
+    const aliases = importAliases(index.tree);
+    let group: HTMLElement | undefined;
+    let groupOf = "";
+    for (const suggestion of namedValues(index.tree, place)) {
+      const id = `${suggestion.group.kind}\u0000${suggestion.group.label}`;
+      if (group === undefined || id !== groupOf) {
+        groupOf = id;
+        group = document.createElement("div");
+        group.className = "named-section";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", suggestion.group.label);
+        const heading = document.createElement("div");
+        heading.className = "named-group";
+        heading.setAttribute("aria-hidden", "true");
+        heading.textContent = suggestion.group.label;
+        group.append(heading);
+        list.append(group);
+      }
+      const parts = nameParts(suggestion.name, aliases);
+      const name: Node[] = [];
+      if (parts.quiet !== "") {
+        const quiet = document.createElement("span");
+        quiet.className = "named-quiet";
+        quiet.textContent = parts.quiet;
+        name.push(quiet);
+      }
+      name.push(document.createTextNode(parts.rest));
+      const preview: Node[] = [];
+      if (suggestion.preview !== undefined) {
+        if (suggestion.preview.kind === "color") {
+          preview.push(this.#swatchOf(suggestion.preview.value, suggestion.preview.outsideSrgb === true));
+        }
+        preview.push(document.createTextNode(previewText(suggestion.preview)));
+      }
+      const option = row("", name, preview, suggestion.name === current);
+      option.dataset["name"] = suggestion.name;
+      option.title = suggestion.doc === undefined ? suggestion.type : `${suggestion.type}\n${suggestion.doc}`;
+      group.append(option);
+    }
+    const empty = document.createElement("div");
+    empty.className = "named-empty";
+    empty.textContent = "No named values match";
+    empty.hidden = true;
+    list.append(empty);
+    const foot = document.createElement("div");
+    foot.className = "named-foot";
+    foot.textContent = "Previews show default values";
+    this.#popover.className = "popover named";
+    this.#popover.replaceChildren(input, list, foot);
+    this.#popover.hidden = false;
+    const session: NamedSession = { place, anchor, button, input, rows, active: undefined };
+    this.#named = session;
+    button?.classList.add("open");
+    button?.setAttribute("aria-expanded", "true");
+    input.addEventListener("input", () => this.#filterNamed(session));
+    this.#filterNamed(session, rows.find((option) => option.classList.contains("current")));
+    input.focus({ preventScroll: true });
+  }
+
+  /** A small square of the color `css`, marked when it lies outside sRGB. */
+  #swatchOf(css: string, outsideSrgb: boolean): HTMLElement {
+    const square = this.ownerDocument.createElement("span");
+    square.className = "swatch";
+    square.style.backgroundColor = css;
+    square.setAttribute("aria-hidden", "true");
+    if (outsideSrgb) {
+      square.classList.add("outside-srgb");
+      square.title = "Outside sRGB: shows differently on sRGB screens";
+    }
+    return square;
+  }
+
+  /**
+   * Shows the rows whose names hold every word typed, `.` read as a space, and the groups that still
+   * hold rows; the default's row only while nothing is typed. One row stays active.
+   */
+  #filterNamed(session: NamedSession, prefer?: HTMLElement): void {
+    const words = filterWords(session.input.value);
+    for (const row of session.rows) {
+      row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !nameHolds(row.dataset["name"] ?? "", words);
+    }
+    for (const group of this.#popover.querySelectorAll<HTMLElement>(".named-section")) {
+      group.hidden = ![...group.querySelectorAll<HTMLElement>(".named-row")].some((row) => !row.hidden);
+    }
+    const shown = session.rows.filter((row) => !row.hidden);
+    const rule = this.#popover.querySelector<HTMLElement>(".named-rule");
+    if (rule !== null) {
+      rule.hidden = words.length > 0;
+    }
+    const empty = this.#popover.querySelector<HTMLElement>(".named-empty");
+    if (empty !== null) {
+      empty.hidden = shown.length > 0;
+    }
+    this.#placeCard(session.anchor, this.#popover);
+    const keep = prefer ?? session.active;
+    this.#setNamedActive(session, keep !== undefined && shown.includes(keep) ? keep : shown[0], true);
+  }
+
+  /** Makes `row` the row Enter chooses, announced, and with `reveal`, scrolls the list alone to it. */
+  #setNamedActive(session: NamedSession, row: HTMLElement | undefined, reveal: boolean): void {
+    session.active = row;
+    for (const candidate of session.rows) {
+      candidate.classList.toggle("active", candidate === row);
+    }
+    if (row === undefined) {
+      session.input.removeAttribute("aria-activedescendant");
+      return;
+    }
+    session.input.setAttribute("aria-activedescendant", row.id);
+    const list = row.closest<HTMLElement>(".named-list");
+    if (!reveal || list === null) {
+      return;
+    }
+    // Only the list scrolls, below the label that stays at its top.
+    const heading = row.closest(".named-section")?.querySelector<HTMLElement>(".named-group");
+    const shown = row.getBoundingClientRect();
+    const port = list.getBoundingClientRect();
+    const top = port.top + (heading?.getBoundingClientRect().height ?? 0);
+    if (shown.top < top) {
+      list.scrollTop -= top - shown.top;
+    } else if (shown.bottom > port.bottom) {
+      list.scrollTop += shown.bottom - port.bottom;
+    }
+  }
+
+  #onNamedKey(event: KeyboardEvent): void {
+    // The popover's keys are its own, not the reading's or the host's.
+    event.stopPropagation();
+    const session = this.#named;
+    if (session === undefined) {
+      return;
+    }
+    const shown = session.rows.filter((row) => !row.hidden);
+    const at = session.active === undefined ? -1 : shown.indexOf(session.active);
+    switch (event.key) {
+      case "Escape":
+      case "Tab":
+        event.preventDefault();
+        this.#closeNamed(true);
+        return;
+      case "ArrowDown":
+      case "ArrowUp": {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        const next = shown[Math.max(0, Math.min(shown.length - 1, at + step))];
+        this.#setNamedActive(session, next, true);
+        return;
+      }
+      case "Enter":
+        event.preventDefault();
+        if (session.active !== undefined) {
+          this.#chooseNamed(session, session.active);
+        }
+        return;
+      default:
+        if (isNamedKey(event)) {
+          event.preventDefault();
+          this.#closeNamed(true);
+        }
+    }
+  }
+
+  /**
+   * Chooses `row`: writes its name over the place's value, or adds the property with it; the
+   * default's row leaves the property out; the current value's row changes nothing.
+   */
+  #chooseNamed(session: NamedSession, row: HTMLElement): void {
+    const index = this.#index;
+    const place = session.place;
+    this.#closeNamed(true);
+    if (index === undefined) {
+      return;
+    }
+    if (row.dataset["default"] === "true") {
+      const at = index.byKey.get(place.key);
+      if (!place.adding && at !== undefined && removalOf(index, at) !== undefined && !this.#removed.has(place.key)) {
+        this.#removed.add(place.key);
+        this.#pendingNames.delete(place.key);
+        this.#rendered.get(place.key)?.classList.add("pending");
+        this.#fire(NX_EDIT_EVENT, { key: place.key, edit: { kind: "remove" } });
+      }
+      return;
+    }
+    const name = row.dataset["name"]!;
+    if (name === (this.#pendingNames.get(place.key) ?? place.current)) {
+      return;
+    }
+    const value = { kind: "name", name } as const;
+    if (place.adding && place.property !== undefined) {
+      this.#fire(NX_EDIT_EVENT, { key: place.property.element, edit: { kind: "addProperty", name: place.property.name, value } });
+    } else if (place.value !== undefined) {
+      this.#fire(NX_EDIT_EVENT, { key: index.tree.nodes[place.value]!.key, edit: { kind: "setValue", value } });
+    } else {
+      return;
+    }
+    this.#pendingNames.set(place.key, name);
+    this.#showPendingNames();
+  }
+
+  /** Closes the named-values popover; with `refocus`, the reading takes the keys again. */
+  #closeNamed(refocus: boolean): void {
+    const session = this.#named;
+    if (session === undefined) {
+      return;
+    }
+    this.#named = undefined;
+    session.button?.classList.remove("open");
+    session.button?.setAttribute("aria-expanded", "false");
+    this.#popover.hidden = true;
+    this.#popover.className = "popover";
+    this.#popover.replaceChildren();
+    if (refocus) {
+      this.#body.focus({ preventScroll: true });
+    }
+  }
+
+  /** Draws each name chosen as its place's value, a token, muted, until the host's tree. */
+  #showPendingNames(): void {
+    const index = this.#index;
+    if (index === undefined) {
+      return;
+    }
+    const document = this.ownerDocument;
+    const token = (name: string): Node[] => {
+      const brace = (text: string): HTMLElement => {
+        const mark = document.createElement("span");
+        mark.className = "t block-brace value-brace";
+        mark.textContent = text;
+        return mark;
+      };
+      const written = document.createElement("span");
+      written.className = "pending-name";
+      written.textContent = name;
+      const preview = suggestionNamed(index.tree, name)?.preview;
+      const swatch = preview?.kind === "color" ? [this.#swatchOf(preview.value, preview.outsideSrgb === true)] : [];
+      return [...swatch, brace("{"), written, brace("}")];
+    };
+    for (const [key, name] of this.#pendingNames) {
+      const place = this.#namedPlaces.get(key);
+      if (place === undefined) {
+        continue;
+      }
+      if (place.adding) {
+        const row = [...this.#body.querySelectorAll<HTMLElement>("[data-named-key]")].find((candidate) => candidate.dataset["namedKey"] === key && candidate.matches(".sheet-row"));
+        const value = row?.querySelector<HTMLElement>(":scope > .sheet-value > .more-value");
+        if (row === undefined || value === null || value === undefined) {
+          continue;
+        }
+        row.classList.replace("dimmed-row", "added-row");
+        row.querySelector(".more-default")?.remove();
+        value.replaceChildren(...token(name));
+        value.classList.remove("editable-value");
+        value.classList.add("pending", "reference-token");
+        continue;
+      }
+      const drawn = this.#rendered.get(key);
+      const cell = drawn?.matches(".sheet-row") === true ? drawn.querySelector<HTMLElement>(":scope > .sheet-value") : null;
+      if (cell !== null && cell !== undefined) {
+        const anchor = cell.querySelector<HTMLElement>(":scope > .row-anchor");
+        const shown = document.createElement("span");
+        shown.className = "pending";
+        shown.append(...token(name));
+        cell.replaceChildren(shown, ...(anchor === null ? [] : [anchor]));
+        cell.classList.add("reference-token");
+        continue;
+      }
+      const value = place.value === undefined ? undefined : this.#rendered.get(index.tree.nodes[place.value]!.key);
+      if (value !== undefined) {
+        const braced = index.tree.nodes[place.value!]!.flags?.includes("braced") === true;
+        value.textContent = braced ? name : `{${name}}`;
+        value.classList.remove("editable-value");
+        value.classList.add("pending");
+      }
+    }
+  }
+
+  /**
+   * What Replace with value opens for the place with `key`, whose value is a name: an editor of its
+   * property's kind holding the name's preview. Nothing when the name has no preview its property's
+   * editor takes, as a color outside sRGB, which would be written as the sRGB hex it maps to.
+   */
+  #replacementOf(key: string): { readonly target: EditTarget; readonly value: string } | undefined {
+    const index = this.#index;
+    const place = this.#namedPlaces.get(key);
+    if (!this.#editable || index === undefined || place === undefined || place.current === undefined || place.value === undefined || this.#pendingNames.has(key)) {
+      return undefined;
+    }
+    const all = (index.tree.suggestions ?? []).filter((suggestion) => suggestion.name === place.current && suggestion.preview !== undefined);
+    const preview = (all.find((suggestion) => suggestion.key === place.suggestionKey) ?? all[0])?.preview;
+    if (preview === undefined) {
+      return undefined;
+    }
+    const base = {
+      at: place.value,
+      key: index.tree.nodes[place.value]!.key,
+      signed: true,
+      detach: true,
+      ...(place.property === undefined ? {} : { property: place.property })
+    };
+    if (preview.kind === "color") {
+      const hex = preview.hex;
+      return hex !== undefined && preview.outsideSrgb !== true
+        ? { target: { ...base, kind: "color", value: hex, colorLiteral: true }, value: hex }
+        : undefined;
+    }
+    const editor = editorOfType(index, place.type, undefined);
+    switch (preview.kind) {
+      case "number":
+        return editor?.kind === "number" ? { target: { ...base, kind: "number", value: preview.value }, value: preview.value } : undefined;
+      case "string":
+        return editor?.kind === "text" ? { target: { ...base, kind: "text", value: preview.value }, value: JSON.stringify(preview.value) } : undefined;
+      case "boolean":
+        return editor?.kind === "boolean" ? { target: { ...base, kind: "boolean", value: preview.value }, value: preview.value } : undefined;
+      case "case":
+        return editor?.kind === "case" && editor.cases?.some((candidate) => candidate.name === preview.value) === true
+          ? { target: { ...base, kind: "case", value: preview.value, cases: editor.cases }, value: preview.value }
+          : undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Opens the editor of the place with `key`'s property holding its name's preview, as if the value
+   * were written so; committing writes that value over the name. A boolean is written at once.
+   */
+  #replaceWithValue(key: string): void {
+    const replacement = this.#replacementOf(key);
+    if (replacement === undefined) {
+      return;
+    }
+    const { target } = replacement;
+    if (target.kind === "boolean") {
+      // A boolean's editor is a toggle, so its preview is written as it is.
+      this.#commitValue(target, replacement.value);
+      return;
+    }
+    const span = this.#rendered.get(target.key);
+    if (span === undefined) {
+      return;
+    }
+    this.#targets.set(target.key, target);
+    span.classList.add("replacing");
+    this.#openEditor(target.key, target.kind === "color" ? undefined : target.value);
   }
 
   // ---- Pressing in the reading ------------------------------------------------------------
@@ -4455,6 +5071,31 @@ export class NxViewerElement extends ElementBase {
       return;
     }
     if (this.#session?.field?.contains(target) === true) {
+      return;
+    }
+    // A property's named values open from their button, and a click on it while open closes them.
+    const namedButton = target.closest?.(".named-values") as HTMLElement | null | undefined;
+    if (namedButton !== null && namedButton !== undefined && this.#body.contains(namedButton)) {
+      const key = namedButton.dataset["namedKey"]!;
+      const closed = this.#namedClosedOnPress === key;
+      this.#namedClosedOnPress = undefined;
+      if (closed) {
+        return;
+      }
+      if (this.#named?.place.key === key) {
+        this.#closeNamed(true);
+      } else {
+        this.#openNamed(key);
+      }
+      return;
+    }
+    this.#namedClosedOnPress = undefined;
+    // A click on a token opens the named values of its property, when it offers them.
+    const token =
+      this.#editable && target.closest?.(".row-anchor") == null ? (target.closest?.(".reference-token") as HTMLElement | null | undefined) : undefined;
+    const tokenRow = token?.closest<HTMLElement>(".sheet-row[data-key]");
+    if (tokenRow !== null && tokenRow !== undefined && this.#body.contains(tokenRow) && this.#namedPlaces.has(tokenRow.dataset["key"]!)) {
+      this.#openNamed(tokenRow.dataset["key"]!);
       return;
     }
     // A row's menu opens from the mark at its end.
@@ -4643,6 +5284,17 @@ export class NxViewerElement extends ElementBase {
     // The host's undo and redo, pressed in the reading, see a value still going live committed.
     if (this.#session === undefined && this.#live !== undefined && (event.ctrlKey || event.metaKey) && /^[zy]$/i.test(event.key)) {
       this.#settleLive();
+    }
+    // Ctrl+Space, or Alt+Escape where the system takes Ctrl+Space, opens the selected property's
+    // named values, or those of the unset property whose row has the focus.
+    if (this.#editable && isNamedKey(event)) {
+      const row = target.closest?.(".dimmed-row[data-named-key], .added-row[data-named-key]") as HTMLElement | null | undefined;
+      const key = row?.dataset["namedKey"] ?? this.#selection;
+      if (key !== undefined && this.#namedPlaces.has(key)) {
+        event.preventDefault();
+        this.#openNamed(key);
+      }
+      return;
     }
     const more = target.closest?.(".more") as HTMLElement | null | undefined;
     if (more !== null && more !== undefined) {
