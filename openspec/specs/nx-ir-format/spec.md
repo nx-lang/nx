@@ -1042,16 +1042,16 @@ SHALL render the type as `<function ... />: R`, parenthesized under an occurrenc
 
 ### Requirement: NX IR evaluation cost is counted in operations
 The cost of evaluating NX IR SHALL be counted in operations, and the count SHALL be a function of
-the linked images and the values the host supplies alone: two runtimes that evaluate the same
-images with the same input and produce the same result SHALL count the same number of operations,
-in the same order. The format's documentation SHALL state the rules, which are:
+the linked images, the values the host supplies and, for a call the instance tree makes, the state
+the tree holds: two runtimes that evaluate the same images with the same input and produce the same
+result SHALL count the same number of operations, in the same order. The format's documentation SHALL state the rules, which are:
 
 - Evaluating a node costs one operation, charged before any of the node's children is evaluated.
   A node is charged every time it is evaluated: a loop body once per iteration, a parameter's
   default each time a call leaves the parameter out, a field's default each time a construction
   leaves the field out, a state field's default each time it is evaluated, a value's initializer
-  each time a `reference` node evaluates it, and an action handler's body each time a dispatch
-  runs it.
+  each time a `reference` node evaluates it rather than reusing its result, and an action handler's
+  body each time a dispatch runs it.
 - Testing one pattern of an `ifIs` arm costs one operation for the pattern's node, whether the
   runtime evaluates that node or, for a pattern that names a union case with fields, reads the
   case it names. A pattern that is not tested because an earlier pattern of its arm matched costs
@@ -1103,8 +1103,9 @@ in the same order. The format's documentation SHALL state the rules, which are:
     field an update record clears is;
   - two action handlers made by one node that captured as many slots compare their captured
     values slot by slot, in order, up to and including the first slot that differs. A handler
-    captures the slots of its frame as they stood when it was made, and a slot that was not bound
-    then compares only with another that was not;
+    captures the slots its node reads, as they stood when it was made, held in ascending slot
+    index, which is the order they are compared in, and a slot that was not bound then compares only
+    with another that was not;
   - two strings cost one more for every 64 UTF-16 code units of the shorter, rounded down.
 
   The items of a sequence and the slots of a frame are in one order in every runtime, so a
@@ -1258,7 +1259,7 @@ last three carry no span.
 - **THEN** binding it SHALL cost one operation, `[1, null]` two, `[[null, null], 1]` three, and `[[], [], [1, 2, 3]]` five
 
 #### Scenario: Two handlers compare what they captured
-- **WHEN** two action handlers made by one node in a frame with two bound slots are compared
+- **WHEN** two action handlers made by one node that reads two slots, both bound, are compared
 - **THEN** the comparison SHALL cost three operations when they captured equal values: the pair of handlers and each pair of captured values
 - **AND** SHALL cost two when the values in their first slot differ, whether or not those in the second differ too
 
@@ -1299,6 +1300,12 @@ last three carry no span.
 - **THEN** the evaluation SHALL cost what building it costs, a few hundred operations
 - **AND** the same value compared with another like it, or returned to the host, SHALL be refused
   by a budget of one hundred thousand, since walked as a tree it is 2^40 values
+
+#### Scenario: A value read twice is evaluated once
+- **WHEN** both runtimes evaluate `let pair() = { [palette.size, palette.size] }`, where
+  `palette` is a top-level value that reads no environment value
+- **THEN** both SHALL charge `palette`'s initializer and its type check once, and one operation for
+  each `reference` node
 
 ### Requirement: The conformance corpus records operation counts
 Every program of the conformance corpus SHALL record, beside its expected results, the operation
@@ -2007,8 +2014,8 @@ the host's root value; the entry module's provides, last first; and the declarat
 An override with a non-empty path SHALL apply its value at that path to the value the later sources
 give. A bundle SHALL contribute its entries for the value being read, last first, and no other entry
 of it SHALL be evaluated for that read. A default, an entry-module provide and a formula SHALL be
-evaluated at each read that uses it, in the environment of the read, with a formula's captured
-locals bound, and while any of them is evaluated for a value, a read of that value at any depth
+evaluated in the environment of the read, with a formula's captured locals bound, at each read that
+uses it and cannot reuse an earlier result under the requirement on reusing derived results, and while any of them is evaluated for a value, a read of that value at any depth
 SHALL see only the sources after it. A read that reaches a value while its default is being
 evaluated, with no source left after the default, SHALL fail with `nx-ir-environment-cycle` naming
 the values on the path. The provides of a module that is not the entry module SHALL be ignored.
@@ -2028,7 +2035,8 @@ The format's documentation SHALL state the cost of the environment feature, and 
 count it alike:
 
 - an `envRead` node costs one operation, and a default, entry-module provide or formula evaluated
-  for it is charged node by node each time it is evaluated;
+  for it is charged node by node each time it is evaluated; one whose earlier result is reused
+  costs nothing more;
 - an `envProvide` node costs one operation, and its override values evaluated where written, its
   bundle nodes and its body are charged as any other children; capturing a formula costs one
   operation;
@@ -2040,16 +2048,21 @@ count it alike:
 
 The conformance corpus SHALL hold cases for reads, defaults, field paths, `provide` around
 expressions and markup, entry-module provides and bundles, bundles in `provide` blocks, `with`
-steps, formulas, a bundle entry that reads another value the bundle sets, and root values, with
-their results and operation counts.
+steps, formulas, a bundle entry that reads another value the bundle sets, root values, and
+reused results, an entry-module bundle that reads a value it sets read for two values among them,
+with their results and operation counts.
 
 #### Scenario: Both runtimes count a read of a default alike
 - **WHEN** both runtimes evaluate a corpus case that reads an environment value whose default is
   `1 + 2`
 - **THEN** both SHALL count one operation for the `envRead` node and three for the default
 
-#### Scenario: A formula is charged at each read
+#### Scenario: A formula is charged once while what it reads is unchanged
 - **WHEN** both runtimes evaluate a corpus case in which a component reads `env.gap` twice and its
   descriptor carries the formula `env.space * 2`
+- **THEN** both SHALL charge the formula's nodes once
+
+#### Scenario: A formula is charged again under a new override of what it reads
+- **WHEN** the same component reads `env.gap` once, and once more inside `provide env.space=1`
 - **THEN** both SHALL charge the formula's nodes twice
 
