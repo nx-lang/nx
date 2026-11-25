@@ -312,13 +312,17 @@ function hexagon(document: Document): SVGSVGElement {
   svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.3");
-  // Sharp corners and no inner mark, so the six sides read as a hexagon even at text size.
-  svg.setAttribute("stroke-linejoin", "miter");
+  svg.setAttribute("stroke-width", "1.25");
+  // Figma's "Apply variable" mark: a hexagon with a small hollow ring at its centre.
+  svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
   const outline = document.createElementNS("http://www.w3.org/2000/svg", "path");
   outline.setAttribute("d", "M8 1.2 13.9 4.6v6.8L8 14.8 2.1 11.4V4.6z");
-  svg.append(outline);
+  const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  ring.setAttribute("cx", "8");
+  ring.setAttribute("cy", "8");
+  ring.setAttribute("r", "2.1");
+  svg.append(outline, ring);
   return svg;
 }
 
