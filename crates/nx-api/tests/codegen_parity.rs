@@ -7,6 +7,8 @@ mod graphics_tests;
 mod ir_corpus_tests;
 #[path = "codegen/ir_image_tests.rs"]
 mod ir_image_tests;
+#[path = "codegen/ir_instance_tree_stress_tests.rs"]
+mod ir_instance_tree_stress_tests;
 #[path = "codegen/ir_instance_tree_tests.rs"]
 mod ir_instance_tree_tests;
 #[path = "codegen/ir_runtime_tests.rs"]

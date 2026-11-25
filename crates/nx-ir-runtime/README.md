@@ -973,6 +973,13 @@ that the budget is charged before a string is built, and the bytes refused input
 that it is measured before it is copied. The tests that compile NX source, including
 the differential run against the interpreter, need the compiler and live in `nx-api/tests/codegen`
 (`cargo test -p nx-api --test codegen_parity ir_runtime`), as do the instance tree's, one for each scenario of its
-specification (`cargo test -p nx-api --test codegen_parity ir_instance_tree`). The cost tests remain in `nx-codegen`; they run generated host values
+specification (`cargo test -p nx-api --test codegen_parity ir_instance_tree`). Beside them, a
+differential stress test drives the tree with seeded random root changes, dispatches and passes,
+and after each step checks every node's output against a fresh initialization through the bare
+lifecycle, with the state the tree holds, and the change set against the outputs that changed
+(`cargo test -p nx-api --test codegen_parity ir_instance_tree_stress`).
+`NX_TREE_STRESS_SEEDS` and `NX_TREE_STRESS_ITERATIONS` set how much it runs (20 seeds of 40 steps by
+default), `NX_TREE_STRESS_SEED` reruns one seed a failure names, and `NX_TREE_STRESS_ALL` runs
+every seed past differences and sums them up by node. The cost tests remain in `nx-codegen`; they run generated host values
 through this runtime and the TypeScript one and hold this runtime's allocations to its counts
 (`cargo test -p nx-codegen --test cost_differential` and `--test cost_allocation`).

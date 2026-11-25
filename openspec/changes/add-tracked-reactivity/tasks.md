@@ -100,6 +100,10 @@
 - [x] 5.9 Tests for every `component-instance-tree` and `reactivity` tree scenario, including the
   modified scenarios of the existing requirements, a `set_environment` whose render fails after a
   kept result was evaluated again, and a dispatch skip followed by a tap on the old output.
+- [x] 5.10 A differential stress test of the tree: seeded random root changes (values written
+  differently that compare equal included), dispatches and passes over a program that mixes the
+  risky features, each step checked against a fresh initialization of every node and against the
+  change set.
 
 ## 6. Corpus and cost model
 
