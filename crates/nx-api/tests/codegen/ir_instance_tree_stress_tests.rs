@@ -9,10 +9,12 @@
 //! overrides and the state the tree holds, and compares the outputs with their handler tokens left
 //! out. It also checks that the change set lists every node whose output changed.</para>
 //!
-//! <para>`NX_TREE_STRESS_SEEDS` sets how many seeds run (default 20) and
+//! <para>`NX_TREE_STRESS_SEEDS` sets how many seeds run (default 20), `NX_TREE_STRESS_BASE_SEED` the
+//! first of them (default 0, so the seeds are 0 to 19 unless it is set) and
 //! `NX_TREE_STRESS_ITERATIONS` how many steps each runs (default 40); `NX_TREE_STRESS_SEED` runs
 //! that one seed alone. A failure names the seed, the steps that led to it and every node whose
-//! output differs. With `NX_TREE_STRESS_ALL` set, a seed goes on past a node that differs, and the
+//! output differs, and `NX_TREE_STRESS_SEED` with the seed it names, and the same
+//! `NX_TREE_STRESS_ITERATIONS`, runs it again. With `NX_TREE_STRESS_ALL` set, a seed goes on past a node that differs, and the
 //! end sums up, by node, how many seeds found it differing and the first difference found. Outputs
 //! compare as a host sees them written, so `0.0` and `-0.0` differ.</para>
 
@@ -536,7 +538,10 @@ fn the_tree_keeps_only_output_a_fresh_evaluation_gives() {
         .and_then(|value| value.parse().ok())
     {
         Some(seed) => vec![seed],
-        None => (0..env_var("NX_TREE_STRESS_SEEDS", 20)).collect(),
+        None => {
+            let base = env_var("NX_TREE_STRESS_BASE_SEED", 0);
+            (base..base.saturating_add(env_var("NX_TREE_STRESS_SEEDS", 20))).collect()
+        }
     };
     let all = std::env::var_os("NX_TREE_STRESS_ALL").is_some();
     // By node: how many seeds found it differing, and the first difference found.
