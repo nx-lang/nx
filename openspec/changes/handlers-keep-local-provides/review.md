@@ -18,7 +18,7 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 
 ## Findings
 
-### 🟡 Fixed - RF1 Bundle overrides captured by a handler are not tested in either runtime, and their cost parity is not pinned
+### ✅ Verified - RF1 Bundle overrides captured by a handler are not tested in either runtime, and their cost parity is not pinned
 - **Severity:** Medium
 - **Evidence:** `with_captured_overrides` (crates/nx-ir-runtime/src/environment.rs) and
   `withCapturedOverrides` (runtime/typescript/src/index.ts) each have a separate path for a `{bundle}`
@@ -31,8 +31,9 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   entry in the bundle) to the `environment-handlers` corpus program, so both runtimes pin its result
   and count.
 - **Fix:** Added a `Bundle` button to the `environment-handlers` `Page`, inside `provide env with dense with { mode="bundle" }` where `dense` sets `space=2` and the formula `gap={env.space * 3}`, and a ninth lifecycle batch that taps it (`bundle 6 2`). Both runtimes pass the corpus with the regenerated counts; the README describes the case.
+- **Verification:** The corpus `Page` lifecycle's ninth batch renders `bundle 6 2`, the result the environment page gives for `dense with { … }`: `mode` from the step, `gap` from the bundle's formula reading the bundle's `space`. `node test/corpus.test.mjs` and `ir_corpus` pass with equal counts, so the bundle replay path (`entries_of` / `bundleEntriesOf`, bundle flag) is pinned in both runtimes.
 
-### 🟡 Fixed - RF2 Equality of flagged handlers, and its cost, is untested in both runtimes
+### ✅ Verified - RF2 Equality of flagged handlers, and its cost, is untested in both runtimes
 - **Severity:** Medium
 - **Evidence:** The nx-ir-format scenario "Two flagged handlers compare their overrides after their
   slots" and the component-action-handlers scenario "Handlers under different overrides are unequal …
@@ -45,39 +46,44 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
   under equal and under different overrides with `==`, as `evaluation-cost` does for slots, so both
   results and counts are pinned in both runtimes.
 - **Fix:** Added corpus entrypoints `equalHandlers` and `unequalHandlers` (two buttons from `pinger`, whose handler reads `env.mode` inside `provide env.mode={label}`) and the control `quietHandlers`, whose handler reads nothing. Results are `true` and `false`, and the counts are 30, 30 and 25: the 5 more are the two lists, their pair of entries and that pair's three fields, as the nx-ir-format scenario says. Both runtimes pass with those counts.
+- **Verification:** Results `true` and `false`, counts 30, 30 and 25 in both runtimes. The 5-operation gap over `quietHandlers` is the override comparison of the nx-ir-format scenario, so a runtime that skipped or mis-costed it would fail. The `false` of `unequalHandlers` also follows from the descriptors' `$env`, which always mirrors the handler's capture; the counts, not that result, are what pin the handler comparison. The tree test still covers unequal handlers across renders.
 
-### 🟡 Fixed - RF3 A new test uses `.err().expect(...)`, which fails CI's clippy (`clippy::err_expect`)
+### ✅ Verified - RF3 A new test uses `.err().expect(...)`, which fails CI's clippy (`clippy::err_expect`)
 - **Severity:** Low
 - **Evidence:** crates/nx-api/tests/codegen/ir_runtime_tests.rs, `a_flagged_handler_without_environment_v3_is_refused`:
   `PreparedModule::prepare(...).err().expect("refused")`. CI's `cargo clippy --workspace --all-targets
   --locked -- -D warnings` fails on 3588446a.
 - **Recommendation:** Use `.expect_err("refused")`.
 - **Fix:** Changed to `.expect_err("refused")`. `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all --check` pass.
+- **Verification:** Line 5023 now uses `expect_err`; `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all --check` pass.
 
-### 🟡 Fixed - RF4 The stress test's module doc comment now has a line far past the line width
+### ✅ Verified - RF4 The stress test's module doc comment now has a line far past the line width
 - **Severity:** Low
 - **Evidence:** crates/nx-api/tests/codegen/ir_instance_tree_stress_tests.rs, the `//!` paragraph
   that lists the risky features: the inserted "handlers that read the environment inside a provide
   in a content child" makes one line about 160 characters; the rest of the paragraph wraps at 100.
 - **Recommendation:** Reflow the paragraph.
 - **Fix:** Reflowed the paragraph to the width of the rest of the comment.
+- **Verification:** No `//!` line in the file is past 100 characters.
 
-### 🟡 Fixed - RF5 The website's new "In an action handler" section runs into the next heading
+### ✅ Verified - RF5 The website's new "In an action handler" section runs into the next heading
 - **Severity:** Low
 - **Evidence:** sites/website/src/content/docs/reference/syntax/environment.md: the section's last
   paragraph is followed directly by `## Root values from the host` with no blank line, unlike every
   other heading on the page.
 - **Recommendation:** Add the blank line.
 - **Fix:** Added the blank line before `## Root values from the host`.
+- **Verification:** A blank line now comes before the heading.
 
-### 🟡 Fixed - RF6 The NX example in docs/nx-ir-format.md exceeds the NX line-length target
+### ✅ Verified - RF6 The NX example in docs/nx-ir-format.md exceeds the NX line-length target
 - **Severity:** Low
 - **Evidence:** docs/nx-ir-format.md, *Handlers and the environment*: the `LocaleList` body is one
   128-character line; AGENTS.md sets a 120-character target for NX source.
 - **Recommendation:** Split the `for` over lines, as the website's copy of the example does.
 - **Fix:** Split the `for` over lines, as the website's copy has it.
+- **Verification:** The example's lines are all within 120 characters.
 
-### 🟡 Fixed - RF7 Rebinding a handler held inside a captured override has no test
+### ✅ Verified - RF7 Rebinding a handler held inside a captured override has no test
 - **Severity:** Low
 - **Evidence:** The rust-ir-runtime requirement says rebinding "SHALL replace a handler held inside a
   captured override value as it replaces one held in a captured slot", and `Rebinding::handler`
@@ -86,6 +92,11 @@ sees the provide around it. `runtime/typescript` builds with no change to `dist`
 - **Recommendation:** Add a unit test in `rebinding_tests`: a handler whose captured overrides hold
   an old handler is replaced by one holding the new handler, and its slots are kept.
 - **Fix:** Added `a_handler_held_in_captured_overrides_is_replaced` to `rebinding_tests` (crates/nx-ir-runtime/src/component.rs): a handler whose captured overrides hold an old handler is replaced by one that holds the new handler, and its captured slot keeps its handler.
+- **Verification:** The test passes, and it fails to compile without `Handler::environment` and the walk, so it exercises the new code; the replaced handler holds the new handler and keeps its slot's handler by pointer.
+
+## Verification Notes
+- Verified at 2789be7e. The session had no tool for spawning subagents, so one agent ran the review,
+  the fixes and this verification; none of it wrote the original change. No new findings.
 
 ## Questions
 - None
