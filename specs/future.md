@@ -2416,7 +2416,11 @@ and `toGamut`. Left for later:
   should show the color beside its `toGamut(…, srgb)` version as two large, labelled patches
   ("P3" and "sRGB"), so a designer can judge whether the fallback an sRGB screen shows is
   acceptable. A split swatch was tried in the named-values list (`add-visual-value-suggestions`)
-  and dropped: at 12 pixels the halves looked the same, even on a P3 screen with HDR on.
+  and dropped: at 12 pixels the halves looked the same, even on a P3 screen with HDR on. A screen
+  can also report `(color-gamut: p3)` and still show no difference (LG HDR 4K panels under Windows
+  HDR, with Chrome on its scRGB F16 buffer, drew pure P3 red and green like `#ff0000` and
+  `#00ff00`), so the patches need labels and can't be the only signal; Macs, which manage P3 by
+  default, are where they pay off.
 - Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
 - `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.
 - Percentage literals for color (Bret, 2026-11-22). NX will get `23%` literals as a general
