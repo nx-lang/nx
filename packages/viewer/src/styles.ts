@@ -1104,7 +1104,9 @@ export const styles = `
 .popover.named { width: max-content; min-width: 22rem; max-width: min(36rem, 100%); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 .popover.named[hidden] { display: none; }
 .popover.named > .popover-filter { width: auto; margin: 6px 6px 0; }
-.popover .named-list { max-height: 18em; overflow: auto; overscroll-behavior: contain; padding: 2px 0 4px; }
+/* No top padding: a sticky group heading sticks inside it, and rows would show above the heading. */
+.popover .named-list { max-height: 18em; overflow: auto; overscroll-behavior: contain; padding: 0 0 4px; }
+.popover .named-list > :first-child { margin-top: 2px; }
 .popover .named-group {
   position: sticky;
   top: 0;
@@ -1114,17 +1116,7 @@ export const styles = `
   color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
   font-size: 11px;
 }
-.popover .named-group[hidden], .popover .named-row[hidden], .popover .named-rule[hidden], .popover .named-sub[hidden] { display: none; }
-/* A path two or more rows share, said once; its rows read their last part, a step in. */
-.popover .named-sub {
-  padding: 2px 10px 0 24px;
-  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
-  font-family: var(--nx-viewer-source-font-family, var(--mono));
-  font-size: 12px;
-}
-.popover .named-sub::after { content: "."; }
-.popover .named-row.in-sub { padding-left: 38px; }
-.popover .named-row.in-sub.current::before { left: 22px; }
+.popover .named-group[hidden], .popover .named-row[hidden], .popover .named-rule[hidden] { display: none; }
 .popover .named-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

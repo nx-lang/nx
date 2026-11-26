@@ -115,17 +115,31 @@ try {
   await fill.locator(".reference-token").click();
   await popover.waitFor();
   assert.ok((await popover.locator(".named-row .swatch").count()) > 5);
-  // Rows under a shared path read their last part, whole: no import alias, and no name cut.
+  // Palette rows read their whole name, without the import alias, and none is cut.
   const palette = await popover.evaluate((element) => {
-    const sub = [...element.querySelectorAll(".named-sub")].find((candidate) => candidate.dataset.path === "standardPalette");
-    sub?.scrollIntoView({ block: "start" });
-    element.querySelector(".named-list").scrollTop -= 30;
-    const names = [...element.querySelectorAll(".named-row")].filter((row) => row.dataset.sub === sub?.dataset.sub).map((row) => row.querySelector(".named-name"));
-    return { found: sub !== undefined, rows: names.length, cut: names.filter((name) => name.scrollWidth > name.clientWidth).map((name) => name.textContent), first: names[0]?.textContent };
+    const names = [...element.querySelectorAll(".named-row")].filter((row) => /standardPalette\./.test(row.dataset.name ?? "")).map((row) => row.querySelector(".named-name"));
+    names[0]?.scrollIntoView({ block: "center" });
+    return { rows: names.length, cut: names.filter((name) => name.scrollWidth > name.clientWidth).map((name) => name.textContent), first: names[0]?.textContent };
   });
-  assert.ok(palette.found && palette.rows > 10, JSON.stringify(palette));
+  assert.ok(palette.rows > 10, JSON.stringify(palette));
   assert.deepEqual(palette.cut, [], "no palette name is cut");
-  assert.ok(/^[a-z]+\d+$/.test(palette.first), JSON.stringify(palette));
+  assert.ok(/^standardPalette\.[a-z]+\d+$/.test(palette.first), JSON.stringify(palette));
+  // The sticky group heading hides the rows that scroll under it.
+  const covered = await popover.evaluate((element) => {
+    const list = element.querySelector(".named-list");
+    const deep = element.querySelector('.named-row[data-name="env.color.text.muted"]');
+    list.scrollTop += deep.getBoundingClientRect().top - list.getBoundingClientRect().top - 4;
+    const heading = [...element.querySelectorAll(".named-group")].find((candidate) => {
+      const box = candidate.getBoundingClientRect();
+      return box.top <= list.getBoundingClientRect().top + 3 && box.bottom > list.getBoundingClientRect().top;
+    });
+    if (heading === undefined) { return JSON.stringify({ list: list.getBoundingClientRect().top, scroll: list.scrollTop, heads: [...element.querySelectorAll(".named-group")].map((g) => [g.textContent, g.getBoundingClientRect().top, g.getBoundingClientRect().bottom]) }); }
+    const box = heading.getBoundingClientRect();
+    // Nothing shows between the list's top edge and the heading.
+    const hit = document.querySelector("nx-viewer").shadowRoot.elementFromPoint(box.left + box.width / 2, list.getBoundingClientRect().top + 0.5);
+    return hit === heading || heading.contains(hit) ? "ok" : `${hit?.className}: ${hit?.textContent}`;
+  });
+  assert.equal(covered, "ok");
   if (process.env.NX_NAMED_SCREENSHOTS) {
     await page.screenshot({ path: `${process.env.NX_NAMED_SCREENSHOTS}/named-values-palette.png`, clip: await popover.boundingBox() });
   }

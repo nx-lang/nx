@@ -4697,39 +4697,12 @@ export class NxViewerElement extends ElementBase {
     }
     // What a row reads, and the path it shares with its neighbours: two or more rows in a row under
     // one path (`standardPalette.`, `color.text.`) read only their last part, under a subheading.
-    const spelledOf = (suggestion: (typeof suggestions)[number]): { quiet: string; rest: string; path: string } => {
-      const prefix = shared.get(groupId(suggestion)) ?? "";
-      const parts = prefix !== "" && suggestion.name.startsWith(prefix) ? { quiet: "", rest: suggestion.name.slice(prefix.length) } : nameParts(suggestion.name, aliases);
-      const dot = parts.rest.lastIndexOf(".");
-      return { ...parts, path: parts.quiet === "" && dot > 0 ? parts.rest.slice(0, dot) : "" };
-    };
-    // Within a group, rows under one path come together, in the order each path first appears and
-    // each row's own order kept, so `color.text.*` does not split the `color.*` rows around it.
-    const buckets = new Map<string, { suggestion: (typeof suggestions)[number]; parts: ReturnType<typeof spelledOf> }[]>();
-    for (const suggestion of suggestions) {
-      const parts = spelledOf(suggestion);
-      const bucket = `${groupId(suggestion)}\u0000${parts.path}`;
-      buckets.set(bucket, [...(buckets.get(bucket) ?? []), { suggestion, parts }]);
-    }
-    const ordered = [...buckets.values()].flat();
-    const spelled = ordered.map((item) => item.parts);
-    const pathOf = (at: number): string => {
-      const here = spelled[at]!.path;
-      if (here === "") {
-        return "";
-      }
-      const same = (other: number): boolean => other >= 0 && other < ordered.length && spelled[other]!.path === here && groupId(ordered[other]!.suggestion) === groupId(ordered[at]!.suggestion);
-      return same(at - 1) || same(at + 1) ? here : "";
-    };
     let group: HTMLElement | undefined;
     let groupOf = "";
-    let sub: HTMLElement | undefined;
-    let subs = 0;
-    for (const [at, { suggestion }] of ordered.entries()) {
+    for (const suggestion of suggestions) {
       const id = groupId(suggestion);
       if (group === undefined || id !== groupOf) {
         groupOf = id;
-        sub = undefined;
         group = document.createElement("div");
         group.className = "named-section";
         group.setAttribute("role", "group");
@@ -4741,19 +4714,9 @@ export class NxViewerElement extends ElementBase {
         group.append(heading);
         list.append(group);
       }
-      const path = pathOf(at);
-      if (path === "") {
-        sub = undefined;
-      } else if (sub === undefined || sub.dataset["path"] !== path) {
-        sub = document.createElement("div");
-        sub.className = "named-sub";
-        sub.setAttribute("aria-hidden", "true");
-        sub.dataset["path"] = path;
-        sub.dataset["sub"] = String(subs++);
-        sub.textContent = path;
-        group.append(sub);
-      }
-      const parts = path === "" ? spelled[at]! : { quiet: "", rest: spelled[at]!.rest.slice(path.length + 1) };
+      // Under a heading, a row drops the `env.` or alias its whole group shares, and reads the rest.
+      const prefix = shared.get(id) ?? "";
+      const parts = prefix !== "" && suggestion.name.startsWith(prefix) ? { quiet: "", rest: suggestion.name.slice(prefix.length) } : nameParts(suggestion.name, aliases);
       const name: Node[] = [];
       if (parts.quiet !== "") {
         const quiet = document.createElement("span");
@@ -4788,10 +4751,6 @@ export class NxViewerElement extends ElementBase {
       }
       const option = row("", name, preview, suggestion.name === current);
       option.dataset["name"] = suggestion.name;
-      if (path !== "" && sub !== undefined) {
-        option.dataset["sub"] = sub.dataset["sub"];
-        option.classList.add("in-sub");
-      }
       // Search reads the description too, so "ring" finds the focus color.
       option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
       // The lines under the list give the active row's doc, then a wide color's exact value. Every
@@ -4912,9 +4871,6 @@ export class NxViewerElement extends ElementBase {
     const words = filterWords(session.input.value);
     for (const row of session.rows) {
       row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !nameHolds(row.dataset["search"] ?? row.dataset["name"] ?? "", words);
-    }
-    for (const sub of this.#popover.querySelectorAll<HTMLElement>(".named-sub")) {
-      sub.hidden = !session.rows.some((row) => row.dataset["sub"] === sub.dataset["sub"] && !row.hidden);
     }
     for (const group of this.#popover.querySelectorAll<HTMLElement>(".named-section")) {
       group.hidden = ![...group.querySelectorAll<HTMLElement>(".named-row")].some((row) => !row.hidden);

@@ -111,9 +111,7 @@ function listed(element: NxViewerElement): string[] {
     }
     for (const row of rows) {
       if (!row.hidden) {
-        // A row under a subheading reads its last part; the list gives its path back.
-        const sub = row.dataset["sub"] === undefined ? undefined : child.querySelector<HTMLElement>(`.named-sub[data-sub="${row.dataset["sub"]}"]`);
-        const name = `${sub === undefined || sub === null ? "" : `${sub.dataset["path"]}.`}${row.querySelector(".named-name")!.textContent}`;
+        const name = row.querySelector(".named-name")!.textContent;
         const preview = row.querySelector(".named-preview")!.textContent;
         lines.push(`${row.classList.contains("current") ? "* " : ""}${name}${preview === "" ? "" : ` ${preview}`}`);
       }
@@ -202,12 +200,11 @@ describe("named values", () => {
     assert.ok(rows.includes("# @nx/design"), rows.join("\n"));
     assert.ok(rows.some((row) => row.startsWith("standardPalette.blue600 #")), rows.join("\n"));
     assert.ok(popover(element).querySelector(".named-row .swatch") !== null);
-    // Rows that share a path read their last part under it, and no row repeats the import alias.
+    // Rows read their whole name, without the `env.` or import alias their group shares.
     const blue = popover(element).querySelector<HTMLElement>('.named-row[data-name="design.standardPalette.blue600"], .named-row[data-name="standardPalette.blue600"]')!;
-    assert.equal(blue.querySelector(".named-name")!.textContent, "blue600");
-    assert.equal(popover(element).querySelector<HTMLElement>(`.named-sub[data-sub="${blue.dataset["sub"]}"]`)?.dataset["path"], "standardPalette");
+    assert.equal(blue.querySelector(".named-name")!.textContent, "standardPalette.blue600");
     const muted = popover(element).querySelector<HTMLElement>('.named-row[data-name="env.color.text.muted"]')!;
-    assert.equal(muted.querySelector(".named-name")!.textContent, "muted");
+    assert.equal(muted.querySelector(".named-name")!.textContent, "color.text.muted");
     assert.ok(![...popover(element).querySelectorAll(".named-quiet")].some((quiet) => quiet.textContent === "design."));
     const input = popover(element).querySelector("input")!;
     input.value = "text mu";
@@ -443,12 +440,11 @@ describe("named values in graphics", () => {
     assert.ok(rows.includes("# Environment") && rows.some((row) => row.startsWith("color.accent #155dfc")), rows.join("\n"));
     assert.ok(rows.includes("# @nx/design") && rows.some((row) => row.startsWith("standardPalette.blue600 #155dfc")), rows.join("\n"));
     assert.ok(popover(element).querySelector(".named-row .swatch") !== null);
-    // Rows that share a path read their last part under it, and no row repeats the import alias.
+    // Rows read their whole name, without the `env.` or import alias their group shares.
     const blue = popover(element).querySelector<HTMLElement>('.named-row[data-name="design.standardPalette.blue600"], .named-row[data-name="standardPalette.blue600"]')!;
-    assert.equal(blue.querySelector(".named-name")!.textContent, "blue600");
-    assert.equal(popover(element).querySelector<HTMLElement>(`.named-sub[data-sub="${blue.dataset["sub"]}"]`)?.dataset["path"], "standardPalette");
+    assert.equal(blue.querySelector(".named-name")!.textContent, "standardPalette.blue600");
     const muted = popover(element).querySelector<HTMLElement>('.named-row[data-name="env.color.text.muted"]')!;
-    assert.equal(muted.querySelector(".named-name")!.textContent, "muted");
+    assert.equal(muted.querySelector(".named-name")!.textContent, "color.text.muted");
     assert.ok(![...popover(element).querySelectorAll(".named-quiet")].some((quiet) => quiet.textContent === "design."));
   });
 });
