@@ -2423,6 +2423,12 @@ and `toGamut`. Left for later:
   default, are where they pay off.
 - Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
 - `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.
+- `@nx/graphics` docs still call `Paint.color`'s `color` and `GradientStop.color` a "Shared sRGB
+  color", which is out of date now that `Color` can be wide-gamut (`oklch`, `displayP3`). The docs
+  should say a wide color is mapped into sRGB when drawn (until P3 surfaces land). Left out of
+  `add-visual-value-suggestions` because editing `graphics.nx` shifts library source offsets, so the
+  graphics preview fixtures (`crates/nx-graphics-skia/fixtures/revisions/*/manifest.json`) must be
+  regenerated with it.
 - Percentage literals for color (Bret, 2026-11-22). NX will get `23%` literals as a general
   language feature. Once they exist, color creation should accept them where CSS does. Channels,
   lightness and alpha would take `50%` for 0.5, as in `c.rgb(100%, 50%, 0%)`,
