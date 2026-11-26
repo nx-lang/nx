@@ -4712,9 +4712,12 @@ export class NxViewerElement extends ElementBase {
       option.dataset["name"] = suggestion.name;
       // Search reads the description too, so "ring" finds the focus color.
       option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
-      // Its type and full value lead, so the one-line detail never cuts the value off.
-      const typed = value === undefined ? suggestion.type : `${suggestion.type} ${value}`;
-      option.title = suggestion.doc === undefined ? typed : `${typed}\n${suggestion.doc}`;
+      // The line under the list gives the active row's doc, and its full value only when the row
+      // shows a swatch alone. Every row fits the same property, so the type would only repeat.
+      const hidden = value !== undefined && suggestion.preview?.kind === "color" && value.length > 9 ? value : undefined;
+      // A doc that only restates the value, as a scale step's `/// 12` does, adds nothing.
+      const doc = suggestion.doc?.trim() === value ? undefined : suggestion.doc;
+      option.dataset["detail"] = [hidden, doc].filter((part) => part !== undefined).join(" \u2014 ");
       group.append(option);
     }
     // Outside the listbox, which holds options alone; always there, so a screen reader announces
@@ -4723,7 +4726,7 @@ export class NxViewerElement extends ElementBase {
     empty.className = "named-empty";
     empty.setAttribute("role", "status");
     empty.setAttribute("aria-live", "polite");
-    // The active row's type and doc, which its hover card gives the pointer, for the keyboard.
+    // The active row's doc, and a full value its row cuts, for the pointer and the keyboard alike.
     const detail = document.createElement("div");
     detail.className = "named-detail";
     detail.id = "nx-viewer-named-detail";
@@ -4800,7 +4803,7 @@ export class NxViewerElement extends ElementBase {
     const detail = this.#popover.querySelector<HTMLElement>(".named-detail");
     if (detail !== null) {
       // One line, kept as the active row changes, so the popover keeps its size.
-      detail.textContent = (row?.title ?? "").replace(/\n/g, " \u2014 ");
+      detail.textContent = row?.dataset["detail"] ?? "";
     }
     if (row === undefined) {
       session.input.removeAttribute("aria-activedescendant");

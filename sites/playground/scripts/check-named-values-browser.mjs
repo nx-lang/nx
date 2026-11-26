@@ -48,6 +48,14 @@ try {
   const popover = viewer.locator(".popover.named");
   await popover.waitFor();
   assert.equal(await popover.locator(".named-row.current").getAttribute("data-name"), "env.space.md");
+  // It opens on the current value: active, and inside the list's visible part, below its heading.
+  assert.equal(await popover.locator(".named-row.active").getAttribute("data-name"), "env.space.md");
+  const placed = await popover.evaluate((element) => {
+    const list = element.querySelector(".named-list").getBoundingClientRect();
+    const current = element.querySelector(".named-row.current").getBoundingClientRect();
+    return { list: [list.top, list.bottom], current: [current.top, current.bottom] };
+  });
+  assert.ok(placed.current[0] >= placed.list[0] + 16 && placed.current[1] <= placed.list[1], JSON.stringify(placed));
   assert.equal(await popover.locator(".named-group").first().textContent(), "Environment");
   const shoot = async (name) => {
     if (process.env.NX_NAMED_SCREENSHOTS) {

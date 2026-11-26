@@ -27,8 +27,8 @@ popover opens. Typing SHALL keep the rows whose name or doc holds every word typ
 SHALL move through the rows, from the marked row when none is active yet, Enter SHALL choose the
 active row, and Escape or a click elsewhere SHALL close the popover and keep the selection. The list
 SHALL scroll inside the popover, its group labels staying at its top as it scrolls, and never scroll
-the reading. A row's hover card, and a line above the foot for the active row, SHALL give its type, its full
-preview text, and its doc. The popover's foot SHALL read, quieter, `Values at their defaults, before
+the reading. A line above the foot SHALL give the active row's doc, and its full preview text when the row
+shows a swatch alone; rows carry no hover card, since pointing at a row makes it active. The popover's foot SHALL read, quieter, `Values at their defaults, before
 any provide or env. override`. The search field SHALL be a combobox over a listbox, with the active
 row announced.
 

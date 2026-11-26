@@ -156,9 +156,10 @@ describe("named values", () => {
     const empty = popover(element).querySelector<HTMLElement>(".named-empty")!;
     assert.equal(empty.getAttribute("role"), "status");
     assert.equal(empty.textContent, "No named values match");
-    input.value = "gap";
+    input.value = "space md";
     input.dispatchEvent(new window.Event("input"));
-    assert.match(popover(element).querySelector(".named-detail")!.textContent ?? "", /Spacing/, "the active row's type shows for the keyboard");
+    assert.equal(popover(element).querySelector(".named-detail")!.textContent, "", "a doc that restates the value is left out");
+    assert.equal(popover(element).querySelector(".named-row.active")!.getAttribute("title"), null, "no hover card repeats the detail");
   });
 
   it("walks the rows with the arrows, and Enter with none active changes nothing", async () => {
