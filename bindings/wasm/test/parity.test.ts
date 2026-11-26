@@ -261,6 +261,51 @@ visualizer Color = <ValueVisualizer format=color />
     }
   });
 
+  it("answers the source tree with suggestions identically for every source of the corpus", () => {
+    const tokens = `import "@nx/design"
+
+let brandRed = #e11d48
+let gap: Spacing = 6
+component <Card padding: Spacing = 0 fill: Color = #ffffff /> = { <div /> }
+let root() = <Card padding={env.space.md} fill={brandRed} />
+`;
+    for (const [name, source] of Object.entries({ ...sources, tokens })) {
+      const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
+      const fromNode = new NodeLanguageSnapshot(corpus);
+      const fromWasm = host.createLanguageSnapshot(corpus);
+      try {
+        const tree = JSON.parse(JSON.stringify(fromWasm.sourceTree(uri, { suggestions: true })));
+        expect(tree, name).toEqual(fromNode.sourceTree(uri, { suggestions: true }));
+        if (name === "tokens") {
+          expect(JSON.stringify(tree)).toContain('"name":"env.space.md"');
+          expect(JSON.stringify(tree)).toContain('"suggestionKey":');
+        }
+      } finally {
+        fromWasm.dispose();
+        fromNode.dispose();
+      }
+    }
+  });
+
+  it("answers name edits identically", () => {
+    const source = `import "@nx/design"
+component <Card padding: Spacing = 0 /> = { <div /> }
+let root() = <Card padding=8 />
+`;
+    const corpus = [{ uri, source, identity: "demo/input.nx", version: 7 }];
+    const fromNode = new NodeLanguageSnapshot(corpus);
+    const fromWasm = host.createLanguageSnapshot(corpus);
+    try {
+      const edit = { kind: "setValue", value: { kind: "name", name: "env.space.md" } } as const;
+      const answer = fromWasm.sourceEdit(uri, "root.body.padding.value", edit);
+      expect(answer).toEqual(fromNode.sourceEdit(uri, "root.body.padding.value", edit));
+      expect(answer.edits.map((change) => change.newText)).toEqual(["{env.space.md}"]);
+    } finally {
+      fromWasm.dispose();
+      fromNode.dispose();
+    }
+  });
+
   it("answers hover and completions identically at every line start", () => {
     const lineCount = sources.component.split("\n").length;
 

@@ -22,10 +22,11 @@ test("a failure is shown for its own source, with the older tree marked stale", 
   assert.equal(readingOf(answers, "a").failure, null);
 });
 
-test("the reading asks for the program's visualizers, naming no host modules", () => {
+test("the reading asks for the program's visualizers, naming no host modules, and for suggestions", () => {
   assert.deepEqual(readingRequest("nx://playground/playground.nx", "let a = 1"), {
     documents: [{ uri: "nx://playground/playground.nx", source: "let a = 1" }],
     uri: "nx://playground/playground.nx",
     visualizers: {},
+    suggestions: true,
   });
 });

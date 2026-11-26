@@ -60,6 +60,8 @@ import type {
 export interface SourceTreeOptions {
   /** Resolve visualizer declarations and attach each declaration's resolved visualizer. */
   visualizers?: SourceTreeVisualizersOption;
+  /** List the named values the document can reach, and give properties their suggestion keys. */
+  suggestions?: boolean;
 }
 
 const encoder = new TextEncoder();
@@ -342,7 +344,8 @@ export interface NxLanguageSnapshot {
    *
    * Unstable: the answer's shape may change in any release until a later one commits to it.
    *
-   * With `options.visualizers`, each declaration entry with a resolved visualizer carries it.
+   * With `options.visualizers`, each declaration entry with a resolved visualizer carries it. With
+   * `options.suggestions`, the answer lists the named values the document can reach.
    */
   sourceTree(uri: string, options?: SourceTreeOptions): SourceTree;
 
@@ -955,7 +958,11 @@ class WasmLanguageSnapshot implements NxLanguageSnapshot {
     return this.#host.callWithArgument<SourceTree>(
       "nx_wasm_snapshot_source_tree",
       (exports, pointer, length) => exports.nx_wasm_snapshot_source_tree(handle, pointer, length),
-      options?.visualizers === undefined ? { uri } : { uri, visualizers: options.visualizers }
+      {
+        uri,
+        ...(options?.visualizers === undefined ? {} : { visualizers: options.visualizers }),
+        ...(options?.suggestions === true ? { suggestions: true } : {}),
+      }
     );
   }
 

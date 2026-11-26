@@ -140,7 +140,7 @@ export const styles = `
 /* A row's icon centers on its line, and its menu's anchor sits at the line's top, so neither moves
    the text off the baseline every row shares; a row is exactly one source line tall. */
 .source .row-element > .row-head > .element-icon { align-self: center; }
-.source .row-element > .row-head > .item-menu { align-self: flex-start; }
+.source .row-element > .row-head > :is(.item-menu, .named-anchor) { align-self: flex-start; }
 /* A row's chevron hangs left of its icon and takes none of the row's gap, so a row that holds
    children starts its icon where its siblings and the lines of an if or a for do. */
 .source .row-element > .row-head > button.fold { margin-right: -0.8ch; }
@@ -352,7 +352,7 @@ export const styles = `
   margin: 0 0.25em 0 0.1em;
   border-radius: 2px;
   border: 0;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 /* A color outside sRGB: a small corner notch, since an sRGB screen draws it mapped. */
@@ -972,7 +972,7 @@ export const styles = `
   height: 0.75em;
   margin-right: 0.4em;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 .menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
@@ -1029,7 +1029,7 @@ export const styles = `
   height: 0.75em;
   margin-right: 0.4em;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 /* A field's choices chevron: drawn where it would stand in the line, just past the value, and taken
@@ -1062,4 +1062,142 @@ export const styles = `
 .source .value-tools.with-choices .choices-toggle { display: inline-block; position: relative; width: 12px; cursor: pointer; }
 .source .value-tools.open .choices-toggle::after { transform: rotate(180deg); }
 .body.scrubbing, .body.scrubbing * { cursor: ew-resize !important; user-select: none; }
+/* A property's named-values button: a quiet hexagon just past its value, before its menu, under the
+   pointer, while selected or open, from a point that takes no room, so it moves nothing. */
+.source .named-values {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin-left: 0.5ch;
+  display: inline-flex;
+  align-items: center;
+  height: 1lh;
+  padding: 0 0.3ch;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  visibility: hidden;
+  color: var(--nx-viewer-fold-color, light-dark(#8c959f, #7a7a7a));
+}
+.source .named-values > svg { width: 1em; height: 1em; }
+.source .row-anchor.with-named > .row-menu { left: 3ch; }
+.source .property-menu.with-named:has(> .row-menu.selected) { width: 5.6ch; }
+.source .property-menu.with-named > .row-menu { left: 3ch; }
+.source .named-anchor { position: relative; display: inline-block; width: 0; height: 1lh; vertical-align: top; }
+.source .sheet-row:hover > :is(.sheet-value, .sheet-below) > .row-anchor > .named-values,
+.source .sheet-row.selected > :is(.sheet-value, .sheet-below) > .row-anchor > .named-values,
+.source .sheet-row:has(> .sheet-value .editing) > .sheet-value > .row-anchor > .named-values,
+.source .sheet-row:focus-within > .sheet-value > .row-anchor > .named-values,
+.source [data-role="declaration"]:hover > .named-anchor > .named-values,
+.source [data-role="declaration"].selected > .named-anchor > .named-values,
+.source [data-role="declaration"]:hover > .row-element > .row-head > .named-anchor > .named-values,
+.source [data-role="declaration"].selected > .row-element > .row-head > .named-anchor > .named-values,
+.source [data-role="declaration"]:has(> .row-element.selected) > .row-element > .row-head > .named-anchor > .named-values,
+.source .property-menu:has(> .row-menu.selected) > .named-values,
+.source .named-values.open { visibility: visible; }
+.source .named-values:hover, .source .named-values.open {
+  color: var(--nx-viewer-foreground, CanvasText);
+  background: var(--nx-viewer-edit-hover, light-dark(#0000000f, #ffffff17));
+}
+.source .reference-token { cursor: pointer; }
+/* While a token is replaced by a value, its braces and swatch give way to the value's editor. */
+.source .sheet-value:has(> .replacing.editing) > :is(.value-brace, .swatch) { display: none; }
+/* The named-values popover: a search field over the values by group, each with its preview. */
+/* As wide as its widest row, within the room the window leaves; fixed once open. */
+.popover.named { width: max-content; min-width: 22rem; max-width: min(36rem, 100%); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.popover.named[hidden] { display: none; }
+.popover.named > .popover-filter { width: auto; margin: 6px 6px 0; }
+/* No top padding: a sticky group heading sticks inside it, and rows would show above the heading. */
+.popover .named-list { max-height: 18em; overflow: auto; overscroll-behavior: contain; padding: 0 0 4px; }
+.popover .named-list > :first-child { margin-top: 2px; }
+.popover .named-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px 2px;
+  background: var(--nx-viewer-card-background, light-dark(#ffffff, #202020));
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-size: 11px;
+}
+.popover .named-group[hidden], .popover .named-row[hidden], .popover .named-rule[hidden] { display: none; }
+.popover .named-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 1px 10px 1px 24px;
+  margin: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+}
+.popover .named-row.active { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
+.popover .named-row.current::before { content: "\\2713"; position: absolute; left: 8px; }
+.popover .named-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: var(--nx-viewer-source-font-size, 13px);
+}
+.popover .named-quiet { color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585)); }
+.popover .named-default .named-name { font-family: inherit; font-size: 13px; }
+.popover .named-preview {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+  font-family: var(--nx-viewer-source-font-family, var(--mono));
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.popover .named-preview .swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
+  vertical-align: -0.05em;
+}
+/* A color outside sRGB: its gamut before its nearest sRGB hex, so the column stays one format. */
+.popover .named-preview .gamut-tag {
+  margin-right: 0.4em;
+  padding: 0 0.3em;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  font-family: var(--sans, system-ui, sans-serif);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.3;
+  vertical-align: 0.1em;
+  opacity: 0.8;
+}
+.popover .named-rule { height: 1px; margin: 3px 8px; background: var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f)); }
+.popover .named-empty { padding: 8px 10px; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
+.popover .named-empty:empty { padding: 0; }
+/* Two lines, always kept, so the popover keeps its size: the doc, then the exact value, quieter. */
+.popover .named-detail {
+  padding: 4px 10px;
+  border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+  font-size: 11.5px;
+}
+.popover .named-detail[hidden], .popover .named-detail > [hidden], .popover .named-foot[hidden] { display: none; }
+.popover .named-detail > div {
+  min-height: 1lh;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.popover .named-detail .named-exact {
+  font-family: var(--mono);
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
+}
+.popover .named-foot {
+  padding: 4px 10px;
+  border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+  color: var(--nx-viewer-quiet-color, light-dark(#8c959f, #858585));
+  font-size: 11.5px;
+}
 `;

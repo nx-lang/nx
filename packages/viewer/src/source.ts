@@ -12,6 +12,7 @@ import { isComposition } from "./compact.js";
 import { isElementFunction, VALUE_ROLES } from "./card.js";
 import { isBooleanType, presentationOf, type Presentation } from "./labels.js";
 import { attributeElement, elementProperties, type TreeIndex } from "./tree.js";
+import { enclosingDeclaration, nameAt, suggestionNamed } from "./named.js";
 
 /** One colored range of the text, in UTF-16 offsets. Ranges are in text order and do not overlap. */
 export interface NxViewerColor {
@@ -322,9 +323,11 @@ export function renderSource(
 
   // A color an sRGB screen cannot show gets a marked swatch, since this screen may draw it mapped.
   const markOutsideSrgb = (square: HTMLElement, at: number): void => {
-    if (tree.nodes[at]?.colorOutsideSrgb !== true) {
-      return;
+    if (tree.nodes[at]?.colorOutsideSrgb === true) {
+      markSwatchOutsideSrgb(square);
     }
+  };
+  const markSwatchOutsideSrgb = (square: HTMLElement): void => {
     square.classList.add("outside-srgb");
     square.title = "Outside sRGB: shows differently on sRGB screens";
     square.removeAttribute("aria-hidden");
@@ -860,14 +863,21 @@ export function renderSource(
     cell.append(opening);
     writeNodes(cell, [at], start, end);
     cell.append(brace(close));
-    // A reference to a color leads with its swatch, before the brace, as a color literal does.
+    // A reference to a color leads with its swatch, before the brace, as a color literal does; so
+    // does a name whose suggestion previews a color, as `env.color.accent`.
     const named = value.role === "reference" ? referencedColor(value) : undefined;
-    if (named !== undefined) {
+    const name = named === undefined ? nameAt(index, at) : undefined;
+    const preview = name === undefined ? undefined : suggestionNamed(tree, name, enclosingDeclaration(tree, at))?.preview;
+    if (named !== undefined || preview?.kind === "color") {
       const square = document.createElement("span");
       square.className = "swatch";
-      square.style.backgroundColor = named.color;
+      square.style.backgroundColor = named?.color ?? preview!.value;
       square.setAttribute("aria-hidden", "true");
-      markOutsideSrgb(square, named.at);
+      if (named !== undefined) {
+        markOutsideSrgb(square, named.at);
+      } else if (preview?.outsideSrgb === true) {
+        markSwatchOutsideSrgb(square);
+      }
       if (square.style.backgroundColor !== "") {
         cell.insertBefore(square, opening);
       }
@@ -1175,7 +1185,7 @@ export function renderSource(
     } else {
       const value = soleValue(attribute);
       writeValue(cell, attribute);
-      if (value !== undefined && tree.nodes[value]!.role === "reference") {
+      if (value !== undefined && nameAt(index, value) !== undefined) {
         cell.classList.add("reference-token");
       }
     }
@@ -1458,7 +1468,11 @@ export function renderSource(
       if (inspector.querySelector(":scope > .inspector-fields > *, :scope > .inspector-more") !== null) {
         // What the element's type is for, in a quiet line over its fields, so it is found without
         // a card; resting on it shows the whole doc.
-        const summary = docSummary(node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.doc);
+        // A union case's own doc says what it is better than its union's, as `Paint.color`'s does.
+        const declared = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+        const caseName = node.name?.slice(node.name.lastIndexOf(".") + 1);
+        const caseDoc = declared?.cases?.find((entry) => entry.name === caseName)?.doc;
+        const summary = docSummary(caseDoc ?? declared?.doc);
         if (summary !== undefined) {
           const doc = document.createElement("span");
           doc.className = "inspector-doc";

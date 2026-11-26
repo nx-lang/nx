@@ -132,7 +132,11 @@ export function createSnapshotLanguageService(
       const answerRequest = toAnswerRequest(request, undefined);
       return answer(
         "sourceTree",
-        request.visualizers === undefined ? answerRequest : { ...answerRequest, visualizers: request.visualizers },
+        {
+          ...answerRequest,
+          ...(request.visualizers === undefined ? {} : { visualizers: request.visualizers }),
+          ...(request.suggestions === true ? { suggestions: true } : {}),
+        },
         signal
       );
     },

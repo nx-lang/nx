@@ -8,6 +8,7 @@
 
 import "@nx/math" as math
 import "@nx/color" as colors
+import "@nx/design" as design
 import "@nx/geometry" as geometry
 import "@nx/visualizer"
 
@@ -108,7 +109,7 @@ type DashLength = float64 where finite && >= 0.0
 /// Stroke widths and dash lengths scale with transforms; non-scaling strokes are not supported.
 export type Stroke = {
   paint: Paint                                    /// Outline paint; none disables the stroke.
-  width: float64 where finite && >= 0.0 = 1       /// Outline width in local units; must be nonnegative.
+  width: design.BorderWidth = 1                   /// Outline width in local units; must be nonnegative.
   lineCap: LineCap = butt                         /// Shape of the stroke at open endpoints and dash endpoints.
   lineJoin: LineJoin = miter                      /// Shape of the stroke where path segments meet.
   miterLimit: float64 where finite && >= 1.0 = 4  /// Maximum miter-length/stroke-width ratio; must be at least 1.
@@ -155,7 +156,7 @@ export type Transform =
 
 /// Base for elements inside a Drawing, with opacity, transforms, clipping, and accessibility.
 export abstract external component <GraphicsElement
-  opacity: float64 where in 0.0..=1.0 = 1.0  /// Opacity of the element and its contents as a whole; must be in 0..1.
+  opacity: design.Opacity = 1.0              /// Opacity of the element and its contents as a whole; must be in 0..1.
   transform?: Transform+                     /// SVG-style transform list: the last entry acts on coordinates first.
   clipPath?: string                          /// SVG path data in local coordinates; omission leaves the element
                                              /// unclipped.
@@ -178,7 +179,7 @@ export abstract external component <Shape extends GraphicsElement
 /// Like an SVG viewport, it maps a viewBox into an output rectangle. Fit and alignment are
 /// expressed separately here instead of SVG's preserveAspectRatio attribute.
 export external component <Drawing
-  opacity: float64 where in 0.0..=1.0 = 1.0  /// Opacity of the complete drawing as a whole; must be in 0..1.
+  opacity: design.Opacity = 1.0              /// Opacity of the complete drawing as a whole; must be in 0..1.
   accessibility?: Accessibility              /// Accessible name and description of the drawing.
   viewBox: Rect                              /// Source coordinate rectangle; width and height must be positive.
   fit: ViewBoxFit = contain                  /// How the source rectangle scales to the viewport.
@@ -202,8 +203,8 @@ export external component <Rectangle extends Shape
   y: float64 where finite = 0             /// Vertical coordinate of the top edge.
   width: float64 where finite && >= 0.0   /// Width in local units; must be nonnegative.
   height: float64 where finite && >= 0.0  /// Height in local units; must be nonnegative.
-  rx: float64 where finite && >= 0.0 = 0  /// Horizontal corner radius; must be nonnegative.
-  ry?: float64 where finite && >= 0.0     /// Vertical corner radius; must be nonnegative. Omission uses rx.
+  rx: design.Radius = 0                   /// Horizontal corner radius; must be nonnegative.
+  ry?: design.Radius                      /// Vertical corner radius; must be nonnegative. Omission uses rx.
 />
 
 /// A circle centered at (cx, cy), corresponding to SVG `<circle>`.
@@ -259,8 +260,8 @@ export external component <Path extends Shape
 export external component <Text extends GraphicsElement
   x: float64 where finite = 0                      /// Horizontal anchor position, interpreted using textAnchor.
   y: float64 where finite = 0                      /// Vertical position of the alphabetic baseline.
-  fontFamily: string                               /// Name of a font family explicitly supplied by the host.
-  fontSize: float64 where finite && > 0.0 = 16     /// Font size in local units; must be positive.
+  fontFamily: design.FontFamily                    /// Name of a font family explicitly supplied by the host.
+  fontSize: design.FontSize = 16                   /// Font size in local units; must be positive.
   fontWeight: float64 where in 1.0..=1000.0 = 400  /// Requested font weight; must be an integer in 1..1000.
   fontStyle: FontStyle = normal                    /// Requested upright or italic font face.
   textAnchor: TextAnchor = start                   /// Aligns the run's start, midpoint, or end with x using its advance
@@ -311,7 +312,7 @@ export let <RegularPolygon
   fill?: Paint                             /// Interior paint; omission uses solid black and none disables filling.
   stroke?: Stroke                          /// Outline paint and style; omission draws no stroke.
   transform?: Transform+                   /// SVG-style transform list: the last entry acts on coordinates first.
-  opacity: float64 where in 0.0..=1.0 = 1  /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1              /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string                        /// SVG path data in local coordinates; omission leaves the shape unclipped.
   clipRule: FillRule = nonzero             /// Interior rule for clipPath, independent of the shape fill rule.
 />: Element = {
@@ -358,7 +359,7 @@ export let <Star
   fill?: Paint                                 /// Interior paint; omission uses solid black and none disables filling.
   stroke?: Stroke                              /// Outline paint and style; omission draws no stroke.
   transform?: Transform+                       /// SVG-style transform list: the last entry acts on coordinates first.
-  opacity: float64 where in 0.0..=1.0 = 1      /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1                  /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string                            /// SVG path data in local coordinates; omission leaves the shape
                                                /// unclipped.
   clipRule: FillRule = nonzero                 /// Interior rule for clipPath, independent of the shape fill rule.
@@ -425,7 +426,7 @@ export let <Arrow
   stroke?: Stroke                                 /// Outline paint and style; omission draws no stroke.
   transform?: Transform+                          /// SVG-style transform list: the last entry acts on coordinates
                                                   /// first.
-  opacity: float64 where in 0.0..=1.0 = 1         /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1                     /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string                               /// SVG path data in local coordinates; omission leaves the shape
                                                   /// unclipped.
   clipRule: FillRule = nonzero                    /// Interior rule for clipPath, independent of the shape fill rule.
@@ -477,7 +478,7 @@ let <arrowChecked
   fill?: Paint                  /// Interior paint; omission uses solid black and none disables filling.
   stroke?: Stroke               /// Outline paint and style; omission draws no stroke.
   transform?: Transform+        /// SVG-style transform list: the last entry acts on coordinates first.
-  opacity: float64 = 1          /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1   /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string             /// SVG path data in local coordinates; omission leaves the shape unclipped.
   clipRule: FillRule = nonzero  /// Interior rule for clipPath, independent of the shape fill rule.
 />: Element = {
@@ -530,7 +531,7 @@ let <arrowPoints
   fill?: Paint                  /// Interior paint; omission uses solid black and none disables filling.
   stroke?: Stroke               /// Outline paint and style; omission draws no stroke.
   transform?: Transform+        /// SVG-style transform list: the last entry acts on coordinates first.
-  opacity: float64 = 1          /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1   /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string             /// SVG path data in local coordinates; omission leaves the shape unclipped.
   clipRule: FillRule = nonzero  /// Interior rule for clipPath, independent of the shape fill rule.
 />: Element =
@@ -617,7 +618,7 @@ export let <Arc
   stroke?: Stroke                                    /// Outline paint and style; omission draws no stroke.
   transform?: Transform+                             /// SVG-style transform list: the last entry acts on coordinates
                                                      /// first.
-  opacity: float64 where in 0.0..=1.0 = 1            /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1                        /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string                                  /// SVG path data in local coordinates; omission leaves the shape
                                                      /// unclipped.
   clipRule: FillRule = nonzero                       /// Interior rule for clipPath, independent of the shape fill rule.
@@ -680,7 +681,7 @@ export let <RingSector
   stroke?: Stroke                                    /// Outline paint and style; omission draws no stroke.
   transform?: Transform+                             /// SVG-style transform list: the last entry acts on coordinates
                                                      /// first.
-  opacity: float64 where in 0.0..=1.0 = 1            /// Opacity of the complete shape; must be in 0..1.
+  opacity: design.Opacity = 1                        /// Opacity of the complete shape; must be in 0..1.
   clipPath?: string                                  /// SVG path data in local coordinates; omission leaves the shape
                                                      /// unclipped.
   clipRule: FillRule = nonzero                       /// Interior rule for clipPath, independent of the shape fill rule.

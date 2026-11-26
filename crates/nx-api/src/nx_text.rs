@@ -885,6 +885,18 @@ impl<'a> Declarations<'a> {
         // An alias cycle is the checker's to report; stop following one rather than loop.
         match self.aliases.get(name) {
             Some(target) if depth < self.aliases.len() => self.expect(target, depth + 1),
+            // A library's own field types name what it imports through an alias, as
+            // `@nx/graphics`'s `design.Opacity`; declarations are indexed by their own names.
+            None if depth <= self.aliases.len() => match name.rsplit_once('.') {
+                Some((qualifier, declared))
+                    if !qualifier.is_empty()
+                        && (self.aliases.contains_key(declared)
+                            || self.unions.contains_key(declared)) =>
+                {
+                    self.expect_name(declared, depth + 1)
+                }
+                _ => Expected::Any,
+            },
             _ => Expected::Any,
         }
     }
@@ -2240,6 +2252,15 @@ mod tests {
                 "label": "Add",
                 "onTapped": { "$type": "ActionHandler", "action": "Button.Tapped", "token": "h1-1" }
             }] })
+        }
+
+        #[test]
+        fn a_number_typed_through_an_import_alias_spells_by_the_alias() {
+            let source = "import \"@nx/design\" as design\n\
+                          type R = { a:design.Opacity = 1 b:design.Spacing = 0 }\n\
+                          let root() = <R />\n";
+            let text = format(source, json!({ "value": { "$type": "R", "a": 1, "b": 0 } }));
+            assert_eq!(text.text, "<R a=1.0 b=0.0 />");
         }
 
         #[test]

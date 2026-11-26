@@ -3,10 +3,10 @@ import type { SourceTree, SourceTreeRequest } from "@nx-lang/language-protocol";
 /**
  * The source-tree request for the visitor's `source` at `uri`: with `visualizers`, naming no host
  * visualizer modules, so visualizer declarations in the source and in what it imports shape the
- * reading.
+ * reading, and with `suggestions`, so each property offers the named values of its type.
  */
 export function readingRequest(uri: string, source: string): SourceTreeRequest {
-  return { documents: [{ uri, source }], uri, visualizers: {} };
+  return { documents: [{ uri, source }], uri, visualizers: {}, suggestions: true };
 }
 
 /** The reading view's tree, the text it was computed from, and whether a newer one is coming. */

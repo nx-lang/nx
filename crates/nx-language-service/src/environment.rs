@@ -234,7 +234,7 @@ fn environment_signature(scope: &DocumentScope, module: &str, value: &ValueDef) 
 
 impl DocumentScope {
     /// The HIR item declared at `origin`, in whichever module declares it.
-    fn item_at_origin(&self, origin: &DeclarationOrigin) -> Option<&Item> {
+    pub(crate) fn item_at_origin(&self, origin: &DeclarationOrigin) -> Option<&Item> {
         self.workspace
             .artifact(&origin.0)?
             .lowered_module
@@ -415,7 +415,10 @@ fn sets_note(set: &[String]) -> String {
 }
 
 /// `name` or `alias.name` when `expr` is a name or a member access on one.
-fn qualified_name(lowered: &nx_hir::LoweredModule, expr: &nx_hir::ast::Expr) -> Option<String> {
+pub(crate) fn qualified_name(
+    lowered: &nx_hir::LoweredModule,
+    expr: &nx_hir::ast::Expr,
+) -> Option<String> {
     match expr {
         nx_hir::ast::Expr::Ident(name) => Some(name.to_string()),
         nx_hir::ast::Expr::Member { base, member, .. } => Some(format!(
@@ -427,7 +430,11 @@ fn qualified_name(lowered: &nx_hir::LoweredModule, expr: &nx_hir::ast::Expr) -> 
 }
 
 /// The declaration `name` binds in the module with identity `module`.
-fn binding_origin(scope: &DocumentScope, module: &str, name: &str) -> Option<DeclarationOrigin> {
+pub(crate) fn binding_origin(
+    scope: &DocumentScope,
+    module: &str,
+    name: &str,
+) -> Option<DeclarationOrigin> {
     scope
         .workspace
         .visible_bindings

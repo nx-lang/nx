@@ -126,7 +126,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     if ("problem" in validated) {
       return errorResponse(400, "invalid-request", validated.problem, query);
     }
-    const { documents, uri, position, visualizers, key, edit } = validated;
+    const { documents, uri, position, visualizers, suggestions, key, edit } = validated;
     const collision = contextCollision(documents, context);
     if (collision !== undefined) {
       return errorResponse(
@@ -138,7 +138,7 @@ export function createNxLanguageHandler(options: NxLanguageHandlerOptions = {}):
     }
 
     try {
-      const answer = answerQuery(query, { documents, uri, position, visualizers, key, edit }, context, (analyzed) =>
+      const answer = answerQuery(query, { documents, uri, position, visualizers, suggestions, key, edit }, context, (analyzed) =>
         cache.getOrCreate(documentSetKey(analyzed), () => createSnapshot(analyzed, snapshotOptions)),
       );
       return jsonResponse(200, answer);
@@ -219,6 +219,7 @@ type ValidatedQuery =
       uri: string;
       position: TextPosition | undefined;
       visualizers?: SourceTreeVisualizersOption;
+      suggestions?: boolean;
       key?: string;
       edit?: SourceEdit;
     }
@@ -283,6 +284,13 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
     }
     position = { line: candidate.line as number, character: candidate.character as number };
   }
+  let suggestions: boolean | undefined;
+  if (query === "sourceTree" && record.suggestions !== undefined) {
+    if (typeof record.suggestions !== "boolean") {
+      return { problem: "'suggestions' must be a boolean." };
+    }
+    suggestions = record.suggestions ? true : undefined;
+  }
   if (query === "sourceTree" && record.visualizers !== undefined) {
     const visualizers = record.visualizers as Record<string, unknown> | null;
     const modules = visualizers?.modules;
@@ -300,7 +308,11 @@ function validateQuery(query: LanguageQueryName, body: unknown): ValidatedQuery 
       uri,
       position,
       visualizers: modules === undefined ? {} : { modules: modules as string[] },
+      ...(suggestions === undefined ? {} : { suggestions }),
     };
+  }
+  if (query === "sourceTree" && suggestions !== undefined) {
+    return { documents, uri, position, suggestions };
   }
   if (query === "sourceEdit") {
     if (typeof record.key !== "string") {
@@ -365,6 +377,12 @@ function sourceEditValueOf(candidate: unknown): SourceEditValue | undefined {
   }
   if (value.kind === "case" && typeof value.name === "string") {
     return { kind: "case", name: value.name };
+  }
+  if (value.kind === "color" && typeof value.text === "string") {
+    return { kind: "color", text: value.text };
+  }
+  if (value.kind === "name" && typeof value.name === "string") {
+    return { kind: "name", name: value.name };
   }
   return undefined;
 }
