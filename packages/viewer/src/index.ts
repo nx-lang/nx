@@ -53,8 +53,9 @@ import {
   importAliases,
   letPlace,
   nameAt,
-  nameHolds,
+  cutName,
   nameParts,
+  rowHolds,
   nameRoot,
   namedValues,
   previewText,
@@ -4705,8 +4706,6 @@ export class NxViewerElement extends ElementBase {
       const before = shared.get(id);
       shared.set(id, before === undefined || before === quiet ? quiet : "");
     }
-    // What a row reads, and the path it shares with its neighbours: two or more rows in a row under
-    // one path (`standardPalette.`, `color.text.`) read only their last part, under a subheading.
     let group: HTMLElement | undefined;
     let groupOf = "";
     for (const suggestion of suggestions) {
@@ -4761,14 +4760,18 @@ export class NxViewerElement extends ElementBase {
       }
       const option = row("", name, preview, suggestion.name === current);
       option.dataset["name"] = suggestion.name;
-      // Search reads the description too, so "ring" finds the focus color.
-      option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
       // The lines under the list give the active row's doc, then a wide color's exact value. Every
       // row fits the same property, so the type would only repeat. A doc that only restates the
       // value, as a scale step's `/// 12` does, adds nothing.
       const doc = suggestion.doc?.trim() === value ? undefined : suggestion.doc?.trim();
       if (doc !== undefined && doc !== "") {
         option.dataset["doc"] = doc;
+      }
+      // Search reads the doc shown too, by the starts of its words, so "ring" finds the focus color
+      // and "on" does not keep every row that says "one".
+      option.dataset["search"] = suggestion.name;
+      if (doc !== undefined && doc !== "") {
+        option.dataset["searchDoc"] = doc;
       }
       if (exact !== undefined) {
         const outside = suggestion.preview?.outsideP3 === true ? "outside sRGB and Display P3" : "outside sRGB";
@@ -4793,11 +4796,15 @@ export class NxViewerElement extends ElementBase {
     detailExact.className = "named-exact";
     detail.append(detailDoc, detailExact);
     input.setAttribute("aria-describedby", detail.id);
-    // Only environment values can be overridden, so the note shows only when the list holds them.
+    // An environment value's preview is its default, which a provide or the host may override, and
+    // a parameter's or state field's is its default, which a caller replaces; the note shows when
+    // the list previews either.
     const foot = document.createElement("div");
     foot.className = "named-foot";
     foot.textContent = "Values shown are defaults, before any override";
-    foot.hidden = !suggestions.some((suggestion) => suggestion.group.kind === "environment");
+    foot.hidden = !suggestions.some(
+      (suggestion) => suggestion.group.kind === "environment" || (suggestion.group.kind === "declaration" && suggestion.preview !== undefined)
+    );
     this.#popover.className = "popover named";
     this.#popover.replaceChildren(input, list, empty, detail, foot);
     this.#popover.hidden = false;
@@ -4824,9 +4831,10 @@ export class NxViewerElement extends ElementBase {
 
   /**
    * Sizes the named-values popover to its widest row, within the room the stylesheet allows, and
-   * keeps that width while typing filters rows out. A name that still does not fit is cut in the
-   * middle, so its end, the part that tells rows apart, stays; the lines under the list then give
-   * the whole name.
+   * keeps that width while typing filters rows out. A name that still does not fit loses whole
+   * middle parts first (`color.….muted`), keeping its first part and as many last parts as fit,
+   * and only then characters from its middle, so its end, the part that tells rows apart, stays.
+   * The lines under the list and the row's accessible name then give the whole name.
    */
   #fitNamed(list: HTMLElement): void {
     const popover = this.#popover;
@@ -4841,27 +4849,15 @@ export class NxViewerElement extends ElementBase {
       if (!(text instanceof Text) || name.scrollWidth <= name.clientWidth) {
         continue;
       }
-      const whole = text.data;
-      // The longest cut that fits: keep the end whole where possible, then the start.
-      let low = 1;
-      let high = whole.length - 1;
-      let best = `\u2026${whole.slice(-1)}`;
-      while (low <= high) {
-        const keep = Math.floor((low + high) / 2);
-        const tail = Math.ceil(keep * 0.6);
-        const tried = `${whole.slice(0, keep - tail)}\u2026${whole.slice(whole.length - tail)}`;
+      text.data = cutName(text.data, (tried) => {
         text.data = tried;
-        if (name.scrollWidth <= name.clientWidth) {
-          best = tried;
-          low = keep + 1;
-        } else {
-          high = keep - 1;
-        }
-      }
-      text.data = best;
+        return name.scrollWidth <= name.clientWidth;
+      });
       const option = name.closest<HTMLElement>(".named-row");
-      if (option !== null && option.dataset["name"] !== undefined) {
-        option.dataset["doc"] = option.dataset["doc"] === undefined ? option.dataset["name"] : `${option.dataset["name"]} \u2014 ${option.dataset["doc"]}`;
+      const whole = option?.dataset["name"];
+      if (option !== null && whole !== undefined) {
+        option.setAttribute("aria-label", `${whole} ${option.querySelector(".named-preview")?.textContent ?? ""}`.trim());
+        option.dataset["doc"] = option.dataset["doc"] === undefined ? whole : `${whole} \u2014 ${option.dataset["doc"]}`;
       }
     }
   }
@@ -4886,7 +4882,7 @@ export class NxViewerElement extends ElementBase {
   #filterNamed(session: NamedSession, prefer?: HTMLElement): void {
     const words = filterWords(session.input.value);
     for (const row of session.rows) {
-      row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !nameHolds(row.dataset["search"] ?? row.dataset["name"] ?? "", words);
+      row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !rowHolds(row.dataset["search"] ?? row.dataset["name"] ?? "", row.dataset["searchDoc"], words);
     }
     for (const group of this.#popover.querySelectorAll<HTMLElement>(".named-section")) {
       group.hidden = ![...group.querySelectorAll<HTMLElement>(".named-row")].some((row) => !row.hidden);

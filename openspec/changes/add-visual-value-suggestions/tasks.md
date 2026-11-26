@@ -26,7 +26,7 @@
 
 - [x] 5.1 Read `suggestions` and `suggestionKey` from the tree; filter by key, scope and `self`.
 - [x] 5.2 Add the named-values button after a field's value (written and unset), shown under the pointer, when selected or open, not a Tab stop, with the host's `named-values` icon or a built-in hexagon; open the popover on click, Ctrl+Space and Alt+Escape.
-- [x] 5.3 Build the popover: combobox search over a grouped listbox, preview column, `Default` row, marked current row, filtering by words, keyboard, sticky group labels, own scrolling, hover cards and the defaults footer.
+- [x] 5.3 Build the popover: combobox search over a grouped listbox, preview column, `Default` row, marked current row, filtering by words, keyboard, sticky group labels, own scrolling, the doc and exact-value lines and the defaults footer.
 - [x] 5.4 Fire `nx-edit` with a `name` value on choosing (setValue or addProperty), the default row's removal, and nothing for the current row.
 - [x] 5.5 Read `env.` reads, parameters, state fields and member chains as tokens, with swatches from color previews; a click on a token opens its popover; add Go to for names starting in this document and Replace with value in the token's menu (colors only inside sRGB, written as hex).
 - [x] 5.6 Viewer tests for each scenario of the viewer delta, in both themes and at phone width. (Themes and the scenarios are covered by `packages/viewer/test/named.test.ts` and the playground browser check; the playground's Visual is unusable at phone width for every example, recorded in `specs/future.md`.)

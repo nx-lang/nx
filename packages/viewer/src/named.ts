@@ -226,6 +226,49 @@ export function nameHolds(name: string, words: readonly string[]): boolean {
   return words.every((word) => spelled.includes(word));
 }
 
+/**
+ * Whether a row holds each of `words`: in its name anywhere, as {@link nameHolds} reads it, or at
+ * the start of a word of its doc, so prose does not match inside its words.
+ */
+export function rowHolds(name: string, doc: string | undefined, words: readonly string[]): boolean {
+  const spelled = name.toLowerCase().replace(/\./g, " ");
+  const docWords = (doc ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word !== "");
+  return words.every((word) => spelled.includes(word) || docWords.some((docWord) => docWord.startsWith(word)));
+}
+
+/**
+ * `whole` cut to fit, as `fits` reports for each try: whole middle parts dropped first, keeping the
+ * first part and as many last parts as fit (`color.….muted`), then just the last parts
+ * (`….muted`), then characters from the middle of what is left, keeping more of the end.
+ */
+export function cutName(whole: string, fits: (tried: string) => boolean): string {
+  const parts = whole.split(".");
+  for (let keep = parts.length - 2; keep >= 1; keep--) {
+    const tried = `${parts[0]}.\u2026.${parts.slice(parts.length - keep).join(".")}`;
+    if (fits(tried)) {
+      return tried;
+    }
+  }
+  if (parts.length > 1 && fits(`\u2026.${parts[parts.length - 1]}`)) {
+    return `\u2026.${parts[parts.length - 1]}`;
+  }
+  let low = 1;
+  let high = whole.length - 1;
+  let best = `\u2026${whole.slice(-1)}`;
+  while (low <= high) {
+    const keep = Math.floor((low + high) / 2);
+    const tail = Math.ceil(keep * 0.6);
+    const tried = `${whole.slice(0, keep - tail)}\u2026${whole.slice(whole.length - tail)}`;
+    if (fits(tried)) {
+      best = tried;
+      low = keep + 1;
+    } else {
+      high = keep - 1;
+    }
+  }
+  return best;
+}
+
 /** The aliases the document's imports give, as `d` for `import "@nx/design" as d`. */
 export function importAliases(tree: SourceTree): Set<string> {
   return new Set(tree.nodes.flatMap((node) => (node.role === "import" && node.parent === undefined && node.name !== undefined ? [node.name] : [])));

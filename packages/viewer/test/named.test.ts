@@ -11,6 +11,7 @@ import type { NxEditDetail, NxViewerElement } from "../src/index.js";
 import { nxHost, treeOf, type Fixture } from "./fixtures.js";
 
 const { NX_EDIT_EVENT } = await import("../src/index.js");
+const { cutName } = await import("../src/named.js");
 
 const window = document.defaultView!;
 const created: NxViewerElement[] = [];
@@ -23,6 +24,7 @@ after(async () => (await nxHost()).dispose());
 
 const CARD = [
   'import "@nx/design"',
+  'import "@nx/color" as c',
   "",
   'component <Card padding: Spacing = 16 background?: Color radius: Radius = 0 title: string = "" fill: Color = #ffffff /> = {',
   "  <div />",
@@ -35,6 +37,8 @@ const CARD = [
   "let gap: Spacing = 6",
   "",
   "let wide: Color = #e11d48",
+  "",
+  "let vivid: Color = { c.oklch(0.85, 0.4, 145) }",
   "",
   "let root() = <Card padding=8 radius={env.radius.md} fill={standardPalette.green500} />",
   "",
@@ -233,6 +237,52 @@ describe("named values", () => {
     input.value = "ring";
     input.dispatchEvent(new window.Event("input"));
     assert.ok(listed(element).some((row) => row.startsWith("color.focus")), listed(element).join("\n"));
+    // A doc is matched by the starts of its words, so "ing" does not find "ring".
+    input.value = "ing";
+    input.dispatchEvent(new window.Event("input"));
+    assert.ok(!listed(element).some((row) => row.startsWith("color.focus")), listed(element).join("\n"));
+    // A color outside Display P3 too is tagged `wide`, and its exact line says so.
+    input.value = "vivid";
+    input.dispatchEvent(new window.Event("input"));
+    const vivid = popover(element).querySelector<HTMLElement>('.named-row[data-name="vivid"]')!;
+    assert.equal(vivid.querySelector(".gamut-tag")?.textContent, "wide");
+    assert.match(vivid.dataset["exact"] ?? "", /\u00b7 outside sRGB and Display P3$/);
+  });
+
+  it("notes that a parameter's preview is its default, and leaves the note out when nothing is a default", async () => {
+    const source = [
+      "type Size = int",
+      "",
+      "component <Inner size: Size = 0 /> = {",
+      "  <div />",
+      "}",
+      "",
+      "component <Box size: Size = 4 /> = {",
+      "  <Inner size={size} />",
+      "}",
+      "",
+      "let step: Size = 2",
+      "",
+      "let root() = <Inner size=1 />",
+      ""
+    ].join("\n");
+    const element = show(await treeOf([{ uri: "nx:///box.nx", identity: "box.nx", source }], { visualizers: { modules: [] }, suggestions: true }));
+    button(element, "Box.body.size")!.click();
+    assert.ok(listed(element).includes("# Box"), listed(element).join("\n"));
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-foot")!.hidden, false, "a parameter previews its default");
+    press(popover(element).querySelector("input")!, "Escape");
+    button(element, "root.body.size")!.click();
+    assert.ok(listed(element).some((row) => row.startsWith("step")), listed(element).join("\n"));
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-foot")!.hidden, true, "a file's value is no default");
+  });
+
+  it("cuts a long name in whole middle parts before characters", () => {
+    const fitsIn = (width: number) => (tried: string) => tried.length <= width;
+    assert.equal(cutName("color.text.muted", fitsIn(14)), "color.\u2026.muted");
+    assert.equal(cutName("a.b.c.d.e", fitsIn(7)), "a.\u2026.d.e");
+    assert.equal(cutName("standardPalette.gray50", fitsIn(8)), "\u2026.gray50");
+    const cut = cutName("averyveryverylongname", fitsIn(10));
+    assert.ok(cut.length <= 10 && cut.includes("\u2026") && cut.endsWith("name"), cut);
   });
 
   it("offers nothing for a string, and Ctrl+Space opens nothing", async () => {

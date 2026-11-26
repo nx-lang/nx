@@ -158,6 +158,30 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await popover.count(), 0);
 
+  // In a narrow popover, a name that can't fit is cut in the middle: its end stays, the whole name
+  // is its accessible name, and the lines under the list give it in full.
+  await viewer.evaluate((element) => {
+    const narrow = document.createElement("style");
+    narrow.id = "narrow-named";
+    narrow.textContent = ".popover.named { min-width: 0; max-width: 13rem; }";
+    element.shadowRoot.append(narrow);
+  });
+  await row(`${tile}.fill`).locator(".reference-token").click();
+  await popover.waitFor();
+  const cut = await popover.evaluate((element) => {
+    const option = [...element.querySelectorAll(".named-row")].find((candidate) => candidate.querySelector(".named-name")?.textContent.includes("\u2026"));
+    if (option === undefined) { return JSON.stringify({ width: element.getBoundingClientRect().width, parent: element.parentElement?.className, longest: Math.max(...[...element.querySelectorAll(".named-name")].map((n) => n.scrollWidth)) }); }
+    option.scrollIntoView({ block: "center" });
+    return { shown: option.querySelector(".named-name").textContent, name: option.dataset.name, label: option.getAttribute("aria-label") };
+  });
+  assert.ok(typeof cut === "object", cut);
+  assert.ok(cut.name.endsWith(cut.shown.split("\u2026").pop()), JSON.stringify(cut));
+  assert.ok(cut.label.startsWith(cut.name), JSON.stringify(cut));
+  await popover.locator(`.named-row[data-name="${cut.name}"]`).hover();
+  assert.ok((await popover.locator(".named-doc").textContent()).startsWith(cut.name), "the detail line gives the whole name");
+  await page.keyboard.press("Escape");
+  await viewer.evaluate((element) => element.shadowRoot.getElementById("narrow-named").remove());
+
   assert.deepEqual(errors, []);
   console.log("PASS: named values: popover, filter, choose, undo, literal binding, unset property, swatches.");
 } finally {

@@ -183,8 +183,13 @@ icons work.
 The popover is a combobox: a search field over a list with group headings, each row reading the
 name (in full, without `env.` under the Environment heading or a module alias a whole group shares), and its preview after
 it in a second column (a bordered swatch, plus the hex when it has one, for a color; the number; the
-case). Typing filters rows whose name or doc holds every typed word,
-ignoring case and treating `.` as a space. Up and Down move, Enter chooses, Escape closes. The list
+case). A color outside sRGB reads `P3`, or `wide` outside Display P3 too, before its swatch and its
+nearest sRGB hex. Two quiet lines under the list give the active row's doc and, for such a color, its
+exact value rounded; each is left out when no row fills it. The popover is as wide as its widest
+row within the room it has, and a name still too long is cut in the middle, whole parts first,
+keeping its end, with the whole name as its accessible name and in the lines below. Typing filters
+rows each of whose typed words is in the name or starts a word of the shown doc, ignoring case and
+treating `.` as a space. Up and Down move, Enter chooses, Escape closes. The list
 scrolls inside the popover, headings sticky.
 
 *Alternative:* put named values into the existing choices list under number and string fields. That
@@ -210,8 +215,9 @@ it imports `@nx/design` itself, since imports are not transitive.
 - **Tree size.** Every tree refresh carries the list. → Only entries whose key some property or
   `let` of the declaration table uses are sent, and entries carry no ranges. Measure on the corpus;
   switch to a query (the alternative above) if a list passes 500 entries.
-- **Previews can mislead** under a theme or in a dark section. → The footer says previews are
-  defaults, and the hover card of a token shows its declaration and doc.
+- **Previews can mislead** under a theme or in a dark section. → When the list holds environment
+  values or parameters previewed by their defaults, the footer says previews are defaults, and the
+  active row's doc shows under the list.
 - **Two `Color`s in scope.** A program that imports `@nx/graphics` and `@nx/design` without aliases
   sees two exported `Color` aliases (of the same type) and gets an ambiguous-name diagnostic on use.
   → The tutorial imports one under an alias; making the two re-exports count as one name is a

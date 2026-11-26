@@ -501,9 +501,11 @@ let root() = <Box />
 fn previews_follow_names_defaults_and_the_default_color_mode() {
     let tree = tree(
         r#"import "@nx/design"
+import "@nx/color" as c
 
 let gap: Spacing = 4
 let wide: Spacing = { gap * 2 }
+let vivid: Color = { c.oklch(0.85, 0.4, 145) }
 component <Box padding: Spacing = 0 fill: Color = #ffffff /> = { <div /> }
 let root() = <Box />
 "#,
@@ -550,6 +552,16 @@ let root() = <Box />
         .as_deref()
         .is_some_and(|hex| hex.len() == 7 && hex.starts_with('#')));
     assert!(!green.outside_p3);
+    // One outside Display P3 too says so, and still reads by its nearest sRGB hex.
+    let vivid = suggestion(&tree, COLOR, "vivid")
+        .preview
+        .clone()
+        .expect("a preview");
+    assert!(vivid.outside_srgb && vivid.outside_p3);
+    assert!(vivid
+        .nearest_hex
+        .as_deref()
+        .is_some_and(|hex| hex.len() == 7 && hex.starts_with('#')));
     assert_eq!(
         suggestion(&tree, COLOR, "standardPalette.blue600")
             .preview
