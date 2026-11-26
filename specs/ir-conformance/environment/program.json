@@ -19,6 +19,8 @@
     { "module": "main.nx", "function": "stacked" },
     { "module": "main.nx", "function": "bundle" },
     { "module": "main.nx", "function": "hosted" },
+    { "module": "main.nx", "function": "inContent" },
+    { "module": "main.nx", "function": "prose" },
     { "module": "main.nx", "function": "mode", "case": "rootDark", "arguments": [], "environment": { "colorMode": "dark" } },
     { "module": "main.nx", "function": "colors", "case": "rootDark", "arguments": [], "environment": { "colorMode": "dark" } },
     { "module": "main.nx", "function": "readProvided", "case": "rootSpace", "arguments": [], "environment": { "space": 2 } },

@@ -926,13 +926,20 @@ module.exports = grammar({
     ),
 
     // ===== Elements Expression =====
-    // Keep bare if/for/else prefixes available for control-flow items in mixed content. Text
-    // that would otherwise collide with those prefixes can still be written via braces.
-    _mixed_text_run: $ => alias(token(prec(-1, /(?:[^\s<{ife][^<{]*|i[^f\s<{][^<{]*|if[^\s<{][^<{]*|f[^o\s<{][^<{]*|fo[^r\s<{][^<{]*|for[^\s<{][^<{]*|e[^l\s<{][^<{]*|el[^s\s<{][^<{]*|els[^e\s<{][^<{]*|else[^\s<{][^<{]*)/)), $.text_run),
+    // Keep bare if/for/else prefixes available for control-flow items in mixed content, and
+    // `provide env` for a provide block. Text that would otherwise collide with those prefixes can
+    // still be written via braces; prose such as "provide feedback" stays text.
+    _mixed_text_run: $ => alias(token(prec(-1, /(?:[^\s<{ifep][^<{]*|i[^f\s<{][^<{]*|if[^\s<{][^<{]*|f[^o\s<{][^<{]*|fo[^r\s<{][^<{]*|for[^\s<{][^<{]*|e[^l\s<{][^<{]*|el[^s\s<{][^<{]*|els[^e\s<{][^<{]*|else[^\s<{][^<{]*|p[^r\s<{][^<{]*|pr[^o\s<{][^<{]*|pro[^v\s<{][^<{]*|prov[^i\s<{][^<{]*|provi[^d\s<{][^<{]*|provid[^e\s<{][^<{]*)/)), $.text_run),
+
+    // Text that begins with the word `provide` but is not a provide block, such as "provide
+    // feedback". It outranks the `provide` keyword, which a lower-precedence text run cannot.
+    _mixed_provide_text_run: $ => alias(token(prec(1, /provide(?:[^\s<{][^<{]*|\s+(?:[^e\s<{][^<{]*|e[^n<{][^<{]*|en[^v<{][^<{]*|env[^.\s<{][^<{]*))/)), $.text_run),
 
     mixed_content: $ => repeat1(choice(
       $._mixed_text_run,
+      $._mixed_provide_text_run,
       $.element,
+      $.provide_expression,
       $.elements_if_expression,
       $.elements_for_expression,
       $.values_braced_expression,

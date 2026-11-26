@@ -43,6 +43,18 @@
       }
     ]
   },
+  "main.nx::inContent": {
+    "$type": "Stack",
+    "Children": [
+      {
+        "$type": "Badge"
+      },
+      {
+        "$type": "span",
+        "mode": "dark"
+      }
+    ]
+  },
   "main.nx::markup": {
     "$type": "div",
     "content": [
@@ -68,6 +80,10 @@
     "$type": "Size",
     "height": 5,
     "width": 12
+  },
+  "main.nx::prose": {
+    "$type": "p",
+    "content": "provide feedback, provided it is kind"
   },
   "main.nx::provideExpr": "fr-FR",
   "main.nx::provideExpr#rootLocale": "fr-FR",

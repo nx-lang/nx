@@ -89,6 +89,20 @@ let label() = { env.locale }
 let french() = { provide env.locale="fr-FR" { label() } }
 ```
 
+In an element's content, a block sits among the other children:
+
+```nx fragment
+<Page>
+  <Intro />
+  provide env.colorMode=dark {
+    <Footer />
+  }
+</Page>
+```
+
+Content text can't begin with `provide env`, since that starts a block; other text that begins with
+the word, such as "provide feedback", is still text.
+
 `provide` begins a block wherever it starts an expression, so it can't be the name of a
 declaration, parameter or binding (`reserved-name`); a record field named `provide` still works.
 

@@ -304,6 +304,7 @@ fn test_parse_environment_and_provide_forms() {
         let label() = { provide env.locale="fr-FR" env.color.accent=#fff { env.locale } }
         component <Footer /> = { <Section env.colorMode=dark><Links /></Section> }
         let siblings() = { provide env.colorMode=dark { <Header /> <Hero /> } <Body /> }
+        let inContent() = { <Page><Intro /> provide env.colorMode=dark { <Footer /> } provide feedback</Page> }
     "#;
     let result = parse_str(source, "environment.nx");
 
@@ -315,7 +316,8 @@ fn test_parse_environment_and_provide_forms() {
     let root = result.root().expect("Should have root node");
     assert_eq!(count_kind(&root, SyntaxKind::ENVIRONMENT_DEFINITION), 2);
     assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_DEFINITION), 3);
-    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 2);
+    // A provide block in an element's content is one, and prose that starts with `provide` is text.
+    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 3);
     let provides = root
         .children()
         .filter(|child| child.kind() == SyntaxKind::PROVIDE_DEFINITION)

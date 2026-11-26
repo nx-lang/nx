@@ -1,7 +1,7 @@
-module main.nx fingerprint 13291814230594613214
+module main.nx fingerprint 1380572326154553818
 links design.nx version "" fingerprint 9671487728751124515
 requires environment-v1 environment-v2
-entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle hosted] components [Badge Stack]
+entrypoints functions [readDefault readProvided readPath readBundle colors mode provideExpr nestedPath readsOutside cascade markup stacked bundle hosted inContent prose] components [Badge Stack]
 
 record Size @3:1-3:37
   width: int required
@@ -89,6 +89,19 @@ function hosted() @30:1-30:63 =
       <Badge />
     </Stack>
   }
+
+function inContent() @31:1-31:108 =
+  <Stack>
+    <Badge />
+    provide design.nx:env.colorMode=design.nx:ColorMode.dark {
+      <span mode=design.nx:env.colorMode />
+    }
+  </Stack>
+
+function prose() @32:1-32:63 =
+  <p>
+    "provide feedback, provided it is kind"
+  </p>
 
 provide design.nx:env.space = 8
 provide env.size.width = 12
