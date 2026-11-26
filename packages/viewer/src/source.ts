@@ -1468,7 +1468,11 @@ export function renderSource(
       if (inspector.querySelector(":scope > .inspector-fields > *, :scope > .inspector-more") !== null) {
         // What the element's type is for, in a quiet line over its fields, so it is found without
         // a card; resting on it shows the whole doc.
-        const summary = docSummary(node.declaration === undefined ? undefined : tree.declarations[node.declaration]?.doc);
+        // A union case's own doc says what it is better than its union's, as `Paint.color`'s does.
+        const declared = node.declaration === undefined ? undefined : tree.declarations[node.declaration];
+        const caseName = node.name?.slice(node.name.lastIndexOf(".") + 1);
+        const caseDoc = declared?.cases?.find((entry) => entry.name === caseName)?.doc;
+        const summary = docSummary(caseDoc ?? declared?.doc);
         if (summary !== undefined) {
           const doc = document.createElement("span");
           doc.className = "inspector-doc";

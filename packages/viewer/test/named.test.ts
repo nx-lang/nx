@@ -422,6 +422,13 @@ describe("named values in graphics", () => {
     assert.deepEqual(changes, [{ key: "drawing.body.fill.value", edit: { kind: "setValue", value: { kind: "name", name: "blue" } } }]);
   });
 
+  it("describes a union case by its own doc, not its union's", async () => {
+    const element = show(await treeOf([{ uri: "nx:///drawing.nx", identity: "drawing.nx", source: DRAWING }], { visualizers: { modules: [] }, suggestions: true }));
+    const doc = rendered(element, "blue.value").querySelector(".inspector-doc");
+    assert.ok(doc !== null, "the open value has a doc line");
+    assert.match(doc.textContent ?? "", /^Paints uniformly with one color/);
+  });
+
   it("draws a let's button past its element value's kind, and names what it replaces", async () => {
     const element = show(await treeOf([{ uri: "nx:///drawing.nx", identity: "drawing.nx", source: DRAWING }], { visualizers: { modules: [] }, suggestions: true }));
     const named = button(element, "blue");
