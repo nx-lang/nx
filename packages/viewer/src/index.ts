@@ -4683,7 +4683,11 @@ export class NxViewerElement extends ElementBase {
         group.append(heading);
         list.append(group);
       }
-      const parts = nameParts(suggestion.name, aliases);
+      // Under the Environment heading every name starts `env.`, so the heading says it once.
+      const parts =
+        suggestion.group.kind === "environment" && suggestion.name.startsWith("env.")
+          ? { quiet: "", rest: suggestion.name.slice(4) }
+          : nameParts(suggestion.name, aliases);
       const name: Node[] = [];
       if (parts.quiet !== "") {
         const quiet = document.createElement("span");
@@ -4693,15 +4697,24 @@ export class NxViewerElement extends ElementBase {
       }
       name.push(document.createTextNode(parts.rest));
       const preview: Node[] = [];
-      if (suggestion.preview !== undefined) {
-        if (suggestion.preview.kind === "color") {
+      const value = suggestion.preview === undefined ? undefined : previewText(suggestion.preview);
+      if (suggestion.preview !== undefined && value !== undefined) {
+        const color = suggestion.preview.kind === "color";
+        if (color) {
           preview.push(this.#swatchOf(suggestion.preview.value, suggestion.preview.outsideSrgb === true));
         }
-        preview.push(document.createTextNode(previewText(suggestion.preview)));
+        // A color reads by its swatch; its text only when that is a short hex, never cut off.
+        if (!color || value.length <= 9) {
+          preview.push(document.createTextNode(value));
+        }
       }
       const option = row("", name, preview, suggestion.name === current);
       option.dataset["name"] = suggestion.name;
-      option.title = suggestion.doc === undefined ? suggestion.type : `${suggestion.type}\n${suggestion.doc}`;
+      // Search reads the description too, so "ring" finds the focus color.
+      option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
+      // Its type and full value lead, so the one-line detail never cuts the value off.
+      const typed = value === undefined ? suggestion.type : `${suggestion.type} ${value}`;
+      option.title = suggestion.doc === undefined ? typed : `${typed}\n${suggestion.doc}`;
       group.append(option);
     }
     // Outside the listbox, which holds options alone; always there, so a screen reader announces
@@ -4717,7 +4730,7 @@ export class NxViewerElement extends ElementBase {
     input.setAttribute("aria-describedby", detail.id);
     const foot = document.createElement("div");
     foot.className = "named-foot";
-    foot.textContent = "Previews show default values";
+    foot.textContent = "Values at their defaults, before any provide or env. override";
     this.#popover.className = "popover named";
     this.#popover.replaceChildren(input, list, empty, detail, foot);
     this.#popover.hidden = false;
@@ -4726,7 +4739,14 @@ export class NxViewerElement extends ElementBase {
     button?.classList.add("open");
     button?.setAttribute("aria-expanded", "true");
     input.addEventListener("input", () => this.#filterNamed(session));
-    this.#filterNamed(session, rows.find((option) => option.classList.contains("current")));
+    const marked = rows.find((option) => option.classList.contains("current"));
+    this.#filterNamed(session, marked);
+    // The current value opens in the middle of the list, so the rows around it show too.
+    if (marked !== undefined) {
+      const port = list.getBoundingClientRect();
+      const shown = marked.getBoundingClientRect();
+      list.scrollTop += shown.top + shown.height / 2 - (port.top + port.height / 2);
+    }
     input.focus({ preventScroll: true });
   }
 
@@ -4750,7 +4770,7 @@ export class NxViewerElement extends ElementBase {
   #filterNamed(session: NamedSession, prefer?: HTMLElement): void {
     const words = filterWords(session.input.value);
     for (const row of session.rows) {
-      row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !nameHolds(row.dataset["name"] ?? "", words);
+      row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !nameHolds(row.dataset["search"] ?? row.dataset["name"] ?? "", words);
     }
     for (const group of this.#popover.querySelectorAll<HTMLElement>(".named-section")) {
       group.hidden = ![...group.querySelectorAll<HTMLElement>(".named-row")].some((row) => !row.hidden);

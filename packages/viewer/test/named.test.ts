@@ -141,11 +141,11 @@ describe("named values", () => {
     assert.equal(rows[1], "# Environment");
     assert.deepEqual(
       rows.slice(2, 11),
-      ["none", "xxs", "xs", "sm", "md", "lg", "xl", "xxl", "xxxl"].map((step, position) => rows[position + 2]!.startsWith(`env.space.${step} `) ? rows[position + 2]! : `env.space.${step}`)
+      ["none", "xxs", "xs", "sm", "md", "lg", "xl", "xxl", "xxxl"].map((step, position) => rows[position + 2]!.startsWith(`space.${step} `) ? rows[position + 2]! : `space.${step}`)
     );
-    assert.ok(!rows.some((row) => row.includes("env.radius")), rows.join("\n"));
+    assert.ok(!rows.some((row) => row.startsWith("radius.")), rows.join("\n"));
     assert.ok(rows.includes("# This document") && rows.includes("gap 6"), rows.join("\n"));
-    assert.equal(popover(element).querySelector(".named-foot")!.textContent, "Previews show default values");
+    assert.equal(popover(element).querySelector(".named-foot")!.textContent, "Values at their defaults, before any provide or env. override");
     const input = popover(element).querySelector("input")!;
     assert.equal(input.getAttribute("role"), "combobox");
     assert.equal(input.getAttribute("aria-activedescendant"), null, "no row is active until the reader picks one");
@@ -189,12 +189,12 @@ describe("named values", () => {
   it("shows colors with their swatches and filters by words", async () => {
     const element = show(await card());
     button(element, "root.body.radius")!.click();
-    assert.ok(listed(element).some((row) => row.startsWith("* env.radius.md")), "the current name is marked");
+    assert.ok(listed(element).some((row) => row.startsWith("* radius.md")), "the current name is marked");
     press(popover(element).querySelector("input")!, "Escape");
     assert.equal(popover(element).hidden, true);
     button(element, "root.body.fill")!.click();
     const rows = listed(element);
-    assert.ok(rows.some((row) => row.startsWith("env.color.accent #")), rows.join("\n"));
+    assert.ok(rows.some((row) => row.startsWith("color.accent #")), rows.join("\n"));
     assert.ok(rows.includes("# @nx/design"), rows.join("\n"));
     assert.ok(rows.some((row) => row.startsWith("standardPalette.blue600 #")), rows.join("\n"));
     assert.ok(popover(element).querySelector(".named-row .swatch") !== null);
@@ -203,7 +203,15 @@ describe("named values", () => {
     input.dispatchEvent(new window.Event("input"));
     const filtered = listed(element).filter((row) => !row.startsWith("#"));
     assert.ok(filtered.length > 0 && filtered.every((row) => /text/i.test(row) && /mu/i.test(row)), filtered.join("\n"));
-    assert.ok(filtered.some((row) => row.startsWith("env.color.text.muted")));
+    assert.ok(filtered.some((row) => row.startsWith("color.text.muted")));
+    // A wide color reads by its swatch alone; its full value is in the row's description.
+    input.value = "";
+    input.dispatchEvent(new window.Event("input"));
+    assert.ok(!listed(element).some((row) => row.includes("oklch(")), listed(element).join("\n"));
+    // Search reads descriptions too: the focus color's is "The focus ring."
+    input.value = "ring";
+    input.dispatchEvent(new window.Event("input"));
+    assert.ok(listed(element).some((row) => row.startsWith("color.focus")), listed(element).join("\n"));
   });
 
   it("offers nothing for a string, and Ctrl+Space opens nothing", async () => {
@@ -281,7 +289,7 @@ describe("named values", () => {
     const element = show(await card());
     rendered(element, "tight.value").click();
     assert.equal(popover(element).hidden, false);
-    assert.ok(listed(element).some((row) => row.startsWith("* env.space.sm")), listed(element).join("\n"));
+    assert.ok(listed(element).some((row) => row.startsWith("* space.sm")), listed(element).join("\n"));
   });
 
   it("previews a name by the value it names where it is written, not a parameter's of the same name", async () => {
@@ -308,7 +316,7 @@ describe("named values", () => {
     const token = rendered(element, "tokened.body.background").querySelector<HTMLElement>(".reference-token")!;
     assert.ok(token.querySelector(".swatch"), "an environment color token shows its swatch");
     token.click();
-    assert.ok(listed(element).some((row) => row.startsWith("* env.color.surface ")));
+    assert.ok(listed(element).some((row) => row.startsWith("* color.surface ")));
     choose(element, "env.color.surface");
     assert.deepEqual(fired, [], "the current name changes nothing");
     token.click();
@@ -374,7 +382,7 @@ describe("named values in graphics", () => {
     assert.ok(rendered(element, "drawing.body.opacity.value").classList.contains("edit-number"), "opacity edits as a number");
     assert.ok(button(element, "box.body.rx"), "rx offers radii");
     button(element, "box.body.rx")!.click();
-    assert.ok(listed(element).some((row) => row.startsWith("env.radius.md ")), listed(element).join("\n"));
+    assert.ok(listed(element).some((row) => row.startsWith("radius.md ")), listed(element).join("\n"));
   });
 
   it("binds a paint written as an element to a named paint", async () => {
@@ -393,11 +401,11 @@ describe("named values in graphics", () => {
     element.selection = "drawing.body.fill.value.color";
     press(root(element).querySelector(".body")!, " ", { ctrlKey: true });
     assert.equal(popover(element).hidden, false);
-    assert.ok(listed(element).some((row) => row.startsWith("env.color.accent ")), listed(element).join("\n"));
+    assert.ok(listed(element).some((row) => row.startsWith("color.accent ")), listed(element).join("\n"));
     press(popover(element).querySelector("input")!, "Escape");
     root(element).querySelector<HTMLElement>('[data-field="tinted.body.fill.value.color"] [data-hover="tinted.body.fill.value.color.value"]')!.click();
     assert.equal(popover(element).hidden, false);
-    assert.ok(listed(element).some((row) => row.startsWith("* env.color.accent ")), listed(element).join("\n"));
+    assert.ok(listed(element).some((row) => row.startsWith("* color.accent ")), listed(element).join("\n"));
   });
 
   it("offers colors with their swatches for a paint's color, unfolded", async () => {
@@ -409,7 +417,7 @@ describe("named values in graphics", () => {
     assert.ok(color, "the paint's color offers named values");
     color.click();
     const rows = listed(element);
-    assert.ok(rows.includes("# Environment") && rows.some((row) => row.startsWith("env.color.accent #155dfc")), rows.join("\n"));
+    assert.ok(rows.includes("# Environment") && rows.some((row) => row.startsWith("color.accent #155dfc")), rows.join("\n"));
     assert.ok(rows.includes("# @nx/design") && rows.some((row) => row.startsWith("standardPalette.blue600 #155dfc")), rows.join("\n"));
     assert.ok(popover(element).querySelector(".named-row .swatch") !== null);
   });

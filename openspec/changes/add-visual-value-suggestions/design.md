@@ -136,7 +136,7 @@ way.
 `env.color.accent` previews as `standardPalette.blue600` followed to `c.oklch(0.546, 0.245,
 262.881)`, in the light arm because `colorMode` defaults to `light`. A preview is the default
 theme's value, not what a main-module theme or a dark section makes it; the popover says so in its
-footer ("Previews show default values"). Following provides is a later change.
+footer ("Values at their defaults, before any provide or env. override"). Following provides is a later change.
 
 *Alternative:* evaluate entries with the IR runtime. The language service does not depend on the
 runtime, previews must not run arbitrary code (as color discovery doesn't), and evaluation would
@@ -181,8 +181,9 @@ Code offers Option+Esc there for the same reason). The host draws the icon by na
 icons work.
 
 The popover is a combobox: a search field over a list with group headings, each row reading the
-name, its `env.` or module alias quieter, and its preview after it in a second column (swatch and
-hex for a color, the number, the case). Typing filters rows whose name holds every typed word,
+name (without `env.` under the Environment heading, a module alias quieter), and its preview after
+it in a second column (a bordered swatch, plus the hex when it has one, for a color; the number; the
+case). Typing filters rows whose name or doc holds every typed word,
 ignoring case and treating `.` as a space. Up and Down move, Enter chooses, Escape closes. The list
 scrolls inside the popover, headings sticky.
 

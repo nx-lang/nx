@@ -352,7 +352,7 @@ export const styles = `
   margin: 0 0.25em 0 0.1em;
   border-radius: 2px;
   border: 0;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 /* A color outside sRGB: a small corner notch, since an sRGB screen draws it mapped. */
@@ -972,7 +972,7 @@ export const styles = `
   height: 0.75em;
   margin-right: 0.4em;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 .menu-item:hover, .menu-item:focus { background: var(--nx-viewer-selection, light-dark(#0969da1f, #388bfd33)); }
@@ -1029,7 +1029,7 @@ export const styles = `
   height: 0.75em;
   margin-right: 0.4em;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 /* A field's choices chevron: drawn where it would stand in the line, just past the value, and taken
@@ -1152,7 +1152,7 @@ export const styles = `
   height: 0.8em;
   margin-right: 0.4em;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.2), rgb(255 255 255 / 0.25));
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
 .popover .named-preview .swatch.outside-srgb {

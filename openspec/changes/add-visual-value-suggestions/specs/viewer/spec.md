@@ -18,35 +18,40 @@ it.
 
 The popover SHALL open over the reading, placed by the value, and move nothing. It SHALL hold a
 search field over a list of the named values by group, each group under its label, in the tree's
-order. Each row SHALL read the name, its leading `env.` or import alias quieter, and, in a second
-column, its preview: a swatch and the hex (or the `toCss` text when it has no hex) for a color, and
-the text of a number, string, boolean or case. When the property has a default, a `Default` row and
+order. Each row SHALL read the name, without its leading `env.` under the Environment group and with
+its import alias quieter elsewhere, and, in a second column, its preview: a swatch with a faint
+border, and the hex when it has one, for a color, and the text of a number, string, boolean or case. When the property has a default, a `Default` row and
 the default SHALL lead the list, set off by a rule, as the choices list's does. The row whose name is
-the property's current value SHALL be marked. Typing SHALL keep the rows whose name holds every word
-typed, ignoring case and taking `.` as a space, and the groups that still hold rows. Up and Down
+the property's current value SHALL be marked, active, and scrolled to the middle of the list when the
+popover opens. Typing SHALL keep the rows whose name or doc holds every word typed, ignoring case and taking `.` as a space, and the groups that still hold rows. Up and Down
 SHALL move through the rows, from the marked row when none is active yet, Enter SHALL choose the
 active row, and Escape or a click elsewhere SHALL close the popover and keep the selection. The list
 SHALL scroll inside the popover, its group labels staying at its top as it scrolls, and never scroll
-the reading. A row's hover card SHALL give its type and doc. The popover's foot SHALL read, quieter,
-`Previews show default values`. The search field SHALL be a combobox over a listbox, with the active
+the reading. A row's hover card, and a line above the foot for the active row, SHALL give its type, its full
+preview text, and its doc. The popover's foot SHALL read, quieter, `Values at their defaults, before
+any provide or env. override`. The search field SHALL be a combobox over a listbox, with the active
 row announced.
 
 #### Scenario: Spacing for a padding
 - **WHEN** a Card typed with `padding: Spacing = 16` writes `padding=8` in a document that imports
   `@nx/design`, and the reader opens the named-values popover of `Padding`
-- **THEN** the popover SHALL read `Default 16`, then under `Environment` `env.space.none` through
-  `env.space.xxxl`, each with its number, and no `env.radius` row
+- **THEN** the popover SHALL read `Default 16`, then under `Environment` `space.none` through
+  `space.xxxl`, each with its number, and no `radius` row
 
 #### Scenario: Colors with their swatches
 - **WHEN** a document imports `@nx/graphics` and `@nx/design`, a Circle writes
   `fill=<Paint.color color=#2563eb/>`, whose case field `color` is typed `Color`, and the reader
   opens the popover of that `Color` in Circle's inspector
-- **THEN** the rows under `Environment` SHALL include `env.color.accent` with a swatch, and the rows
+- **THEN** the rows under `Environment` SHALL include `color.accent` with a swatch, and the rows
   under `@nx/design` SHALL include `standardPalette.blue600` with a swatch
 
 #### Scenario: Filtering
 - **WHEN** the reader types `text mu` in the popover of a `Color`
-- **THEN** the list SHALL hold `env.color.text.muted` and no row without both words
+- **THEN** the list SHALL hold `color.text.muted` and no row whose name and doc lack either word
+
+#### Scenario: Searching descriptions
+- **WHEN** the reader types `ring` in the popover of a `Color`
+- **THEN** the list SHALL hold `color.focus`, whose doc reads "The focus ring."
 
 #### Scenario: A property without named values
 - **WHEN** a property is typed `string`
