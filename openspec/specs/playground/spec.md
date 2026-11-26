@@ -691,3 +691,16 @@ Source with the cursor at the start of the node and reveal it.
 #### Scenario: Opening an expression in Source
 - **WHEN** a visitor double-clicks a braced expression in Visual
 - **THEN** Source SHALL show, with the cursor at the start of that expression
+
+### Requirement: The Visual view offers named values
+The playground's Visual view SHALL ask for the source tree with `suggestions`, with the `visualizers`
+it already asks for, so that its inspectors offer the named values of each property's type, and SHALL
+draw the `named-values` icon. A `nx-edit` that chooses a named value SHALL be applied as any other
+edit from Visual. The Visual test cases page SHALL hold an example that imports `@nx/design` and
+writes properties with tokens, with literals and unset.
+
+#### Scenario: Choosing a token in the playground
+- **WHEN** a visitor on that example opens the named-values popover of a Card's `Padding` in Visual
+  and chooses `env.space.lg`
+- **THEN** the source SHALL read `padding={env.space.lg}`, and undo SHALL take it back
+
