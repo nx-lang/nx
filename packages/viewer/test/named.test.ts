@@ -158,7 +158,8 @@ describe("named values", () => {
     assert.equal(empty.textContent, "No named values match");
     input.value = "space md";
     input.dispatchEvent(new window.Event("input"));
-    assert.equal(popover(element).querySelector(".named-detail")!.textContent, "", "a doc that restates the value is left out");
+    assert.equal(popover(element).querySelector(".named-detail .named-doc")!.textContent, "", "a doc that restates the value is left out");
+    assert.equal(popover(element).querySelector(".named-detail .named-exact")!.textContent, "");
     assert.equal(popover(element).querySelector(".named-row.active")!.getAttribute("title"), null, "no hover card repeats the detail");
   });
 
@@ -213,7 +214,14 @@ describe("named values", () => {
     const green = popover(element).querySelector<HTMLElement>('.named-row[data-name="standardPalette.green500"]')!;
     assert.equal(green.querySelector(".gamut-tag")?.textContent, "P3");
     assert.match(green.querySelector(".named-preview")!.textContent ?? "", /^P3#[0-9a-f]{6}$/);
-    assert.match(green.dataset["detail"] ?? "", /^oklch\(.*\), outside sRGB/);
+    assert.match(green.dataset["exact"] ?? "", /^oklch\(\d\.\d{1,3} \d\.\d{1,3} \d+(\.\d)?\) \u00b7 outside sRGB$/);
+    assert.equal(popover(element).querySelector('.named-row[data-name="standardPalette.green500"] .swatch.split'), null, "swatches never split");
+    // The doc and the exact value each get their own line under the list.
+    green.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true }));
+    assert.equal(popover(element).querySelector(".named-detail .named-exact")!.textContent, green.dataset["exact"]);
+    const focus = popover(element).querySelector<HTMLElement>('.named-row[data-name="env.color.focus"]')!;
+    assert.ok((focus.dataset["doc"] ?? "").length > 0);
+    assert.ok((focus.dataset["exact"] ?? "").startsWith("oklch("), focus.dataset["exact"]);
     // Search reads descriptions too: the focus color's is "The focus ring."
     input.value = "ring";
     input.dispatchEvent(new window.Event("input"));

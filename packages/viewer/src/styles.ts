@@ -1168,21 +1168,27 @@ export const styles = `
   vertical-align: 0.1em;
   opacity: 0.8;
 }
-.popover .named-preview .swatch.split { width: 1.2em; }
 .popover .named-preview .swatch.outside-srgb {
   background-image: linear-gradient(225deg, light-dark(#000, #fff) 0 28%, transparent 28%);
 }
 .popover .named-rule { height: 1px; margin: 3px 8px; background: var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f)); }
 .popover .named-empty { padding: 8px 10px; color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e)); }
 .popover .named-empty:empty { padding: 0; }
+/* Two lines, always kept, so the popover keeps its size: the doc, then the exact value, quieter. */
 .popover .named-detail {
   padding: 4px 10px;
   border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
+  font-size: 11.5px;
+}
+.popover .named-detail > div {
   min-height: 1lh;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 11.5px;
+}
+.popover .named-detail .named-exact {
+  font-family: var(--mono);
+  color: var(--nx-viewer-quiet-color, light-dark(#6e7781, #8b949e));
 }
 .popover .named-foot {
   padding: 4px 10px;

@@ -306,9 +306,22 @@ function isNamedKey(event: KeyboardEvent): boolean {
   return (event.ctrlKey && !event.altKey && !event.metaKey && (event.key === " " || event.code === "Space")) || (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "Escape");
 }
 
-/** Whether the document's screen can show colors outside sRGB, as Display P3 ones. */
-function wideGamutScreen(document: Document): boolean {
-  return document.defaultView?.matchMedia?.("(color-gamut: p3)").matches === true;
+/**
+ * `oklch(…)` or `oklab(…)` text rounded to what a reader can tell apart: lightness and chroma (or a
+ * and b) to 3 places, hue to 1. Other text is returned as it is.
+ */
+function roundedColor(text: string): string {
+  const match = /^(oklch|oklab)\(([^)]*)\)$/.exec(text.trim());
+  if (match === null) {
+    return text;
+  }
+  const places = match[1] === "oklch" ? [3, 3, 1] : [3, 3, 3];
+  const parts = match[2]!.trim().split(/\s+/);
+  const rounded = parts.map((part, index) => {
+    const number = Number(part);
+    return index < places.length && part !== "" && Number.isFinite(number) ? String(Number(number.toFixed(places[index]))) : part;
+  });
+  return `${match[1]}(${rounded.join(" ")})`;
 }
 
 /** The hexagon the named-values button shows when the host draws no `named-values` icon. */
@@ -4719,13 +4732,8 @@ export class NxViewerElement extends ElementBase {
         }
         if (shown.kind === "color") {
           const swatch = this.#swatchOf(shown.value, false);
-          // On a wide-gamut screen, a wide color's swatch splits: the color, then the sRGB color an
-          // ordinary screen shows for it. On an sRGB screen the halves would look the same.
-          if (wide && shown.nearestHex !== undefined && wideGamutScreen(this.ownerDocument)) {
-            swatch.classList.add("split");
-            swatch.style.background = `linear-gradient(90deg, ${shown.value} 50%, ${shown.nearestHex} 50%)`;
-            swatch.title = `${shown.value} | ${shown.nearestHex} on an sRGB screen`;
-          }
+          // A swatch split into the color and its sRGB version was tried: at swatch size, even on a
+          // wide-gamut screen, the halves looked the same, so the tag carries the difference.
           preview.push(swatch);
         }
         preview.push(document.createTextNode(wide ? (shown.nearestHex ?? "") : value));
@@ -4734,15 +4742,17 @@ export class NxViewerElement extends ElementBase {
       option.dataset["name"] = suggestion.name;
       // Search reads the description too, so "ring" finds the focus color.
       option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
-      // The line under the list gives the active row's doc, and a wide color's exact value. Every
-      // row fits the same property, so the type would only repeat.
-      const hidden =
-        exact === undefined
-          ? undefined
-          : `${exact}, outside sRGB${suggestion.preview?.outsideP3 === true ? " and Display P3" : ""}`;
-      // A doc that only restates the value, as a scale step's `/// 12` does, adds nothing.
-      const doc = suggestion.doc?.trim() === value ? undefined : suggestion.doc;
-      option.dataset["detail"] = [hidden, doc].filter((part) => part !== undefined).join(" \u2014 ");
+      // The lines under the list give the active row's doc, then a wide color's exact value. Every
+      // row fits the same property, so the type would only repeat. A doc that only restates the
+      // value, as a scale step's `/// 12` does, adds nothing.
+      const doc = suggestion.doc?.trim() === value ? undefined : suggestion.doc?.trim();
+      if (doc !== undefined && doc !== "") {
+        option.dataset["doc"] = doc;
+      }
+      if (exact !== undefined) {
+        const outside = suggestion.preview?.outsideP3 === true ? "outside sRGB and Display P3" : "outside sRGB";
+        option.dataset["exact"] = `${roundedColor(exact)} \u00b7 ${outside}`;
+      }
       group.append(option);
     }
     // Outside the listbox, which holds options alone; always there, so a screen reader announces
@@ -4751,10 +4761,16 @@ export class NxViewerElement extends ElementBase {
     empty.className = "named-empty";
     empty.setAttribute("role", "status");
     empty.setAttribute("aria-live", "polite");
-    // The active row's doc, and a full value its row cuts, for the pointer and the keyboard alike.
+    // The active row's doc, then its exact value, for the pointer and the keyboard alike: two lines,
+    // always there, so the popover keeps its size as the active row changes.
     const detail = document.createElement("div");
     detail.className = "named-detail";
     detail.id = "nx-viewer-named-detail";
+    const detailDoc = document.createElement("div");
+    detailDoc.className = "named-doc";
+    const detailExact = document.createElement("div");
+    detailExact.className = "named-exact";
+    detail.append(detailDoc, detailExact);
     input.setAttribute("aria-describedby", detail.id);
     const foot = document.createElement("div");
     foot.className = "named-foot";
@@ -4825,10 +4841,14 @@ export class NxViewerElement extends ElementBase {
     for (const candidate of session.rows) {
       candidate.classList.toggle("active", candidate === row);
     }
-    const detail = this.#popover.querySelector<HTMLElement>(".named-detail");
-    if (detail !== null) {
-      // One line, kept as the active row changes, so the popover keeps its size.
-      detail.textContent = row?.dataset["detail"] ?? "";
+    const doc = this.#popover.querySelector<HTMLElement>(".named-detail .named-doc");
+    const exact = this.#popover.querySelector<HTMLElement>(".named-detail .named-exact");
+    if (doc !== null && exact !== null) {
+      // A line clipped by its width keeps its full text in its title.
+      for (const [line, text] of [[doc, row?.dataset["doc"] ?? ""], [exact, row?.dataset["exact"] ?? ""]] as const) {
+        line.textContent = text;
+        line.title = text;
+      }
     }
     if (row === undefined) {
       session.input.removeAttribute("aria-activedescendant");
