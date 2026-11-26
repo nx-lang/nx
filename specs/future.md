@@ -2412,7 +2412,11 @@ function call styles and first-class calling conventions remain a separate desig
 and `toGamut`. Left for later:
 
 - Drawing on P3 surfaces in Skia and Canvas, instead of mapping into sRGB at preparation.
-- An OKLCH picker, so wide colors can be edited and not only shown.
+- An OKLCH picker, so wide colors can be edited and not only shown. On a wide-gamut screen it
+  should show the color beside its `toGamut(…, srgb)` version as two large, labelled patches
+  ("P3" and "sRGB"), so a designer can judge whether the fallback an sRGB screen shows is
+  acceptable. A split swatch was tried in the named-values list (`add-visual-value-suggestions`)
+  and dropped: at 12 pixels the halves looked the same, even on a P3 screen with HDR on.
 - Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
 - `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.
 - Percentage literals for color (Bret, 2026-11-22). NX will get `23%` literals as a general
@@ -2455,6 +2459,11 @@ viewer's named-values popover). Left for later:
   on its field's line offers its named values from Ctrl+Space and a click on its token, but draws no
   hexagon there, so a pointer reader finds it only by unfolding. A button that does not crowd the
   line (shown while the property is selected) would close the gap.
+- **A P3 and sRGB comparison in the footer.** A wide color's row reads `P3` and its nearest sRGB
+  hex, and the lines under the list give its exact value. On a wide-gamut screen, the footer could
+  also show the highlighted color and its sRGB version as two larger, labelled patches, which is
+  where Mac and OLED users would see the difference. Bret chose to wait (2026-11-26); see the
+  OKLCH picker note under Wide-Gamut Color.
 - **Visual at phone width in the playground.** At a 390-pixel viewport the playground's NX pane
   gives `<nx-viewer>` about 62 pixels, so Visual is unreadable on a phone. This predates value
   suggestions (every example shows it); the pane's layout, not the viewer, needs the fix.
