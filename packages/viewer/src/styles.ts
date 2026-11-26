@@ -1183,6 +1183,7 @@ export const styles = `
   border-top: 1px solid var(--nx-viewer-rule, light-dark(#0000001f, #ffffff1f));
   font-size: 11.5px;
 }
+.popover .named-detail[hidden], .popover .named-detail > [hidden], .popover .named-foot[hidden] { display: none; }
 .popover .named-detail > div {
   min-height: 1lh;
   white-space: nowrap;

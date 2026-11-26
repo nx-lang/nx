@@ -170,7 +170,7 @@ let root() = <Box />
     );
     let red = suggestion(&tree, COLOR, "brandRed");
     assert_eq!(red.group.kind, SourceSuggestionGroupKind::Document);
-    assert_eq!(red.group.label, "This document");
+    assert_eq!(red.group.label, "This file");
     assert_eq!(
         red.preview
             .as_ref()

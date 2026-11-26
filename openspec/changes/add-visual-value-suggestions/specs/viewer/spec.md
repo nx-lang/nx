@@ -32,12 +32,13 @@ popover opens. Typing SHALL keep the rows whose name or doc holds every word typ
 SHALL move through the rows, from the marked row when none is active yet, Enter SHALL choose the
 active row, and Escape or a click elsewhere SHALL close the popover and keep the selection. The list
 SHALL scroll inside the popover, its group labels staying at its top as it scrolls, and never scroll
-the reading. Two lines above the foot, always kept so the popover keeps its size, SHALL give the active row's doc,
+the reading. Two lines above the foot, each kept while the popover is open so it keeps its size, and
+each left out when no row of the list fills it, SHALL give the active row's doc,
 then, quieter, a wide color's exact value rounded to 3 places (hue to 1) with `outside sRGB`; a
 doc that only restates the value is left out, a line too long for the popover ends in an ellipsis
 with its full text as its title, and rows carry no hover card, since pointing at a row makes it
-active. The popover's foot SHALL read, quieter, `Values at their defaults, before
-any provide or env. override`. The search field SHALL be a combobox over a listbox, with the active
+active. When the list holds environment values, the only ones an override can change, the popover's
+foot SHALL read, quieter, `Values shown are defaults, before any override`. The search field SHALL be a combobox over a listbox, with the active
 row announced.
 
 #### Scenario: Spacing for a padding

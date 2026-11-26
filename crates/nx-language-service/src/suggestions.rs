@@ -65,7 +65,7 @@ pub struct SourceSuggestion {
 pub struct SourceSuggestionGroup {
     /// Which kind of group.
     pub kind: SourceSuggestionGroupKind,
-    /// The group's label: `Environment`, a declaration's name, `This document`, a peer file's
+    /// The group's label: `Environment`, a declaration's name, `This file`, a peer file's
     /// path or an import's path.
     pub label: String,
 }
@@ -1380,7 +1380,7 @@ impl TreeBuilder<'_> {
             let (group, label, order) = match &binding.origin {
                 PreparedBindingOrigin::Local => (
                     SourceSuggestionGroupKind::Document,
-                    "This document".to_string(),
+                    "This file".to_string(),
                     0,
                 ),
                 PreparedBindingOrigin::Peer { module_identity }

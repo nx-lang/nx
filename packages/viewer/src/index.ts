@@ -4783,13 +4783,19 @@ export class NxViewerElement extends ElementBase {
     detailExact.className = "named-exact";
     detail.append(detailDoc, detailExact);
     input.setAttribute("aria-describedby", detail.id);
+    // Only environment values can be overridden, so the note shows only when the list holds them.
     const foot = document.createElement("div");
     foot.className = "named-foot";
-    foot.textContent = "Values at their defaults, before any provide or env. override";
+    foot.textContent = "Values shown are defaults, before any override";
+    foot.hidden = !suggestions.some((suggestion) => suggestion.group.kind === "environment");
     this.#popover.className = "popover named";
     this.#popover.replaceChildren(input, list, empty, detail, foot);
     this.#popover.hidden = false;
     this.#fitNamed(list);
+    // A line no row fills is left out for the whole popover, so its size still holds as rows change.
+    detailDoc.hidden = !rows.some((option) => option.dataset["doc"] !== undefined);
+    detailExact.hidden = !rows.some((option) => option.dataset["exact"] !== undefined);
+    detail.hidden = detailDoc.hidden && detailExact.hidden;
     const session: NamedSession = { place, anchor, button, input, rows, active: undefined };
     this.#named = session;
     button?.classList.add("open");

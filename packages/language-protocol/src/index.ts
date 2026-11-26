@@ -680,7 +680,7 @@ export interface SourceSuggestion {
 /** The group a suggestion belongs to: its kind, in listing order, and its label. */
 export interface SourceSuggestionGroup {
   kind: "environment" | "declaration" | "document" | "peer" | "import";
-  /** `Environment`, a declaration's name, `This document`, a file's path or an import's path. */
+  /** `Environment`, a declaration's name, `This file`, a file's path or an import's path. */
   label: string;
 }
 

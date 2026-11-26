@@ -95,7 +95,7 @@ Groups, in this order:
    `env.color.text.muted`. An ambiguous name, which the module could not read, is left out.
 2. **The enclosing declaration**: the parameters, and a component's state fields, of the top-level
    component or function the value is written in, with their record fields. Labeled with its name.
-3. **This document**: its top-level parameterless `let` values, with their record fields.
+3. **This file** (`This file`): its top-level parameterless `let` values, with their record fields.
 4. **Each peer file**: other files of the same library, and other root modules of the same
    program, whose non-private values the module sees without an import (declaration-visibility).
 5. **Each imported module**, in import order: the `let` values it makes visible, spelled through the
@@ -136,7 +136,7 @@ way.
 `env.color.accent` previews as `standardPalette.blue600` followed to `c.oklch(0.546, 0.245,
 262.881)`, in the light arm because `colorMode` defaults to `light`. A preview is the default
 theme's value, not what a main-module theme or a dark section makes it; the popover says so in its
-footer ("Values at their defaults, before any provide or env. override"). Following provides is a later change.
+footer, shown when environment values are listed ("Values shown are defaults, before any override"). Following provides is a later change.
 
 *Alternative:* evaluate entries with the IR runtime. The language service does not depend on the
 runtime, previews must not run arbitrary code (as color discovery doesn't), and evaluation would

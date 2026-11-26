@@ -150,7 +150,7 @@ Each suggestion SHALL belong to one group, in this order:
 
 1. `environment`, labeled `Environment`;
 2. `declaration`, the parameters and state of one top-level declaration, labeled with its name;
-3. `document`, this document's `let` values, labeled `This document`;
+3. `document`, this document's `let` values, labeled `This file`;
 4. `peer`, one per other file of the library or program whose values the module sees without an
    import, in path order, labeled with its path relative to the document, such as `./brand.nx`;
 5. `import`, one per imported module in import order, labeled with the import's path as written,

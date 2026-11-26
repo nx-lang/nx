@@ -144,8 +144,9 @@ describe("named values", () => {
       ["none", "xxs", "xs", "sm", "md", "lg", "xl", "xxl", "xxxl"].map((step, position) => rows[position + 2]!.startsWith(`space.${step} `) ? rows[position + 2]! : `space.${step}`)
     );
     assert.ok(!rows.some((row) => row.startsWith("radius.")), rows.join("\n"));
-    assert.ok(rows.includes("# This document") && rows.includes("gap 6"), rows.join("\n"));
-    assert.equal(popover(element).querySelector(".named-foot")!.textContent, "Values at their defaults, before any provide or env. override");
+    assert.ok(rows.includes("# This file") && rows.includes("gap 6"), rows.join("\n"));
+    assert.equal(popover(element).querySelector(".named-foot")!.textContent, "Values shown are defaults, before any override");
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-foot")!.hidden, false, "the list holds environment values");
     const input = popover(element).querySelector("input")!;
     assert.equal(input.getAttribute("role"), "combobox");
     assert.equal(input.getAttribute("aria-activedescendant"), null, "no row is active until the reader picks one");
@@ -412,6 +413,9 @@ describe("named values in graphics", () => {
     const changes = edits(element);
     fill.click();
     assert.ok(listed(element).includes("blue"), listed(element).join("\n"));
+    // No environment value can be overridden here, and no row has a doc: no note, no detail lines.
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-foot")!.hidden, true);
+    assert.equal(popover(element).querySelector<HTMLElement>(".named-detail")!.hidden, true);
     choose(element, "blue");
     assert.deepEqual(changes, [{ key: "drawing.body.fill.value", edit: { kind: "setValue", value: { kind: "name", name: "blue" } } }]);
   });
