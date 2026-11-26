@@ -480,12 +480,13 @@ _Answers (fix pass): ButtonGap keeps only its own values, by design, noted as a 
 
 ## New Findings Discovered During 2026-11-26 16:38 Verification
 
-### 🟡 Fixed - RF36 The defaults-note fix leaves one stale design line, an unrecorded follow-up, and a dead export
+### ✅ Verified - RF36 The defaults-note fix leaves one stale design line, an unrecorded follow-up, and a dead export
 - **Severity:** Low
 - **Confidence:** High
 - **Evidence:** (a) `design.md:139` still says the footer is "shown when environment values are listed", while the delta, the design risk bullet (`design.md:218-220`) and the code now also show it for a parameter or state field previewed by its default. (b) The RF30 Fix note leaves "a document `let` that reads `env.`" for later, behind a service-side `fromDefault` flag, but `specs/future.md`'s "What `add-visual-value-suggestions` Left For Later" has no entry for it. The "Previews that follow `provide`s" bullet is about what a running session knows, not about flagging when the note is missing. (c) `nameHolds` (`packages/viewer/src/named.ts:224`) is no longer called anywhere. `rowHolds` replaced it, and only `rowHolds`' doc comment still names it.
 - **Recommendation:** Reword `design.md:139` to the new condition. Add a future.md bullet for flagging previews that followed an `env.` read so the note shows for them. Remove `nameHolds`, or have `rowHolds` call it for the name half, and fix the doc comment to match.
 - **Fix:** `design.md:139` now says the footer shows when environment values, or parameters previewed by their defaults, are listed. `specs/future.md` (value suggestions follow-ups) records the defaults note for a `let` that reads `env.` with a `preview.fromDefault` idea. The unused `nameHolds` is removed and `rowHolds`' comment no longer names it.
+- **Verification:** (a) `design.md:139` now gives the new condition, matching the delta and the risk bullet. It says "parameters" where the delta says "a parameter or state field", which is close enough for a design note. (b) The new `specs/future.md` bullet sits under the value suggestions follow-ups and describes the unflagged `env.`-reading `let` and the `preview.fromDefault` idea. (c) `nameHolds` is gone, nothing references it, and `rowHolds`' comment describes the name match itself. The viewer build and 271/271 tests pass.
 
 
 ## Questions (2026-11-26 pass)
