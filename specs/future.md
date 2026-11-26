@@ -2474,6 +2474,10 @@ viewer's named-values popover). Left for later:
   also show the highlighted color and its sRGB version as two larger, labelled patches, which is
   where Mac and OLED users would see the difference. Bret chose to wait (2026-11-26); see the
   OKLCH picker note under Wide-Gamut Color.
+- **The defaults note for a `let` that reads `env.`.** The popover's note shows when the list holds
+  an environment value or a parameter previewed by its default. A file's `let tint: Color =
+  {env.color.accent}` also previews a default, but when no environment row is listed the note stays
+  hidden. The service could flag such previews (`preview.fromDefault`) so the viewer shows it.
 - **Visual at phone width in the playground.** At a 390-pixel viewport the playground's NX pane
   gives `<nx-viewer>` about 62 pixels, so Visual is unreadable on a phone. This predates value
   suggestions (every example shows it); the pane's layout, not the viewer, needs the fix.

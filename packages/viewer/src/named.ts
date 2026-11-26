@@ -220,14 +220,8 @@ export function filterWords(typed: string): string[] {
   return typed.toLowerCase().replace(/\./g, " ").split(/\s+/).filter((word) => word !== "");
 }
 
-/** Whether `name` holds each of `words`, ignoring case, `.` taken as a space. */
-export function nameHolds(name: string, words: readonly string[]): boolean {
-  const spelled = name.toLowerCase().replace(/\./g, " ");
-  return words.every((word) => spelled.includes(word));
-}
-
 /**
- * Whether a row holds each of `words`: in its name anywhere, as {@link nameHolds} reads it, or at
+ * Whether a row holds each of `words`: in its name anywhere, `.` taken as a space, or at
  * the start of a word of its doc, so prose does not match inside its words.
  */
 export function rowHolds(name: string, doc: string | undefined, words: readonly string[]): boolean {

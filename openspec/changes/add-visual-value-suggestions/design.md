@@ -136,7 +136,7 @@ way.
 `env.color.accent` previews as `standardPalette.blue600` followed to `c.oklch(0.546, 0.245,
 262.881)`, in the light arm because `colorMode` defaults to `light`. A preview is the default
 theme's value, not what a main-module theme or a dark section makes it; the popover says so in its
-footer, shown when environment values are listed ("Values shown are defaults, before any override"). Following provides is a later change.
+footer, shown when environment values, or parameters previewed by their defaults, are listed ("Values shown are defaults, before any override"). Following provides is a later change.
 
 *Alternative:* evaluate entries with the IR runtime. The language service does not depend on the
 runtime, previews must not run arbitrary code (as color discovery doesn't), and evaluation would
