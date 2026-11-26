@@ -1090,6 +1090,8 @@ export const styles = `
 .source .sheet-row:focus-within > .sheet-value > .row-anchor > .named-values,
 .source [data-role="declaration"]:hover > .named-anchor > .named-values,
 .source [data-role="declaration"].selected > .named-anchor > .named-values,
+.source [data-role="declaration"]:hover > .row-element > .row-head > .named-anchor > .named-values,
+.source [data-role="declaration"]:has(> .row-element.selected) > .row-element > .row-head > .named-anchor > .named-values,
 .source .property-menu:has(> .row-menu.selected) > .named-values,
 .source .named-values.open { visibility: visible; }
 .source .named-values:hover, .source .named-values.open {

@@ -1954,6 +1954,14 @@ export class NxViewerElement extends ElementBase {
       const anchor = this.ownerDocument.createElement("span");
       anchor.className = "named-anchor";
       anchor.append(this.#namedButton(place, node.name ?? "the value"));
+      // An element value drawn as a row has its button just past the row's kind or title, inside
+      // its head, not past the row, which runs to the pane's edge.
+      const head = drawn.matches(".row-element") ? drawn.querySelector<HTMLElement>(":scope > .row-head") : null;
+      if (head !== null) {
+        const pin = head.querySelector(":scope > .row-pin");
+        head.insertBefore(anchor, pin);
+        continue;
+      }
       // After the brace that closes a braced value, so the button follows all of it.
       const after = drawn.nextElementSibling?.matches(".value-brace") === true ? drawn.nextElementSibling : drawn;
       after.after(anchor);
@@ -4641,7 +4649,9 @@ export class NxViewerElement extends ElementBase {
     const label = place.property?.name ?? index.tree.nodes[index.byKey.get(key) ?? -1]?.name ?? "value";
     const input = document.createElement("input");
     input.className = "popover-filter";
-    input.placeholder = "Search named values";
+    // A `let`'s popover replaces its whole value, so it says which type and which `let`.
+    const wholeType = place.property === undefined ? place.type?.replace(/\s+where\s[\s\S]*$/, "").replace(/[?+*]$/, "").trim() : undefined;
+    input.placeholder = wholeType !== undefined && wholeType !== "" ? `Named ${wholeType} values for ${label}` : "Search named values";
     input.spellcheck = false;
     input.autocomplete = "off";
     input.setAttribute("role", "combobox");

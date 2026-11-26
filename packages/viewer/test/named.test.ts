@@ -392,6 +392,8 @@ const DRAWING = [
   "",
   "let blue: g.Paint = <g.Paint.color color=#2563eb/>",
   "",
+  "let red: g.Paint = <g.Paint.color color=#e11d48/>",
+  "",
   "let tinted() = <g.Circle cx=1 cy=1 r=1 fill=<g.Paint.color color={env.color.accent}/> />",
   ""
 ].join("\n");
@@ -418,6 +420,15 @@ describe("named values in graphics", () => {
     assert.equal(popover(element).querySelector<HTMLElement>(".named-detail")!.hidden, true);
     choose(element, "blue");
     assert.deepEqual(changes, [{ key: "drawing.body.fill.value", edit: { kind: "setValue", value: { kind: "name", name: "blue" } } }]);
+  });
+
+  it("draws a let's button past its element value's kind, and names what it replaces", async () => {
+    const element = show(await treeOf([{ uri: "nx:///drawing.nx", identity: "drawing.nx", source: DRAWING }], { visualizers: { modules: [] }, suggestions: true }));
+    const named = button(element, "blue");
+    assert.ok(named, "a typed let has the button");
+    assert.ok(named.closest(".row-head") !== null, "inside the value's head, not past the row");
+    named.click();
+    assert.equal(popover(element).querySelector("input")!.placeholder, "Named g.Paint values for blue");
   });
 
   it("offers a line property's named values from Ctrl+Space and a click on its token", async () => {
