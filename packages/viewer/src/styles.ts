@@ -140,7 +140,7 @@ export const styles = `
 /* A row's icon centers on its line, and its menu's anchor sits at the line's top, so neither moves
    the text off the baseline every row shares; a row is exactly one source line tall. */
 .source .row-element > .row-head > .element-icon { align-self: center; }
-.source .row-element > .row-head > .item-menu { align-self: flex-start; }
+.source .row-element > .row-head > :is(.item-menu, .named-anchor) { align-self: flex-start; }
 /* A row's chevron hangs left of its icon and takes none of the row's gap, so a row that holds
    children starts its icon where its siblings and the lines of an if or a for do. */
 .source .row-element > .row-head > button.fold { margin-right: -0.8ch; }
