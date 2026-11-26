@@ -181,7 +181,7 @@ Code offers Option+Esc there for the same reason). The host draws the icon by na
 icons work.
 
 The popover is a combobox: a search field over a list with group headings, each row reading the
-name (without `env.` under the Environment heading, a module alias quieter), and its preview after
+name (without `env.` under the Environment heading or a module alias a whole group shares; rows sharing a path come together under it, reading their last part), and its preview after
 it in a second column (a bordered swatch, plus the hex when it has one, for a color; the number; the
 case). Typing filters rows whose name or doc holds every typed word,
 ignoring case and treating `.` as a space. Up and Down move, Enter chooses, Escape closes. The list

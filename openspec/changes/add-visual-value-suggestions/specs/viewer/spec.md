@@ -18,8 +18,12 @@ it.
 
 The popover SHALL open over the reading, placed by the value, and move nothing. It SHALL hold a
 search field over a list of the named values by group, each group under its label, in the tree's
-order. Each row SHALL read the name, without its leading `env.` under the Environment group and with
-its import alias quieter elsewhere, and, in a second column, its preview: for a color, a swatch with a faint
+order, the popover as wide as its widest row within the room it has. Each row SHALL read the name,
+without its leading `env.` under the Environment group or the import alias a whole group is spelled
+through; rows of a group that share a path (`standardPalette.`, `color.text.`) SHALL come together,
+under a subheading naming the path once, and read only their last part. A name still too long SHALL
+be cut in the middle, keeping its end, and the lines under the list SHALL then give the whole name.
+In a second column each row SHALL show its preview: for a color, a swatch with a faint
 border and its hex; a color outside sRGB SHALL read `P3` (or `wide` outside Display P3 too) before
 its swatch and its nearest sRGB hex, and the lines under the list SHALL give its exact value; and
 the text of a number, string, boolean or case. When the property has a default, a `Default` row and

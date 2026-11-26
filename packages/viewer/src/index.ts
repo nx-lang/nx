@@ -4684,12 +4684,52 @@ export class NxViewerElement extends ElementBase {
       list.append(option, rule);
     }
     const aliases = importAliases(index.tree);
+    const suggestions = namedValues(index.tree, place);
+    const groupId = (suggestion: (typeof suggestions)[number]): string => `${suggestion.group.kind}\u0000${suggestion.group.label}`;
+    // A group whose every name is spelled through one import alias, or `env.`, drops it from each
+    // row, since the heading already says where the values come from.
+    const shared = new Map<string, string>();
+    for (const suggestion of suggestions) {
+      const id = groupId(suggestion);
+      const quiet = nameParts(suggestion.name, aliases).quiet;
+      const before = shared.get(id);
+      shared.set(id, before === undefined || before === quiet ? quiet : "");
+    }
+    // What a row reads, and the path it shares with its neighbours: two or more rows in a row under
+    // one path (`standardPalette.`, `color.text.`) read only their last part, under a subheading.
+    const spelledOf = (suggestion: (typeof suggestions)[number]): { quiet: string; rest: string; path: string } => {
+      const prefix = shared.get(groupId(suggestion)) ?? "";
+      const parts = prefix !== "" && suggestion.name.startsWith(prefix) ? { quiet: "", rest: suggestion.name.slice(prefix.length) } : nameParts(suggestion.name, aliases);
+      const dot = parts.rest.lastIndexOf(".");
+      return { ...parts, path: parts.quiet === "" && dot > 0 ? parts.rest.slice(0, dot) : "" };
+    };
+    // Within a group, rows under one path come together, in the order each path first appears and
+    // each row's own order kept, so `color.text.*` does not split the `color.*` rows around it.
+    const buckets = new Map<string, { suggestion: (typeof suggestions)[number]; parts: ReturnType<typeof spelledOf> }[]>();
+    for (const suggestion of suggestions) {
+      const parts = spelledOf(suggestion);
+      const bucket = `${groupId(suggestion)}\u0000${parts.path}`;
+      buckets.set(bucket, [...(buckets.get(bucket) ?? []), { suggestion, parts }]);
+    }
+    const ordered = [...buckets.values()].flat();
+    const spelled = ordered.map((item) => item.parts);
+    const pathOf = (at: number): string => {
+      const here = spelled[at]!.path;
+      if (here === "") {
+        return "";
+      }
+      const same = (other: number): boolean => other >= 0 && other < ordered.length && spelled[other]!.path === here && groupId(ordered[other]!.suggestion) === groupId(ordered[at]!.suggestion);
+      return same(at - 1) || same(at + 1) ? here : "";
+    };
     let group: HTMLElement | undefined;
     let groupOf = "";
-    for (const suggestion of namedValues(index.tree, place)) {
-      const id = `${suggestion.group.kind}\u0000${suggestion.group.label}`;
+    let sub: HTMLElement | undefined;
+    let subs = 0;
+    for (const [at, { suggestion }] of ordered.entries()) {
+      const id = groupId(suggestion);
       if (group === undefined || id !== groupOf) {
         groupOf = id;
+        sub = undefined;
         group = document.createElement("div");
         group.className = "named-section";
         group.setAttribute("role", "group");
@@ -4701,11 +4741,19 @@ export class NxViewerElement extends ElementBase {
         group.append(heading);
         list.append(group);
       }
-      // Under the Environment heading every name starts `env.`, so the heading says it once.
-      const parts =
-        suggestion.group.kind === "environment" && suggestion.name.startsWith("env.")
-          ? { quiet: "", rest: suggestion.name.slice(4) }
-          : nameParts(suggestion.name, aliases);
+      const path = pathOf(at);
+      if (path === "") {
+        sub = undefined;
+      } else if (sub === undefined || sub.dataset["path"] !== path) {
+        sub = document.createElement("div");
+        sub.className = "named-sub";
+        sub.setAttribute("aria-hidden", "true");
+        sub.dataset["path"] = path;
+        sub.dataset["sub"] = String(subs++);
+        sub.textContent = path;
+        group.append(sub);
+      }
+      const parts = path === "" ? spelled[at]! : { quiet: "", rest: spelled[at]!.rest.slice(path.length + 1) };
       const name: Node[] = [];
       if (parts.quiet !== "") {
         const quiet = document.createElement("span");
@@ -4740,6 +4788,10 @@ export class NxViewerElement extends ElementBase {
       }
       const option = row("", name, preview, suggestion.name === current);
       option.dataset["name"] = suggestion.name;
+      if (path !== "" && sub !== undefined) {
+        option.dataset["sub"] = sub.dataset["sub"];
+        option.classList.add("in-sub");
+      }
       // Search reads the description too, so "ring" finds the focus color.
       option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
       // The lines under the list give the active row's doc, then a wide color's exact value. Every
@@ -4778,6 +4830,7 @@ export class NxViewerElement extends ElementBase {
     this.#popover.className = "popover named";
     this.#popover.replaceChildren(input, list, empty, detail, foot);
     this.#popover.hidden = false;
+    this.#fitNamed(list);
     const session: NamedSession = { place, anchor, button, input, rows, active: undefined };
     this.#named = session;
     button?.classList.add("open");
@@ -4792,6 +4845,50 @@ export class NxViewerElement extends ElementBase {
       list.scrollTop += shown.top + shown.height / 2 - (port.top + port.height / 2);
     }
     input.focus({ preventScroll: true });
+  }
+
+  /**
+   * Sizes the named-values popover to its widest row, within the room the stylesheet allows, and
+   * keeps that width while typing filters rows out. A name that still does not fit is cut in the
+   * middle, so its end, the part that tells rows apart, stays; the lines under the list then give
+   * the whole name.
+   */
+  #fitNamed(list: HTMLElement): void {
+    const popover = this.#popover;
+    popover.style.width = "";
+    const width = popover.getBoundingClientRect().width;
+    if (width <= 0) {
+      return;
+    }
+    popover.style.width = `${Math.ceil(width)}px`;
+    for (const name of list.querySelectorAll<HTMLElement>(".named-row:not(.named-default) .named-name")) {
+      const text = name.lastChild;
+      if (!(text instanceof Text) || name.scrollWidth <= name.clientWidth) {
+        continue;
+      }
+      const whole = text.data;
+      // The longest cut that fits: keep the end whole where possible, then the start.
+      let low = 1;
+      let high = whole.length - 1;
+      let best = `\u2026${whole.slice(-1)}`;
+      while (low <= high) {
+        const keep = Math.floor((low + high) / 2);
+        const tail = Math.ceil(keep * 0.6);
+        const tried = `${whole.slice(0, keep - tail)}\u2026${whole.slice(whole.length - tail)}`;
+        text.data = tried;
+        if (name.scrollWidth <= name.clientWidth) {
+          best = tried;
+          low = keep + 1;
+        } else {
+          high = keep - 1;
+        }
+      }
+      text.data = best;
+      const option = name.closest<HTMLElement>(".named-row");
+      if (option !== null && option.dataset["name"] !== undefined) {
+        option.dataset["doc"] = option.dataset["doc"] === undefined ? option.dataset["name"] : `${option.dataset["name"]} \u2014 ${option.dataset["doc"]}`;
+      }
+    }
   }
 
   /** A small square of the color `css`, marked when it lies outside sRGB. */
@@ -4815,6 +4912,9 @@ export class NxViewerElement extends ElementBase {
     const words = filterWords(session.input.value);
     for (const row of session.rows) {
       row.hidden = row.dataset["default"] === "true" ? words.length > 0 : !nameHolds(row.dataset["search"] ?? row.dataset["name"] ?? "", words);
+    }
+    for (const sub of this.#popover.querySelectorAll<HTMLElement>(".named-sub")) {
+      sub.hidden = !session.rows.some((row) => row.dataset["sub"] === sub.dataset["sub"] && !row.hidden);
     }
     for (const group of this.#popover.querySelectorAll<HTMLElement>(".named-section")) {
       group.hidden = ![...group.querySelectorAll<HTMLElement>(".named-row")].some((row) => !row.hidden);
@@ -4956,6 +5056,7 @@ export class NxViewerElement extends ElementBase {
     session.button?.setAttribute("aria-expanded", "false");
     this.#popover.hidden = true;
     this.#popover.className = "popover";
+    this.#popover.style.width = "";
     this.#popover.replaceChildren();
     if (refocus) {
       this.#body.focus({ preventScroll: true });
