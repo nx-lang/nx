@@ -205,10 +205,15 @@ describe("named values", () => {
     const filtered = listed(element).filter((row) => !row.startsWith("#"));
     assert.ok(filtered.length > 0 && filtered.every((row) => /text/i.test(row) && /mu/i.test(row)), filtered.join("\n"));
     assert.ok(filtered.some((row) => row.startsWith("color.text.muted")));
-    // A wide color reads by its swatch alone; its full value is in the row's description.
+    // A wide color reads by its nearest sRGB hex after a P3 tag; its exact value is in the line
+    // under the list.
     input.value = "";
     input.dispatchEvent(new window.Event("input"));
     assert.ok(!listed(element).some((row) => row.includes("oklch(")), listed(element).join("\n"));
+    const green = popover(element).querySelector<HTMLElement>('.named-row[data-name="standardPalette.green500"]')!;
+    assert.equal(green.querySelector(".gamut-tag")?.textContent, "P3");
+    assert.match(green.querySelector(".named-preview")!.textContent ?? "", /^P3#[0-9a-f]{6}$/);
+    assert.match(green.dataset["detail"] ?? "", /^oklch\(.*\), outside sRGB/);
     // Search reads descriptions too: the focus color's is "The focus ring."
     input.value = "ring";
     input.dispatchEvent(new window.Event("input"));

@@ -19,8 +19,10 @@ it.
 The popover SHALL open over the reading, placed by the value, and move nothing. It SHALL hold a
 search field over a list of the named values by group, each group under its label, in the tree's
 order. Each row SHALL read the name, without its leading `env.` under the Environment group and with
-its import alias quieter elsewhere, and, in a second column, its preview: a swatch with a faint
-border, and the hex when it has one, for a color, and the text of a number, string, boolean or case. When the property has a default, a `Default` row and
+its import alias quieter elsewhere, and, in a second column, its preview: for a color, a swatch with a faint
+border and its hex; a color outside sRGB SHALL read `P3` (or `wide` outside Display P3 too) before
+its swatch and its nearest sRGB hex, its swatch split into the color and that sRGB color on a
+wide-gamut screen, and the line under the list SHALL give its exact value; and and the text of a number, string, boolean or case. When the property has a default, a `Default` row and
 the default SHALL lead the list, set off by a rule, as the choices list's does. The row whose name is
 the property's current value SHALL be marked, active, and scrolled to the middle of the list when the
 popover opens. Typing SHALL keep the rows whose name or doc holds every word typed, ignoring case and taking `.` as a space, and the groups that still hold rows. Up and Down

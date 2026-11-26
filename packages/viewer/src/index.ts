@@ -306,6 +306,11 @@ function isNamedKey(event: KeyboardEvent): boolean {
   return (event.ctrlKey && !event.altKey && !event.metaKey && (event.key === " " || event.code === "Space")) || (event.altKey && !event.ctrlKey && !event.metaKey && event.key === "Escape");
 }
 
+/** Whether the document's screen can show colors outside sRGB, as Display P3 ones. */
+function wideGamutScreen(document: Document): boolean {
+  return document.defaultView?.matchMedia?.("(color-gamut: p3)").matches === true;
+}
+
 /** The hexagon the named-values button shows when the host draws no `named-values` icon. */
 function hexagon(document: Document): SVGSVGElement {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -4698,23 +4703,43 @@ export class NxViewerElement extends ElementBase {
       name.push(document.createTextNode(parts.rest));
       const preview: Node[] = [];
       const value = suggestion.preview === undefined ? undefined : previewText(suggestion.preview);
+      // A color outside sRGB reads, like the rest, by a hex: its nearest sRGB color's, after a tag
+      // naming its gamut, and its exact value goes in the line under the list.
+      let exact: string | undefined;
       if (suggestion.preview !== undefined && value !== undefined) {
-        const color = suggestion.preview.kind === "color";
-        if (color) {
-          preview.push(this.#swatchOf(suggestion.preview.value, suggestion.preview.outsideSrgb === true));
+        const shown = suggestion.preview;
+        // The tag leads, so every hex ends the row at the same place.
+        const wide = shown.kind === "color" && shown.outsideSrgb === true;
+        if (wide) {
+          exact = value;
+          const tag = document.createElement("span");
+          tag.className = "gamut-tag";
+          tag.textContent = shown.outsideP3 === true ? "wide" : "P3";
+          preview.push(tag);
         }
-        // A color reads by its swatch; its text only when that is a short hex, never cut off.
-        if (!color || value.length <= 9) {
-          preview.push(document.createTextNode(value));
+        if (shown.kind === "color") {
+          const swatch = this.#swatchOf(shown.value, false);
+          // On a wide-gamut screen, a wide color's swatch splits: the color, then the sRGB color an
+          // ordinary screen shows for it. On an sRGB screen the halves would look the same.
+          if (wide && shown.nearestHex !== undefined && wideGamutScreen(this.ownerDocument)) {
+            swatch.classList.add("split");
+            swatch.style.background = `linear-gradient(90deg, ${shown.value} 50%, ${shown.nearestHex} 50%)`;
+            swatch.title = `${shown.value} | ${shown.nearestHex} on an sRGB screen`;
+          }
+          preview.push(swatch);
         }
+        preview.push(document.createTextNode(wide ? (shown.nearestHex ?? "") : value));
       }
       const option = row("", name, preview, suggestion.name === current);
       option.dataset["name"] = suggestion.name;
       // Search reads the description too, so "ring" finds the focus color.
       option.dataset["search"] = `${suggestion.name} ${suggestion.doc ?? ""}`;
-      // The line under the list gives the active row's doc, and its full value only when the row
-      // shows a swatch alone. Every row fits the same property, so the type would only repeat.
-      const hidden = value !== undefined && suggestion.preview?.kind === "color" && value.length > 9 ? value : undefined;
+      // The line under the list gives the active row's doc, and a wide color's exact value. Every
+      // row fits the same property, so the type would only repeat.
+      const hidden =
+        exact === undefined
+          ? undefined
+          : `${exact}, outside sRGB${suggestion.preview?.outsideP3 === true ? " and Display P3" : ""}`;
       // A doc that only restates the value, as a scale step's `/// 12` does, adds nothing.
       const doc = suggestion.doc?.trim() === value ? undefined : suggestion.doc;
       option.dataset["detail"] = [hidden, doc].filter((part) => part !== undefined).join(" \u2014 ");

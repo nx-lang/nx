@@ -102,6 +102,13 @@ pub struct SourcePreview {
     /// it is not opaque. Absent for any other value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hex: Option<String>,
+    /// For a color outside sRGB, the hex of its nearest sRGB color, mapped as `toGamut` maps it, for
+    /// a list to read beside its swatch. It is not the color, so nothing writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearest_hex: Option<String>,
+    /// Whether a color is outside Display P3 too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outside_p3: bool,
 }
 
 /// The kind of a preview.
@@ -664,6 +671,8 @@ impl Previewer<'_> {
                 value,
                 outside_srgb: false,
                 hex: None,
+                nearest_hex: None,
+                outside_p3: false,
             })
         };
         match lowered.expr(id) {
@@ -848,7 +857,7 @@ fn color_preview(
         .ok()
         .and_then(|value| nx_value::color::read(value).ok());
     let (value, outside_srgb) = swatch(value).ok()?;
-    let hex = color.filter(|_| !outside_srgb).map(|color| {
+    let srgb_hex = |color| {
         let [r, g, b, a] = nx_value::color::to_gamut(color, nx_value::color::Space::Srgb)
             .map(|x| (x.clamp(0.0, 1.0) * 255.0).round() as u8);
         if a == 255 {
@@ -856,12 +865,19 @@ fn color_preview(
         } else {
             format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
         }
+    };
+    let hex = color.filter(|_| !outside_srgb).map(srgb_hex);
+    let nearest_hex = color.filter(|_| outside_srgb).map(srgb_hex);
+    let outside_p3 = color.is_some_and(|color| {
+        outside_srgb && !nx_value::color::in_gamut(color, nx_value::color::Space::DisplayP3)
     });
     Some(SourcePreview {
         kind: SourcePreviewKind::Color,
         value,
         outside_srgb,
         hex,
+        nearest_hex,
+        outside_p3,
     })
 }
 

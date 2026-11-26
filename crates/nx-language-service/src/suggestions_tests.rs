@@ -540,6 +540,23 @@ let root() = <Box />
         .preview
         .as_ref()
         .is_some_and(|preview| preview.outside_srgb));
+    // One outside sRGB reads by its nearest sRGB hex instead, and says whether P3 holds it.
+    let green = suggestion(&tree, COLOR, "standardPalette.green500")
+        .preview
+        .clone()
+        .expect("a preview");
+    assert!(green
+        .nearest_hex
+        .as_deref()
+        .is_some_and(|hex| hex.len() == 7 && hex.starts_with('#')));
+    assert!(!green.outside_p3);
+    assert_eq!(
+        suggestion(&tree, COLOR, "standardPalette.blue600")
+            .preview
+            .as_ref()
+            .and_then(|preview| preview.nearest_hex.clone()),
+        None
+    );
     assert_eq!(
         preview("gap", SPACING),
         Some((SourcePreviewKind::Number, "4".to_string()))

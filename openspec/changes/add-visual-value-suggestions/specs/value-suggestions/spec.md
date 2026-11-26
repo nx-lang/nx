@@ -184,7 +184,8 @@ program, by following, at most 16 steps:
 It SHALL stop with a preview at a string, number or boolean literal (`string`, `number` with the
 literal's text, `boolean`), at a bare case (`case` with its name), or at a color the color-tooling
 discovery recognizes (`color`, with the same swatch text and outside-sRGB mark a source node's color
-carries, and, for a color inside sRGB, the hex literal that writes it), and SHALL give no preview at
+carries; for a color inside sRGB, the hex literal that writes it; and, for one outside, the hex of
+its nearest sRGB color as `toGamut` maps it, which nothing writes, and whether Display P3 holds it), and SHALL give no preview at
 anything else. Color discovery SHALL resolve a constructor
 through the imports of the module that writes it, as `palette.nx`'s `c.oklch(…)`. A preview SHALL
 NOT follow main-module `provide`s, host root values or overrides, and SHALL NOT run NX functions.

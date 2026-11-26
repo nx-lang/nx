@@ -1155,6 +1155,20 @@ export const styles = `
   box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.4));
   vertical-align: -0.05em;
 }
+/* A color outside sRGB: its gamut before its nearest sRGB hex, so the column stays one format. */
+.popover .named-preview .gamut-tag {
+  margin-right: 0.4em;
+  padding: 0 0.3em;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  font-family: var(--sans, system-ui, sans-serif);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.3;
+  vertical-align: 0.1em;
+  opacity: 0.8;
+}
+.popover .named-preview .swatch.split { width: 1.2em; }
 .popover .named-preview .swatch.outside-srgb {
   background-image: linear-gradient(225deg, light-dark(#000, #fff) 0 28%, transparent 28%);
 }

@@ -699,6 +699,13 @@ export interface SourcePreview {
    * it is not opaque.
    */
   hex?: string;
+  /**
+   * For a color outside sRGB, the hex of its nearest sRGB color, mapped as `toGamut` maps it, for a
+   * list to read beside its swatch. It is not the color, so nothing writes it.
+   */
+  nearestHex?: string;
+  /** Present, and `true`, for a color outside Display P3 too. */
+  outsideP3?: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
