@@ -7,6 +7,13 @@ on:
     - 'v*.*'
     - validate/*
   pull_request:
+    # Follow-up notes and proposals that no build or test reads. Other Markdown is tested (crate
+    # READMEs are Rust docs, website docs have code-block checks), and docs/ subfolders hold test
+    # catalogs, so only these top-level files skip the build. A PR that also changes anything else
+    # still runs it.
+    paths-ignore:
+    - 'specs/*.md'
+    - 'docs/*.md'
   workflow_dispatch:
 
 env:
