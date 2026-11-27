@@ -93,6 +93,12 @@ export interface SourceTreeRequest extends LanguageQuery {
    * answer carries no visualizers.
    */
   visualizers?: SourceTreeVisualizersOption;
+  /**
+   * List the named values the document can reach that fit a property or `let` of the answer, in
+   * `suggestions`, and give each such property and `let` its `suggestionKey`. Absent or false, the
+   * answer carries neither.
+   */
+  suggestions?: boolean;
 }
 
 /** Which visualizer declarations a source-tree request resolves. */
@@ -149,7 +155,12 @@ export type SourceEditValue =
   | { kind: "number"; text: string }
   | { kind: "boolean"; value: boolean }
   /** A union case, by name. */
-  | { kind: "case"; name: string };
+  | { kind: "case"; name: string }
+  /**
+   * A name, such as `env.space.md` or `standardPalette.blue600`: written in braces at an attribute
+   * or a `let`, where a bare name would read as a case, and bare inside braces or as a sequence item.
+   */
+  | { kind: "name"; name: string };
 
 /** The queries this protocol defines. */
 export const LANGUAGE_QUERIES = [
@@ -467,6 +478,11 @@ export interface SourceProperty {
    * when its type is constrained directly or through aliases.
    */
   bounds?: SourceBounds;
+  /**
+   * The key of the suggestions that fit the property; present only when the request asked for
+   * `suggestions` and the property's type has one.
+   */
+  suggestionKey?: string;
 }
 
 /**
@@ -520,6 +536,11 @@ export interface SourceDeclaration {
    * to it; present only when the request asked for `visualizers`.
    */
   visualizer?: SourceVisualizer;
+  /**
+   * For a parameterless `let` the queried document declares, the key of the suggestions that fit
+   * its value; present only when the request asked for `suggestions`.
+   */
+  suggestionKey?: string;
 }
 
 /**
@@ -624,6 +645,67 @@ export interface SourceTree {
   declarations: SourceDeclaration[];
   /** The host visualizer modules the request named that the analyzed documents do not include. */
   missingVisualizerModules?: string[];
+  /**
+   * The named values the document can reach that fit a `suggestionKey` of the answer, in group
+   * order; present only when the request asked for `suggestions`.
+   */
+  suggestions?: SourceSuggestion[];
+}
+
+/** One named value a document can reach, with the key of the properties it fits. */
+export interface SourceSuggestion {
+  /** The value as the document would write it: `env.space.md`, `d.standardPalette.blue600`. */
+  name: string;
+  /** The suggestion key of the properties it fits. */
+  key: string;
+  /** Where it comes from. */
+  group: SourceSuggestionGroup;
+  /**
+   * For a parameter or state field, the index in `declarations` of the top-level declaration whose
+   * body may use it.
+   */
+  scope?: number;
+  /** Its type, spelled in NX. */
+  type: string;
+  /** The index in `declarations` of the declaration it starts from. */
+  declaration: number;
+  /** The doc comment of the field or declaration it names. */
+  doc?: string;
+  /** Its value at the defaults, when that is found without running the program. */
+  preview?: SourcePreview;
+  /** The indices in `declarations` of the top-level declarations inside which it is not offered. */
+  self?: number[];
+}
+
+/** The group a suggestion belongs to: its kind, in listing order, and its label. */
+export interface SourceSuggestionGroup {
+  kind: "environment" | "declaration" | "document" | "peer" | "import";
+  /** `Environment`, a declaration's name, `This file`, a file's path or an import's path. */
+  label: string;
+}
+
+/** A value found without running the program. */
+export interface SourcePreview {
+  kind: "string" | "number" | "boolean" | "case" | "color";
+  /**
+   * A string's text, a number as written, `true` or `false`, a case's name, or a color's swatch
+   * text, as a source node's `color` carries it.
+   */
+  value: string;
+  /** Present, and `true`, for a color outside sRGB. */
+  outsideSrgb?: boolean;
+  /**
+   * For a color inside sRGB, the hex literal that writes it: `#rrggbb`, with two more digits when
+   * it is not opaque.
+   */
+  hex?: string;
+  /**
+   * For a color outside sRGB, the hex of its nearest sRGB color, mapped as `toGamut` maps it, for a
+   * list to read beside its swatch. It is not the color, so nothing writes it.
+   */
+  nearestHex?: string;
+  /** Present, and `true`, for a color outside Display P3 too. */
+  outsideP3?: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------

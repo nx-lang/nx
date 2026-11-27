@@ -427,6 +427,55 @@ test("an added property answers through HTTP, and a nameless one is refused", as
   assert.match((await json<LanguageServiceErrorBody>(nameless)).error.message, /'addProperty'/);
 });
 
+test("a source tree asked with suggestions alone carries them, and name and color edits answer", async () => {
+  const handler = createNxLanguageHandler();
+  const source = [
+    "type Spacing = int",
+    "type Box = { padding:Spacing = 0 }",
+    "let gap: Spacing = 8",
+    "let box = <Box padding=4 />",
+    "",
+  ].join("\n");
+  const documents = [{ uri: FORM, source }];
+
+  for (const extra of [{}, { visualizers: {} }]) {
+    const tree = await json<SourceTree>(await handler(post("sourceTree", { documents, uri: FORM, suggestions: true, ...extra })));
+    assert.ok(tree.suggestions?.some((suggestion) => suggestion.name === "gap"), JSON.stringify(extra));
+  }
+  const plain = await json<SourceTree>(await handler(post("sourceTree", { documents, uri: FORM })));
+  assert.equal(plain.suggestions, undefined);
+
+  const refused = await handler(post("sourceTree", { documents, uri: FORM, suggestions: "yes" }));
+  assert.equal(refused.status, 400);
+  assert.match((await json<LanguageServiceErrorBody>(refused)).error.message, /'suggestions'/);
+
+  const named = await json<SourceEditAnswer>(
+    await handler(
+      post("sourceEdit", {
+        documents,
+        uri: FORM,
+        key: "box.value.padding.value",
+        edit: { kind: "setValue", value: { kind: "name", name: "gap" } },
+      }),
+    ),
+  );
+  assert.deepEqual(named.edits.map((edit) => edit.newText), ["{gap}"]);
+
+  const colored = await handler(
+    post("sourceEdit", {
+      documents,
+      uri: FORM,
+      key: "box.value.padding.value",
+      edit: { kind: "setValue", value: { kind: "color", text: "#ff0000" } },
+    }),
+  );
+  assert.equal(colored.status, 200);
+  const badName = await handler(
+    post("sourceEdit", { documents, uri: FORM, key: "gap.value", edit: { kind: "setValue", value: { kind: "name" } } }),
+  );
+  assert.equal(badName.status, 400);
+});
+
 test("a move answers through HTTP, and one without a position is refused", async () => {
   const handler = createNxLanguageHandler();
   const source = [

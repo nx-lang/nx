@@ -1,34 +1,38 @@
 import "@nx/graphics"
+import "@nx/design"
 
-let blue: Paint = <Paint.color color=#2563eb/>
+// Colors, widths and radii come from the design tokens in @nx/design, so a theme restyles the
+// drawing. The panel on the right sets env.colorMode to dark, and every token read inside it follows.
+
+let accent: Paint = <Paint.color color={env.color.accent}/>
 let outline: Stroke = <Stroke
-  paint=<Paint.color color=#0f172a/>
-  width=2
+  paint=<Paint.color color={env.color.text.normal}/>
+  width={env.borderWidth.thick}
 />
 
 <Drawing
   viewBox=<Rect x=0 y=0 width=400 height=240/>
-  background=<Paint.color color=#ffffff/>
+  background=<Paint.color color={env.color.background}/>
 >
   <RegularPolygon
     cx=55 cy=55
     radius=35
     pointCount=6
-    fill={blue}
+    fill={accent}
   />
   <Star
     cx=150 cy=55
     outerRadius=36 innerRadius=17
     pointCount=5
     rotation=-90
-    fill={blue}
+    fill={accent}
   />
   <Arrow
     x1=210 y1=55
     x2=285 y2=55
     shaftWidth=8
     headWidth=24 headLength=20
-    fill={blue}
+    fill={accent}
   />
   <Arc
     cx=340 cy=55
@@ -40,13 +44,23 @@ let outline: Stroke = <Stroke
     cx=70 cy=160
     outerRadius=40 innerRadius=22
     sweepAngle=360
-    fill={blue}
+    fill={accent}
   />
   <Group opacity=0.5>
-    <Rectangle x=140 y=130 width=60 height=60 fill={blue}/>
-    <Circle cx=200 cy=160 r=30 fill={blue}/>
+    <Rectangle x=140 y=130 width=60 height=60 fill={accent}/>
+    <Circle cx=200 cy=160 r=30 fill={accent}/>
   </Group>
-  <Text x=250 y=165 fontFamily="Fixture" fontSize=18>
-    NX graphics
-  </Text>
+  <Group env.colorMode=dark>
+    <Rectangle
+      x=245 y=125
+      width=145 height=70
+      rx={env.radius.xl}
+      fill=<Paint.color color={env.color.surface}/>
+      stroke={outline}
+    />
+    <Circle cx=275 cy=160 r=15 fill={accent}/>
+    <Text x=300 y=166 fontFamily="Fixture" fontSize={env.font.size.lg}>
+      Dark
+    </Text>
+  </Group>
 </Drawing>

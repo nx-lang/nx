@@ -89,7 +89,21 @@ with tempfile.TemporaryDirectory(prefix='nx-preview-') as d:
             message='Graphics walkthrough fixtures changed; run python3 scripts/check-graphics-preview.py --write-fixtures'
             assert (dest/'main.nx').read_text()==source,message
             assert (dest/'image.png').read_bytes()==pathlib.Path(result['image']).read_bytes(),message
-            assert json.loads((dest/'manifest.json').read_text())==manifest,message
+            stored=json.loads((dest/'manifest.json').read_text())
+            if stored!=manifest:
+                # Name the fields that differ, so a fixture can be fixed without a local Skia build.
+                def differences(a,b,path=''):
+                    if isinstance(a,dict) and isinstance(b,dict):
+                        for key in sorted(set(a)|set(b)):
+                            yield from differences(a.get(key),b.get(key),f'{path}.{key}')
+                    elif isinstance(a,list) and isinstance(b,list) and len(a)==len(b):
+                        for i,(x,y) in enumerate(zip(a,b)):
+                            yield from differences(x,y,f'{path}[{i}]')
+                    elif a!=b:
+                        yield f'{path}: stored {json.dumps(a)[:200]} produced {json.dumps(b)[:200]}'
+                for line in list(differences(stored,manifest))[:40]:
+                    print(f'fixture {count}{line}')
+            assert stored==manifest,message
     assert revisions[0]!=revisions[1]
     previous=(output/'current.json').read_bytes()
     for source in [

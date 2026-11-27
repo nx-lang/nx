@@ -8,6 +8,7 @@
 import type {
   SourceBounds,
   SourceCase,
+  SourceDeclaration,
   SourceEdit,
   SourceEditorHints,
   SourceEditValue,
@@ -59,6 +60,11 @@ export interface EditTarget {
    * property's default, or nothing, and its node is the element's.
    */
   readonly adding?: boolean;
+  /**
+   * Set for a value written by a name that Replace with value writes over: the editor starts at the
+   * name's preview, and committing writes even that value, since the name is what it replaces.
+   */
+  readonly detach?: boolean;
 }
 
 /** The types a number field edits, and their aliases' ends. */
@@ -460,8 +466,7 @@ function resolveType(
   let format: SourceValueFormat | undefined;
   let editor: SourceEditorHints | undefined;
   for (let depth = 0; name !== undefined && name !== "" && depth < 8; depth++) {
-    const current: string = name;
-    const alias = index.tree.declarations.find((entry) => entry.kind === "alias" && entry.name === current);
+    const alias = declarationNamed(index, name, "alias");
     if (alias === undefined || alias.type === undefined) {
       break;
     }
@@ -472,6 +477,17 @@ function resolveType(
     name = target.replace(/[?+*]+$/, "").trim();
   }
   return { base: name === "" ? undefined : name, format, editor, list };
+}
+
+/**
+ * The declaration of the kind `kind` a type spelled `name` names: the one of that name, or, for a
+ * name through an import's alias, as `design.Radius`, the one another module declares named by its last part.
+ */
+function declarationNamed(index: TreeIndex, name: string, kind: "alias" | "union"): SourceDeclaration | undefined {
+  const declarations = index.tree.declarations;
+  const exact = declarations.find((entry) => entry.kind === kind && entry.name === name);
+  const dot = name.lastIndexOf(".");
+  return exact ?? (dot < 0 ? undefined : declarations.find((entry) => entry.kind === kind && entry.name === name.slice(dot + 1) && entry.range === undefined));
 }
 
 /** The editor a value of the type `spelled` opens, and what it needs: nothing for a type no editor takes. */
@@ -509,7 +525,7 @@ export function editorOfType(
   if (base === "string") {
     return { kind: (format ?? declared.format) === "color" ? "color" : "text" };
   }
-  const union = index.tree.declarations.find((entry) => entry.kind === "union" && entry.name === base);
+  const union = declarationNamed(index, base, "union");
   const cases = (union?.cases ?? []).filter((candidate) => (candidate.properties ?? []).length === 0);
   return cases.length > 0 ? { kind: "case", cases } : undefined;
 }

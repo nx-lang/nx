@@ -1,4 +1,5 @@
 import "@nx/visualizer"
+import "@nx/design" as design
 
 // Test cases for Visual, one or two of each. Hover a name, or select it and press i, for its card.
 // Click a value, or press Enter or F2 on the selected row, to edit it; Tab and Shift+Tab move between
@@ -224,6 +225,22 @@ let short =
 // and its ⋯ waits at the end of the line
 type Pair = { options:Option+ }
 let pair = <Pair options={ <Option value="a" label="A" /> <Option value="b" label="B" /> <Option value="c" label="C" /> } />
+
+// Tokens: a property typed by a design token type offers its named values. Select Tile's Padding
+// or Fill and click the hexagon past its value (or press Ctrl+Space, or Alt+Esc), then pick one:
+// the environment's tokens come first. Click a token to swap it, or choose Replace with value in its
+// menu to write its value instead. Border is a plain number: its hexagon binds it to a token.
+// Radius is unset: its hexagon adds it as a token.
+component <Tile
+  padding: design.Spacing = 16
+  fill: design.Color = #ffffff
+  border: design.BorderWidth = 0
+  radius: design.Radius = 0
+/> = {
+  <div />
+}
+
+let tiles = <Tile padding={env.space.md} fill={env.color.surface} border=1 />
 
 let root(): Menu = {
   // No visualizer: the box icon, and folded (its chevron, or Left) it counts its children

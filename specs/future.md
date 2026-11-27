@@ -2412,9 +2412,23 @@ function call styles and first-class calling conventions remain a separate desig
 and `toGamut`. Left for later:
 
 - Drawing on P3 surfaces in Skia and Canvas, instead of mapping into sRGB at preparation.
-- An OKLCH picker, so wide colors can be edited and not only shown.
+- An OKLCH picker, so wide colors can be edited and not only shown. On a wide-gamut screen it
+  should show the color beside its `toGamut(…, srgb)` version as two large, labelled patches
+  ("P3" and "sRGB"), so a designer can judge whether the fallback an sRGB screen shows is
+  acceptable. A split swatch was tried in the named-values list (`add-visual-value-suggestions`)
+  and dropped: at 12 pixels the halves looked the same, even on a P3 screen with HDR on. A screen
+  can also report `(color-gamut: p3)` and still show no difference (LG HDR 4K panels under Windows
+  HDR, with Chrome on its scRGB F16 buffer, drew pure P3 red and green like `#ff0000` and
+  `#00ff00`), so the patches need labels and can't be the only signal; Macs, which manage P3 by
+  default, are where they pay off.
 - Further CSS spaces (`rec2020`, `a98-rgb`, `lab`, `lch`) if a use appears.
 - `@nx/design`'s palette could adopt Tailwind v4's OKLCH values.
+- `@nx/graphics` docs still call `Paint.color`'s `color` and `GradientStop.color` a "Shared sRGB
+  color", which is out of date now that `Color` can be wide-gamut (`oklch`, `displayP3`). The docs
+  should say a wide color is mapped into sRGB when drawn (until P3 surfaces land). Left out of
+  `add-visual-value-suggestions` because editing `graphics.nx` shifts library source offsets, so the
+  graphics preview fixtures (`crates/nx-graphics-skia/fixtures/revisions/*/manifest.json`) must be
+  regenerated with it.
 - Percentage literals for color (Bret, 2026-11-22). NX will get `23%` literals as a general
   language feature. Once they exist, color creation should accept them where CSS does. Channels,
   lightness and alpha would take `50%` for 0.5, as in `c.rgb(100%, 50%, 0%)`,
@@ -2422,3 +2436,48 @@ and `toGamut`. Left for later:
   fields as percentages. The stored value stays 0 to 1, which is why `color.nx` writes the range
   inline instead of naming it `Percentage`. Note that `Length.percent` in the drawn-UI proposal
   stores 50 for 50%, so the literal's meaning has to be settled per target type.
+
+## Value Suggestions In Visual: What `add-visual-value-suggestions` Left For Later
+
+A property offers the named values of its declared type (`suggestions` on the source tree, the
+viewer's named-values popover). Left for later:
+
+- **Modules not yet imported.** A property typed `Spacing` in a document that does not import
+  `@nx/design` offers nothing from it; a later version could list a library's values with the import
+  the choice would add.
+- **Local bindings.** `let` bindings inside a body and `for` bindings are not offered, only
+  top-level values, parameters and state fields.
+- **List items.** An item of a list (`stops={ … }`) has no suggestion key of its own; only whole
+  property and `let` values do.
+- **Previews that follow `provide`s.** A preview reads defaults statically. The value a name has
+  under the main module's `provide`, the host's root values or an enclosing section's override is
+  what a running preview session knows, so a later version could ask it.
+- **Element-typed properties.** A property typed by an element, function or sequence type has no
+  key, so a shared `let card = <Card … />` is not offered for it.
+- **Peer files in the workspace.** The language service gives a workspace document no peer
+  bindings, even with a filesystem root, so the `peer` group stays empty there and a sibling file's
+  value is offered only through an import (the spec's peer scenario holds for programs whose peers
+  are bound). Peer binding in the language service would fill it.
+- **A silent name collision between workspace imports.** Two unaliased imports of workspace files
+  that both export `accent` give no diagnostic; the first wins. Suggestions leave such a name out,
+  but the compiler should report it as it does for libraries.
+- **Qualified type names in the viewer and value text.** The viewer and the canonical value
+  formatter resolve a type spelled through an import alias (`design.Radius`) by its last part, which
+  picks the wrong declaration when two modules declare the same name. The source tree could carry
+  each property's resolved type declaration instead.
+- **A button for properties read on a line.** A property shown in a folded element value's head or
+  on its field's line offers its named values from Ctrl+Space and a click on its token, but draws no
+  hexagon there, so a pointer reader finds it only by unfolding. A button that does not crowd the
+  line (shown while the property is selected) would close the gap.
+- **A P3 and sRGB comparison in the footer.** A wide color's row reads `P3` and its nearest sRGB
+  hex, and the lines under the list give its exact value. On a wide-gamut screen, the footer could
+  also show the highlighted color and its sRGB version as two larger, labelled patches, which is
+  where Mac and OLED users would see the difference. Bret chose to wait (2026-11-26); see the
+  OKLCH picker note under Wide-Gamut Color.
+- **The defaults note for a `let` that reads `env.`.** The popover's note shows when the list holds
+  an environment value or a parameter previewed by its default. A file's `let tint: Color =
+  {env.color.accent}` also previews a default, but when no environment row is listed the note stays
+  hidden. The service could flag such previews (`preview.fromDefault`) so the viewer shows it.
+- **Visual at phone width in the playground.** At a 390-pixel viewport the playground's NX pane
+  gives `<nx-viewer>` about 62 pixels, so Visual is unreadable on a phone. This predates value
+  suggestions (every example shows it); the pane's layout, not the viewer, needs the fix.

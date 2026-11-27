@@ -390,6 +390,29 @@ default (with the default, quieter, as `Reset to default  8`), Remove for an opt
 A property written on a line has the same menu: a click on its name selects it, and its `⋯` shows
 right after it while it is selected; Delete removes it as it removes a row.
 
+### Named values
+
+When the tree carries suggestions (ask for it with `sourceTree(uri, { visualizers: {}, suggestions:
+true })`), a property whose type has a `suggestionKey` offers the named values of that type: the
+environment's tokens first, then the enclosing component's own properties, this document's values
+and those of what it imports. A quiet hexagon past the value, before its `⋯`, shows under the
+pointer, while the property is selected and while its field is open, on written and unset
+properties and after a typed `let`'s value; it is not a Tab stop. A click on it, Ctrl+Space, or
+Alt+Escape (Option+Esc on a Mac) opens the named-values popover: a search field over the values by
+group, each with its preview (a swatch and hex for a color, the number, text or case otherwise), a
+`Default` row when the property has a default, and the current name marked. Typing keeps the names
+that hold every word, `.` read as a space; Up, Down and Enter choose, and Escape closes it. Previews
+show default values: they follow names and environment defaults statically, not the program's
+`provide`s.
+
+Choosing fires `nx-edit` with `{ kind: "setValue", value: { kind: "name", name } }`, or
+`addProperty` for an unset property; the `Default` row leaves the property out. The name then reads
+as a token, `{env.space.md}`, with a swatch when its preview is a color, and a click on a token
+opens the popover again. A token's `⋯` menu offers Go to for a name that starts from this document,
+and Replace with value, which opens the property's own editor holding the preview; a color is
+offered only inside sRGB, where it is written as hex. The host draws the button's icon when its
+`icons` function draws `named-values`; otherwise the viewer draws a hexagon.
+
 ### Moving and deleting items
 
 An element that is an item of a list (a braced sequence, as `choices={ … }`, or what an element

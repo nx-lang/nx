@@ -135,6 +135,24 @@ the system setting, as a root value of `env.colorMode`.
 - The default theme's text and `on…` colors meet WCAG contrast targets in both modes. A theme that
   changes them can check its own with `@nx/color`'s `contrastRatio`.
 
+## 6) Pick tokens in Visual
+
+In the playground's NX pane, choose **Visual**, select an element, and point at a property such as
+`Padding`. A hexagon shows past its value: click it, or press Ctrl+Space (Option+Esc on a Mac), to
+list the named values of the property's type. The environment's tokens come first, then the
+component's own properties, the file's values and those of what it imports, each with its default
+value or color swatch. Type to filter (`text mu` finds `env.color.text.muted`) and press Enter: the
+property is written as `{env.space.md}`, and reads as a token you can click to swap. A token's `⋯`
+menu has **Replace with value**, to write its value instead.
+
+What a property offers comes from its type, so:
+
+- Declare your own tokens' types, `let gap: Spacing = 12`, to have them offered; an untyped
+  `let gap = 12` is a number, and a `Spacing` property does not suggest it.
+- A type of your own, as `type ButtonGap = Spacing`, is offered only what is declared with it.
+- `@nx/graphics` and `@nx/design` each export a `Color`. When you use both, import one under an
+  alias, as `import "@nx/graphics" as g`, so the names stay apart.
+
 ## Next steps
 
 - Read the [`@nx/design` reference](/reference/libraries/design) for every token and its default.

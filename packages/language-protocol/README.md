@@ -215,6 +215,30 @@ const sizeProperty: SourcePropertyVisualizer = {
 };
 ```
 
+A request with `suggestions: true` also lists the named values a property could take. Each property,
+state field and union case field whose type has one, and each parameterless `let` of the document,
+carries a `suggestionKey`: the alias of a primitive its type names (so `Spacing` and `Radius`
+differ), or the record, union or action it names through aliases. A bare primitive has none. The
+tree's `suggestions` list, in the order to show them, each named value that matches a key carried
+somewhere in the answer and that resolves where it is offered: environment values (`env.space.md`),
+the parameters and state of each top-level component or function (with that declaration's index as
+`scope`), this document's values, and those of the modules it imports, spelled as the document
+writes them (`d.standardPalette.blue600` through `import "@nx/design" as d`), each followed by its
+record's fields up to four deep. Each carries its `group` (`environment`, `declaration`, `document`,
+`peer` or `import`, with a label such as `Environment` or `@nx/design`), its `type` and doc, the
+index of the `declaration` it starts from, `self` (the declarations inside which it would read
+itself), and, when its value at the defaults is found without running the program, a `preview`:
+`{ kind: "number", value: "12" }`, a string, boolean or case, or a color with its swatch text, an
+`outsideSrgb` mark, and the `hex` that writes it when it is inside sRGB.
+
+```ts
+const tree = await service.sourceTree({ documents, uri, suggestions: true });
+const padding = tree.declarations[0]!.properties!.find((property) => property.name === "padding")!;
+const offered = tree.suggestions!.filter((suggestion) => suggestion.key === padding.suggestionKey);
+// [{ name: "env.space.none", group: { kind: "environment", label: "Environment" },
+//    preview: { kind: "number", value: "0" }, ... }, ...]
+```
+
 ### `sourceEdit` (unstable)
 
 **Unstable:** the request's and the answer's shapes may change in any release until a later one
@@ -233,8 +257,10 @@ const refused: SourceEditAnswer = { edits: [], refused: "notEditable" };
 ```
 
 The request names a node of the document's source tree by its `key` and one change: `setValue`
-with a typed value (`string`, `number` as typed, `boolean`, or `case` by name) for a literal or a
-bare union case that is a whole value, `setText` with one line of text for a run of text content,
+with a typed value (`string`, `number` as typed, `boolean`, `case` by name, `color` as a hex, or
+`name`, a reference such as `env.space.md` written in braces) for a literal or a bare union case
+that is a whole value, or for a name, a color element or a color constructor call that is one (a
+literal written over a name drops its braces), `setText` with one line of text for a run of text content,
 `remove` for an attribute or for an element that is an item of a list, `addProperty` with a
 property's name and a typed value for an element, which writes the attribute after the element's
 last one, in its layout, or `move` with a position `to` for an element that is an item of a list. An
