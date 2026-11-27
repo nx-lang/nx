@@ -317,9 +317,17 @@ fn test_parse_provide_prefixes_in_content_as_text() {
     for content in prose {
         let source = format!("let a() = {content}\n");
         let result = parse_str(&source, "prose.nx");
-        assert!(result.errors.is_empty(), "{content} parses: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "{content} parses: {:?}",
+            result.errors
+        );
         let root = result.root().expect("Should have root node");
-        assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 0, "{content} is text");
+        assert_eq!(
+            count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION),
+            0,
+            "{content} is text"
+        );
     }
     let blocks = [
         "<p>provide env.x=1 { <b/> }</p>",
@@ -329,9 +337,17 @@ fn test_parse_provide_prefixes_in_content_as_text() {
     for content in blocks {
         let source = format!("let a() = {content}\n");
         let result = parse_str(&source, "blocks.nx");
-        assert!(result.errors.is_empty(), "{content} parses: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "{content} parses: {:?}",
+            result.errors
+        );
         let root = result.root().expect("Should have root node");
-        assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 1, "{content} is a provide block");
+        assert_eq!(
+            count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION),
+            1,
+            "{content} is a provide block"
+        );
     }
 }
 
