@@ -4037,7 +4037,7 @@
           "value": -1,
           "content": {
             "type": "PATTERN",
-            "value": "(?:[^\\s<{ife][^<{]*|i[^f\\s<{][^<{]*|if[^\\s<{][^<{]*|f[^o\\s<{][^<{]*|fo[^r\\s<{][^<{]*|for[^\\s<{][^<{]*|e[^l\\s<{][^<{]*|el[^s\\s<{][^<{]*|els[^e\\s<{][^<{]*|else[^\\s<{][^<{]*)"
+            "value": "(?:[^\\s<{ifep][^<{]*|i[^f\\s<{][^<{]*|if[^\\s<{][^<{]*|f[^o\\s<{][^<{]*|fo[^r\\s<{][^<{]*|for[^\\s<{][^<{]*|e[^l\\s<{][^<{]*|el[^s\\s<{][^<{]*|els[^e\\s<{][^<{]*|else[^\\s<{][^<{]*|p(?:[^r<{][^<{]*)?|pr(?:[^o<{][^<{]*)?|pro(?:[^v<{][^<{]*)?|prov(?:[^i<{][^<{]*)?|provi(?:[^d<{][^<{]*)?|provid(?:[^e<{][^<{]*)?)"
           }
         }
       },
@@ -4054,8 +4054,21 @@
             "name": "_mixed_text_run"
           },
           {
+            "type": "ALIAS",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_provide_text"
+            },
+            "named": true,
+            "value": "text_run"
+          },
+          {
             "type": "SYMBOL",
             "name": "element"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "provide_expression"
           },
           {
             "type": "SYMBOL",
@@ -6026,6 +6039,10 @@
     {
       "type": "SYMBOL",
       "name": "escaped_at"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_provide_text"
     }
   ],
   "inline": [],

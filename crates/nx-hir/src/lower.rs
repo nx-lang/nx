@@ -3019,7 +3019,8 @@ impl LoweringContext {
             | SyntaxKind::ELEMENTS_IF_SIMPLE_EXPRESSION
             | SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION
             | SyntaxKind::ELEMENTS_IF_CONDITION_LIST_EXPRESSION
-            | SyntaxKind::ELEMENTS_FOR_EXPRESSION => {
+            | SyntaxKind::ELEMENTS_FOR_EXPRESSION
+            | SyntaxKind::PROVIDE_EXPRESSION => {
                 gaps.note_piece(&node, content.len());
                 content.push(self.lower_expr(node));
             }

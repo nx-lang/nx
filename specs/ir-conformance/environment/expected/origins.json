@@ -14,6 +14,11 @@
     {"path": "", "module": "main.nx", "start": 1096, "end": 1139},
     {"path": "/Children/0", "module": "main.nx", "start": 1122, "end": 1131}
   ],
+  "main.nx::inContent": [
+    {"path": "", "module": "main.nx", "start": 1162, "end": 1247},
+    {"path": "/Children/0", "module": "main.nx", "start": 1169, "end": 1178},
+    {"path": "/Children/1", "module": "main.nx", "start": 1208, "end": 1237}
+  ],
   "main.nx::markup": [
     {"path": "", "module": "main.nx", "start": 902, "end": 970},
     {"path": "/content/0", "module": "main.nx", "start": 926, "end": 935},
@@ -23,6 +28,9 @@
   "main.nx::mode#rootDark": [],
   "main.nx::nestedPath": [
     {"path": "", "module": "main.nx", "start": 85, "end": 112}
+  ],
+  "main.nx::prose": [
+    {"path": "", "module": "main.nx", "start": 1266, "end": 1310}
   ],
   "main.nx::provideExpr": [],
   "main.nx::provideExpr#rootLocale": [],

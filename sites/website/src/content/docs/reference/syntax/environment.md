@@ -89,6 +89,23 @@ let label() = { env.locale }
 let french() = { provide env.locale="fr-FR" { label() } }
 ```
 
+In an element's content, a block sits among the other children:
+
+```nx fragment
+<Page>
+  <Intro />
+  provide env.colorMode=dark {
+    <Footer />
+  }
+</Page>
+```
+
+Content text can't begin with `provide env` followed by `.` or a space, since that starts a block;
+other text with the word, such as "provide feedback", "provided" or a bold `<b>provide</b>`, is still
+text. A block starts a content item, so it comes first in the content or right after an element or a
+`{…}` value. After prose it is read as more prose: `Intro text provide env.x=1 { … }` is text and a
+braced value, so put the text in an element or a `{"…"}` value first, as you would for `if` and `for`.
+
 `provide` begins a block wherever it starts an expression, so it can't be the name of a
 declaration, parameter or binding (`reserved-name`); a record field named `provide` still works.
 

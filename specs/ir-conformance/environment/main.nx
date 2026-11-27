@@ -28,3 +28,5 @@ let markup() = { <div env.colorMode=dark><Badge /><span mode={env.colorMode} /><
 let stacked() = { provide env.colorMode=dark { <Badge env.colorMode=light /> } }
 let bundle() = { theme }
 let hosted() = { <Stack env.colorMode=dark><Badge /></Stack> }
+let inContent() = { <Stack><Badge /> provide env.colorMode=dark { <span mode={env.colorMode} /> }</Stack> }
+let prose() = { <p>provide feedback, provided it is kind</p> }

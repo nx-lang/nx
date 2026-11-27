@@ -8,6 +8,8 @@
  * - ESCAPED_LBRACE: \{
  * - ESCAPED_RBRACE: \}
  * - ESCAPED_AT: \@ (only used inside typed text content)
+ * - PROVIDE_TEXT: mixed-content text starting with the word "provide" that does not open a
+ *   provide block (`provide env.…` or `provide env with …`)
  *
  * Only backslash-brace pairs are treated as escapes; any other backslash
  * sequence is left as literal text.
@@ -31,6 +33,7 @@ enum TokenType {
   ESCAPED_LBRACE,
   ESCAPED_RBRACE,
   ESCAPED_AT,
+  PROVIDE_TEXT,
 };
 
 void *tree_sitter_nx_external_scanner_create() {
@@ -51,6 +54,66 @@ void tree_sitter_nx_external_scanner_deserialize(void *payload, const char *buff
   (void)payload; // unused
   (void)buffer;  // unused
   (void)length;  // unused
+}
+
+static bool is_space(int32_t c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+/** Consumes mixed-content text up to the next '<' or '{', marking its end. */
+static void consume_text_rest(TSLexer *lexer) {
+  while (lexer->lookahead != 0 && lexer->lookahead != '<' && lexer->lookahead != '{') {
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+  }
+}
+
+/**
+ * Scans mixed-content text that begins with the word "provide" but does not open a provide block.
+ * A block is `provide` then whitespace then `env` then `.` or whitespace; everything else that
+ * starts with "provide" ("provide feedback", "provided", a bare "provide" before a tag, a brace
+ * or the end) is text. The lookahead past `provide` is what a regex token cannot do: a text token
+ * long enough to cover "provide " would also outmatch the keyword at a real block.
+ */
+static bool scan_provide_text(TSLexer *lexer) {
+  while (is_space(lexer->lookahead)) {
+    lexer->advance(lexer, true);
+  }
+  const char *word = "provide";
+  for (const char *c = word; *c != 0; c++) {
+    if (lexer->lookahead != *c) {
+      return false;
+    }
+    lexer->advance(lexer, false);
+  }
+  lexer->mark_end(lexer);
+  lexer->result_symbol = PROVIDE_TEXT;
+  if (!is_space(lexer->lookahead)) {
+    consume_text_rest(lexer);
+    return true;
+  }
+  while (is_space(lexer->lookahead)) {
+    lexer->advance(lexer, false);
+  }
+  if (lexer->lookahead == 'e') {
+    lexer->advance(lexer, false);
+    if (lexer->lookahead == 'n') {
+      lexer->advance(lexer, false);
+      if (lexer->lookahead == 'v') {
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == '.' || is_space(lexer->lookahead)) {
+          return false;
+        }
+      }
+    }
+  }
+  // Text after all: it runs on to the next '<' or '{', the whitespace already passed included.
+  if (lexer->lookahead == 0 || lexer->lookahead == '<' || lexer->lookahead == '{') {
+    lexer->mark_end(lexer);
+    return true;
+  }
+  consume_text_rest(lexer);
+  return true;
 }
 
 /**
@@ -146,6 +209,12 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
   const enum TokenType chunk_kind =
       allow_embed_text_chunk ? EMBED_TEXT_CHUNK : TEXT_CHUNK;
   const bool embed_mode = chunk_kind == EMBED_TEXT_CHUNK;
+
+  // Text starting with "provide" in mixed content. Error recovery marks every symbol valid, text
+  // chunks included, so this runs only where mixed content, not a text element, is being read.
+  if (valid_symbols[PROVIDE_TEXT] && !allow_any_chunk) {
+    return scan_provide_text(lexer);
+  }
 
   // Check for escapes first (highest priority)
   if (lexer->lookahead == '\\') {

@@ -292,6 +292,65 @@ fn test_parse_visualizer_definition() {
     assert!(visualizers[0].child_by_field("value").is_some());
 }
 
+/// Prose in element content that starts with "provide", or with a shorter prefix of it, stays text;
+/// only `provide env.…` or `provide env with …` opens a provide block.
+#[test]
+fn test_parse_provide_prefixes_in_content_as_text() {
+    let prose = [
+        "<p>pro bono</p>",
+        "<p>p</p>",
+        "<p>p q</p>",
+        "<p>prov</p>",
+        "<p>pr {x}</p>",
+        "<p>{x} pro tip</p>",
+        "<p>Please <b>provide</b> details</p>",
+        "<p>provide</p>",
+        "<p>provide {count} items</p>",
+        "<p>provide{x}</p>",
+        "<p>{x} provide <b>y</b></p>",
+        "<p>provide e</p>",
+        "<p>provided it works</p>",
+        "<p>provide envelopes</p>",
+        // After prose, as with bare `if` and `for`, a block is more prose and a braced value.
+        "<p>Intro text\n  provide env.x=1 { <b/> }</p>",
+    ];
+    for content in prose {
+        let source = format!("let a() = {content}\n");
+        let result = parse_str(&source, "prose.nx");
+        assert!(
+            result.errors.is_empty(),
+            "{content} parses: {:?}",
+            result.errors
+        );
+        let root = result.root().expect("Should have root node");
+        assert_eq!(
+            count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION),
+            0,
+            "{content} is text"
+        );
+    }
+    let blocks = [
+        "<p>provide env.x=1 { <b/> }</p>",
+        "<p><b/>   provide   env.x=1 { <b/> }</p>",
+        "<p>provide env with theme { <b/> }</p>",
+    ];
+    for content in blocks {
+        let source = format!("let a() = {content}\n");
+        let result = parse_str(&source, "blocks.nx");
+        assert!(
+            result.errors.is_empty(),
+            "{content} parses: {:?}",
+            result.errors
+        );
+        let root = result.root().expect("Should have root node");
+        assert_eq!(
+            count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION),
+            1,
+            "{content} is a provide block"
+        );
+    }
+}
+
 #[test]
 fn test_parse_environment_and_provide_forms() {
     let source = r#"
@@ -304,6 +363,7 @@ fn test_parse_environment_and_provide_forms() {
         let label() = { provide env.locale="fr-FR" env.color.accent=#fff { env.locale } }
         component <Footer /> = { <Section env.colorMode=dark><Links /></Section> }
         let siblings() = { provide env.colorMode=dark { <Header /> <Hero /> } <Body /> }
+        let inContent() = { <Page><Intro /> provide env.colorMode=dark { <Footer /> } provide feedback</Page> }
     "#;
     let result = parse_str(source, "environment.nx");
 
@@ -315,7 +375,8 @@ fn test_parse_environment_and_provide_forms() {
     let root = result.root().expect("Should have root node");
     assert_eq!(count_kind(&root, SyntaxKind::ENVIRONMENT_DEFINITION), 2);
     assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_DEFINITION), 3);
-    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 2);
+    // A provide block in an element's content is one, and prose that starts with `provide` is text.
+    assert_eq!(count_kind(&root, SyntaxKind::PROVIDE_EXPRESSION), 3);
     let provides = root
         .children()
         .filter(|child| child.kind() == SyntaxKind::PROVIDE_DEFINITION)
