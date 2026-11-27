@@ -3215,7 +3215,7 @@ fn generated_code_supports_a_match_on_union_cases() {
 
 /// A program that reads `@nx/design` tokens generates JavaScript that follows the mode. Its
 /// TypeScript does not type-check yet: a `Color` there is `@nx/color`'s, which the file does not
-/// import (`specs/future.md`, "Design Tokens").
+/// import (`specs/env-future.md`, "Design Tokens").
 #[test]
 fn generated_javascript_reads_design_tokens_in_both_modes() {
     let source = "import \"@nx/design\"\n\
